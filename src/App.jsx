@@ -3,14 +3,6 @@ import { parseSF2 } from "../sf2-parser.js";
 import { createMidiDriver } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
 
-const SAMPLE_FILES = [
-  {
-    label: "GeneralUser-GS.sf2",
-    path: `${import.meta.env.BASE_URL}static/GeneralUser-GS.sf2`,
-  },
-];
-const DEFAULT_SF2 = SAMPLE_FILES[0];
-
 const QWERTY_NOTE_MAP = {
   a: 60, // C4
   w: 61, // C#4
@@ -510,7 +502,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("midi");
   const [audioCtxState, setAudioCtxState] = useState("off");
   const [analyzerCollapsed, setAnalyzerCollapsed] = useState(false);
-  const [didAutoLoadDefault, setDidAutoLoadDefault] = useState(false);
+  const [sf2Options, setSf2Options] = useState([]);
+  const [selectedSf2Path, setSelectedSf2Path] = useState("");
   const [didAutoEnableMidi, setDidAutoEnableMidi] = useState(false);
 
   const audioCtxRef = useRef(null);
@@ -647,10 +640,28 @@ export default function App() {
   }, [selectedMidiInput]);
 
   useEffect(() => {
-    if (didAutoLoadDefault) return;
-    setDidAutoLoadDefault(true);
-    onSelectSample(DEFAULT_SF2.path, DEFAULT_SF2.label);
-  }, [didAutoLoadDefault]);
+    (async () => {
+      try {
+        const manifestUrl = `${import.meta.env.BASE_URL}static/sf2-manifest.json`;
+        const res = await fetch(manifestUrl);
+        if (!res.ok) throw new Error(`Failed to fetch ${manifestUrl}`);
+        const list = await res.json();
+        const normalized = Array.isArray(list)
+          ? list.filter((item) => item?.path && item?.name)
+          : [];
+        setSf2Options(normalized);
+
+        const preferred = normalized.find((item) => item.name === "GeneralUser-GS.sf2");
+        const first = preferred ?? normalized[0];
+        if (first) {
+          setSelectedSf2Path(first.path);
+          await onSelectSample(first.path, first.name);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!sf2 || didAutoEnableMidi || midiEnabled) return;
@@ -680,7 +691,8 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(path);
+      const resolvedPath = /^https?:\/\//i.test(path) ? path : `${import.meta.env.BASE_URL}${path}`;
+      const res = await fetch(resolvedPath);
       if (!res.ok) throw new Error(`Failed to fetch ${label}`);
       const buffer = await res.arrayBuffer();
       await parseFromU8(new Uint8Array(buffer), label);
@@ -982,12 +994,25 @@ export default function App() {
           <p>Inspect INFO tags, presets, instruments, and samples from an SF2 file.</p>
         </div>
         <div className="toolbar">
-          <button type="button" onClick={onTogglePower}>
-            {audioCtxState === "running" ? "Power Off" : "Power On"}
+          <button
+            type="button"
+            onClick={onTogglePower}
+            className={`toggleBtn ${audioCtxState === "running" ? "tintOn" : ""}`}
+            title={audioCtxState === "running" ? "Power Off" : "Power On"}
+          >
+            <i className="fa-solid fa-power-off" aria-hidden="true" />
+            <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
           </button>
           <span className="midiStatus">Audio: {audioCtxState}</span>
-          <button type="button" onClick={onToggleMidi} disabled={!sf2}>
-            {midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+          <button
+            type="button"
+            onClick={onToggleMidi}
+            disabled={!sf2}
+            className={`toggleBtn ${midiEnabled ? "tintOn" : ""}`}
+            title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+          >
+            <i className="fa-solid fa-music" aria-hidden="true" />
+            <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
           </button>
           <select
             value={selectedMidiInput}
@@ -1003,8 +1028,14 @@ export default function App() {
             ))}
           </select>
           <span className="midiStatus">{midiStatus}</span>
-          <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
-            {analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+          <button
+            type="button"
+            className="menuToggleBtn"
+            onClick={() => setAnalyzerCollapsed((v) => !v)}
+            title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+            aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+          >
+            <i className="fa-solid fa-bars" aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -1050,24 +1081,35 @@ export default function App() {
         <>
           <section className="card controls">
             <label className="fileInput">
-              <span>Open SF2 File</span>
+              <span className="iconLabel">
+                <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
+                <span>Open SF2 File</span>
+              </span>
               <input type="file" accept=".sf2" onChange={onUploadFile} />
             </label>
+            <select
+              value={selectedSf2Path}
+              onChange={async (e) => {
+                const nextPath = e.target.value;
+                setSelectedSf2Path(nextPath);
+                if (!nextPath) return;
+                const selected = sf2Options.find((item) => item.path === nextPath);
+                await onSelectSample(nextPath, selected?.name || nextPath);
+              }}
+              disabled={!sf2Options.length || loading}
+              title="SF2 files from public/static"
+            >
+              <option value="">Select SF2</option>
+              {sf2Options.map((item) => (
+                <option key={item.path} value={item.path}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
             <button type="button" onClick={() => setShowSummaryModal((v) => !v)} disabled={!sf2}>
               {showSummaryModal ? "Hide File Summary" : "Show File Summary"}
             </button>
             <span className="midiStatus">Keyboard: a w s e d f t g y h</span>
-            <div className="sampleButtons">
-              {SAMPLE_FILES.map((sample) => (
-                <button
-                  key={sample.path}
-                  onClick={() => onSelectSample(sample.path, sample.label)}
-                  disabled={loading}
-                >
-                  Load {sample.label}
-                </button>
-              ))}
-            </div>
           </section>
           {sf2 && showSummaryModal && (
             <div className="modalBackdrop" onClick={() => setShowSummaryModal(false)}>
@@ -1475,9 +1517,11 @@ export default function App() {
       <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
         <div className="analyzerHead">
           <h2>{analyzerCollapsed ? "Viz" : "Analyzer"}</h2>
-          <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
-            {analyzerCollapsed ? "Open" : "Collapse"}
-          </button>
+          {!analyzerCollapsed && (
+            <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
+              Collapse
+            </button>
+          )}
         </div>
         {!analyzerCollapsed && (
           <div className="analyzerBody">

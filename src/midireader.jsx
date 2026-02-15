@@ -711,7 +711,10 @@ export default function MidiReader({
       <div className="midiTop">
         <div className="midiTopGroup midiTopLoad">
           <label className="fileInput midiFileInputCompact">
-            <span>Upload MIDI</span>
+            <span className="iconLabel">
+              <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
+              <span>Upload MIDI</span>
+            </span>
             <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
           </label>
           <select

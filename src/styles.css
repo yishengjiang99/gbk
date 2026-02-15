@@ -95,6 +95,12 @@ header p {
   align-items: center;
 }
 
+.iconLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .sampleButtons {
   display: flex;
   gap: 0.6rem;
@@ -436,6 +442,29 @@ button {
   cursor: pointer;
 }
 
+.toggleBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.toggleBtn.tintOn {
+  border-color: #2e7a5f;
+  background: #e9f8f1;
+  color: #0d5f44;
+}
+
+.menuToggleBtn {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: progress;
@@ -719,6 +748,14 @@ td {
 
 tbody tr {
   cursor: pointer;
+}
+
+table tbody tr:nth-child(odd) {
+  background: #fbfdff;
+}
+
+table tbody tr:nth-child(even) {
+  background: #f3f8fc;
 }
 
 tbody tr:hover {

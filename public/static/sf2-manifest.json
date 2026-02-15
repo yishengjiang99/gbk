@@ -1,0 +1,38 @@
+[
+  {
+    "name": "ChaosBank.sf2",
+    "path": "static/ChaosBank.sf2"
+  },
+  {
+    "name": "eawpats.sf2",
+    "path": "static/eawpats.sf2"
+  },
+  {
+    "name": "GeneralUser-GS.sf2",
+    "path": "static/GeneralUser-GS.sf2"
+  },
+  {
+    "name": "GeneralUser.sf2",
+    "path": "static/GeneralUser.sf2"
+  },
+  {
+    "name": "Jnsgm2.sf2",
+    "path": "static/Jnsgm2.sf2"
+  },
+  {
+    "name": "Masterpiece.sf2",
+    "path": "static/Masterpiece.sf2"
+  },
+  {
+    "name": "TimGM.sf2",
+    "path": "static/TimGM.sf2"
+  },
+  {
+    "name": "Unison.SF2",
+    "path": "static/Unison.SF2"
+  },
+  {
+    "name": "WeedsGM3.sf2",
+    "path": "static/WeedsGM3.sf2"
+  }
+]
