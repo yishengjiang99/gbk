@@ -1,0 +1,1386 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { parseSF2 } from "../sf2-parser.js";
+import { createMidiDriver } from "./midi-driver.js";
+import MidiReader from "./midireader.jsx";
+
+const SAMPLE_FILES = [
+  { label: "GeneralUser-GS.sf2", path: "/static/GeneralUser-GS.sf2" },
+  { label: "HoeCakesSF.sf2", path: "/static/HoeCakesSF.sf2" },
+];
+const DEFAULT_SF2 = SAMPLE_FILES[0];
+
+const QWERTY_NOTE_MAP = {
+  a: 60, // C4
+  w: 61, // C#4
+  s: 62, // D4
+  e: 63, // D#4
+  d: 64, // E4
+  f: 65, // F4
+  t: 66, // F#4
+  g: 67, // G4
+  y: 68, // G#4
+  h: 69, // A4
+};
+
+function getPresetRows(sf2) {
+  return sf2?.pdta?.phdr?.slice(0, -1) ?? [];
+}
+
+const GEN_OPER_NAMES = {
+  0: "startAddrsOffset",
+  1: "endAddrsOffset",
+  2: "startloopAddrsOffset",
+  3: "endloopAddrsOffset",
+  4: "startAddrsCoarseOffset",
+  5: "modLfoToPitch",
+  6: "vibLfoToPitch",
+  7: "modEnvToPitch",
+  8: "initialFilterFc",
+  9: "initialFilterQ",
+  10: "modLfoToFilterFc",
+  11: "modEnvToFilterFc",
+  12: "endAddrsCoarseOffset",
+  13: "modLfoToVolume",
+  15: "chorusEffectsSend",
+  16: "reverbEffectsSend",
+  17: "pan",
+  21: "delayModLFO",
+  22: "freqModLFO",
+  23: "delayVibLFO",
+  24: "freqVibLFO",
+  25: "delayModEnv",
+  26: "attackModEnv",
+  27: "holdModEnv",
+  28: "decayModEnv",
+  29: "sustainModEnv",
+  30: "releaseModEnv",
+  33: "delayVolEnv",
+  34: "attackVolEnv",
+  35: "holdVolEnv",
+  36: "decayVolEnv",
+  37: "sustainVolEnv",
+  38: "releaseVolEnv",
+  41: "instrument",
+  43: "keyRange",
+  44: "velRange",
+  48: "initialAttenuation",
+  51: "coarseTune",
+  52: "fineTune",
+  53: "sampleID",
+  54: "sampleModes",
+  56: "scaleTuning",
+  57: "exclusiveClass",
+  58: "overridingRootKey",
+};
+
+function readZones(bags, gens, mods, start, end) {
+  const out = [];
+  for (let bi = start; bi < end; bi += 1) {
+    const genStart = bags[bi]?.genNdx ?? 0;
+    const genEnd = bags[bi + 1]?.genNdx ?? gens.length;
+    const modStart = bags[bi]?.modNdx ?? 0;
+    const modEnd = bags[bi + 1]?.modNdx ?? mods.length;
+    out.push({
+      bagIndex: bi,
+      gens: gens.slice(genStart, genEnd),
+      mods: mods.slice(modStart, modEnd),
+    });
+  }
+  return out;
+}
+
+function unpackRange(amount) {
+  const u = amount & 0xffff;
+  return [u & 0xff, (u >> 8) & 0xff];
+}
+
+function getLastGeneratorAmount(gens, oper) {
+  for (let i = gens.length - 1; i >= 0; i -= 1) {
+    if (gens[i].oper === oper) return gens[i].amount;
+  }
+  return null;
+}
+
+function formatGenerator(g) {
+  if (g.oper === 43 || g.oper === 44) {
+    const [lo, hi] = unpackRange(g.amount);
+    return `${GEN_OPER_NAMES[g.oper] ?? `op${g.oper}`}: ${lo}-${hi}`;
+  }
+  return `${GEN_OPER_NAMES[g.oper] ?? `op${g.oper}`}: ${g.amount}`;
+}
+
+function formatGeneratorValue(g) {
+  if (g.oper === 43 || g.oper === 44) {
+    const [lo, hi] = unpackRange(g.amount);
+    return `${lo}-${hi}`;
+  }
+  return `${g.amount}`;
+}
+
+function formatModTarget(mod) {
+  return GEN_OPER_NAMES[mod.destOper] ?? `op${mod.destOper}`;
+}
+
+function zoneKeyVel(zone) {
+  const keyRange = getLastGeneratorAmount(zone.gens, 43);
+  const velRange = getLastGeneratorAmount(zone.gens, 44);
+  const [keyLo, keyHi] = keyRange != null ? unpackRange(keyRange) : [0, 127];
+  const [velLo, velHi] = velRange != null ? unpackRange(velRange) : [0, 127];
+  return { keyLo, keyHi, velLo, velHi };
+}
+
+function zoneMatches(zone, note, velocity) {
+  const { keyLo, keyHi, velLo, velHi } = zoneKeyVel(zone);
+  return note >= keyLo && note <= keyHi && velocity >= velLo && velocity <= velHi;
+}
+
+function selectLayerFromMidi(programDetails, note, velocity) {
+  if (!programDetails) return null;
+  const matchedRegion = programDetails.regionZones.find((zone) => zoneMatches(zone, note, velocity));
+  if (!matchedRegion) return null;
+  const instIndex = getLastGeneratorAmount(matchedRegion.gens, 41);
+  const inst = programDetails.instruments.find((item) => item.index === instIndex);
+  const matchedInstZone =
+    inst?.sampleZones.find((zone) => zoneMatches(zone, note, velocity)) ?? inst?.sampleZones[0];
+  const levels = [];
+  if (programDetails.presetGlobal) {
+    levels.push({
+      label: `Preset global bag ${programDetails.presetGlobal.bagIndex}`,
+      gens: programDetails.presetGlobal.gens,
+      mods: programDetails.presetGlobal.mods,
+    });
+  }
+  levels.push({
+    label: `Preset region bag ${matchedRegion.bagIndex}`,
+    gens: matchedRegion.gens,
+    mods: matchedRegion.mods,
+  });
+  if (inst?.globalZone) {
+    levels.push({
+      label: `Instrument ${inst.index} global bag ${inst.globalZone.bagIndex}`,
+      gens: inst.globalZone.gens,
+      mods: inst.globalZone.mods,
+    });
+  }
+  if (matchedInstZone) {
+    levels.push({
+      label: `Instrument ${inst.index} region bag ${matchedInstZone.bagIndex}`,
+      gens: matchedInstZone.gens,
+      mods: matchedInstZone.mods,
+    });
+  }
+  return {
+    type: "region",
+    title: `Preset region ${matchedRegion.bagIndex}`,
+    context: `instrument ${instIndex}`,
+    levels,
+    bagIndex: matchedRegion.bagIndex,
+  };
+}
+
+function buildSelectionFromRegion(programDetails, regionZone, midiNote, midiVelocity) {
+  const instIndex = getLastGeneratorAmount(regionZone.gens, 41);
+  const inst = programDetails.instruments.find((item) => item.index === instIndex);
+  const matchedInstZone =
+    inst?.sampleZones.find((zone) => zoneMatches(zone, midiNote, midiVelocity)) ??
+    inst?.sampleZones[0];
+  const levels = [];
+  if (programDetails.presetGlobal) {
+    levels.push({
+      label: `Preset global bag ${programDetails.presetGlobal.bagIndex}`,
+      gens: programDetails.presetGlobal.gens,
+      mods: programDetails.presetGlobal.mods,
+    });
+  }
+  levels.push({
+    label: `Preset region bag ${regionZone.bagIndex}`,
+    gens: regionZone.gens,
+    mods: regionZone.mods,
+  });
+  if (inst?.globalZone) {
+    levels.push({
+      label: `Instrument ${inst.index} global bag ${inst.globalZone.bagIndex}`,
+      gens: inst.globalZone.gens,
+      mods: inst.globalZone.mods,
+    });
+  }
+  if (matchedInstZone) {
+    levels.push({
+      label: `Instrument ${inst.index} region bag ${matchedInstZone.bagIndex}`,
+      gens: matchedInstZone.gens,
+      mods: matchedInstZone.mods,
+    });
+  }
+  return {
+    type: "region",
+    title: `Preset region ${regionZone.bagIndex}`,
+    context: `instrument ${instIndex}`,
+    levels,
+    bagIndex: regionZone.bagIndex,
+  };
+}
+
+function buildSelectionFromInstrumentGlobal(programDetails, inst, midiNote, midiVelocity) {
+  const candidateRegion = programDetails.regionZones.find(
+    (zone) =>
+      getLastGeneratorAmount(zone.gens, 41) === inst.index && zoneMatches(zone, midiNote, midiVelocity)
+  );
+  const candidateInstRegion =
+    inst.sampleZones.find((zone) => zoneMatches(zone, midiNote, midiVelocity)) ?? inst.sampleZones[0];
+  const levels = [];
+  if (programDetails.presetGlobal) {
+    levels.push({
+      label: `Preset global bag ${programDetails.presetGlobal.bagIndex}`,
+      gens: programDetails.presetGlobal.gens,
+      mods: programDetails.presetGlobal.mods,
+    });
+  }
+  if (candidateRegion) {
+    levels.push({
+      label: `Preset region bag ${candidateRegion.bagIndex}`,
+      gens: candidateRegion.gens,
+      mods: candidateRegion.mods,
+    });
+  }
+  if (inst.globalZone) {
+    levels.push({
+      label: `Instrument ${inst.index} global bag ${inst.globalZone.bagIndex}`,
+      gens: inst.globalZone.gens,
+      mods: inst.globalZone.mods,
+    });
+  }
+  if (candidateInstRegion) {
+    levels.push({
+      label: `Instrument ${inst.index} region bag ${candidateInstRegion.bagIndex}`,
+      gens: candidateInstRegion.gens,
+      mods: candidateInstRegion.mods,
+    });
+  }
+  return {
+    type: "instrumentGlobal",
+    title: `Instrument ${inst.index} global`,
+    context: inst.name || "(unnamed)",
+    levels,
+    bagIndex: inst.globalZone?.bagIndex ?? -1,
+  };
+}
+
+function buildSelectionFromInstrumentRegion(programDetails, inst, zone, midiNote, midiVelocity) {
+  const candidateRegion = programDetails.regionZones.find(
+    (r) => getLastGeneratorAmount(r.gens, 41) === inst.index && zoneMatches(r, midiNote, midiVelocity)
+  );
+  const levels = [];
+  if (programDetails.presetGlobal) {
+    levels.push({
+      label: `Preset global bag ${programDetails.presetGlobal.bagIndex}`,
+      gens: programDetails.presetGlobal.gens,
+      mods: programDetails.presetGlobal.mods,
+    });
+  }
+  if (candidateRegion) {
+    levels.push({
+      label: `Preset region bag ${candidateRegion.bagIndex}`,
+      gens: candidateRegion.gens,
+      mods: candidateRegion.mods,
+    });
+  }
+  if (inst.globalZone) {
+    levels.push({
+      label: `Instrument ${inst.index} global bag ${inst.globalZone.bagIndex}`,
+      gens: inst.globalZone.gens,
+      mods: inst.globalZone.mods,
+    });
+  }
+  levels.push({
+    label: `Instrument ${inst.index} region bag ${zone.bagIndex}`,
+    gens: zone.gens,
+    mods: zone.mods,
+  });
+  return {
+    type: "instrumentRegion",
+    title: `Instrument ${inst.index} zone ${zone.bagIndex}`,
+    context: `sample ${zone.sampleID} (${zone.sampleName})`,
+    levels,
+    bagIndex: zone.bagIndex,
+  };
+}
+
+function extractProgramDetails(sf2, presetIndex) {
+  if (!sf2 || presetIndex == null) return null;
+  const pdta = sf2.pdta;
+  const header = pdta.phdr[presetIndex];
+  const next = pdta.phdr[presetIndex + 1];
+  if (!header || !next) return null;
+
+  const presetZones = readZones(
+    pdta.pbag,
+    pdta.pgen,
+    pdta.pmod,
+    header.presetBagNdx,
+    next.presetBagNdx
+  );
+  const presetGlobal =
+    presetZones.length > 0 && getLastGeneratorAmount(presetZones[0].gens, 41) == null
+      ? presetZones[0]
+      : null;
+  const regionZones = presetZones.filter((z) => getLastGeneratorAmount(z.gens, 41) != null);
+
+  const instrumentIndexes = [
+    ...new Set(
+      regionZones
+        .map((z) => getLastGeneratorAmount(z.gens, 41))
+        .filter((idx) => idx != null && idx >= 0 && idx < pdta.inst.length - 1)
+    ),
+  ];
+
+  const instruments = instrumentIndexes.map((instIndex) => {
+    const inst = pdta.inst[instIndex];
+    const instNext = pdta.inst[instIndex + 1];
+    const zones = readZones(pdta.ibag, pdta.igen, pdta.imod, inst.instBagNdx, instNext.instBagNdx);
+    const globalZone =
+      zones.length > 0 && getLastGeneratorAmount(zones[0].gens, 53) == null ? zones[0] : null;
+    const sampleZones = zones
+      .filter((z) => getLastGeneratorAmount(z.gens, 53) != null)
+      .map((z) => {
+        const sampleID = getLastGeneratorAmount(z.gens, 53);
+        const sh = pdta.shdr[sampleID];
+        return {
+          ...z,
+          sampleID,
+          sampleName: sh?.sampleName ?? "(unknown)",
+          sampleRate: sh?.sampleRate ?? 0,
+        };
+      });
+
+    return {
+      index: instIndex,
+      name: inst.instName,
+      globalZone,
+      sampleZones,
+    };
+  });
+
+  const previewRegion = sf2
+    .buildRegionsForPreset(presetIndex, {
+      decodeToFloat32: true,
+      normalize: false,
+      includeStereoLinks: false,
+    })
+    .find((r) => r.sample?.dataL?.length > 0);
+
+  return {
+    header,
+    presetGlobal,
+    regionZones,
+    instruments,
+    previewRegion,
+  };
+}
+
+function WaveformCanvas({ data }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.fillStyle = "#f2f8fd";
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = "#0f4c75";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+
+    const source = data ?? new Float32Array(0);
+    if (source.length === 0) {
+      ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+      return;
+    }
+
+    const mid = height / 2;
+    const step = Math.max(1, Math.floor(source.length / width));
+    for (let x = 0; x < width; x += 1) {
+      const start = x * step;
+      const end = Math.min(source.length, start + step);
+      let min = 1;
+      let max = -1;
+      for (let i = start; i < end; i += 1) {
+        const v = source[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const y1 = mid + min * mid;
+      const y2 = mid + max * mid;
+      ctx.moveTo(x, y1);
+      ctx.lineTo(x, y2);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = "#6f8ca1";
+    ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+  }, [data]);
+
+  return <canvas ref={canvasRef} width={460} height={120} className="waveCanvas" />;
+}
+
+function AnalyzerCanvas({ data, mode }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    ctx.fillStyle = "#f7fbff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = "#5f8096";
+    ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+
+    if (!data?.length) return;
+
+    if (mode === "time") {
+      ctx.strokeStyle = "#0e5a7b";
+      ctx.beginPath();
+      for (let i = 0; i < data.length; i += 1) {
+        const x = (i / (data.length - 1 || 1)) * (width - 1);
+        const y = (1 - (data[i] + 1) / 2) * (height - 1);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      return;
+    }
+
+    ctx.fillStyle = "#0b7d5c";
+    const barW = width / data.length;
+    for (let i = 0; i < data.length; i += 1) {
+      const v = Math.max(0, Math.min(255, data[i])) / 255;
+      const h = v * (height - 2);
+      ctx.fillRect(i * barW, height - 1 - h, Math.max(1, barW - 1), h);
+    }
+  }, [data, mode]);
+
+  return <canvas ref={canvasRef} width={460} height={90} className="analyzerCanvas" />;
+}
+
+export default function App() {
+  const [sf2, setSf2] = useState(null);
+  const [sourceName, setSourceName] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState(null);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [presetSearch, setPresetSearch] = useState("");
+  const [sortKey, setSortKey] = useState("bank");
+  const [sortDirection, setSortDirection] = useState("asc");
+  const [midiNote, setMidiNote] = useState(60);
+  const [midiVelocity, setMidiVelocity] = useState(100);
+  const [selectedLayer, setSelectedLayer] = useState(null);
+  const [audioReady, setAudioReady] = useState(false);
+  const [audioError, setAudioError] = useState("");
+  const [recentTimeData, setRecentTimeData] = useState([]);
+  const [recentFreqData, setRecentFreqData] = useState([]);
+  const [midiEnabled, setMidiEnabled] = useState(false);
+  const [midiStatus, setMidiStatus] = useState("MIDI disabled");
+  const [midiError, setMidiError] = useState("");
+  const [midiInputs, setMidiInputs] = useState([]);
+  const [selectedMidiInput, setSelectedMidiInput] = useState("all");
+  const [activeTab, setActiveTab] = useState("midi");
+  const [audioCtxState, setAudioCtxState] = useState("off");
+  const [didAutoLoadDefault, setDidAutoLoadDefault] = useState(false);
+  const [didAutoEnableMidi, setDidAutoEnableMidi] = useState(false);
+
+  const audioCtxRef = useRef(null);
+  const workletNodeRef = useRef(null);
+  const analyserRef = useRef(null);
+  const timeDomainRef = useRef(null);
+  const freqDomainRef = useRef(null);
+  const rafRef = useRef(null);
+  const lastVizUpdateRef = useRef(0);
+  const noteOffTimerRef = useRef(null);
+  const midiDriverRef = useRef(null);
+  const presetRegionsRef = useRef({ presetIndex: null, regions: [] });
+  const presetRegionCacheRef = useRef(new Map());
+  const activeKeyboardKeysRef = useRef(new Map());
+  const workletLoadPromiseRef = useRef(null);
+
+  const presets = useMemo(() => getPresetRows(sf2), [sf2]);
+  const visiblePresets = useMemo(() => {
+    const query = presetSearch.trim().toLowerCase();
+    const rows = presets
+      .map((preset, index) => ({ ...preset, _index: index }))
+      .filter((preset) => {
+        if (!query) return true;
+        const text = `${preset.presetName} ${preset.bank} ${preset.preset}`.toLowerCase();
+        return text.includes(query);
+      })
+      .sort((a, b) => {
+        const mult = sortDirection === "asc" ? 1 : -1;
+        if (sortKey === "program") {
+          if (a.preset !== b.preset) return (a.preset - b.preset) * mult;
+          if (a.bank !== b.bank) return (a.bank - b.bank) * mult;
+          return (a._index - b._index) * mult;
+        }
+        if (a.bank !== b.bank) return (a.bank - b.bank) * mult;
+        if (a.preset !== b.preset) return (a.preset - b.preset) * mult;
+        return (a._index - b._index) * mult;
+      });
+    return rows;
+  }, [presets, presetSearch, sortDirection, sortKey]);
+  const programDetails = useMemo(
+    () => extractProgramDetails(sf2, selectedPreset),
+    [sf2, selectedPreset]
+  );
+  const effectivePresetIndex = useMemo(() => {
+    if (!sf2) return null;
+    if (selectedPreset != null) return selectedPreset;
+    return presets.length > 0 ? 0 : null;
+  }, [sf2, selectedPreset, presets.length]);
+
+  useEffect(() => {
+    if (!programDetails) {
+      setSelectedLayer(null);
+      return;
+    }
+    const auto = selectLayerFromMidi(programDetails, midiNote, midiVelocity);
+    setSelectedLayer(auto);
+  }, [programDetails, midiNote, midiVelocity]);
+
+  useEffect(() => {
+    return () => {
+      const active = [...activeKeyboardKeysRef.current.values()];
+      activeKeyboardKeysRef.current.clear();
+      for (const note of active) triggerNoteOff(note);
+      if (noteOffTimerRef.current) clearTimeout(noteOffTimerRef.current);
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+      }
+      if (midiDriverRef.current) {
+        midiDriverRef.current.disconnect();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    presetRegionsRef.current = { presetIndex: null, regions: [] };
+    presetRegionCacheRef.current = new Map();
+  }, [sf2, effectivePresetIndex]);
+
+  useEffect(() => {
+    function isTypingTarget(target) {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return target.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    }
+
+    function releaseAllKeys() {
+      const active = [...activeKeyboardKeysRef.current.values()];
+      activeKeyboardKeysRef.current.clear();
+      for (const note of active) {
+        triggerNoteOff(note);
+      }
+    }
+
+    function onKeyDown(event) {
+      if (isTypingTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      const note = QWERTY_NOTE_MAP[key];
+      if (note == null) return;
+      event.preventDefault();
+      if (activeKeyboardKeysRef.current.has(key)) return;
+      activeKeyboardKeysRef.current.set(key, note);
+      setMidiNote(note);
+      triggerNoteOn(note, midiVelocity).catch((err) => {
+        setAudioError(err instanceof Error ? err.message : String(err));
+      });
+    }
+
+    function onKeyUp(event) {
+      const key = event.key.toLowerCase();
+      const note = activeKeyboardKeysRef.current.get(key);
+      if (note == null) return;
+      event.preventDefault();
+      activeKeyboardKeysRef.current.delete(key);
+      triggerNoteOff(note);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", releaseAllKeys);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", releaseAllKeys);
+      releaseAllKeys();
+    };
+  }, [midiVelocity, sf2, effectivePresetIndex]);
+
+  useEffect(() => {
+    if (!midiDriverRef.current) return;
+    midiDriverRef.current.setSelectedInput(selectedMidiInput);
+  }, [selectedMidiInput]);
+
+  useEffect(() => {
+    if (didAutoLoadDefault) return;
+    setDidAutoLoadDefault(true);
+    onSelectSample(DEFAULT_SF2.path, DEFAULT_SF2.label);
+  }, [didAutoLoadDefault]);
+
+  useEffect(() => {
+    if (!sf2 || didAutoEnableMidi || midiEnabled) return;
+    setDidAutoEnableMidi(true);
+    startMidiDriver();
+  }, [sf2, didAutoEnableMidi, midiEnabled]);
+
+  async function parseFromU8(u8, name) {
+    setLoading(true);
+    setError("");
+    try {
+      const parsed = parseSF2(u8);
+      setSf2(parsed);
+      setSourceName(name);
+      setSelectedPreset(null);
+      setSelectedLayer(null);
+      setShowSummaryModal(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setSf2(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onSelectSample(path, label) {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error(`Failed to fetch ${label}`);
+      const buffer = await res.arrayBuffer();
+      await parseFromU8(new Uint8Array(buffer), label);
+    } catch (e) {
+      setLoading(false);
+      setError(e instanceof Error ? e.message : String(e));
+      setSf2(null);
+    }
+  }
+
+  async function onUploadFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const buffer = await file.arrayBuffer();
+    await parseFromU8(new Uint8Array(buffer), file.name);
+  }
+
+  function startAnalyzerLoop() {
+    if (rafRef.current != null || !analyserRef.current) return;
+
+    const tick = (ts) => {
+      const analyser = analyserRef.current;
+      const td = timeDomainRef.current;
+      const fd = freqDomainRef.current;
+      if (analyser && td && fd) {
+        analyser.getFloatTimeDomainData(td);
+        analyser.getByteFrequencyData(fd);
+        if (ts - lastVizUpdateRef.current > 80) {
+          const timeSample = Array.from(td.slice(0, 32), (v) => Number(v.toFixed(3)));
+          const freqSample = Array.from(fd.slice(0, 32));
+          setRecentTimeData(timeSample);
+          setRecentFreqData(freqSample);
+          lastVizUpdateRef.current = ts;
+        }
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }
+
+  const ensureAudioInfrastructure = useCallback(async () => {
+    setAudioError("");
+    let ctx = audioCtxRef.current;
+    if (!ctx) {
+      ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+      setAudioCtxState(ctx.state);
+      ctx.onstatechange = () => setAudioCtxState(ctx.state);
+    }
+
+    let analyser = analyserRef.current;
+    if (!analyser) {
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.82;
+      analyserRef.current = analyser;
+      analyser.connect(ctx.destination);
+      timeDomainRef.current = new Float32Array(analyser.fftSize);
+      freqDomainRef.current = new Uint8Array(analyser.frequencyBinCount);
+    }
+
+    if (!workletLoadPromiseRef.current) {
+      const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
+      workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
+    }
+    await workletLoadPromiseRef.current;
+    setAudioReady(true);
+    startAnalyzerLoop();
+    return { ctx, analyser };
+  }, []);
+
+  const ensureAudioGraph = useCallback(async (autoResume = false) => {
+    const { ctx, analyser } = await ensureAudioInfrastructure();
+    if (autoResume && ctx.state !== "running") {
+      await ctx.resume();
+    }
+    if (ctx.state !== "running") {
+      throw new Error("AudioContext is not running. Click Power On in the toolbar.");
+    }
+    let node = workletNodeRef.current;
+    if (!node) {
+      node = new AudioWorkletNode(ctx, "sf2-processor", {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+      });
+      workletNodeRef.current = node;
+      node.connect(analyser);
+    }
+    return node;
+  }, [ensureAudioInfrastructure]);
+
+  const resolvePresetIndex = useCallback((program, bank) => {
+    const exactIndex = presets.findIndex((p) => p.preset === program && p.bank === bank);
+    const bankZeroIndex = presets.findIndex((p) => p.preset === program && p.bank === 0);
+    const programAnyIndex = presets.findIndex((p) => p.preset === program);
+    if (exactIndex >= 0) return exactIndex;
+    if (bankZeroIndex >= 0) return bankZeroIndex;
+    if (programAnyIndex >= 0) return programAnyIndex;
+    return null;
+  }, [presets]);
+
+  const getRegionsForPresetIndex = useCallback((presetIndex) => {
+    if (!sf2 || presetIndex == null || presetIndex < 0) return [];
+    if (presetRegionCacheRef.current.has(presetIndex)) {
+      return presetRegionCacheRef.current.get(presetIndex);
+    }
+    const regions = sf2.buildRegionsForPreset(presetIndex, {
+      decodeToFloat32: true,
+      normalize: true,
+      includeStereoLinks: true,
+    });
+    presetRegionCacheRef.current.set(presetIndex, regions);
+    return regions;
+  }, [sf2]);
+
+  function getCurrentPresetRegions() {
+    if (!sf2 || effectivePresetIndex == null) return [];
+    if (
+      presetRegionsRef.current.presetIndex === effectivePresetIndex &&
+      presetRegionsRef.current.regions.length
+    ) {
+      return presetRegionsRef.current.regions;
+    }
+    const regions = getRegionsForPresetIndex(effectivePresetIndex);
+    presetRegionsRef.current = { presetIndex: effectivePresetIndex, regions };
+    return regions;
+  }
+
+  async function triggerNoteOn(note, velocity) {
+    if (!sf2 || effectivePresetIndex == null) return;
+    if (selectedPreset == null) setSelectedPreset(effectivePresetIndex);
+    const node = await ensureAudioGraph(false);
+    const regions = getCurrentPresetRegions();
+    node.port.postMessage({ type: "setPreset", regions });
+    node.port.postMessage({ type: "noteOn", note, velocity });
+  }
+
+  async function triggerNoteOff(note) {
+    const node = workletNodeRef.current;
+    if (!node) return;
+    node.port.postMessage({ type: "noteOff", note });
+  }
+
+  async function onPlaySample() {
+    if (!sf2 || effectivePresetIndex == null) return;
+    try {
+      await ensureAudioGraph(true);
+      await triggerNoteOn(midiNote, midiVelocity);
+      if (noteOffTimerRef.current) clearTimeout(noteOffTimerRef.current);
+      noteOffTimerRef.current = setTimeout(() => {
+        triggerNoteOff(midiNote);
+      }, 900);
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onTogglePower() {
+    try {
+      const { ctx } = await ensureAudioInfrastructure();
+      if (ctx.state === "running") await ctx.suspend();
+      else await ctx.resume();
+      setAudioCtxState(ctx.state);
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function startMidiDriver() {
+    if (midiDriverRef.current) return;
+    if (midiEnabled) {
+      return;
+    }
+    try {
+      setMidiError("");
+      const driver = await createMidiDriver({
+        selectedInputId: selectedMidiInput,
+        onNoteOn: async (note, velocity) => {
+          setMidiNote(note);
+          setMidiVelocity(velocity);
+          setMidiStatus(`MIDI noteOn ${note} vel ${velocity}`);
+          try {
+            await triggerNoteOn(note, velocity);
+          } catch (err) {
+            setAudioError(err instanceof Error ? err.message : String(err));
+          }
+        },
+        onNoteOff: (note) => {
+          setMidiStatus(`MIDI noteOff ${note}`);
+          triggerNoteOff(note);
+        },
+        onProgramChange: (program, bank, channel) => {
+          const nextIndex = resolvePresetIndex(program, bank);
+          if (nextIndex != null && nextIndex >= 0) {
+            setSelectedPreset(nextIndex);
+            setMidiStatus(
+              `MIDI program ch${channel + 1}: bank ${bank}, program ${program} -> preset #${nextIndex}`
+            );
+          } else {
+            setMidiStatus(`MIDI program ch${channel + 1}: bank ${bank}, program ${program} (not found)`);
+          }
+        },
+        onStateChange: ({ connected, names, inputs }) => {
+          setMidiInputs(inputs ?? []);
+          if (connected === 0) {
+            setMidiStatus("MIDI enabled (no inputs)");
+            return;
+          }
+          setMidiStatus(`MIDI inputs: ${names.join(", ")}`);
+        },
+      });
+      midiDriverRef.current = driver;
+      setMidiEnabled(true);
+      setMidiStatus("MIDI enabled");
+    } catch (err) {
+      setMidiError(err instanceof Error ? err.message : String(err));
+      setMidiEnabled(false);
+      setMidiStatus("MIDI failed");
+    }
+  }
+
+  async function onToggleMidi() {
+    if (midiEnabled) {
+      midiDriverRef.current?.disconnect();
+      midiDriverRef.current = null;
+      setMidiEnabled(false);
+      setMidiStatus("MIDI disabled");
+      setMidiError("");
+      setMidiInputs([]);
+      return;
+    }
+    await startMidiDriver();
+  }
+
+  function onHeaderSortClick(key) {
+    if (sortKey === key) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection("asc");
+  }
+
+  return (
+    <div className="app">
+      <header className="topHeader">
+        <div>
+          <h1>SoundFont2 Explorer</h1>
+          <p>Inspect INFO tags, presets, instruments, and samples from an SF2 file.</p>
+        </div>
+        <div className="toolbar">
+          <button type="button" onClick={onTogglePower}>
+            {audioCtxState === "running" ? "Power Off" : "Power On"}
+          </button>
+          <span className="midiStatus">Audio: {audioCtxState}</span>
+          <button type="button" onClick={onToggleMidi} disabled={!sf2}>
+            {midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+          </button>
+          <select
+            value={selectedMidiInput}
+            onChange={(e) => setSelectedMidiInput(e.target.value)}
+            disabled={!midiEnabled}
+            title="MIDI input source"
+          >
+            <option value="all">All MIDI Inputs</option>
+            {midiInputs.map((input) => (
+              <option key={input.id} value={input.id}>
+                {input.name}
+              </option>
+            ))}
+          </select>
+          <span className="midiStatus">{midiStatus}</span>
+        </div>
+      </header>
+      <section className="tabsRow">
+        <button
+          type="button"
+          className={`tabButton ${activeTab === "midi" ? "active" : ""}`}
+          onClick={() => setActiveTab("midi")}
+        >
+          MIDI Explorer
+        </button>
+        <button
+          type="button"
+          className={`tabButton ${activeTab === "sf2" ? "active" : ""}`}
+          onClick={() => setActiveTab("sf2")}
+        >
+          SF2 Explorer
+        </button>
+      </section>
+
+      {loading && <p className="status">Parsing...</p>}
+      {error && <p className="status error">{error}</p>}
+      {midiError && <p className="status error">{midiError}</p>}
+
+      {activeTab === "midi" && (
+        <MidiReader
+          sf2Ready={!!sf2}
+          ensureAudioInfrastructure={ensureAudioInfrastructure}
+          getRegionsForPreset={(presetIndex) => getRegionsForPresetIndex(presetIndex)}
+          resolvePresetIndex={resolvePresetIndex}
+          fallbackPresetIndex={effectivePresetIndex ?? 0}
+          presetOptions={presets.map((p, idx) => ({
+            index: idx,
+            bank: p.bank,
+            program: p.preset,
+            name: p.presetName || "(unnamed)",
+          }))}
+          onError={(msg) => setAudioError(msg)}
+          defaultMidiUrl="/static/60884_Beethoven-Symphony-No51.mid"
+          defaultMidiName="60884_Beethoven-Symphony-No51.mid"
+        />
+      )}
+
+      {activeTab === "sf2" && (
+        <>
+          <section className="card controls">
+            <label className="fileInput">
+              <span>Open SF2 File</span>
+              <input type="file" accept=".sf2" onChange={onUploadFile} />
+            </label>
+            <button type="button" onClick={() => setShowSummaryModal((v) => !v)} disabled={!sf2}>
+              {showSummaryModal ? "Hide File Summary" : "Show File Summary"}
+            </button>
+            <span className="midiStatus">Keyboard: a w s e d f t g y h</span>
+            <div className="sampleButtons">
+              {SAMPLE_FILES.map((sample) => (
+                <button
+                  key={sample.path}
+                  onClick={() => onSelectSample(sample.path, sample.label)}
+                  disabled={loading}
+                >
+                  Load {sample.label}
+                </button>
+              ))}
+            </div>
+          </section>
+          {sf2 && showSummaryModal && (
+            <div className="modalBackdrop" onClick={() => setShowSummaryModal(false)}>
+              <section className="card summaryModal" onClick={(e) => e.stopPropagation()}>
+                <h2>File Summary</h2>
+                <p>
+                  <strong>Source:</strong> {sourceName}
+                </p>
+                <p>
+                  <strong>Presets:</strong> {presets.length}
+                </p>
+                <p>
+                  <strong>Instruments:</strong> {sf2.pdta.inst.length - 1}
+                </p>
+                <p>
+                  <strong>Samples:</strong> {sf2.pdta.shdr.length - 1}
+                </p>
+                <h3>INFO</h3>
+                <ul className="infoList">
+                  {Object.entries(sf2.info).map(([k, v]) => (
+                    <li key={k}>
+                      <code>{k}</code>: {v || "(empty)"}
+                    </li>
+                  ))}
+                </ul>
+                <button type="button" onClick={() => setShowSummaryModal(false)}>
+                  Close
+                </button>
+              </section>
+            </div>
+          )}
+
+          {sf2 && <main className="layout">
+            <section className="card">
+              <h2>Presets</h2>
+              <div className="presetFilters">
+                <input
+                  type="search"
+                  placeholder="Search name/bank/program"
+                  value={presetSearch}
+                  onChange={(e) => setPresetSearch(e.target.value)}
+                />
+              </div>
+              <div className="scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Name</th>
+                      <th>
+                        <button type="button" className="thSort" onClick={() => onHeaderSortClick("bank")}>
+                          Bank {sortKey === "bank" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="thSort"
+                          onClick={() => onHeaderSortClick("program")}
+                        >
+                          Program {sortKey === "program" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visiblePresets.map((preset) => (
+                      <tr
+                        key={`${preset.bank}:${preset.preset}:${preset._index}`}
+                        className={selectedPreset === preset._index ? "selected" : ""}
+                        onClick={() => {
+                          setSelectedPreset(preset._index);
+                        }}
+                      >
+                        <td>{preset._index}</td>
+                        <td>{preset.presetName || "(unnamed)"}</td>
+                        <td>{preset.bank}</td>
+                        <td>{preset.preset}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="card centerPanel">
+              <h2>Program Details</h2>
+              <div className="centerPanelScroll">
+                {selectedPreset == null || !programDetails ? (
+                  <p>Click a program row to inspect its header, zones, and sample preview.</p>
+                ) : (
+                  <div className="programDetails">
+                  <div className="detailBlock">
+                    <h3>MIDI Select</h3>
+                    <div className="sliderBlock">
+                      <label>
+                        MIDI note: <strong>{midiNote}</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="127"
+                        value={midiNote}
+                        onChange={(e) => setMidiNote(Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="sliderBlock">
+                      <label>
+                        Velocity: <strong>{midiVelocity}</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="127"
+                        value={midiVelocity}
+                        onChange={(e) => setMidiVelocity(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                  <div className="detailBlock">
+                    <h3>Program Header Info</h3>
+                    <p>
+                      <strong>Name:</strong> {programDetails.header.presetName || "(unnamed)"}
+                    </p>
+                    <p>
+                      <strong>Bank:</strong> {programDetails.header.bank}
+                    </p>
+                    <p>
+                      <strong>Program:</strong> {programDetails.header.preset}
+                    </p>
+                    <p>
+                      <strong>presetBagNdx:</strong> {programDetails.header.presetBagNdx}
+                    </p>
+                    <p>
+                      <strong>library/genre/morphology:</strong> {programDetails.header.library}/
+                      {programDetails.header.genre}/{programDetails.header.morphology}
+                    </p>
+                  </div>
+
+                  <div className="detailBlock">
+                    <h3>Global Zone</h3>
+                    {programDetails.presetGlobal ? (
+                      <ul className="monoList">
+                        <li>
+                          <button
+                            type="button"
+                            className={`layerButton ${
+                              selectedLayer?.type === "presetGlobal" ? "selected" : ""
+                            }`}
+                            onClick={() =>
+                              setSelectedLayer({
+                                type: "presetGlobal",
+                                title: `Preset global ${programDetails.presetGlobal.bagIndex}`,
+                                context: "global zone",
+                                levels: [
+                                  {
+                                    label: `Preset global bag ${programDetails.presetGlobal.bagIndex}`,
+                                    gens: programDetails.presetGlobal.gens,
+                                    mods: programDetails.presetGlobal.mods,
+                                  },
+                                ],
+                                bagIndex: programDetails.presetGlobal.bagIndex,
+                              })
+                            }
+                          >
+                            bag {programDetails.presetGlobal.bagIndex}:{" "}
+                            {programDetails.presetGlobal.gens.length} generators /{" "}
+                            {programDetails.presetGlobal.mods.length} modulators
+                          </button>
+                        </li>
+                      </ul>
+                    ) : (
+                      <p>None</p>
+                    )}
+                  </div>
+
+                  <div className="detailBlock">
+                    <h3>Region Layer</h3>
+                    {programDetails.regionZones.length === 0 ? (
+                      <p>No preset regions</p>
+                    ) : (
+                      <ul className="monoList">
+                        {programDetails.regionZones.map((zone) => {
+                          const instIndex = getLastGeneratorAmount(zone.gens, 41);
+                          const { keyLo, keyHi, velLo, velHi } = zoneKeyVel(zone);
+                          const isSelected =
+                            selectedLayer?.type === "region" &&
+                            selectedLayer?.bagIndex === zone.bagIndex;
+                          return (
+                            <li key={`rz-${zone.bagIndex}`}>
+                              <button
+                                type="button"
+                                className={`layerButton ${isSelected ? "selected" : ""}`}
+                                onClick={() =>
+                                  setSelectedLayer(
+                                    buildSelectionFromRegion(
+                                      programDetails,
+                                      zone,
+                                      midiNote,
+                                      midiVelocity
+                                    )
+                                  )
+                                }
+                              >
+                                bag {zone.bagIndex}: instrument {instIndex}, key {keyLo}-{keyHi},
+                                vel {velLo}-{velHi}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="detailBlock">
+                    <h3>Instrument Layer</h3>
+                    {programDetails.instruments.length === 0 ? (
+                      <p>No instruments referenced</p>
+                    ) : (
+                      <div className="instrumentBlocks">
+                        {programDetails.instruments.map((inst) => (
+                          <div key={`inst-${inst.index}`} className="instBlock">
+                          <p>
+                            <strong>{inst.index}</strong> {inst.name || "(unnamed)"}
+                          </p>
+                          {inst.globalZone ? (
+                            <p>
+                              <strong>Global:</strong>{" "}
+                              <button
+                                type="button"
+                                className={`layerButton ${
+                                  selectedLayer?.type === "instrumentGlobal" &&
+                                  selectedLayer?.bagIndex === inst.globalZone.bagIndex
+                                    ? "selected"
+                                    : ""
+                                }`}
+                                onClick={() =>
+                                  setSelectedLayer(
+                                    buildSelectionFromInstrumentGlobal(
+                                      programDetails,
+                                      inst,
+                                      midiNote,
+                                      midiVelocity
+                                    )
+                                  )
+                                }
+                              >
+                                {inst.globalZone.gens.length} generators / {inst.globalZone.mods.length} modulators
+                              </button>
+                            </p>
+                          ) : (
+                            <p>
+                              <strong>Global:</strong> None
+                            </p>
+                          )}
+                          <ul className="monoList">
+                            {inst.sampleZones.map((zone) => (
+                              <li key={`iz-${inst.index}-${zone.bagIndex}`}>
+                                <button
+                                  type="button"
+                                  className={`layerButton ${
+                                    selectedLayer?.type === "instrumentRegion" &&
+                                    selectedLayer?.bagIndex === zone.bagIndex
+                                      ? "selected"
+                                      : ""
+                                  }`}
+                                  onClick={() =>
+                                    setSelectedLayer(
+                                      buildSelectionFromInstrumentRegion(
+                                        programDetails,
+                                        inst,
+                                        zone,
+                                        midiNote,
+                                        midiVelocity
+                                      )
+                                    )
+                                  }
+                                >
+                                  bag {zone.bagIndex}: sample {zone.sampleID} ({zone.sampleName}) @{" "}
+                                  {zone.sampleRate}Hz
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                )}
+              </div>
+            </section>
+
+            <div className="rightStack">
+              <section className="card">
+                <h2>PCM Sample Preview</h2>
+                <div className="playControls">
+                  <button type="button" onClick={onPlaySample} disabled={selectedPreset == null || !sf2}>
+                    Play Sample
+                  </button>
+                  <span className="audioState">{audioReady ? "Audio ready" : "Audio not initialized"}</span>
+                </div>
+                {audioError ? <p className="status error">{audioError}</p> : null}
+                {selectedPreset == null || !programDetails?.previewRegion ? (
+                  <p>Waveform appears when the selected program has playable regions.</p>
+                ) : (
+                  <>
+                    <WaveformCanvas data={programDetails.previewRegion.sample.dataL} />
+                    <p>
+                      <strong>Frames:</strong> {programDetails.previewRegion.sample.dataL.length}{" "}
+                      <strong>Sample Rate:</strong> {programDetails.previewRegion.sample.sampleRate}
+                    </p>
+                  </>
+                )}
+              </section>
+              <section className="card">
+                <h2>Level Details</h2>
+                {selectedPreset == null || !programDetails ? (
+                  <p>Select a program to inspect layer generators and modulators.</p>
+                ) : !selectedLayer ? (
+                  <p>
+                    No matching layer for note {midiNote} velocity {midiVelocity}. Click a region or
+                    instrument layer to inspect it directly.
+                  </p>
+                ) : (
+                  <div className="scroll">
+                    <p>
+                      <strong>{selectedLayer.title}</strong> ({selectedLayer.context})
+                    </p>
+                    {(selectedLayer.levels ?? []).map((level, idx) => (
+                      <div key={`${selectedLayer.type}-${selectedLayer.bagIndex}-level-${idx}`} className="levelBlock">
+                        <p>
+                          <strong>{level.label}</strong>
+                        </p>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Kind</th>
+                              <th>Operator/Route</th>
+                              <th>Value</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(level.gens ?? []).map((g, gIdx) => (
+                              <tr key={`g-${idx}-${gIdx}`}>
+                                <td>generator</td>
+                                <td>{GEN_OPER_NAMES[g.oper] ?? `op${g.oper}`}</td>
+                                <td>{formatGeneratorValue(g)}</td>
+                              </tr>
+                            ))}
+                            {(level.mods ?? []).map((m, mIdx) => (
+                              <tr key={`m-${idx}-${mIdx}`}>
+                                <td>modulator</td>
+                                <td>
+                                  src {m.srcOper} → {formatModTarget(m)}
+                                </td>
+                                <td>
+                                  amount {m.amount}, amtSrc {m.amtSrcOper}, trans {m.transOper}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </main>}
+        </>
+      )}
+
+      <aside className="fixedAnalyzerPanel card">
+        <h2>Analyzer</h2>
+        <h3>Recent Time Domain</h3>
+        <AnalyzerCanvas data={recentTimeData} mode="time" />
+        <code className="sampleText">{recentTimeData.join(", ") || "No samples yet"}</code>
+        <h3>Recent Frequency Domain</h3>
+        <AnalyzerCanvas data={recentFreqData} mode="freq" />
+        <code className="sampleText">{recentFreqData.join(", ") || "No samples yet"}</code>
+      </aside>
+    </div>
+  );
+}

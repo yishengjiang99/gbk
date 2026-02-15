@@ -1,0 +1,477 @@
+:root {
+  color-scheme: light;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #eef3f7;
+  color: #14202a;
+}
+
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1rem;
+  padding-right: 360px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+header p {
+  margin-top: 0.3rem;
+  color: #355266;
+}
+
+.topHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.tabsRow {
+  margin-top: 0.8rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tabButton.active {
+  background: #d8e7f3;
+  border-color: #5f8096;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #c9d5df;
+  border-radius: 12px;
+  padding: 0.9rem;
+}
+
+.controls {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fileInput {
+  border: 1px dashed #7f96a8;
+  border-radius: 10px;
+  padding: 0.6rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.sampleButtons {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.midiReader {
+  margin-top: 0.8rem;
+}
+
+.midiTop {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.midiTimelineWrap {
+  margin-top: 0.7rem;
+  position: relative;
+  border: 1px solid #d3e0e9;
+  border-radius: 10px;
+  padding: 0.5rem;
+  background: #fbfdff;
+}
+
+.midiScrollViewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.midiTimelineContent {
+  min-width: 100%;
+  position: relative;
+}
+
+.midiPlayheadOptimized {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #bf1f2f;
+  opacity: 0.95;
+  pointer-events: none;
+  transform: translateX(0px);
+  will-change: transform;
+  z-index: 5;
+}
+
+.midiTracksSplit {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 0.5rem;
+}
+
+.midiTracksLeft {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.midiTrackLabelRow {
+  height: 108px;
+  border: 1px solid #d5e0e8;
+  border-radius: 6px;
+  background: #f7fbff;
+  padding: 0.35rem;
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+}
+
+.midiTrackSvgRow {
+  margin-bottom: 0.4rem;
+}
+
+.midiTrackLabel {
+  font-size: 0.8rem;
+  color: #294152;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.midiTrackLabel span {
+  color: #4b6a7f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fixedAnalyzerPanel {
+  position: fixed;
+  right: 1rem;
+  top: 1rem;
+  width: 330px;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.midiTrackSvg {
+  width: 100%;
+  height: 108px;
+  border: 1px solid #d5e0e8;
+  border-radius: 6px;
+}
+
+.presetFilters {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+input[type="search"],
+select {
+  border: 1px solid #9ab0bf;
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  font-family: inherit;
+  background: #fff;
+}
+
+button {
+  border: 1px solid #355266;
+  border-radius: 8px;
+  background: #f5f9fc;
+  padding: 0.45rem 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.status {
+  margin: 0.8rem 0;
+}
+
+.error {
+  color: #8b1f1f;
+}
+
+.layout {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.fullRow {
+  grid-column: 1 / -1;
+}
+
+.rightStack {
+  grid-column: 3;
+  display: grid;
+  gap: 0.8rem;
+  align-content: start;
+}
+
+.programDetails {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.centerPanel {
+  max-height: calc(100vh - 220px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.centerPanelScroll {
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.detailBlock h3 {
+  margin: 0 0 0.4rem;
+}
+
+.detailBlock p {
+  margin: 0.2rem 0;
+}
+
+.sliderBlock {
+  margin-top: 0.4rem;
+}
+
+.sliderBlock label {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.sliderBlock input[type="range"] {
+  width: 100%;
+}
+
+.monoList {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.88rem;
+}
+
+.instrumentBlocks {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.instBlock {
+  border: 1px solid #d5e0e8;
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.layerButton {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #b5c7d4;
+  border-radius: 6px;
+  background: #f6fafc;
+  padding: 0.35rem 0.45rem;
+  font-family: inherit;
+}
+
+.layerButton.selected {
+  background: #d8e7f3;
+  border-color: #5f8096;
+}
+
+.thSort {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-weight: 700;
+}
+
+.levelBlock {
+  margin-bottom: 0.7rem;
+}
+
+.waveCanvas {
+  width: min(100%, 460px);
+  height: auto;
+  display: block;
+  border-radius: 8px;
+}
+
+.playControls {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.audioState {
+  font-size: 0.9rem;
+  color: #3c5a6e;
+}
+
+.midiStatus {
+  font-size: 0.86rem;
+  color: #355266;
+}
+
+.analyzerWrap {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.analyzerCanvas {
+  width: min(100%, 460px);
+  height: auto;
+  display: block;
+  border-radius: 6px;
+}
+
+.sampleText {
+  display: block;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #1f3444;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 20, 32, 0.42);
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.summaryModal {
+  width: min(760px, 95vw);
+  max-height: 85vh;
+  overflow: auto;
+}
+
+.infoList {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.scroll {
+  overflow: auto;
+  max-height: 50vh;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid #e1e9ef;
+  padding: 0.35rem;
+  font-size: 0.9rem;
+}
+
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr:hover {
+  background: #f4f8fb;
+}
+
+tbody tr.selected {
+  background: #d8e7f3;
+}
+
+@media (max-width: 960px) {
+  .topHeader {
+    flex-direction: column;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .fullRow {
+    grid-column: auto;
+  }
+
+  .presetFilters {
+    grid-template-columns: 1fr;
+  }
+
+  .rightStack {
+    grid-column: auto;
+  }
+
+  .app {
+    padding-right: 1rem;
+  }
+
+  .fixedAnalyzerPanel {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin-top: 0.8rem;
+  }
+
+  .midiTracksSplit {
+    grid-template-columns: 1fr;
+  }
+
+  .midiTrackLabelRow {
+    height: auto;
+  }
+
+  .centerPanel {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .centerPanelScroll {
+    overflow: visible;
+    padding-right: 0;
+  }
+}
