@@ -4,7 +4,10 @@ import { createMidiDriver } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
 
 const SAMPLE_FILES = [
-  { label: "GeneralUser-GS.sf2", path: "/static/GeneralUser-GS.sf2" },
+  {
+    label: "GeneralUser-GS.sf2",
+    path: `${import.meta.env.BASE_URL}static/GeneralUser-GS.sf2`,
+  },
 ];
 const DEFAULT_SF2 = SAMPLE_FILES[0];
 
@@ -443,11 +446,18 @@ function AnalyzerCanvas({ data, mode }) {
     if (!data?.length) return;
 
     if (mode === "time") {
+      let peak = 0.0001;
+      for (let i = 0; i < data.length; i += 1) {
+        const a = Math.abs(data[i]);
+        if (a > peak) peak = a;
+      }
+      const scale = Math.max(0.05, peak);
       ctx.strokeStyle = "#0e5a7b";
       ctx.beginPath();
       for (let i = 0; i < data.length; i += 1) {
         const x = (i / (data.length - 1 || 1)) * (width - 1);
-        const y = (1 - (data[i] + 1) / 2) * (height - 1);
+        const v = Math.max(-1, Math.min(1, data[i] / scale));
+        const y = (1 - (v + 1) / 2) * (height - 1);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
@@ -688,8 +698,8 @@ export default function App() {
         analyser.getFloatTimeDomainData(td);
         analyser.getByteFrequencyData(fd);
         if (ts - lastVizUpdateRef.current > 80) {
-          const timeSample = Array.from(td.slice(0, 32), (v) => Number(v.toFixed(3)));
-          const freqSample = Array.from(fd.slice(0, 32));
+          const timeSample = Array.from(td.slice(0, 384), (v) => Number(v.toFixed(4)));
+          const freqSample = Array.from(fd.slice(0, 128));
           setRecentTimeData(timeSample);
           setRecentFreqData(freqSample);
           lastVizUpdateRef.current = ts;
@@ -970,7 +980,7 @@ export default function App() {
             name: p.presetName || "(unnamed)",
           }))}
           onError={(msg) => setAudioError(msg)}
-          defaultMidiUrl="/static/60884_Beethoven-Symphony-No51.mid"
+          defaultMidiUrl={`${import.meta.env.BASE_URL}static/60884_Beethoven-Symphony-No51.mid`}
           defaultMidiName="60884_Beethoven-Symphony-No51.mid"
         />
       )}
@@ -1029,9 +1039,13 @@ export default function App() {
             </div>
           )}
 
-          {sf2 && <main className="layout">
-            <section className="card">
-              <h2>Presets</h2>
+          {sf2 && <main className="layout sf2Layout">
+            <section className="card sf2Panel presetsPanel">
+              <div className="panelHead">
+                <h2>Presets</h2>
+                <span className="panelBadge">{visiblePresets.length}</span>
+              </div>
+              <div className="panelBody">
               <div className="presetFilters">
                 <input
                   type="search"
@@ -1040,8 +1054,8 @@ export default function App() {
                   onChange={(e) => setPresetSearch(e.target.value)}
                 />
               </div>
-              <div className="scroll">
-                <table>
+              <div className="scroll tableScroll">
+                <table className="sf2Table">
                   <thead>
                     <tr>
                       <th>#</th>
@@ -1080,10 +1094,16 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              </div>
             </section>
 
-            <section className="card centerPanel">
-              <h2>Program Details</h2>
+            <section className="card centerPanel sf2Panel detailsPanel">
+              <div className="panelHead">
+                <h2>Program Details</h2>
+                <span className="panelBadge">
+                  {selectedPreset == null ? "None" : `Preset #${selectedPreset}`}
+                </span>
+              </div>
               <div className="centerPanelScroll">
                 {selectedPreset == null || !programDetails ? (
                   <p>Click a program row to inspect its header, zones, and sample preview.</p>
@@ -1292,8 +1312,12 @@ export default function App() {
             </section>
 
             <div className="rightStack">
-              <section className="card">
-                <h2>PCM Sample Preview</h2>
+              <section className="card sf2Panel samplePanel">
+                <div className="panelHead">
+                  <h2>PCM Sample Preview</h2>
+                  <span className="panelBadge">Audio</span>
+                </div>
+                <div className="panelBody">
                 <div className="playControls">
                   <button type="button" onClick={onPlaySample} disabled={selectedPreset == null || !sf2}>
                     Play Sample
@@ -1312,9 +1336,12 @@ export default function App() {
                     </p>
                   </>
                 )}
+                </div>
               </section>
-              <section className="card">
-                <h2>Level Details</h2>
+              <section className="card sf2Panel levelPanel">
+                <div className="panelHead">
+                  <h2>Level Details</h2>
+                </div>
                 {selectedPreset == null || !programDetails ? (
                   <p>Select a program to inspect layer generators and modulators.</p>
                 ) : !selectedLayer ? (

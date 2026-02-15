@@ -231,6 +231,62 @@ button:disabled {
   gap: 0.8rem;
 }
 
+.sf2Layout {
+  gap: 1rem;
+}
+
+.sf2Panel {
+  border-color: #bfd1de;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  box-shadow: 0 8px 18px rgba(20, 45, 62, 0.07);
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -0.9rem -0.9rem 0.7rem;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid #d7e3ec;
+  background: linear-gradient(90deg, #f6fbff 0%, #eef5fb 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.panelHead h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.panelBadge {
+  border: 1px solid #9cb4c6;
+  border-radius: 999px;
+  padding: 0.08rem 0.5rem;
+  font-size: 0.74rem;
+  color: #244355;
+  background: #f8fcff;
+}
+
+.panelBody {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.presetsPanel {
+  min-height: 560px;
+}
+
+.detailsPanel {
+  min-height: 560px;
+}
+
+.samplePanel {
+  min-height: 240px;
+}
+
+.levelPanel {
+  min-height: 300px;
+}
+
 .fullRow {
   grid-column: 1 / -1;
 }
@@ -364,10 +420,14 @@ button:disabled {
 .sampleText {
   display: block;
   font-size: 0.75rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 5.2rem;
   color: #1f3444;
+  border: 1px solid #d3e0e9;
+  border-radius: 6px;
+  background: #f8fbfd;
+  padding: 0.3rem 0.4rem;
 }
 
 .modalBackdrop {
@@ -396,6 +456,19 @@ button:disabled {
   max-height: 50vh;
 }
 
+.tableScroll {
+  border: 1px solid #d6e2eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.sf2Table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f5f9fc;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -418,7 +491,7 @@ tbody tr:hover {
 }
 
 tbody tr.selected {
-  background: #d8e7f3;
+  background: #dceaf4;
 }
 
 @media (max-width: 960px) {
