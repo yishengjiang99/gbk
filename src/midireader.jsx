@@ -189,21 +189,7 @@ export default function MidiReader({
     })();
   }, [didAutoLoad, defaultMidiName, defaultMidiUrl, onError]);
 
-  useEffect(() => {
-    const pauseIfHidden = () => {
-      if (!isPlaying || !workerRef.current) return;
-      workerRef.current.postMessage({ type: "pause" });
-    };
-    const onVis = () => {
-      if (document.visibilityState === "hidden") pauseIfHidden();
-    };
-    window.addEventListener("blur", pauseIfHidden);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.removeEventListener("blur", pauseIfHidden);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [isPlaying]);
+
 
   useEffect(() => {
     if (!workerRef.current || !song || !portsAttachedRef.current) return;
@@ -264,6 +250,16 @@ export default function MidiReader({
     }
     try {
       await ensureTrackInfrastructure();
+      // Resume audio context if it's not running (e.g., suspended or interrupted)
+      const { ctx } = await ensureAudioInfrastructure();
+      if (ctx.state !== "running") {
+        try {
+          await ctx.resume();
+        } catch (resumeErr) {
+          const resumeMsg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+          throw new Error("Failed to resume audio: " + resumeMsg);
+        }
+      }
       workerRef.current.postMessage({ type: "play", startSec: songTime });
       setIsPlaying(true);
       setSongError("");
