@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "gen:midi-manifest": "node scripts/generate-midi-manifest.mjs",
+    "dev": "npm run gen:midi-manifest && vite",
+    "build": "npm run gen:midi-manifest && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

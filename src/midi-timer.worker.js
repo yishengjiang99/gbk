@@ -204,7 +204,7 @@ function parseMidiBuffer(buffer) {
     return {
       index: idx,
       name: track.trackName || `Track ${idx + 1}`,
-      instrumentName: track.instrumentName || "Unknown",
+      instrumentName: track.instrumentName || "",
       notes: notes.sort((a, b) => a.startSec - b.startSec),
       playEvents: playEvents.sort((a, b) => (a.sec - b.sec) || (a.seq - b.seq)),
     };

@@ -110,6 +110,12 @@ header p {
 .midiScrollViewport {
   overflow-x: auto;
   overflow-y: hidden;
+  cursor: grab;
+  user-select: none;
+}
+
+.midiScrollViewport.dragging {
+  cursor: grabbing;
 }
 
 .midiTimelineContent {
@@ -124,10 +130,16 @@ header p {
   width: 1px;
   background: #bf1f2f;
   opacity: 0.95;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: ew-resize;
   transform: translateX(0px);
   will-change: transform;
   z-index: 5;
+}
+
+.midiPlayheadOptimized.seeking {
+  width: 2px;
+  background: #a41220;
 }
 
 .midiTracksSplit {
