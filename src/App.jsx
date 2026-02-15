@@ -727,7 +727,7 @@ export default function App() {
     let compressor = compressorRef.current;
     
     // Track if we need to establish connections
-    const needsConnections = !compressor;
+    const needsConnections = !masterGain || !compressor;
 
     if (!analyser) {
       analyser = ctx.createAnalyser();
@@ -745,21 +745,22 @@ export default function App() {
     }
 
     if (!compressor) {
+      const currentTime = ctx.currentTime;
       compressor = ctx.createDynamicsCompressor();
       // The point at which compression begins
-      compressor.threshold.setValueAtTime(-24, ctx.currentTime);
+      compressor.threshold.setValueAtTime(-24, currentTime);
       // A range above the threshold where the curve smoothly transitions to the ratio
-      compressor.knee.setValueAtTime(30, ctx.currentTime);
+      compressor.knee.setValueAtTime(30, currentTime);
       // The amount of change in dB input vs output
-      compressor.ratio.setValueAtTime(2, ctx.currentTime);
+      compressor.ratio.setValueAtTime(2, currentTime);
       // How quickly the compressor reduces the volume (seconds)
-      compressor.attack.setValueAtTime(0.01, ctx.currentTime);
+      compressor.attack.setValueAtTime(0.01, currentTime);
       // How quickly the volume returns to normal (seconds)
-      compressor.release.setValueAtTime(0.25, ctx.currentTime);
+      compressor.release.setValueAtTime(0.25, currentTime);
       compressorRef.current = compressor;
     }
 
-    // Connect the audio graph only once when compressor is first created
+    // Connect the audio graph only once when all nodes are created
     if (needsConnections) {
       analyser.connect(masterGain);
       masterGain.connect(compressor);
