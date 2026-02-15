@@ -31,19 +31,21 @@ body {
 
 header h1 {
   margin: 0;
-  font-size: 1.8rem;
+  font-size: 1.55rem;
+  line-height: 1.1;
 }
 
 header p {
-  margin-top: 0.3rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
   color: #355266;
 }
 
 .topHeader {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.8rem;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .toolbar {
@@ -55,14 +57,18 @@ header p {
 }
 
 .tabsRow {
-  margin-top: 0.8rem;
+  margin-top: 0.5rem;
   display: flex;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .tabButton.active {
   background: #d8e7f3;
   border-color: #5f8096;
+}
+
+.tabButton {
+  padding: 0.35rem 0.55rem;
 }
 
 .card {
@@ -101,10 +107,70 @@ header p {
 }
 
 .midiTop {
-  display: flex;
-  gap: 0.6rem;
+  display: grid;
+  grid-template-columns: 1.7fr 1.1fr 1fr;
+  gap: 0.45rem;
   align-items: center;
-  flex-wrap: wrap;
+}
+
+.midiTopGroup {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.midiTopLoad select {
+  min-width: 180px;
+  flex: 1;
+}
+
+.midiTopTransport {
+  justify-content: flex-start;
+}
+
+.midiTopSong {
+  justify-content: flex-end;
+}
+
+.midiFileInputCompact {
+  padding: 0.38rem 0.5rem;
+  gap: 0.4rem;
+}
+
+.transportBtn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.chip {
+  font-size: 0.76rem;
+  border: 1px solid #c8d8e4;
+  border-radius: 999px;
+  padding: 0.16rem 0.44rem;
+  background: #f8fcff;
+  color: #2a465a;
+  white-space: nowrap;
+}
+
+.songChip {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.78rem;
+  border: 1px solid #c8d8e4;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  background: #f9fcff;
+  color: #304e62;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .midiTimelineWrap {
@@ -598,6 +664,10 @@ button:disabled {
   padding-left: 1rem;
 }
 
+.infoValueMultiline {
+  white-space: pre-line;
+}
+
 .scroll {
   overflow: auto;
   max-height: 50vh;
@@ -644,6 +714,7 @@ tbody tr.selected {
 @media (max-width: 960px) {
   .topHeader {
     flex-direction: column;
+    align-items: flex-start;
   }
 
   .toolbar {
@@ -684,6 +755,14 @@ tbody tr.selected {
 
   .midiTracksSplit {
     grid-template-columns: 1fr;
+  }
+
+  .midiTop {
+    grid-template-columns: 1fr;
+  }
+
+  .midiTopSong {
+    justify-content: flex-start;
   }
 
   .midiTrackLabelRow {

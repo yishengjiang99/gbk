@@ -1058,11 +1058,19 @@ export default function App() {
                 </p>
                 <h3>INFO</h3>
                 <ul className="infoList">
-                  {Object.entries(sf2.info).map(([k, v]) => (
-                    <li key={k}>
-                      <code>{k}</code>: {v || "(empty)"}
-                    </li>
-                  ))}
+                  {Object.entries(sf2.info).map(([k, v]) => {
+                    const raw = v || "(empty)";
+                    const rendered =
+                      k === "ICMT"
+                        ? String(raw).replace(/<br\s*\/?>/gi, "\n")
+                        : raw;
+                    return (
+                      <li key={k}>
+                        <code>{k}</code>:{" "}
+                        <span className={k === "ICMT" ? "infoValueMultiline" : undefined}>{rendered}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <button type="button" onClick={() => setShowSummaryModal(false)}>
                   Close

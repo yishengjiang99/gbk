@@ -709,31 +709,46 @@ export default function MidiReader({
   return (
     <section className="card midiReader">
       <div className="midiTop">
-        <label className="fileInput">
-          <span>Upload MIDI</span>
-          <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
-        </label>
-        <select
-          value={selectedMidiPath}
-          onChange={(e) => onSelectMidiPath(e.target.value)}
-          disabled={!midiOptions.length}
-          title="MIDI files from public/static"
-        >
-          <option value="">Select MIDI</option>
-          {midiOptions.map((midi) => (
-            <option key={midi.path} value={midi.path}>
-              {midi.name}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={onLoadSelectedMidi} disabled={!selectedMidiPath}>Reload</button>
-        <button type="button" onClick={onPlayPause} disabled={!song || !sf2Ready}>
-          {isPlaying ? "Pause" : "Play"}
-        </button>
-        <strong>{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-        <span>{song ? `Tempo ${song.bpm} BPM` : ""}</span>
-        <span>{song ? `Signature ${song.timeSig}` : ""}</span>
-        <span>{songName || "No MIDI loaded"}</span>
+        <div className="midiTopGroup midiTopLoad">
+          <label className="fileInput midiFileInputCompact">
+            <span>Upload MIDI</span>
+            <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
+          </label>
+          <select
+            value={selectedMidiPath}
+            onChange={(e) => onSelectMidiPath(e.target.value)}
+            disabled={!midiOptions.length}
+            title="MIDI files from public/static"
+          >
+            <option value="">Select MIDI</option>
+            {midiOptions.map((midi) => (
+              <option key={midi.path} value={midi.path}>
+                {midi.name}
+              </option>
+            ))}
+          </select>
+          <button type="button" onClick={onLoadSelectedMidi} disabled={!selectedMidiPath}>Reload</button>
+        </div>
+
+        <div className="midiTopGroup midiTopTransport">
+          <button
+            type="button"
+            className="transportBtn"
+            onClick={onPlayPause}
+            disabled={!song || !sf2Ready}
+            aria-label={isPlaying ? "Pause" : "Play"}
+            title={isPlaying ? "Pause" : "Play"}
+          >
+            <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+          </button>
+          <strong className="chip">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+          <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
+          <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+        </div>
+
+        <div className="midiTopGroup midiTopSong">
+          <span className="songChip">{songName || "No MIDI loaded"}</span>
+        </div>
       </div>
       {songError ? <p className="status error">{songError}</p> : null}
       {song && (
