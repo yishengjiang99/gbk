@@ -744,15 +744,15 @@ export default function App() {
 
     if (!compressor) {
       compressor = ctx.createDynamicsCompressor();
-      // The point at which compression begins
+      // The point at which compression begins (in dB)
       compressor.threshold.setValueAtTime(-24, currentTime);
-      // A range above the threshold where the curve smoothly transitions to the ratio
+      // A range above the threshold where the curve smoothly transitions to the ratio (in dB)
       compressor.knee.setValueAtTime(30, currentTime);
-      // The amount of change in dB input vs output
+      // The amount of change in dB input vs output (ratio)
       compressor.ratio.setValueAtTime(2, currentTime);
-      // How quickly the compressor reduces the volume (seconds)
+      // How quickly the compressor reduces the volume (in seconds)
       compressor.attack.setValueAtTime(0.01, currentTime);
-      // How quickly the volume returns to normal (seconds)
+      // How quickly the volume returns to normal (in seconds)
       compressor.release.setValueAtTime(0.25, currentTime);
       compressorRef.current = compressor;
       // Connect the audio graph: analyser -> masterGain -> compressor -> destination
