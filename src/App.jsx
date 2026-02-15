@@ -1402,10 +1402,8 @@ export default function App() {
         <h2>Analyzer</h2>
         <h3>Recent Time Domain</h3>
         <AnalyzerCanvas data={recentTimeData} mode="time" />
-        <code className="sampleText">{recentTimeData.join(", ") || "No samples yet"}</code>
         <h3>Recent Frequency Domain</h3>
         <AnalyzerCanvas data={recentFreqData} mode="freq" />
-        <code className="sampleText">{recentFreqData.join(", ") || "No samples yet"}</code>
       </aside>
     </div>
   );
