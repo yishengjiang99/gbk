@@ -256,7 +256,8 @@ export default function MidiReader({
         try {
           await ctx.resume();
         } catch (resumeErr) {
-          throw new Error("Failed to resume audio: " + (resumeErr instanceof Error ? resumeErr.message : String(resumeErr)));
+          const resumeMsg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+          throw new Error("Failed to resume audio: " + resumeMsg);
         }
       }
       workerRef.current.postMessage({ type: "play", startSec: songTime });
