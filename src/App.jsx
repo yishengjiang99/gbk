@@ -507,6 +507,8 @@ export default function App() {
   const audioCtxRef = useRef(null);
   const workletNodeRef = useRef(null);
   const analyserRef = useRef(null);
+  const masterGainRef = useRef(null);
+  const compressorRef = useRef(null);
   const timeDomainRef = useRef(null);
   const freqDomainRef = useRef(null);
   const rafRef = useRef(null);
@@ -720,15 +722,43 @@ export default function App() {
       ctx.onstatechange = () => setAudioCtxState(ctx.state);
     }
 
+    const currentTime = ctx.currentTime;
     let analyser = analyserRef.current;
+    let masterGain = masterGainRef.current;
+    let compressor = compressorRef.current;
+
     if (!analyser) {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.82;
       analyserRef.current = analyser;
-      analyser.connect(ctx.destination);
       timeDomainRef.current = new Float32Array(analyser.fftSize);
       freqDomainRef.current = new Uint8Array(analyser.frequencyBinCount);
+    }
+
+    if (!masterGain) {
+      masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(1.0, currentTime);
+      masterGainRef.current = masterGain;
+    }
+
+    if (!compressor) {
+      compressor = ctx.createDynamicsCompressor();
+      // The point at which compression begins (in dB)
+      compressor.threshold.setValueAtTime(-24, currentTime);
+      // A range above the threshold where the curve smoothly transitions to the ratio (in dB)
+      compressor.knee.setValueAtTime(30, currentTime);
+      // The amount of change in dB input vs output (ratio)
+      compressor.ratio.setValueAtTime(2, currentTime);
+      // How quickly the compressor reduces the volume (in seconds)
+      compressor.attack.setValueAtTime(0.01, currentTime);
+      // How quickly the volume returns to normal (in seconds)
+      compressor.release.setValueAtTime(0.25, currentTime);
+      compressorRef.current = compressor;
+      // Connect the audio graph: analyser -> masterGain -> compressor -> destination
+      analyser.connect(masterGain);
+      masterGain.connect(compressor);
+      compressor.connect(ctx.destination);
     }
 
     if (!workletLoadPromiseRef.current) {
