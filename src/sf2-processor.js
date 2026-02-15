@@ -301,23 +301,55 @@ class LFO {
     }
 }
 
-// ---------- Filter (cheap 1-pole LPF) ----------
-class OnePoleLPF {
+// ---------- Filter (2-pole LPF using biquad) ----------
+class TwoPoleLPF {
     constructor(sr) {
         this.sr = sr;
-        this.zL = 0;
-        this.zR = 0;
-        this.a = 1;
-        this.b = 0;
+        // State variables for left channel
+        this.z1L = 0;
+        this.z2L = 0;
+        // State variables for right channel
+        this.z1R = 0;
+        this.z2R = 0;
+        // Biquad coefficients
+        this.b0 = 1;
+        this.b1 = 0;
+        this.b2 = 0;
+        this.a1 = 0;
+        this.a2 = 0;
     }
     setCutoffHz(hz) {
         const clamped = Math.max(5, Math.min(hz ?? 1000, this.sr * 0.45));
-        const x = Math.exp(-2 * Math.PI * clamped / this.sr);
-        this.a = 1 - x;
-        this.b = x;
+        // Q factor for smooth response (typical value for music synthesis)
+        const Q = 0.7071; // Butterworth response (maximally flat)
+        
+        // Calculate biquad coefficients for low-pass filter
+        const w0 = 2 * Math.PI * clamped / this.sr;
+        const cosw0 = Math.cos(w0);
+        const sinw0 = Math.sin(w0);
+        const alpha = sinw0 / (2 * Q);
+        
+        const a0 = 1 + alpha;
+        this.b0 = ((1 - cosw0) / 2) / a0;
+        this.b1 = (1 - cosw0) / a0;
+        this.b2 = ((1 - cosw0) / 2) / a0;
+        this.a1 = (-2 * cosw0) / a0;
+        this.a2 = (1 - alpha) / a0;
     }
-    processL(x) { this.zL = this.a * x + this.b * this.zL; return this.zL; }
-    processR(x) { this.zR = this.a * x + this.b * this.zR; return this.zR; }
+    processL(x) {
+        // Direct Form I biquad: y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+        const y = this.b0 * x + this.z1L;
+        this.z1L = this.b1 * x - this.a1 * y + this.z2L;
+        this.z2L = this.b2 * x - this.a2 * y;
+        return y;
+    }
+    processR(x) {
+        // Direct Form I biquad: y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+        const y = this.b0 * x + this.z1R;
+        this.z1R = this.b1 * x - this.a1 * y + this.z2R;
+        this.z2R = this.b2 * x - this.a2 * y;
+        return y;
+    }
 }
 
 // ---------- Pitch ----------
@@ -393,7 +425,7 @@ function makeVoice(region, note, velocity, outSr) {
         modEnv: new ModEnv(outSr),
         modLfo: new LFO(outSr),
         vibLfo: new LFO(outSr),
-        lpf: new OnePoleLPF(outSr),
+        lpf: new TwoPoleLPF(outSr),
 
         exclusiveClass: region.exclusiveClass ?? 0,
         finished: false,
