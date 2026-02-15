@@ -23,6 +23,11 @@ function panToGains(pan) {
     const angle = (p + 1) * 0.25 * Math.PI; // 0..pi/2
     return { gL: Math.cos(angle), gR: Math.sin(angle) };
 }
+function balanceToGains(balance) {
+    const p = Math.max(-1, Math.min(1, balance ?? 0));
+    const angle = (p + 1) * 0.25 * Math.PI;
+    return { gL: Math.cos(angle), gR: Math.sin(angle) };
+}
 function fcCentsToHz(fcCents) {
     // common SF2-ish mapping: 8.176 * 2^(cents/1200)
     return 8.176 * Math.pow(2, (fcCents ?? 13500) / 1200);
@@ -417,6 +422,7 @@ function makeVoice(region, note, velocity, outSr) {
 
         // gains
         baseGain,
+        regionPanPos: Math.max(-500, Math.min(500, region.pan ?? 0)) / 500,
         panL: panG.gL,
         panR: panG.gR,
 
@@ -454,6 +460,9 @@ class Sf2Processor extends AudioWorkletProcessor {
         this.regions = []; // current preset regions
         this.voices = [];
         this.maxVoices = 64;
+        this.cc7Volume = 100;
+        this.cc10Pan = 64;
+        this.cc11Expression = 127;
 
         this.port.onmessage = (e) => this.onMsg(e.data);
     }
@@ -495,6 +504,18 @@ class Sf2Processor extends AudioWorkletProcessor {
                     // if sampleModes == 3: stop looping on release, play tail to end
                     if (v.loopUntilReleaseThenTail) v.inReleaseTail = true;
                 }
+            }
+        }
+
+        if (msg.type === "setControllers") {
+            if (Number.isFinite(msg.cc7Volume)) {
+                this.cc7Volume = Math.max(0, Math.min(127, msg.cc7Volume | 0));
+            }
+            if (Number.isFinite(msg.cc10Pan)) {
+                this.cc10Pan = Math.max(0, Math.min(127, msg.cc10Pan | 0));
+            }
+            if (Number.isFinite(msg.cc11Expression)) {
+                this.cc11Expression = Math.max(0, Math.min(127, msg.cc11Expression | 0));
             }
         }
     }
@@ -559,6 +580,9 @@ class Sf2Processor extends AudioWorkletProcessor {
         outL.fill(0);
         outR.fill(0);
 
+        const volumeMul = (this.cc7Volume / 127) * (this.cc11Expression / 127);
+        const ccPanPos = (this.cc10Pan - 64) / 63;
+
         for (let i = 0; i < outL.length; i++) {
             let sumL = 0;
             let sumR = 0;
@@ -600,10 +624,12 @@ class Sf2Processor extends AudioWorkletProcessor {
 
                 // --- Volume envelope & gain ---
                 const env = v.volEnv.next();
-                const g = v.baseGain * env;
+                const g = v.baseGain * env * volumeMul;
+                const mixPan = Math.max(-1, Math.min(1, v.regionPanPos + ccPanPos));
+                const panG = balanceToGains(mixPan);
 
-                sumL += fL * g * v.panL;
-                sumR += fR * g * v.panR;
+                sumL += fL * g * panG.gL;
+                sumR += fR * g * panG.gR;
 
                 // --- Advance position (looping/tail) ---
                 this.advancePos(v);

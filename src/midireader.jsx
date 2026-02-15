@@ -7,6 +7,73 @@ function fmtTime(sec) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+const DEFAULT_TRACK_CC = { cc7Volume: 100, cc10Pan: 64, cc11Expression: 127 };
+
+function clampCc(value) {
+  return Math.max(0, Math.min(127, Number(value) | 0));
+}
+
+function CcKnob({ label, value, onChange, disabled = false }) {
+  const startRef = useRef({ active: false, startY: 0, startValue: value });
+
+  useEffect(() => {
+    if (!startRef.current.active) startRef.current.startValue = value;
+  }, [value]);
+
+  const angle = -135 + (Math.max(0, Math.min(127, value)) / 127) * 270;
+  const rad = (angle * Math.PI) / 180;
+  const x2 = 20 + Math.cos(rad) * 11;
+  const y2 = 20 + Math.sin(rad) * 11;
+
+  const onPointerDown = (event) => {
+    if (disabled) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    startRef.current = { active: true, startY: event.clientY, startValue: value };
+  };
+
+  const onPointerMove = (event) => {
+    if (!startRef.current.active || disabled) return;
+    event.preventDefault();
+    const delta = startRef.current.startY - event.clientY;
+    const next = clampCc(startRef.current.startValue + Math.round(delta * 0.8));
+    onChange(next);
+  };
+
+  const onPointerUp = () => {
+    if (!startRef.current.active) return;
+    startRef.current.active = false;
+  };
+
+  useEffect(() => {
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  });
+
+  return (
+    <button
+      type="button"
+      className="ccKnobBtn"
+      onPointerDown={onPointerDown}
+      disabled={disabled}
+      title={`${label} ${value}`}
+    >
+      <svg viewBox="0 0 40 40" className="ccKnobSvg" aria-hidden="true">
+        <circle cx="20" cy="20" r="15" className="ccKnobRing" />
+        <line x1="20" y1="20" x2={x2} y2={y2} className="ccKnobNeedle" />
+      </svg>
+      <span className="ccKnobLabel">{label}</span>
+      <span className="ccKnobValue">{value}</span>
+    </button>
+  );
+}
+
 const ORCHESTRA_PAN_RULES = [
   { test: /\bviolin\s*(?:ii|2)\b/i, pan: -0.35 },
   { test: /\bviolin\b/i, pan: -0.75 },
@@ -52,6 +119,8 @@ export default function MidiReader({
   const [midiOptions, setMidiOptions] = useState([]);
   const [selectedMidiPath, setSelectedMidiPath] = useState("");
   const [trackPresetOverrides, setTrackPresetOverrides] = useState({});
+  const [trackCcControls, setTrackCcControls] = useState({});
+  const [trackMixState, setTrackMixState] = useState({});
 
   const viewportRef = useRef(null);
   const playheadRef = useRef(null);
@@ -63,6 +132,8 @@ export default function MidiReader({
   const isSeekingRef = useRef(false);
   const onErrorRef = useRef(onError);
   const trackPresetOverridesRef = useRef({});
+  const trackCcControlsRef = useRef({});
+  const trackMixStateRef = useRef({});
   const resolvePresetRef = useRef(resolvePresetIndex);
   const getRegionsRef = useRef(getRegionsForPreset);
   const fallbackPresetRef = useRef(fallbackPresetIndex);
@@ -101,6 +172,12 @@ export default function MidiReader({
   useEffect(() => {
     trackPresetOverridesRef.current = trackPresetOverrides;
   }, [trackPresetOverrides]);
+  useEffect(() => {
+    trackCcControlsRef.current = trackCcControls;
+  }, [trackCcControls]);
+  useEffect(() => {
+    trackMixStateRef.current = trackMixState;
+  }, [trackMixState]);
   useEffect(() => {
     resolvePresetRef.current = resolvePresetIndex;
   }, [resolvePresetIndex]);
@@ -149,6 +226,11 @@ export default function MidiReader({
         // no-op
       }
       try {
+        rec.gain?.disconnect();
+      } catch {
+        // no-op
+      }
+      try {
         rec.panner?.disconnect();
       } catch {
         // no-op
@@ -156,6 +238,42 @@ export default function MidiReader({
     }
     trackNodesRef.current = [];
     portsAttachedRef.current = false;
+  };
+
+  const getTrackCc = (trackIndex, controls = trackCcControlsRef.current) => {
+    const cc = controls?.[trackIndex];
+    return {
+      cc7Volume: clampCc(cc?.cc7Volume ?? DEFAULT_TRACK_CC.cc7Volume),
+      cc10Pan: clampCc(cc?.cc10Pan ?? DEFAULT_TRACK_CC.cc10Pan),
+      cc11Expression: clampCc(cc?.cc11Expression ?? DEFAULT_TRACK_CC.cc11Expression),
+    };
+  };
+
+  const applyTrackControllers = (songData, controls = trackCcControlsRef.current) => {
+    if (!songData?.tracks?.length) return;
+    for (let i = 0; i < songData.tracks.length; i += 1) {
+      const track = songData.tracks[i];
+      const rec = trackNodesRef.current[i];
+      if (!rec?.node) continue;
+      const cc = getTrackCc(track.index, controls);
+      rec.node.port.postMessage({ type: "setControllers", ...cc });
+    }
+  };
+
+  const applyTrackMuteSolo = (songData, mix = trackMixStateRef.current) => {
+    if (!songData?.tracks?.length) return;
+    const anySolo = songData.tracks.some((track) => !!mix?.[track.index]?.solo);
+    for (let i = 0; i < songData.tracks.length; i += 1) {
+      const track = songData.tracks[i];
+      const rec = trackNodesRef.current[i];
+      if (!rec?.gain) continue;
+      const muted = !!mix?.[track.index]?.mute;
+      const solo = !!mix?.[track.index]?.solo;
+      const cc = getTrackCc(track.index);
+      const ccSilent = cc.cc7Volume === 0 || cc.cc11Expression === 0;
+      const audible = (anySolo ? solo : !muted) && !ccSilent;
+      rec.gain.gain.setTargetAtTime(audible ? 1 : 0, rec.gain.context.currentTime, 0.01);
+    }
   };
 
   const applyTrackPanning = (songData, overrides) => {
@@ -194,6 +312,8 @@ export default function MidiReader({
         setIsPlaying(false);
         setSongError("");
         setTrackPresetOverrides({});
+        setTrackCcControls({});
+        setTrackMixState({});
         updatePlayhead(0);
         return;
       }
@@ -390,6 +510,17 @@ export default function MidiReader({
     applyTrackPanning(song, trackPresetOverrides);
   }, [trackPresetOverrides, song, getRegionsForPreset]);
 
+  useEffect(() => {
+    if (!song || !portsAttachedRef.current) return;
+    applyTrackControllers(song, trackCcControls);
+    applyTrackMuteSolo(song, trackMixStateRef.current);
+  }, [trackCcControls, song]);
+
+  useEffect(() => {
+    if (!song || !portsAttachedRef.current) return;
+    applyTrackMuteSolo(song, trackMixState);
+  }, [trackMixState, song]);
+
   async function ensureTrackInfrastructure() {
     if (!song || !workerRef.current) return;
     if (portsAttachedRef.current) return;
@@ -403,9 +534,12 @@ export default function MidiReader({
         outputChannelCount: [2],
       });
       const panner = new StereoPannerNode(ctx, { pan: 0 });
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(1, ctx.currentTime);
       node.connect(panner);
-      panner.connect(analyser);
-      trackNodes.push({ node, panner });
+      panner.connect(gain);
+      gain.connect(analyser);
+      trackNodes.push({ node, panner, gain });
     }
     trackNodesRef.current = trackNodes;
 
@@ -426,6 +560,8 @@ export default function MidiReader({
       });
     }
     applyTrackPanning(song, trackPresetOverrides);
+    applyTrackControllers(song, trackCcControlsRef.current);
+    applyTrackMuteSolo(song, trackMixStateRef.current);
   }
 
   async function onPlayPause() {
@@ -533,6 +669,43 @@ export default function MidiReader({
     applyTrackPanning(song, { ...trackPresetOverridesRef.current, [trackIndex]: nextPreset });
   }
 
+  function onTrackCcChange(trackIndex, key, rawValue) {
+    const value = clampCc(rawValue);
+    const current = getTrackCc(trackIndex);
+    const nextTrack = { ...current, [key]: value };
+    const nextAll = { ...trackCcControlsRef.current, [trackIndex]: nextTrack };
+    trackCcControlsRef.current = nextAll;
+    setTrackCcControls(nextAll);
+    const rec = trackNodesRef.current[trackIndex];
+    if (rec?.node) rec.node.port.postMessage({ type: "setControllers", ...nextTrack });
+    applyTrackMuteSolo(song, trackMixStateRef.current);
+  }
+
+  function onToggleTrackMute(trackIndex) {
+    const current = trackMixStateRef.current[trackIndex] ?? { mute: false, solo: false };
+    const nextAll = {
+      ...trackMixStateRef.current,
+      [trackIndex]: { ...current, mute: !current.mute },
+    };
+    setTrackMixState(nextAll);
+    applyTrackMuteSolo(song, nextAll);
+  }
+
+  function onToggleTrackSolo(trackIndex) {
+    const current = trackMixStateRef.current[trackIndex] ?? { mute: false, solo: false };
+    const nextAll = {
+      ...trackMixStateRef.current,
+      [trackIndex]: { ...current, solo: !current.solo },
+    };
+    setTrackMixState(nextAll);
+    applyTrackMuteSolo(song, nextAll);
+  }
+
+  function formatTrackInlineName(track) {
+    const generic = /^track\s+\d+$/i.test(track?.name || "");
+    return generic ? "" : (track?.name || "");
+  }
+
   return (
     <section className="card midiReader">
       <div className="midiTop">
@@ -570,8 +743,48 @@ export default function MidiReader({
               {visibleTracks.map((track) => (
                 <div key={`left-${track.index}`} className="midiTrackLabelRow">
                   <div className="midiTrackLabel">
-                    <strong>{track.name}</strong>
-                    <span>{track.instrumentName}</span>
+                    <strong>#{track.index + 1}</strong>
+                    <div className="trackMixButtons">
+                      <button
+                        type="button"
+                        className={`mixBtn ${trackMixState[track.index]?.mute ? "active" : ""}`}
+                        onClick={() => onToggleTrackMute(track.index)}
+                        disabled={!sf2Ready}
+                        title="Mute"
+                      >
+                        <i className="fa-solid fa-volume-xmark" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className={`mixBtn ${trackMixState[track.index]?.solo ? "active" : ""}`}
+                        onClick={() => onToggleTrackSolo(track.index)}
+                        disabled={!sf2Ready}
+                        title="Solo"
+                      >
+                        <i className="fa-solid fa-headphones" aria-hidden="true" />
+                      </button>
+                    </div>
+                    <span>{formatTrackInlineName(track) || track.instrumentName}</span>
+                  </div>
+                  <div className="midiTrackCc">
+                    <CcKnob
+                      label="EXP"
+                      value={getTrackCc(track.index).cc11Expression}
+                      onChange={(next) => onTrackCcChange(track.index, "cc11Expression", next)}
+                      disabled={!sf2Ready}
+                    />
+                    <CcKnob
+                      label="VOL"
+                      value={getTrackCc(track.index).cc7Volume}
+                      onChange={(next) => onTrackCcChange(track.index, "cc7Volume", next)}
+                      disabled={!sf2Ready}
+                    />
+                    <CcKnob
+                      label="PAN"
+                      value={getTrackCc(track.index).cc10Pan}
+                      onChange={(next) => onTrackCcChange(track.index, "cc10Pan", next)}
+                      disabled={!sf2Ready}
+                    />
                   </div>
                   <select
                     value={
@@ -581,7 +794,7 @@ export default function MidiReader({
                     onChange={(e) => onTrackPresetChange(track.index, e.target.value)}
                     disabled={!sf2Ready}
                   >
-                    <option value="">Track Program</option>
+                    <option value="">Prg</option>
                     {presetOptions.map((p) => (
                       <option key={`preset-${p.index}`} value={p.index}>
                         {p.bank}:{p.program} {p.name}

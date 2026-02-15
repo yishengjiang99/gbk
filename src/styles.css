@@ -15,10 +15,18 @@ body {
 }
 
 .app {
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   padding: 1rem;
-  padding-right: 360px;
+  padding-right: 1rem;
+}
+
+.app.analyzerOpen {
+  padding-right: 370px;
+}
+
+.app.analyzerCollapsed {
+  padding-right: 84px;
 }
 
 header h1 {
@@ -89,6 +97,7 @@ header p {
 
 .midiReader {
   margin-top: 0.8rem;
+  width: 100%;
 }
 
 .midiTop {
@@ -144,7 +153,7 @@ header p {
 
 .midiTracksSplit {
   display: grid;
-  grid-template-columns: 170px 1fr;
+  grid-template-columns: minmax(320px, 360px) 1fr;
   gap: 0.5rem;
 }
 
@@ -154,14 +163,15 @@ header p {
 }
 
 .midiTrackLabelRow {
-  height: 108px;
+  min-height: 108px;
   border: 1px solid #d5e0e8;
   border-radius: 6px;
   background: #f7fbff;
-  padding: 0.35rem;
+  padding: 0.4rem;
   display: grid;
   align-content: start;
-  gap: 0.35rem;
+  grid-template-columns: auto 1fr;
+  gap: 0.32rem 0.45rem;
 }
 
 .midiTrackSvgRow {
@@ -171,15 +181,103 @@ header p {
 .midiTrackLabel {
   font-size: 0.8rem;
   color: #294152;
-  display: grid;
-  gap: 0.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
 .midiTrackLabel span {
   color: #4b6a7f;
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.midiTrackCc {
+  display: flex;
+  gap: 0.28rem;
+  align-items: center;
+}
+
+.trackMixButtons {
+  display: flex;
+  gap: 0.26rem;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.mixBtn {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mixBtn.active {
+  background: #dbeaf7;
+  border-color: #4e7190;
+  color: #1f3c52;
+}
+
+.ccKnobBtn {
+  border: 1px solid #bfd0dc;
+  background: #fff;
+  border-radius: 8px;
+  width: 58px;
+  min-width: 58px;
+  padding: 0.18rem 0.12rem 0.16rem;
+  display: grid;
+  justify-items: center;
+  gap: 0.04rem;
+}
+
+.ccKnobBtn:disabled {
+  opacity: 0.5;
+}
+
+.ccKnobSvg {
+  width: 36px;
+  height: 36px;
+}
+
+.ccKnobRing {
+  fill: #f4f8fb;
+  stroke: #7f9bb0;
+  stroke-width: 1.2;
+}
+
+.ccKnobNeedle {
+  stroke: #2f4f64;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.ccKnobLabel {
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  color: #4b6477;
+}
+
+.ccKnobValue {
+  font-size: 0.64rem;
+  color: #1e3646;
+}
+
+.midiTrackLabelRow select {
+  min-width: 0;
+  width: 100%;
+  font-size: 0.72rem;
+  padding: 0.3rem 0.35rem;
 }
 
 .fixedAnalyzerPanel {
@@ -189,6 +287,43 @@ header p {
   width: 330px;
   max-height: calc(100vh - 2rem);
   overflow: auto;
+}
+
+.analyzerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.analyzerHead h2 {
+  margin: 0;
+}
+
+.analyzerBody {
+  margin-top: 0.5rem;
+}
+
+.fixedAnalyzerPanel.collapsed {
+  width: 62px;
+  overflow: hidden;
+  padding: 0.5rem;
+}
+
+.fixedAnalyzerPanel.collapsed .analyzerHead {
+  display: grid;
+  gap: 0.3rem;
+  justify-items: center;
+}
+
+.fixedAnalyzerPanel.collapsed .analyzerHead h2 {
+  font-size: 0.72rem;
+}
+
+.fixedAnalyzerPanel.collapsed .analyzerHead button {
+  width: 100%;
+  padding: 0.24rem;
+  font-size: 0.68rem;
 }
 
 .midiTrackSvg {
@@ -540,6 +675,11 @@ tbody tr.selected {
     width: auto;
     max-height: none;
     margin-top: 0.8rem;
+  }
+
+  .app.analyzerOpen,
+  .app.analyzerCollapsed {
+    padding-right: 1rem;
   }
 
   .midiTracksSplit {

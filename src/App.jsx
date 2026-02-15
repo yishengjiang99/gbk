@@ -501,6 +501,7 @@ export default function App() {
   const [selectedMidiInput, setSelectedMidiInput] = useState("all");
   const [activeTab, setActiveTab] = useState("midi");
   const [audioCtxState, setAudioCtxState] = useState("off");
+  const [analyzerCollapsed, setAnalyzerCollapsed] = useState(false);
   const [didAutoLoadDefault, setDidAutoLoadDefault] = useState(false);
   const [didAutoEnableMidi, setDidAutoEnableMidi] = useState(false);
 
@@ -945,7 +946,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
       <header className="topHeader">
         <div>
           <h1>SoundFont2 Explorer</h1>
@@ -973,6 +974,9 @@ export default function App() {
             ))}
           </select>
           <span className="midiStatus">{midiStatus}</span>
+          <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
+            {analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+          </button>
         </div>
       </header>
       <section className="tabsRow">
@@ -1423,12 +1427,21 @@ export default function App() {
         </>
       )}
 
-      <aside className="fixedAnalyzerPanel card">
-        <h2>Analyzer</h2>
-        <h3>Recent Time Domain</h3>
-        <AnalyzerCanvas data={recentTimeData} mode="time" />
-        <h3>Recent Frequency Domain</h3>
-        <AnalyzerCanvas data={recentFreqData} mode="freq" />
+      <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
+        <div className="analyzerHead">
+          <h2>{analyzerCollapsed ? "Viz" : "Analyzer"}</h2>
+          <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
+            {analyzerCollapsed ? "Open" : "Collapse"}
+          </button>
+        </div>
+        {!analyzerCollapsed && (
+          <div className="analyzerBody">
+            <h3>Recent Time Domain</h3>
+            <AnalyzerCanvas data={recentTimeData} mode="time" />
+            <h3>Recent Frequency Domain</h3>
+            <AnalyzerCanvas data={recentFreqData} mode="freq" />
+          </div>
+        )}
       </aside>
     </div>
   );
