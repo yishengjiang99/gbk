@@ -754,12 +754,11 @@ export default function App() {
       // How quickly the volume returns to normal (seconds)
       compressor.release.setValueAtTime(0.25, ctx.currentTime);
       compressorRef.current = compressor;
+      // Connect the audio graph: analyser -> masterGain -> compressor -> destination
+      analyser.connect(masterGain);
+      masterGain.connect(compressor);
+      compressor.connect(ctx.destination);
     }
-
-    // Connect the audio graph: analyser -> masterGain -> compressor -> destination
-    analyser.connect(masterGain);
-    masterGain.connect(compressor);
-    compressor.connect(ctx.destination);
 
     if (!workletLoadPromiseRef.current) {
       const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
