@@ -507,6 +507,8 @@ export default function App() {
   const audioCtxRef = useRef(null);
   const workletNodeRef = useRef(null);
   const analyserRef = useRef(null);
+  const masterGainRef = useRef(null);
+  const compressorRef = useRef(null);
   const timeDomainRef = useRef(null);
   const freqDomainRef = useRef(null);
   const rafRef = useRef(null);
@@ -721,15 +723,43 @@ export default function App() {
     }
 
     let analyser = analyserRef.current;
+    let masterGain = masterGainRef.current;
+    let compressor = compressorRef.current;
+
     if (!analyser) {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.82;
       analyserRef.current = analyser;
-      analyser.connect(ctx.destination);
       timeDomainRef.current = new Float32Array(analyser.fftSize);
       freqDomainRef.current = new Uint8Array(analyser.frequencyBinCount);
     }
+
+    if (!masterGain) {
+      masterGain = ctx.createGain();
+      masterGain.gain.value = 1.0;
+      masterGainRef.current = masterGain;
+    }
+
+    if (!compressor) {
+      compressor = ctx.createDynamicsCompressor();
+      // The point at which compression begins
+      compressor.threshold.setValueAtTime(-24, ctx.currentTime);
+      // A range above the threshold where the curve smoothly transitions to the ratio
+      compressor.knee.setValueAtTime(30, ctx.currentTime);
+      // The amount of change in dB input vs output
+      compressor.ratio.setValueAtTime(2, ctx.currentTime);
+      // How quickly the compressor reduces the volume (seconds)
+      compressor.attack.setValueAtTime(0.01, ctx.currentTime);
+      // How quickly the volume returns to normal (seconds)
+      compressor.release.setValueAtTime(0.25, ctx.currentTime);
+      compressorRef.current = compressor;
+    }
+
+    // Connect the audio graph: analyser -> masterGain -> compressor -> destination
+    analyser.connect(masterGain);
+    masterGain.connect(compressor);
+    compressor.connect(ctx.destination);
 
     if (!workletLoadPromiseRef.current) {
       const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
