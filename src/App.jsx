@@ -5,7 +5,6 @@ import MidiReader from "./midireader.jsx";
 
 const SAMPLE_FILES = [
   { label: "GeneralUser-GS.sf2", path: "/static/GeneralUser-GS.sf2" },
-  { label: "HoeCakesSF.sf2", path: "/static/HoeCakesSF.sf2" },
 ];
 const DEFAULT_SF2 = SAMPLE_FILES[0];
 
