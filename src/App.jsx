@@ -725,6 +725,9 @@ export default function App() {
     let analyser = analyserRef.current;
     let masterGain = masterGainRef.current;
     let compressor = compressorRef.current;
+    
+    // Track if we need to establish connections
+    const needsConnections = !compressor;
 
     if (!analyser) {
       analyser = ctx.createAnalyser();
@@ -737,7 +740,7 @@ export default function App() {
 
     if (!masterGain) {
       masterGain = ctx.createGain();
-      masterGain.gain.value = 1.0;
+      masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
       masterGainRef.current = masterGain;
     }
 
@@ -754,7 +757,10 @@ export default function App() {
       // How quickly the volume returns to normal (seconds)
       compressor.release.setValueAtTime(0.25, ctx.currentTime);
       compressorRef.current = compressor;
-      // Connect the audio graph: analyser -> masterGain -> compressor -> destination
+    }
+
+    // Connect the audio graph only once when compressor is first created
+    if (needsConnections) {
       analyser.connect(masterGain);
       masterGain.connect(compressor);
       compressor.connect(ctx.destination);
