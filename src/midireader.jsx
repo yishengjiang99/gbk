@@ -253,7 +253,11 @@ export default function MidiReader({
       // Resume audio context if it's suspended (e.g., after tab was backgrounded)
       const { ctx } = await ensureAudioInfrastructure();
       if (ctx.state === "suspended") {
-        await ctx.resume();
+        try {
+          await ctx.resume();
+        } catch (resumeErr) {
+          throw new Error("Failed to resume audio: " + (resumeErr instanceof Error ? resumeErr.message : String(resumeErr)));
+        }
       }
       workerRef.current.postMessage({ type: "play", startSec: songTime });
       setIsPlaying(true);
