@@ -136,6 +136,14 @@ function zoneMatches(zone, note, velocity) {
   return note >= keyLo && note <= keyHi && velocity >= velLo && velocity <= velHi;
 }
 
+function rangeFromGenerators(gens) {
+  const keyRange = getLastGeneratorAmount(gens ?? [], 43);
+  const velRange = getLastGeneratorAmount(gens ?? [], 44);
+  const [keyLo, keyHi] = keyRange != null ? unpackRange(keyRange) : [0, 127];
+  const [velLo, velHi] = velRange != null ? unpackRange(velRange) : [0, 127];
+  return { keyLo, keyHi, velLo, velHi };
+}
+
 function selectLayerFromMidi(programDetails, note, velocity) {
   if (!programDetails) return null;
   const matchedRegion = programDetails.regionZones.find((zone) => zoneMatches(zone, note, velocity));
@@ -713,7 +721,7 @@ export default function App() {
     rafRef.current = requestAnimationFrame(tick);
   }
 
-  const ensureAudioInfrastructure = useCallback(async () => {
+  const ensureAudioInfrastructure = useCallback(async ({ loadWorklet = true } = {}) => {
     setAudioError("");
     let ctx = audioCtxRef.current;
     if (!ctx) {
@@ -762,12 +770,14 @@ export default function App() {
       compressor.connect(ctx.destination);
     }
 
-    if (!workletLoadPromiseRef.current) {
-      const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
-      workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
+    if (loadWorklet) {
+      if (!workletLoadPromiseRef.current) {
+        const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
+        workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
+      }
+      await workletLoadPromiseRef.current;
+      setAudioReady(true);
     }
-    await workletLoadPromiseRef.current;
-    setAudioReady(true);
     startAnalyzerLoop();
     return { ctx, analyser };
   }, []);
@@ -861,9 +871,28 @@ export default function App() {
 
   async function onTogglePower() {
     try {
-      const { ctx } = await ensureAudioInfrastructure();
-      if (ctx.state === "running") await ctx.suspend();
-      else await ctx.resume();
+      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
+      const targetState = ctx.state === "running" ? "suspended" : "running";
+      if (targetState === "running") await ctx.resume();
+      else await ctx.suspend();
+
+      // Wait briefly for the context state transition to settle before reflecting it in UI.
+      if (ctx.state !== targetState) {
+        await new Promise((resolve) => {
+          const start = performance.now();
+          const poll = () => {
+            if (ctx.state === targetState || performance.now() - start > 700) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 16);
+          };
+          poll();
+        });
+      }
+      if (targetState === "running" && ctx.state !== "running") {
+        throw new Error(`AudioContext resume did not complete (current state: ${ctx.state})`);
+      }
       setAudioCtxState(ctx.state);
     } catch (err) {
       setAudioError(err instanceof Error ? err.message : String(err));
@@ -1396,6 +1425,14 @@ export default function App() {
                         <p>
                           <strong>{level.label}</strong>
                         </p>
+                        {(() => {
+                          const r = rangeFromGenerators(level.gens);
+                          return (
+                            <p className="levelRangeCompact">
+                              MIDI {r.keyLo}-{r.keyHi} | Vel {r.velLo}-{r.velHi}
+                            </p>
+                          );
+                        })()}
                         <table>
                           <thead>
                             <tr>
