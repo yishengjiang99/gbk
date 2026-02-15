@@ -722,12 +722,10 @@ export default function App() {
       ctx.onstatechange = () => setAudioCtxState(ctx.state);
     }
 
+    const currentTime = ctx.currentTime;
     let analyser = analyserRef.current;
     let masterGain = masterGainRef.current;
     let compressor = compressorRef.current;
-    
-    // Track if we need to establish connections
-    const needsConnections = !masterGain || !compressor;
 
     if (!analyser) {
       analyser = ctx.createAnalyser();
@@ -740,12 +738,11 @@ export default function App() {
 
     if (!masterGain) {
       masterGain = ctx.createGain();
-      masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+      masterGain.gain.setValueAtTime(1.0, currentTime);
       masterGainRef.current = masterGain;
     }
 
     if (!compressor) {
-      const currentTime = ctx.currentTime;
       compressor = ctx.createDynamicsCompressor();
       // The point at which compression begins
       compressor.threshold.setValueAtTime(-24, currentTime);
@@ -758,10 +755,7 @@ export default function App() {
       // How quickly the volume returns to normal (seconds)
       compressor.release.setValueAtTime(0.25, currentTime);
       compressorRef.current = compressor;
-    }
-
-    // Connect the audio graph only once when all nodes are created
-    if (needsConnections) {
+      // Connect the audio graph: analyser -> masterGain -> compressor -> destination
       analyser.connect(masterGain);
       masterGain.connect(compressor);
       compressor.connect(ctx.destination);
