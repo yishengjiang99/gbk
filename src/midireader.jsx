@@ -250,9 +250,9 @@ export default function MidiReader({
     }
     try {
       await ensureTrackInfrastructure();
-      // Resume audio context if it's suspended (e.g., after tab was backgrounded)
+      // Resume audio context if it's not running (e.g., suspended or interrupted)
       const { ctx } = await ensureAudioInfrastructure();
-      if (ctx.state === "suspended") {
+      if (ctx.state !== "running") {
         try {
           await ctx.resume();
         } catch (resumeErr) {
