@@ -337,14 +337,14 @@ class TwoPoleLPF {
         this.a2 = (1 - alpha) / a0;
     }
     processL(x) {
-        // Direct Form I biquad: y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+        // Direct Form II Transposed biquad
         const y = this.b0 * x + this.z1L;
         this.z1L = this.b1 * x - this.a1 * y + this.z2L;
         this.z2L = this.b2 * x - this.a2 * y;
         return y;
     }
     processR(x) {
-        // Direct Form I biquad: y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+        // Direct Form II Transposed biquad
         const y = this.b0 * x + this.z1R;
         this.z1R = this.b1 * x - this.a1 * y + this.z2R;
         this.z2R = this.b2 * x - this.a2 * y;
