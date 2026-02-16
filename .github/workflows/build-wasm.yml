@@ -2,7 +2,7 @@ name: Build WebAssembly Module
 
 on:
   push:
-    branches: ['main', 'copilot/**']
+    branches: ['main']
     paths:
       - 'src/dsp.c'
       - 'Dockerfile'
@@ -13,6 +13,9 @@ on:
       - 'src/dsp.c'
       - 'Dockerfile'
   workflow_dispatch:
+
+permissions:
+  contents: write  # Needed to commit and push WASM files
 
 jobs:
   build-wasm:
