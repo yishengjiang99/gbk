@@ -422,7 +422,6 @@ class ModEnvJS {
     }
     next() {
         const dt = 1 / this.sr;
-        const lerp = (a, b, t) => a + (b - a) * t;
         switch (this.stage) {
             case "idle":
                 this.level = 0;
@@ -546,6 +545,10 @@ class TwoPoleLPFJS {
 }
 
 // ---------- Utility Functions (not in WASM wrapper) ----------
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+
 function panToGains(pan) {
     // SF2 pan: -500..+500
     const p = Math.max(-500, Math.min(500, pan ?? 0)) / 500; // -1..+1
