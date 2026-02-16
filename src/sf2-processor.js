@@ -1,550 +1,131 @@
 // sf2-processor.js
 // 
 // DSP computation for SF2 synthesis using WebAssembly
-// 
-// This processor uses the WebAssembly DSP module for optimized performance.
-// The WASM module is loaded and initialized before the AudioWorklet is created.
-// If WASM is not available, it falls back to JavaScript implementations.
 
 // ---------- WASM Integration ----------
 let dspModule = null;
 let dspReady = false;
 
-// This will be called from the main thread before AudioWorklet is loaded
-// The module instance is stored globally for the worklet to use
+// Module instance is stored globally for the worklet to use
 if (typeof globalThis.dspModule !== 'undefined') {
     dspModule = globalThis.dspModule;
     dspReady = true;
 }
 
-// Utility functions with WASM support
+// Utility functions using WASM
 function centsToRatio(c) {
-    if (dspReady && dspModule) {
-        return dspModule._centsToRatio(c ?? 0);
-    }
-    return Math.pow(2, (c ?? 0) / 1200);
+    return dspModule._centsToRatio(c ?? 0);
 }
 
 function cbAttenToLin(cb) {
-    if (dspReady && dspModule) {
-        return dspModule._cbAttenToLin(cb ?? 0);
-    }
-    const db = -(cb ?? 0) / 10;
-    return Math.pow(10, db / 20);
+    return dspModule._cbAttenToLin(cb ?? 0);
 }
 
 function velToLin(vel, curve = 2.0) {
-    if (dspReady && dspModule) {
-        return dspModule._velToLin(vel, curve);
-    }
-    const x = Math.max(0, Math.min(127, vel)) / 127;
-    return Math.pow(x, curve);
+    return dspModule._velToLin(vel, curve);
 }
 
 function fcCentsToHz(fcCents) {
-    if (dspReady && dspModule) {
-        return dspModule._fcCentsToHz(fcCents ?? 13500);
-    }
-    return 8.176 * Math.pow(2, (fcCents ?? 13500) / 1200);
+    return dspModule._fcCentsToHz(fcCents ?? 13500);
 }
 
 function timecentsToSeconds(tc) {
-    if (dspReady && dspModule) {
-        return dspModule._timecentsToSeconds(tc ?? 0);
-    }
-    return Math.pow(2, (tc ?? 0) / 1200);
+    return dspModule._timecentsToSeconds(tc ?? 0);
 }
 
-// ---------- WASM Wrapper Classes ----------
-// These classes use WASM when available, with JS fallback
-
-class VolEnvWasm {
-    constructor(sr, jsImpl) {
-        this.sr = sr;
-        this.jsImpl = jsImpl;
-        this.ptr = null;
-        
-        if (dspReady && dspModule) {
-            try {
-                this.ptr = dspModule._volEnvCreate(sr);
-            } catch (e) {
-                console.warn('Failed to create WASM VolEnv, using JS fallback:', e);
-            }
-        }
-    }
-    
-    setFromSf2(params) {
-        if (this.ptr && dspModule) {
+// ---------- WASM DSP Object Creators ----------
+function createVolEnv(sr) {
+    const ptr = dspModule._volEnvCreate(sr);
+    return {
+        ptr,
+        setFromSf2(params) {
             const delayTc = params.delayTc ?? -12000;
             const attackTc = params.attackTc ?? -12000;
             const holdTc = params.holdTc ?? -12000;
             const decayTc = params.decayTc ?? -12000;
             const sustainCb = params.sustainCb ?? 0;
             const releaseTc = params.releaseTc ?? 0;
-            
-            dspModule._volEnvSetFromSf2(this.ptr, delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc);
-        } else if (this.jsImpl) {
-            this.jsImpl.setFromSf2(params);
+            dspModule._volEnvSetFromSf2(ptr, delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc);
+        },
+        noteOn() {
+            dspModule._volEnvNoteOn(ptr);
+        },
+        noteOff() {
+            dspModule._volEnvNoteOff(ptr);
+        },
+        next() {
+            return dspModule._volEnvNext(ptr);
+        },
+        destroy() {
+            dspModule._volEnvDestroy(ptr);
         }
-    }
-    
-    noteOn() {
-        if (this.ptr && dspModule) {
-            dspModule._volEnvNoteOn(this.ptr);
-        } else if (this.jsImpl) {
-            this.jsImpl.noteOn();
-        }
-    }
-    
-    noteOff() {
-        if (this.ptr && dspModule) {
-            dspModule._volEnvNoteOff(this.ptr);
-        } else if (this.jsImpl) {
-            this.jsImpl.noteOff();
-        }
-    }
-    
-    next() {
-        if (this.ptr && dspModule) {
-            return dspModule._volEnvNext(this.ptr);
-        } else if (this.jsImpl) {
-            return this.jsImpl.next();
-        }
-        return 0;
-    }
-    
-    get level() {
-        if (this.jsImpl) return this.jsImpl.level;
-        return 0;
-    }
-    
-    get stage() {
-        if (this.jsImpl) return this.jsImpl.stage;
-        return 'idle';
-    }
+    };
 }
 
-class ModEnvWasm {
-    constructor(sr, jsImpl) {
-        this.sr = sr;
-        this.jsImpl = jsImpl;
-        this.ptr = null;
-        
-        if (dspReady && dspModule) {
-            try {
-                this.ptr = dspModule._modEnvCreate(sr);
-            } catch (e) {
-                console.warn('Failed to create WASM ModEnv, using JS fallback:', e);
-            }
-        }
-    }
-    
-    setFromSf2(params) {
-        if (this.ptr && dspModule) {
+function createModEnv(sr) {
+    const ptr = dspModule._modEnvCreate(sr);
+    return {
+        ptr,
+        setFromSf2(params) {
             const delayTc = params.delayTc ?? -12000;
             const attackTc = params.attackTc ?? -12000;
             const holdTc = params.holdTc ?? -12000;
             const decayTc = params.decayTc ?? -12000;
             const sustain = params.sustain ?? 0;
             const releaseTc = params.releaseTc ?? 0;
-            
-            dspModule._modEnvSetFromSf2(this.ptr, delayTc, attackTc, holdTc, decayTc, sustain, releaseTc);
-        } else if (this.jsImpl) {
-            this.jsImpl.setFromSf2(params);
+            dspModule._modEnvSetFromSf2(ptr, delayTc, attackTc, holdTc, decayTc, sustain, releaseTc);
+        },
+        noteOn() {
+            dspModule._modEnvNoteOn(ptr);
+        },
+        noteOff() {
+            dspModule._modEnvNoteOff(ptr);
+        },
+        next() {
+            return dspModule._modEnvNext(ptr);
+        },
+        destroy() {
+            dspModule._modEnvDestroy(ptr);
         }
-    }
-    
-    noteOn() {
-        if (this.ptr && dspModule) {
-            dspModule._modEnvNoteOn(this.ptr);
-        } else if (this.jsImpl) {
-            this.jsImpl.noteOn();
-        }
-    }
-    
-    noteOff() {
-        if (this.ptr && dspModule) {
-            dspModule._modEnvNoteOff(this.ptr);
-        } else if (this.jsImpl) {
-            this.jsImpl.noteOff();
-        }
-    }
-    
-    next() {
-        if (this.ptr && dspModule) {
-            return dspModule._modEnvNext(this.ptr);
-        } else if (this.jsImpl) {
-            return this.jsImpl.next();
-        }
-        return 0;
-    }
-    
-    get level() {
-        if (this.jsImpl) return this.jsImpl.level;
-        return 0;
-    }
-    
-    get stage() {
-        if (this.jsImpl) return this.jsImpl.stage;
-        return 'idle';
-    }
+    };
 }
 
-class LFOWasm {
-    constructor(sr, jsImpl) {
-        this.sr = sr;
-        this.jsImpl = jsImpl;
-        this.ptr = null;
-        
-        if (dspReady && dspModule) {
-            try {
-                this.ptr = dspModule._lfoCreate(sr);
-            } catch (e) {
-                console.warn('Failed to create WASM LFO, using JS fallback:', e);
-            }
+function createLFO(sr) {
+    const ptr = dspModule._lfoCreate(sr);
+    return {
+        ptr,
+        set(freqHz, delaySec) {
+            dspModule._lfoSet(ptr, freqHz ?? 0, delaySec ?? 0);
+        },
+        next() {
+            return dspModule._lfoNext(ptr);
+        },
+        destroy() {
+            dspModule._lfoDestroy(ptr);
         }
-    }
-    
-    set(freqHz, delaySec) {
-        if (this.ptr && dspModule) {
-            dspModule._lfoSet(this.ptr, freqHz ?? 0, delaySec ?? 0);
-        } else if (this.jsImpl) {
-            this.jsImpl.set(freqHz, delaySec);
-        }
-    }
-    
-    next() {
-        if (this.ptr && dspModule) {
-            return dspModule._lfoNext(this.ptr);
-        } else if (this.jsImpl) {
-            return this.jsImpl.next();
-        }
-        return 0;
-    }
+    };
 }
 
-class TwoPoleLPFWasm {
-    constructor(sr, jsImpl) {
-        this.sr = sr;
-        this.jsImpl = jsImpl;
-        this.ptr = null;
-        
-        if (dspReady && dspModule) {
-            try {
-                this.ptr = dspModule._lpfCreate(sr);
-            } catch (e) {
-                console.warn('Failed to create WASM LPF, using JS fallback:', e);
-            }
+function createLPF(sr) {
+    const ptr = dspModule._lpfCreate(sr);
+    return {
+        ptr,
+        setCutoffHz(hz) {
+            dspModule._lpfSetCutoffHz(ptr, hz ?? 1000);
+        },
+        processL(x) {
+            return dspModule._lpfProcessL(ptr, x);
+        },
+        processR(x) {
+            return dspModule._lpfProcessR(ptr, x);
+        },
+        destroy() {
+            dspModule._lpfDestroy(ptr);
         }
-    }
-    
-    setCutoffHz(hz) {
-        if (this.ptr && dspModule) {
-            dspModule._lpfSetCutoffHz(this.ptr, hz ?? 1000);
-        } else if (this.jsImpl) {
-            this.jsImpl.setCutoffHz(hz);
-        }
-    }
-    
-    processL(x) {
-        if (this.ptr && dspModule) {
-            return dspModule._lpfProcessL(this.ptr, x);
-        } else if (this.jsImpl) {
-            return this.jsImpl.processL(x);
-        }
-        return x;
-    }
-    
-    processR(x) {
-        if (this.ptr && dspModule) {
-            return dspModule._lpfProcessR(this.ptr, x);
-        } else if (this.jsImpl) {
-            return this.jsImpl.processR(x);
-        }
-        return x;
-    }
+    };
 }
 
-// ---------- JavaScript Fallback DSP Implementations ----------
-// These are used as fallbacks when WASM is not available
-
-class VolEnvJS {
-    constructor(sr) {
-        this.sr = sr;
-        this.stage = "idle";
-        this.level = 0;
-        this.t = 0;
-        this.peak = 1.0;
-        this.delay = 0;
-        this.attack = 0.01;
-        this.hold = 0;
-        this.decay = 0.1;
-        this.sustain = 0.5;
-        this.release = 0.2;
-        this.releaseStart = 0;
-    }
-    setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc }) {
-        const MIN_VOL_RELEASE_SEC = 0.06;
-        this.delay = Math.max(0, timecentsToSeconds(delayTc ?? -12000));
-        this.attack = Math.max(0, timecentsToSeconds(attackTc ?? -12000));
-        this.hold = Math.max(0, timecentsToSeconds(holdTc ?? -12000));
-        this.decay = Math.max(0, timecentsToSeconds(decayTc ?? -12000));
-        const rel = timecentsToSeconds(releaseTc ?? 0);
-        this.release = Math.max(MIN_VOL_RELEASE_SEC, rel);
-        const sustainDb = -(sustainCb ?? 0) / 10;
-        this.sustain = Math.min(1, Math.max(0, Math.pow(10, sustainDb / 20)));
-    }
-    noteOn() {
-        this.stage = this.delay > 0 ? "delay" : "attack";
-        this.t = 0;
-        this.level = 0;
-    }
-    noteOff() {
-        if (this.stage === "idle") return;
-        this.stage = "release";
-        this.t = 0;
-        this.releaseStart = this.level;
-    }
-    next() {
-        const dt = 1 / this.sr;
-        const eps = 1e-5;
-        switch (this.stage) {
-            case "idle":
-                this.level = 0;
-                return 0;
-            case "delay":
-                this.t += dt;
-                if (this.t >= this.delay) { this.stage = "attack"; this.t = 0; }
-                this.level = 0;
-                return 0;
-            case "attack": {
-                if (this.attack <= 0) {
-                    this.level = this.peak;
-                    this.stage = this.hold > 0 ? "hold" : "decay";
-                    this.t = 0;
-                    return this.level;
-                }
-                this.t += dt;
-                const x = Math.min(1, this.t / this.attack);
-                const shaped = 1 - Math.exp(-x * 6);
-                this.level = this.peak * shaped;
-                if (x >= 1) {
-                    this.level = this.peak;
-                    this.stage = this.hold > 0 ? "hold" : "decay";
-                    this.t = 0;
-                }
-                return this.level;
-            }
-            case "hold":
-                this.t += dt;
-                this.level = this.peak;
-                if (this.t >= this.hold) { this.stage = "decay"; this.t = 0; }
-                return this.level;
-            case "decay": {
-                if (this.decay <= 0) {
-                    this.level = this.sustain;
-                    this.stage = "sustain";
-                    this.t = 0;
-                    return this.level;
-                }
-                this.t += dt;
-                const x = Math.min(1, this.t / this.decay);
-                const start = Math.max(eps, this.peak);
-                const end = Math.max(eps, this.sustain);
-                const y = Math.exp(Math.log(start) + (Math.log(end) - Math.log(start)) * x);
-                this.level = y;
-                if (x >= 1) {
-                    this.level = this.sustain;
-                    this.stage = "sustain";
-                    this.t = 0;
-                }
-                return this.level;
-            }
-            case "sustain":
-                this.level = this.sustain;
-                return this.level;
-            case "release": {
-                if (this.release <= 0) {
-                    this.level = 0;
-                    this.stage = "idle";
-                    return 0;
-                }
-                this.t += dt;
-                const x = Math.min(1, this.t / this.release);
-                const start = Math.max(eps, this.releaseStart);
-                const end = eps;
-                const y = Math.exp(Math.log(start) + (Math.log(end) - Math.log(start)) * x);
-                this.level = y;
-                if (x >= 1) {
-                    this.level = 0;
-                    this.stage = "idle";
-                }
-                return this.level;
-            }
-        }
-    }
-}
-
-class ModEnvJS {
-    constructor(sr) {
-        this.sr = sr;
-        this.stage = "idle";
-        this.level = 0;
-        this.t = 0;
-        this.delay = 0;
-        this.attack = 0.01;
-        this.hold = 0;
-        this.decay = 0.1;
-        this.sustain = 0;
-        this.release = 0.2;
-        this.releaseStart = 0;
-    }
-    setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustain, releaseTc }) {
-        const MIN_MOD_RELEASE_SEC = 0.02;
-        this.delay = Math.max(0, timecentsToSeconds(delayTc ?? -12000));
-        this.attack = Math.max(0, timecentsToSeconds(attackTc ?? -12000));
-        this.hold = Math.max(0, timecentsToSeconds(holdTc ?? -12000));
-        this.decay = Math.max(0, timecentsToSeconds(decayTc ?? -12000));
-        const rel = timecentsToSeconds(releaseTc ?? 0);
-        this.release = Math.max(MIN_MOD_RELEASE_SEC, rel);
-        this.sustain = Math.min(1, Math.max(0, sustain ?? 0));
-    }
-    noteOn() {
-        this.stage = this.delay > 0 ? "delay" : "attack";
-        this.t = 0;
-        this.level = 0;
-    }
-    noteOff() {
-        if (this.stage === "idle") return;
-        this.stage = "release";
-        this.t = 0;
-        this.releaseStart = this.level;
-    }
-    next() {
-        const dt = 1 / this.sr;
-        switch (this.stage) {
-            case "idle":
-                this.level = 0;
-                return 0;
-            case "delay":
-                this.t += dt;
-                if (this.t >= this.delay) { this.stage = "attack"; this.t = 0; }
-                this.level = 0;
-                return 0;
-            case "attack": {
-                if (this.attack <= 0) {
-                    this.level = 1;
-                    this.stage = this.hold > 0 ? "hold" : "decay";
-                    this.t = 0;
-                    return this.level;
-                }
-                this.t += dt;
-                const x = Math.min(1, this.t / this.attack);
-                this.level = x;
-                if (x >= 1) { this.level = 1; this.stage = this.hold > 0 ? "hold" : "decay"; this.t = 0; }
-                return this.level;
-            }
-            case "hold":
-                this.t += dt;
-                this.level = 1;
-                if (this.t >= this.hold) { this.stage = "decay"; this.t = 0; }
-                return this.level;
-            case "decay": {
-                if (this.decay <= 0) {
-                    this.level = this.sustain;
-                    this.stage = "sustain";
-                    this.t = 0;
-                    return this.level;
-                }
-                this.t += dt;
-                const x = Math.min(1, this.t / this.decay);
-                this.level = lerp(1, this.sustain, x);
-                if (x >= 1) { this.level = this.sustain; this.stage = "sustain"; this.t = 0; }
-                return this.level;
-            }
-            case "sustain":
-                this.level = this.sustain;
-                return this.level;
-            case "release": {
-                if (this.release <= 0) {
-                    this.level = 0;
-                    this.stage = "idle";
-                    return 0;
-                }
-                this.t += dt;
-                const x = Math.min(1, this.t / this.release);
-                this.level = lerp(this.releaseStart, 0, x);
-                if (x >= 1) { this.level = 0; this.stage = "idle"; }
-                return this.level;
-            }
-        }
-    }
-}
-
-class LFOJS {
-    constructor(sr) {
-        this.sr = sr;
-        this.phase = 0;
-        this.freqHz = 5;
-        this.delayLeft = 0;
-    }
-    set(freqHz, delaySec) {
-        this.freqHz = Math.max(0, freqHz ?? 0);
-        this.delayLeft = Math.max(0, delaySec ?? 0);
-    }
-    next() {
-        if (this.delayLeft > 0) {
-            this.delayLeft -= 1 / this.sr;
-            return 0;
-        }
-        this.phase += 2 * Math.PI * this.freqHz / this.sr;
-        if (this.phase > 2 * Math.PI) this.phase -= 2 * Math.PI;
-        return Math.sin(this.phase);
-    }
-}
-
-class TwoPoleLPFJS {
-    constructor(sr) {
-        this.sr = sr;
-        this.z1L = 0;
-        this.z2L = 0;
-        this.z1R = 0;
-        this.z2R = 0;
-        this.b0 = 1;
-        this.b1 = 0;
-        this.b2 = 0;
-        this.a1 = 0;
-        this.a2 = 0;
-    }
-    setCutoffHz(hz) {
-        const clamped = Math.max(5, Math.min(hz ?? 1000, this.sr * 0.45));
-        const Q = 0.7071;
-        const w0 = 2 * Math.PI * clamped / this.sr;
-        const cosw0 = Math.cos(w0);
-        const sinw0 = Math.sin(w0);
-        const alpha = sinw0 / (2 * Q);
-        const a0 = 1 + alpha;
-        this.b0 = ((1 - cosw0) / 2) / a0;
-        this.b1 = (1 - cosw0) / a0;
-        this.b2 = ((1 - cosw0) / 2) / a0;
-        this.a1 = (-2 * cosw0) / a0;
-        this.a2 = (1 - alpha) / a0;
-    }
-    processL(x) {
-        const y = this.b0 * x + this.z1L;
-        this.z1L = this.b1 * x - this.a1 * y + this.z2L;
-        this.z2L = this.b2 * x - this.a2 * y;
-        return y;
-    }
-    processR(x) {
-        const y = this.b0 * x + this.z1R;
-        this.z1R = this.b1 * x - this.a1 * y + this.z2R;
-        this.z2R = this.b2 * x - this.a2 * y;
-        return y;
-    }
-}
-
-// ---------- Utility Functions (not in WASM wrapper) ----------
+// ---------- Utility Functions ----------
 function lerp(a, b, t) {
     return a + (b - a) * t;
 }
@@ -631,12 +212,12 @@ function makeVoice(region, note, velocity, outSr) {
         panL: panG.gL,
         panR: panG.gR,
 
-        // mod - using WASM wrapper classes with JS fallback
-        volEnv: new VolEnvWasm(outSr, new VolEnvJS(outSr)),
-        modEnv: new ModEnvWasm(outSr, new ModEnvJS(outSr)),
-        modLfo: new LFOWasm(outSr, new LFOJS(outSr)),
-        vibLfo: new LFOWasm(outSr, new LFOJS(outSr)),
-        lpf: new TwoPoleLPFWasm(outSr, new TwoPoleLPFJS(outSr)),
+        // DSP - using WASM directly
+        volEnv: createVolEnv(outSr),
+        modEnv: createModEnv(outSr),
+        modLfo: createLFO(outSr),
+        vibLfo: createLFO(outSr),
+        lpf: createLPF(outSr),
 
         exclusiveClass: region.exclusiveClass ?? 0,
         finished: false,
