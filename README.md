@@ -102,11 +102,27 @@ This project is a React + Vite web app for:
 - Build:
   - `npm run build`
 
+- Build WebAssembly:
+  - `npm run build:wasm` (requires Docker)
+  - Compiles DSP code from C to WebAssembly
+  - See [WASM_README.md](WASM_README.md) for details
+
 - Vite base:
   - Dev: `/`
   - Production build: `/gbk/` (for GitHub Pages project site)
 
 - GitHub Actions:
-  - `.github/workflows/deploy-pages.yml`
-  - On push to `main`: build + deploy `dist` to GitHub Pages.
+  - `.github/workflows/build-wasm.yml` - Builds WASM module when DSP code changes
+  - `.github/workflows/deploy.yml` - Builds WASM and deploys to GitHub Pages
+  - On push to `main`: build WASM + build app + deploy `dist` to GitHub Pages.
+
+## WebAssembly DSP Module
+
+This project uses WebAssembly for high-performance DSP computation. The DSP algorithms (envelopes, filters, LFOs) are written in C and compiled to WebAssembly using Emscripten.
+
+- **Source**: `src/dsp.c`
+- **Build**: Docker-based with fixed Emscripten version (3.1.51)
+- **Documentation**: See [WASM_README.md](WASM_README.md)
+- **Testing**: Open `/gbk/test-wasm.html` in dev mode
+
 # gbk
