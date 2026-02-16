@@ -785,18 +785,28 @@ export default function App() {
 
     if (loadWorklet) {
       if (!workletLoadPromiseRef.current) {
-        // Note: WASM DSP module initialization is attempted but AudioWorklet runs in a 
-        // separate context, so it will use the JS fallback implementations for now.
-        // Future enhancement: implement WASM loading within the AudioWorklet context.
-        try {
-          await initDSP();
-          console.log('WASM DSP module initialized in main thread');
-        } catch (error) {
-          console.warn('WASM DSP initialization failed:', error);
-        }
+        // Set up the base URL for WASM assets in the AudioWorklet global scope
+        const basePath = import.meta.env?.BASE_URL || '/';
+        const normalizedBase = basePath.endsWith('/') ? basePath : `${basePath}/`;
+        const assetRoot = new URL(normalizedBase, window.location.origin).href;
         
-        const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
-        workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
+        // Create a simple script to set the base URL in the AudioWorklet context
+        const setupScript = `globalThis.WASM_BASE_URL = "${assetRoot}";`;
+        const setupBlob = new Blob([setupScript], { type: 'application/javascript' });
+        const setupUrl = URL.createObjectURL(setupBlob);
+        
+        try {
+          // Load the setup script first
+          await ctx.audioWorklet.addModule(setupUrl);
+          URL.revokeObjectURL(setupUrl);
+          
+          // Now load the processor
+          const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
+          workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
+        } catch (error) {
+          URL.revokeObjectURL(setupUrl);
+          throw error;
+        }
       }
       await workletLoadPromiseRef.current;
       setAudioReady(true);

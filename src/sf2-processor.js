@@ -5,16 +5,70 @@
 // ---------- WASM Integration ----------
 let dspModule = null;
 let dspReady = false;
+let dspInitPromise = null;
 
-// Module instance is stored globally for the worklet to use
-if (typeof globalThis.dspModule !== 'undefined') {
-    dspModule = globalThis.dspModule;
-    dspReady = true;
-}
-
-// Validate WASM is ready
-if (!dspReady || !dspModule) {
-    throw new Error('WASM DSP module not initialized. Ensure initDSP() is called before loading AudioWorklet.');
+// Initialize WASM module within the AudioWorklet context
+async function initWASMInWorklet() {
+    if (dspReady) return dspModule;
+    if (dspInitPromise) return dspInitPromise;
+    
+    dspInitPromise = (async () => {
+        try {
+            // Check if module was already initialized in main thread (legacy path)
+            if (typeof globalThis.dspModule !== 'undefined') {
+                dspModule = globalThis.dspModule;
+                dspReady = true;
+                console.log('[AudioWorklet] Using WASM module from globalThis');
+                return dspModule;
+            }
+            
+            // Load WASM module directly in AudioWorklet context
+            // Determine base URL for WASM assets
+            const baseURL = (typeof globalThis.WASM_BASE_URL !== 'undefined') 
+                ? globalThis.WASM_BASE_URL 
+                : './';
+            
+            const dspJsUrl = new URL('dsp.js', baseURL).href;
+            console.log('[AudioWorklet] Loading WASM from:', dspJsUrl);
+            
+            // Import the DSP loader module
+            const response = await fetch(dspJsUrl);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch DSP loader: ${response.status}`);
+            }
+            const dspSource = await response.text();
+            
+            // Execute the DSP module loader in the worklet context
+            const dspFactoryCode = `${dspSource}\n//# sourceURL=dsp.js`;
+            const blob = new Blob([dspFactoryCode], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+            
+            try {
+                await import(/* webpackIgnore: true */ blobUrl);
+            } finally {
+                URL.revokeObjectURL(blobUrl);
+            }
+            
+            // DSPModule should now be available in global scope
+            if (typeof DSPModule === 'undefined') {
+                throw new Error('DSPModule not found after loading dsp.js');
+            }
+            
+            // Initialize the WASM module
+            dspModule = await DSPModule({
+                locateFile: (path) => new URL(path, baseURL).href
+            });
+            
+            dspReady = true;
+            console.log('[AudioWorklet] WASM module initialized successfully');
+            return dspModule;
+        } catch (error) {
+            console.error('[AudioWorklet] Failed to initialize WASM:', error);
+            throw error;
+        }
+    })();
+    
+    return dspInitPromise;
 }
 
 // Utility functions using WASM
@@ -254,11 +308,34 @@ class Sf2Processor extends AudioWorkletProcessor {
         this.cc7Volume = 100;
         this.cc10Pan = 64;
         this.cc11Expression = 127;
+        this.wasmReady = false;
+        this.initError = null;
+
+        // Initialize WASM asynchronously
+        initWASMInWorklet()
+            .then(() => {
+                this.wasmReady = true;
+                console.log('[Sf2Processor] WASM ready');
+            })
+            .catch((error) => {
+                this.initError = error;
+                console.error('[Sf2Processor] WASM initialization failed:', error);
+                // Post error to main thread
+                this.port.postMessage({ type: 'error', message: 'WASM initialization failed', error: error.message });
+            });
 
         this.port.onmessage = (e) => this.onMsg(e.data);
     }
 
     onMsg(msg) {
+        // Skip processing if WASM not ready yet (except for setPreset which can be buffered)
+        if (!this.wasmReady && msg.type !== 'setPreset') {
+            if (this.initError) {
+                console.warn('[Sf2Processor] Ignoring message, WASM failed to initialize');
+            }
+            return;
+        }
+
         if (msg.type === "setPreset") {
             this.regions = msg.regions ?? [];
             // Optional: clear current voices
