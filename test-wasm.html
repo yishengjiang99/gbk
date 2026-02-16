@@ -60,9 +60,10 @@
             try {
                 addResult('Starting WebAssembly module test...', 'info');
 
-                // Load the module
-                addResult('Loading DSP module...', 'info');
-                const DSPModuleLoader = await import('/dsp.js');
+                // Load the module - use base path for GitHub Pages
+                const basePath = window.location.pathname.includes('/gbk/') ? '/gbk' : '';
+                addResult(`Loading DSP module from ${basePath}/dsp.js...`, 'info');
+                const DSPModuleLoader = await import(`${basePath}/dsp.js`);
                 const dspModule = await DSPModuleLoader.default();
                 
                 addResult('✓ WASM module loaded successfully!', 'success');

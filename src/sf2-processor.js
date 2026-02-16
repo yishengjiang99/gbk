@@ -5,7 +5,7 @@
 // NOTE: This JavaScript implementation is kept for compatibility and as a reference.
 // For production use, compile src/dsp.c to WebAssembly using the Dockerfile:
 //   docker build -t gbk-wasm-builder .
-//   docker run --rm -v "$(pwd)/public:/output" gbk-wasm-builder sh -c "cp /output/dsp.js /output/dsp.wasm /output/"
+//   docker run --rm -v "$(pwd)/public:/host-output" gbk-wasm-builder sh -c "cp /output/dsp.js /output/dsp.wasm /host-output/"
 // 
 // The WebAssembly module provides optimized implementations of:
 // - Volume and Modulation Envelopes (VolEnv, ModEnv)

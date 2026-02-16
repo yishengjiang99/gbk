@@ -9,8 +9,15 @@ export async function initDSP() {
     if (dspReady) return dspModule;
     
     try {
+        // Determine the base path dynamically
+        // In dev mode: '/', in production (GitHub Pages): '/gbk/'
+        const basePath = import.meta.env?.BASE_URL || '/';
+        const dspPath = `${basePath}dsp.js`;
+        
+        console.log(`Loading WASM module from: ${dspPath}`);
+        
         // Import the generated module
-        const DSPModule = await import('/dsp.js');
+        const DSPModule = await import(/* @vite-ignore */ dspPath);
         dspModule = await DSPModule.default();
         dspReady = true;
         console.log('WebAssembly DSP module initialized');

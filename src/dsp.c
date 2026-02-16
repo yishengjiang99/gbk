@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <math.h>
 #include <emscripten.h>
 
@@ -76,6 +77,8 @@ typedef struct {
 EMSCRIPTEN_KEEPALIVE
 VolEnv* volEnvCreate(double sr) {
     VolEnv* env = (VolEnv*)malloc(sizeof(VolEnv));
+    if (!env) return NULL;
+    
     env->sr = sr;
     env->stage = 0; // idle
     env->level = 0.0;
@@ -244,6 +247,8 @@ typedef struct {
 EMSCRIPTEN_KEEPALIVE
 ModEnv* modEnvCreate(double sr) {
     ModEnv* env = (ModEnv*)malloc(sizeof(ModEnv));
+    if (!env) return NULL;
+    
     env->sr = sr;
     env->stage = 0; // idle
     env->level = 0.0;
@@ -389,6 +394,8 @@ typedef struct {
 EMSCRIPTEN_KEEPALIVE
 LFO* lfoCreate(double sr) {
     LFO* lfo = (LFO*)malloc(sizeof(LFO));
+    if (!lfo) return NULL;
+    
     lfo->sr = sr;
     lfo->phase = 0.0;
     lfo->freqHz = 5.0;
@@ -440,6 +447,8 @@ typedef struct {
 EMSCRIPTEN_KEEPALIVE
 TwoPoleLPF* lpfCreate(double sr) {
     TwoPoleLPF* lpf = (TwoPoleLPF*)malloc(sizeof(TwoPoleLPF));
+    if (!lpf) return NULL;
+    
     lpf->sr = sr;
     lpf->z1L = 0.0;
     lpf->z2L = 0.0;
