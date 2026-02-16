@@ -6,6 +6,7 @@
   "scripts": {
     "gen:midi-manifest": "node scripts/generate-midi-manifest.mjs",
     "gen:sf2-manifest": "node scripts/generate-sf2-manifest.mjs",
+    "build:wasm": "bash scripts/build-wasm.sh",
     "dev": "npm run gen:midi-manifest && npm run gen:sf2-manifest && vite",
     "build": "npm run gen:midi-manifest && npm run gen:sf2-manifest && vite build",
     "preview": "vite preview"

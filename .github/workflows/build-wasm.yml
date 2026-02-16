@@ -1,0 +1,53 @@
+name: Build WebAssembly Module
+
+on:
+  push:
+    branches: ['main', 'copilot/**']
+    paths:
+      - 'src/dsp.c'
+      - 'Dockerfile'
+      - '.github/workflows/build-wasm.yml'
+  pull_request:
+    branches: ['main']
+    paths:
+      - 'src/dsp.c'
+      - 'Dockerfile'
+  workflow_dispatch:
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        
+      - name: Build WebAssembly module with Docker
+        run: |
+          docker build -t gbk-wasm-builder .
+          mkdir -p public
+          docker run --rm -v "$PWD/public:/host-output" gbk-wasm-builder sh -c "cp /output/dsp.js /output/dsp.wasm /host-output/"
+          
+      - name: Upload WebAssembly artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-module
+          path: |
+            public/dsp.js
+            public/dsp.wasm
+          retention-days: 30
+          
+      - name: Commit WASM files (if on main branch)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add public/dsp.js public/dsp.wasm
+          git diff --quiet && git diff --staged --quiet || git commit -m "Build: Update WebAssembly module [skip ci]"
+          
+      - name: Push changes
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}

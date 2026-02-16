@@ -37,6 +37,11 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+      - name: Build WebAssembly module
+        run: |
+          docker build -t gbk-wasm-builder .
+          mkdir -p public
+          docker run --rm -v "$PWD/public:/host-output" gbk-wasm-builder sh -c "cp /output/dsp.js /output/dsp.wasm /host-output/"
       - name: Build
         run: npm run build
       - name: Setup Pages
