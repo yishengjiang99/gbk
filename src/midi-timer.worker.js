@@ -249,10 +249,7 @@ function clearTimer() {
 function stopNotes() {
   for (const state of trackState) {
     if (!state?.port) continue;
-    for (const key of state.active) {
-      const note = Number(key.split(":")[1]);
-      state.port.postMessage({ type: "noteOff", note });
-    }
+    state.port.postMessage({ type: "allNotesOff" });
     state.active.clear();
   }
 }
@@ -382,6 +379,7 @@ self.onmessage = (event) => {
   if (msg.type === "seek") {
     if (!song) return;
     const sec = Math.max(0, Math.min(song.durationSec, msg.sec ?? 0));
+    stopNotes();
     for (let i = 0; i < song.tracks.length; i += 1) {
       const track = song.tracks[i];
       const idx = track.playEvents.findIndex((e) => e.sec >= sec);
@@ -395,4 +393,3 @@ self.onmessage = (event) => {
     self.postMessage({ type: "tick", sec });
   }
 };
-

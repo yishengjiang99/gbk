@@ -25,11 +25,36 @@ export async function initDSP() {
             return res.text();
         });
 
+        let dspFactory = null;
         const blobUrl = URL.createObjectURL(new Blob([dspSource], { type: 'text/javascript' }));
-        const DSPModule = await import(/* @vite-ignore */ blobUrl);
-        URL.revokeObjectURL(blobUrl);
+        try {
+            const dspNs = await import(/* @vite-ignore */ blobUrl);
+            if (typeof dspNs?.default === 'function') {
+                dspFactory = dspNs.default;
+            }
+        } finally {
+            URL.revokeObjectURL(blobUrl);
+        }
 
-        dspModule = await DSPModule.default({
+        // Emscripten non-ESM output has no export; wrap it and export DSPModule.
+        if (typeof dspFactory !== 'function') {
+            const wrappedSource = `${dspSource}\nexport default (typeof DSPModule !== 'undefined' ? DSPModule : null);`;
+            const wrappedBlobUrl = URL.createObjectURL(new Blob([wrappedSource], { type: 'text/javascript' }));
+            try {
+                const wrappedNs = await import(/* @vite-ignore */ wrappedBlobUrl);
+                if (typeof wrappedNs?.default === 'function') {
+                    dspFactory = wrappedNs.default;
+                }
+            } finally {
+                URL.revokeObjectURL(wrappedBlobUrl);
+            }
+        }
+
+        if (typeof dspFactory !== 'function') {
+            throw new Error('DSP module loader did not expose a callable factory');
+        }
+
+        dspModule = await dspFactory({
             locateFile: (path) => new URL(path, assetRoot).href,
         });
         dspReady = true;

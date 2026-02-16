@@ -125,6 +125,7 @@ export default function MidiReader({
   const viewportRef = useRef(null);
   const playheadRef = useRef(null);
   const contentRef = useRef(null);
+  const uploadInputRef = useRef(null);
   const workerRef = useRef(null);
   const trackNodesRef = useRef([]);
   const portsAttachedRef = useRef(false);
@@ -204,6 +205,15 @@ export default function MidiReader({
     line.style.transform = `translateX(${x}px)`;
   };
 
+  const seekToSeconds = (nextSec) => {
+    const safeDuration = Math.max(0.01, durationRef.current);
+    const sec = Math.max(0, Math.min(safeDuration, Number(nextSec) || 0));
+    updatePlayhead(sec);
+    setSongTime(sec);
+    workerRef.current?.postMessage({ type: "seek", sec });
+    return sec;
+  };
+
   const seekToClientX = (clientX) => {
     const content = contentRef.current;
     if (!content) return 0;
@@ -211,11 +221,7 @@ export default function MidiReader({
     const width = Math.max(1, contentWRef.current);
     const safeDuration = Math.max(0.01, durationRef.current);
     const xInContent = Math.max(0, Math.min(width, clientX - rect.left));
-    const sec = (xInContent / width) * safeDuration;
-    updatePlayhead(sec);
-    setSongTime(sec);
-    workerRef.current?.postMessage({ type: "seek", sec });
-    return sec;
+    return seekToSeconds((xInContent / width) * safeDuration);
   };
 
   const disconnectTrackNodes = () => {
@@ -592,6 +598,10 @@ export default function MidiReader({
     }
   }
 
+  function onStepSeek(deltaSec) {
+    seekToSeconds(songTime + deltaSec);
+  }
+
   async function onUploadMidi(event) {
     const file = event.target.files?.[0];
     if (!file || !workerRef.current) return;
@@ -608,26 +618,6 @@ export default function MidiReader({
       setSongError(msg);
       onError?.(msg);
       setSong(null);
-    }
-  }
-
-  async function onLoadSelectedMidi() {
-    if (!selectedMidiPath || !workerRef.current) return;
-    try {
-      if (isPlaying) workerRef.current.postMessage({ type: "pause" });
-      disconnectTrackNodes();
-      const res = await fetch(`${import.meta.env.BASE_URL}${selectedMidiPath}`);
-      if (!res.ok) throw new Error(`Failed to fetch ${selectedMidiPath}`);
-      const buf = await res.arrayBuffer();
-      workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
-      const selected = midiOptions.find((m) => m.path === selectedMidiPath);
-      setSongName(selected?.name || selectedMidiPath);
-      setSongTime(0);
-      setSongError("");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSongError(msg);
-      onError?.(msg);
     }
   }
 
@@ -709,14 +699,47 @@ export default function MidiReader({
   return (
     <section className="card midiReader">
       <div className="midiTop">
-        <div className="midiTopGroup midiTopLoad">
-          <label className="fileInput midiFileInputCompact">
-            <span className="iconLabel">
-              <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
-              <span>Upload MIDI</span>
-            </span>
-            <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
-          </label>
+        <div className="midiTopGroup midiTopTransport transportPanel">
+          <div className="transportRow">
+            <button
+              type="button"
+              className="transportBtn"
+              onClick={() => onStepSeek(-5)}
+              disabled={!song}
+              aria-label="Rewind 5 seconds"
+              title="Rewind 5 seconds"
+            >
+              <i className="fa-solid fa-backward-step" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="transportBtn"
+              onClick={onPlayPause}
+              disabled={!song || !sf2Ready}
+              aria-label={isPlaying ? "Pause" : "Play"}
+              title={isPlaying ? "Pause" : "Play"}
+            >
+              <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="transportBtn"
+              onClick={() => onStepSeek(5)}
+              disabled={!song}
+              aria-label="Forward 5 seconds"
+              title="Forward 5 seconds"
+            >
+              <i className="fa-solid fa-forward-step" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="transportMeta">
+            <strong className="chip">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+            <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
+            <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+          </div>
+        </div>
+
+        <div className="midiTopGroup midiTopLoad sourcePanel">
           <select
             value={selectedMidiPath}
             onChange={(e) => onSelectMidiPath(e.target.value)}
@@ -730,30 +753,43 @@ export default function MidiReader({
               </option>
             ))}
           </select>
-          <button type="button" onClick={onLoadSelectedMidi} disabled={!selectedMidiPath}>Reload</button>
-        </div>
-
-        <div className="midiTopGroup midiTopTransport">
           <button
             type="button"
-            className="transportBtn"
-            onClick={onPlayPause}
-            disabled={!song || !sf2Ready}
-            aria-label={isPlaying ? "Pause" : "Play"}
-            title={isPlaying ? "Pause" : "Play"}
+            className="uploadMidiBtn"
+            onClick={() => uploadInputRef.current?.click()}
           >
-            <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+            <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
+            <span>Upload MIDI</span>
           </button>
-          <strong className="chip">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-          <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
-          <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
-        </div>
-
-        <div className="midiTopGroup midiTopSong">
-          <span className="songChip">{songName || "No MIDI loaded"}</span>
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept=".mid,.midi"
+            onChange={onUploadMidi}
+            hidden
+          />
         </div>
       </div>
+      <div className="midiTopSong">
+        <span className="songChip">{songName || "No MIDI loaded"}</span>
+      </div>
       {songError ? <p className="status error">{songError}</p> : null}
+      {song && (
+        <div className="midiScrubberRow">
+          <span className="midiScrubberTime">{fmtTime(songTime)}</span>
+          <input
+            className="midiScrubber"
+            type="range"
+            min={0}
+            max={duration}
+            step={0.01}
+            value={Math.min(duration, songTime)}
+            onChange={(e) => seekToSeconds(e.target.value)}
+            aria-label="Song position"
+          />
+          <span className="midiScrubberTime">{fmtTime(duration)}</span>
+        </div>
+      )}
       {song && (
         <div className="midiTimelineWrap">
           <div className="midiTracksSplit">

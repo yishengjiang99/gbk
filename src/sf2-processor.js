@@ -712,6 +712,14 @@ class Sf2Processor extends AudioWorkletProcessor {
             }
         }
 
+        if (msg.type === "allNotesOff") {
+            for (const v of this.voices) {
+                v.volEnv.noteOff();
+                v.modEnv.noteOff();
+                if (v.loopUntilReleaseThenTail) v.inReleaseTail = true;
+            }
+        }
+
         if (msg.type === "setControllers") {
             if (Number.isFinite(msg.cc7Volume)) {
                 this.cc7Volume = Math.max(0, Math.min(127, msg.cc7Volume | 0));
