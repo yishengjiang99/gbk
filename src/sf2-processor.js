@@ -31,22 +31,20 @@ async function initWASMInWorklet() {
             const dspJsUrl = new URL('dsp.js', baseURL).href;
             console.log('[AudioWorklet] Loading WASM from:', dspJsUrl);
             
-            // Import the DSP loader module
-            const response = await fetch(dspJsUrl);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch DSP loader: ${response.status}`);
-            }
-            const dspSource = await response.text();
-            
-            // Execute the DSP module loader in the worklet context
-            const dspFactoryCode = `${dspSource}\n//# sourceURL=dsp.js`;
-            const blob = new Blob([dspFactoryCode], { type: 'application/javascript' });
-            const blobUrl = URL.createObjectURL(blob);
-            
+            // Use importScripts to load the DSP module in the worklet global scope
+            // This makes DSPModule available globally in the worklet context
             try {
-                await import(/* webpackIgnore: true */ blobUrl);
-            } finally {
-                URL.revokeObjectURL(blobUrl);
+                importScripts(dspJsUrl);
+            } catch (e) {
+                // importScripts might not be available in all contexts, fall back to fetch + eval
+                console.log('[AudioWorklet] importScripts not available, using fetch');
+                const response = await fetch(dspJsUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch DSP loader: ${response.status}`);
+                }
+                const dspSource = await response.text();
+                // Use indirect eval to execute in global scope
+                (0, eval)(dspSource);
             }
             
             // DSPModule should now be available in global scope
