@@ -1,4 +1,20 @@
 // sf2-processor.js
+// 
+// DSP computation for SF2 synthesis
+// 
+// NOTE: This JavaScript implementation is kept for compatibility and as a reference.
+// For production use, compile src/dsp.c to WebAssembly using the Dockerfile:
+//   docker build -t gbk-wasm-builder .
+//   docker run --rm -v "$(pwd)/public:/host-output" gbk-wasm-builder sh -c "cp /output/dsp.js /output/dsp.wasm /host-output/"
+// 
+// The WebAssembly module provides optimized implementations of:
+// - Volume and Modulation Envelopes (VolEnv, ModEnv)
+// - Low Frequency Oscillators (LFO)
+// - Two-pole Low-Pass Filter (TwoPoleLPF)
+// - Utility functions (centsToRatio, cbAttenToLin, etc.)
+//
+// The JS implementation below serves as both a fallback and the authoritative
+// reference for the WASM implementation.
 
 // ---------- Utility ----------
 function timecentsToSeconds(tc) {

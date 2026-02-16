@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM DSP Module Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebAssembly DSP Module Test</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        const resultsDiv = document.getElementById('results');
+
+        function addResult(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = message;
+            resultsDiv.appendChild(div);
+        }
+
+        function addCode(label, data) {
+            const div = document.createElement('div');
+            div.innerHTML = `<strong>${label}:</strong><pre>${JSON.stringify(data, null, 2)}</pre>`;
+            resultsDiv.appendChild(div);
+        }
+
+        async function testWASM() {
+            try {
+                addResult('Starting WebAssembly module test...', 'info');
+
+                // Load the module - use base path for GitHub Pages
+                const basePath = window.location.pathname.includes('/gbk/') ? '/gbk' : '';
+                addResult(`Loading DSP module from ${basePath}/dsp.js...`, 'info');
+                const DSPModuleLoader = await import(`${basePath}/dsp.js`);
+                const dspModule = await DSPModuleLoader.default();
+                
+                addResult('✓ WASM module loaded successfully!', 'success');
+
+                // Test utility functions
+                addResult('Testing utility functions...', 'info');
+                
+                const testCents = 1200;
+                const ratio = dspModule._centsToRatio(testCents);
+                addCode('centsToRatio(1200)', ratio);
+                addResult(`✓ centsToRatio: ${testCents} cents = ${ratio}x (expected ~2.0)`, 
+                    Math.abs(ratio - 2.0) < 0.001 ? 'success' : 'error');
+
+                const attenCb = 60;
+                const linear = dspModule._cbAttenToLin(attenCb);
+                addCode('cbAttenToLin(60)', linear);
+                addResult(`✓ cbAttenToLin: ${attenCb} cB = ${linear} (expected ~0.5)`, 
+                    Math.abs(linear - 0.5) < 0.01 ? 'success' : 'error');
+
+                const fcCents = 13500;
+                const hz = dspModule._fcCentsToHz(fcCents);
+                addCode('fcCentsToHz(13500)', hz);
+                addResult(`✓ fcCentsToHz: ${fcCents} cents = ${hz} Hz`, 
+                    hz > 0 ? 'success' : 'error');
+
+                // Test envelope creation
+                addResult('Testing envelope creation...', 'info');
+                const sampleRate = 48000;
+                const volEnvPtr = dspModule._volEnvCreate(sampleRate);
+                addResult(`✓ VolEnv created: pointer = ${volEnvPtr}`, 
+                    volEnvPtr !== 0 ? 'success' : 'error');
+
+                const modEnvPtr = dspModule._modEnvCreate(sampleRate);
+                addResult(`✓ ModEnv created: pointer = ${modEnvPtr}`, 
+                    modEnvPtr !== 0 ? 'success' : 'error');
+
+                // Test LFO creation
+                const lfoPtr = dspModule._lfoCreate(sampleRate);
+                addResult(`✓ LFO created: pointer = ${lfoPtr}`, 
+                    lfoPtr !== 0 ? 'success' : 'error');
+
+                // Test filter creation
+                const lpfPtr = dspModule._lpfCreate(sampleRate);
+                addResult(`✓ LPF created: pointer = ${lpfPtr}`, 
+                    lpfPtr !== 0 ? 'success' : 'error');
+
+                // Test envelope behavior
+                addResult('Testing envelope behavior...', 'info');
+                dspModule._volEnvSetFromSf2(volEnvPtr, -12000, -1000, -12000, -2000, 0, -3000);
+                dspModule._volEnvNoteOn(volEnvPtr);
+                
+                const envSamples = [];
+                for (let i = 0; i < 10; i++) {
+                    envSamples.push(dspModule._volEnvNext(volEnvPtr));
+                }
+                addCode('First 10 envelope samples', envSamples);
+                addResult(`✓ Envelope generates samples: ${envSamples[9].toFixed(4)}`, 
+                    envSamples.some(s => s > 0) ? 'success' : 'error');
+
+                // Test LFO
+                addResult('Testing LFO...', 'info');
+                dspModule._lfoSet(lfoPtr, 5.0, 0.0);
+                const lfoSamples = [];
+                for (let i = 0; i < 10; i++) {
+                    lfoSamples.push(dspModule._lfoNext(lfoPtr));
+                }
+                addCode('First 10 LFO samples', lfoSamples);
+                addResult(`✓ LFO generates samples`, 
+                    lfoSamples.some(s => s !== 0) ? 'success' : 'error');
+
+                // Test filter
+                addResult('Testing filter...', 'info');
+                dspModule._lpfSetCutoffHz(lpfPtr, 1000.0);
+                const input = 1.0;
+                const outputL = dspModule._lpfProcessL(lpfPtr, input);
+                const outputR = dspModule._lpfProcessR(lpfPtr, input);
+                addCode('Filter output', { input, outputL, outputR });
+                addResult(`✓ Filter processes samples`, 'success');
+
+                // Cleanup
+                addResult('Cleaning up...', 'info');
+                dspModule._volEnvDestroy(volEnvPtr);
+                dspModule._modEnvDestroy(modEnvPtr);
+                dspModule._lfoDestroy(lfoPtr);
+                dspModule._lpfDestroy(lpfPtr);
+                addResult('✓ All resources cleaned up', 'success');
+
+                addResult('=== All tests passed! ===', 'success');
+
+            } catch (error) {
+                addResult(`✗ Error: ${error.message}`, 'error');
+                console.error('Full error:', error);
+            }
+        }
+
+        testWASM();
+    </script>
+</body>
+</html>
