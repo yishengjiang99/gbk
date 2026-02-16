@@ -24,6 +24,13 @@ function parseTrackBytes(trackU8) {
   const events = [];
   let trackName = "";
   let instrumentName = "";
+  const meta = {
+    textEvents: [],
+    lyrics: [],
+    markers: [],
+    cues: [],
+    copyright: "",
+  };
   const posRef = { pos: 0 };
   let tick = 0;
   let runningStatus = 0;
@@ -48,8 +55,14 @@ function parseTrackBytes(trackU8) {
       const dataStart = posRef.pos;
       posRef.pos += len;
       if (metaType === 0x2f) break;
-      if (metaType === 0x03 && len > 0) trackName = ascii(trackU8, dataStart, len).replace(/\0/g, "");
-      if (metaType === 0x04 && len > 0) instrumentName = ascii(trackU8, dataStart, len).replace(/\0/g, "");
+      const text = len > 0 ? ascii(trackU8, dataStart, len).replace(/\0/g, "").trim() : "";
+      if (metaType === 0x01 && text) meta.textEvents.push(text);
+      if (metaType === 0x02 && text && !meta.copyright) meta.copyright = text;
+      if (metaType === 0x03 && text) trackName = text;
+      if (metaType === 0x04 && text) instrumentName = text;
+      if (metaType === 0x05 && text) meta.lyrics.push(text);
+      if (metaType === 0x06 && text) meta.markers.push(text);
+      if (metaType === 0x07 && text) meta.cues.push(text);
       if (metaType === 0x51 && len === 3) {
         const microPerQuarter =
           (trackU8[dataStart] << 16) | (trackU8[dataStart + 1] << 8) | trackU8[dataStart + 2];
@@ -86,7 +99,7 @@ function parseTrackBytes(trackU8) {
     }
   }
 
-  return { trackName, instrumentName, events };
+  return { trackName, instrumentName, events, meta };
 }
 
 function buildTempoMap(allEvents, division) {
@@ -221,6 +234,15 @@ function parseMidiBuffer(buffer) {
   const barTicks = Math.max(1, primaryTimeSig.numerator * division * (4 / primaryTimeSig.denominator));
   const totalBars = Math.max(1, maxTick / barTicks);
   const durationSec = tickToSec(tempoMap, division, maxTick);
+  const title =
+    parsedTracks.find((track) => track.trackName)?.trackName ||
+    parsedTracks.find((track) => track.meta.textEvents.length)?.meta.textEvents[0] ||
+    "";
+  const noteCount = tracks.reduce((count, track) => count + track.notes.length, 0);
+  const lyricsCount = parsedTracks.reduce((count, track) => count + track.meta.lyrics.length, 0);
+  const markerCount = parsedTracks.reduce((count, track) => count + track.meta.markers.length, 0);
+  const cueCount = parsedTracks.reduce((count, track) => count + track.meta.cues.length, 0);
+  const copyright = parsedTracks.find((track) => track.meta.copyright)?.meta.copyright || "";
   return {
     format,
     division,
@@ -229,6 +251,21 @@ function parseMidiBuffer(buffer) {
     totalBars,
     bpm: Math.round(60000000 / primaryTempo),
     timeSig: `${primaryTimeSig.numerator}/${primaryTimeSig.denominator}`,
+    info: {
+      title,
+      copyright,
+      trackCount: tracks.length,
+      noteCount,
+      lyricsCount,
+      markerCount,
+      cueCount,
+      durationSec,
+      bpm: Math.round(60000000 / primaryTempo),
+      timeSig: `${primaryTimeSig.numerator}/${primaryTimeSig.denominator}`,
+      format,
+      division,
+      totalBars: Math.round(totalBars * 100) / 100,
+    },
   };
 }
 

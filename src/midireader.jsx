@@ -116,6 +116,7 @@ export default function MidiReader({
   const [songError, setSongError] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [songTime, setSongTime] = useState(0);
+  const [showMidiInfoModal, setShowMidiInfoModal] = useState(false);
   const [midiOptions, setMidiOptions] = useState([]);
   const [selectedMidiPath, setSelectedMidiPath] = useState("");
   const [trackPresetOverrides, setTrackPresetOverrides] = useState({});
@@ -151,6 +152,29 @@ export default function MidiReader({
   const contentW = Math.round(timelineW * zoomFactor);
 
   const visibleTracks = useMemo(() => song?.tracks ?? [], [song]);
+  const songTitle = useMemo(() => {
+    const midiTitle = song?.info?.title;
+    if (typeof midiTitle === "string" && midiTitle.trim()) return midiTitle.trim();
+    return songName || "No MIDI loaded";
+  }, [song?.info?.title, songName]);
+  const midiInfoRows = useMemo(() => {
+    if (!song?.info) return [];
+    return [
+      ["Title", song.info.title || "(none)"],
+      ["Duration", fmtTime(song.info.durationSec ?? song.durationSec ?? 0)],
+      ["BPM", song.info.bpm ?? song.bpm ?? "--"],
+      ["Time Signature", song.info.timeSig ?? song.timeSig ?? "--"],
+      ["Format", song.info.format ?? song.format ?? "--"],
+      ["Division", song.info.division ?? song.division ?? "--"],
+      ["Tracks", song.info.trackCount ?? song.tracks?.length ?? 0],
+      ["Notes", song.info.noteCount ?? 0],
+      ["Bars", song.info.totalBars ?? song.totalBars ?? "--"],
+      ["Lyrics Events", song.info.lyricsCount ?? 0],
+      ["Marker Events", song.info.markerCount ?? 0],
+      ["Cue Events", song.info.cueCount ?? 0],
+      ["Copyright", song.info.copyright || "(none)"],
+    ];
+  }, [song]);
   const presetOptionMap = useMemo(
     () => new Map((presetOptions ?? []).map((p) => [p.index, p])),
     [presetOptions]
@@ -773,8 +797,32 @@ export default function MidiReader({
         </div>
       </div>
       <div className="midiTopSong">
-        <span className="songChip">{songName || "No MIDI loaded"}</span>
+        <span className="songChip">{songTitle}</span>
+        <button
+          type="button"
+          onClick={() => setShowMidiInfoModal(true)}
+          disabled={!song}
+        >
+          MIDI Info
+        </button>
       </div>
+      {showMidiInfoModal && song && (
+        <div className="modalBackdrop" onClick={() => setShowMidiInfoModal(false)}>
+          <section className="card summaryModal" onClick={(e) => e.stopPropagation()}>
+            <h2>MIDI Info</h2>
+            <ul className="infoList">
+              {midiInfoRows.map(([label, value]) => (
+                <li key={label}>
+                  <strong>{label}:</strong> {value}
+                </li>
+              ))}
+            </ul>
+            <button type="button" onClick={() => setShowMidiInfoModal(false)}>
+              Close
+            </button>
+          </section>
+        </div>
+      )}
       {songError ? <p className="status error">{songError}</p> : null}
       {song && (
         <div className="midiScrubberRow">
