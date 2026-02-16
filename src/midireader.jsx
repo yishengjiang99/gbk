@@ -610,9 +610,11 @@ export default function MidiReader({
       disconnectTrackNodes();
       const buf = await file.arrayBuffer();
       workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
+      setSelectedMidiPath("");
       setSongName(file.name);
       setSongTime(0);
       setSongError("");
+      event.target.value = "";
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -759,7 +761,7 @@ export default function MidiReader({
             onClick={() => uploadInputRef.current?.click()}
           >
             <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
-            <span>Upload MIDI</span>
+            <span>Play MIDI File</span>
           </button>
           <input
             ref={uploadInputRef}
