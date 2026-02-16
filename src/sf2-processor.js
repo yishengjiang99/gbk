@@ -12,6 +12,11 @@ if (typeof globalThis.dspModule !== 'undefined') {
     dspReady = true;
 }
 
+// Validate WASM is ready
+if (!dspReady || !dspModule) {
+    throw new Error('WASM DSP module not initialized. Ensure initDSP() is called before loading AudioWorklet.');
+}
+
 // Utility functions using WASM
 function centsToRatio(c) {
     return dspModule._centsToRatio(c ?? 0);
