@@ -9,16 +9,29 @@ export async function initDSP() {
     if (dspReady) return dspModule;
     
     try {
-        // Determine the base path dynamically
-        // In dev mode: '/', in production (GitHub Pages): '/gbk/'
+        // Public assets in Vite cannot be imported from source directly.
+        // Load /dsp.js at runtime and import via blob URL instead.
         const basePath = import.meta.env?.BASE_URL || '/';
-        const dspPath = `${basePath}dsp.js`;
-        
-        console.log(`Loading WASM module from: ${dspPath}`);
-        
-        // Import the generated module
-        const DSPModule = await import(/* @vite-ignore */ dspPath);
-        dspModule = await DSPModule.default();
+        const normalizedBase = basePath.endsWith('/') ? basePath : `${basePath}/`;
+        const assetRoot = new URL(normalizedBase, window.location.origin);
+        const dspUrl = new URL('dsp.js', assetRoot).href;
+
+        console.log(`Loading WASM module from: ${dspUrl}`);
+
+        const dspSource = await fetch(dspUrl).then((res) => {
+            if (!res.ok) {
+                throw new Error(`Failed to fetch DSP loader (${res.status})`);
+            }
+            return res.text();
+        });
+
+        const blobUrl = URL.createObjectURL(new Blob([dspSource], { type: 'text/javascript' }));
+        const DSPModule = await import(/* @vite-ignore */ blobUrl);
+        URL.revokeObjectURL(blobUrl);
+
+        dspModule = await DSPModule.default({
+            locateFile: (path) => new URL(path, assetRoot).href,
+        });
         dspReady = true;
         console.log('WebAssembly DSP module initialized');
         return dspModule;
