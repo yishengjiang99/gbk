@@ -1,118 +1,322 @@
 // sf2-processor.js
 // 
-// DSP computation for SF2 synthesis
+// DSP computation for SF2 synthesis using WebAssembly
 // 
-// NOTE: This JavaScript implementation is kept for compatibility and as a reference.
-// For production use, compile src/dsp.c to WebAssembly using the Dockerfile:
-//   docker build -t gbk-wasm-builder .
-//   docker run --rm -v "$(pwd)/public:/host-output" gbk-wasm-builder sh -c "cp /output/dsp.js /output/dsp.wasm /host-output/"
-// 
-// The WebAssembly module provides optimized implementations of:
-// - Volume and Modulation Envelopes (VolEnv, ModEnv)
-// - Low Frequency Oscillators (LFO)
-// - Two-pole Low-Pass Filter (TwoPoleLPF)
-// - Utility functions (centsToRatio, cbAttenToLin, etc.)
-//
-// The JS implementation below serves as both a fallback and the authoritative
-// reference for the WASM implementation.
+// This processor uses the WebAssembly DSP module for optimized performance.
+// The WASM module is loaded and initialized before the AudioWorklet is created.
+// If WASM is not available, it falls back to JavaScript implementations.
 
-// ---------- Utility ----------
-function timecentsToSeconds(tc) {
-    // seconds = 2^(tc/1200)
-    return Math.pow(2, (tc ?? 0) / 1200);
+// ---------- WASM Integration ----------
+let dspModule = null;
+let dspReady = false;
+
+// This will be called from the main thread before AudioWorklet is loaded
+// The module instance is stored globally for the worklet to use
+if (typeof globalThis.dspModule !== 'undefined') {
+    dspModule = globalThis.dspModule;
+    dspReady = true;
 }
+
+// Utility functions with WASM support
 function centsToRatio(c) {
+    if (dspReady && dspModule) {
+        return dspModule._centsToRatio(c ?? 0);
+    }
     return Math.pow(2, (c ?? 0) / 1200);
 }
+
 function cbAttenToLin(cb) {
-    // cb attenuation -> dB = -cb/10 -> linear gain
+    if (dspReady && dspModule) {
+        return dspModule._cbAttenToLin(cb ?? 0);
+    }
     const db = -(cb ?? 0) / 10;
     return Math.pow(10, db / 20);
 }
+
 function velToLin(vel, curve = 2.0) {
+    if (dspReady && dspModule) {
+        return dspModule._velToLin(vel, curve);
+    }
     const x = Math.max(0, Math.min(127, vel)) / 127;
     return Math.pow(x, curve);
 }
-function panToGains(pan) {
-    // SF2 pan: -500..+500
-    const p = Math.max(-500, Math.min(500, pan ?? 0)) / 500; // -1..+1
-    const angle = (p + 1) * 0.25 * Math.PI; // 0..pi/2
-    return { gL: Math.cos(angle), gR: Math.sin(angle) };
-}
-function balanceToGains(balance) {
-    const p = Math.max(-1, Math.min(1, balance ?? 0));
-    const angle = (p + 1) * 0.25 * Math.PI;
-    return { gL: Math.cos(angle), gR: Math.sin(angle) };
-}
+
 function fcCentsToHz(fcCents) {
-    // common SF2-ish mapping: 8.176 * 2^(cents/1200)
+    if (dspReady && dspModule) {
+        return dspModule._fcCentsToHz(fcCents ?? 13500);
+    }
     return 8.176 * Math.pow(2, (fcCents ?? 13500) / 1200);
 }
-function lerp(a, b, t) { return a + (b - a) * t; }
 
-const MIN_VOL_RELEASE_SEC = 0.06;
-const MIN_MOD_RELEASE_SEC = 0.02;
+function timecentsToSeconds(tc) {
+    if (dspReady && dspModule) {
+        return dspModule._timecentsToSeconds(tc ?? 0);
+    }
+    return Math.pow(2, (tc ?? 0) / 1200);
+}
 
-// ---------- Envelopes ----------
-class VolEnv {
+// ---------- WASM Wrapper Classes ----------
+// These classes use WASM when available, with JS fallback
+
+class VolEnvWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._volEnvCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM VolEnv, using JS fallback:', e);
+            }
+        }
+    }
+    
+    setFromSf2(params) {
+        if (this.ptr && dspModule) {
+            const delayTc = params.delayTc ?? -12000;
+            const attackTc = params.attackTc ?? -12000;
+            const holdTc = params.holdTc ?? -12000;
+            const decayTc = params.decayTc ?? -12000;
+            const sustainCb = params.sustainCb ?? 0;
+            const releaseTc = params.releaseTc ?? 0;
+            
+            dspModule._volEnvSetFromSf2(this.ptr, delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc);
+        } else if (this.jsImpl) {
+            this.jsImpl.setFromSf2(params);
+        }
+    }
+    
+    noteOn() {
+        if (this.ptr && dspModule) {
+            dspModule._volEnvNoteOn(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOn();
+        }
+    }
+    
+    noteOff() {
+        if (this.ptr && dspModule) {
+            dspModule._volEnvNoteOff(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOff();
+        }
+    }
+    
+    next() {
+        if (this.ptr && dspModule) {
+            return dspModule._volEnvNext(this.ptr);
+        } else if (this.jsImpl) {
+            return this.jsImpl.next();
+        }
+        return 0;
+    }
+    
+    get level() {
+        if (this.jsImpl) return this.jsImpl.level;
+        return 0;
+    }
+    
+    get stage() {
+        if (this.jsImpl) return this.jsImpl.stage;
+        return 'idle';
+    }
+}
+
+class ModEnvWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._modEnvCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM ModEnv, using JS fallback:', e);
+            }
+        }
+    }
+    
+    setFromSf2(params) {
+        if (this.ptr && dspModule) {
+            const delayTc = params.delayTc ?? -12000;
+            const attackTc = params.attackTc ?? -12000;
+            const holdTc = params.holdTc ?? -12000;
+            const decayTc = params.decayTc ?? -12000;
+            const sustain = params.sustain ?? 0;
+            const releaseTc = params.releaseTc ?? 0;
+            
+            dspModule._modEnvSetFromSf2(this.ptr, delayTc, attackTc, holdTc, decayTc, sustain, releaseTc);
+        } else if (this.jsImpl) {
+            this.jsImpl.setFromSf2(params);
+        }
+    }
+    
+    noteOn() {
+        if (this.ptr && dspModule) {
+            dspModule._modEnvNoteOn(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOn();
+        }
+    }
+    
+    noteOff() {
+        if (this.ptr && dspModule) {
+            dspModule._modEnvNoteOff(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOff();
+        }
+    }
+    
+    next() {
+        if (this.ptr && dspModule) {
+            return dspModule._modEnvNext(this.ptr);
+        } else if (this.jsImpl) {
+            return this.jsImpl.next();
+        }
+        return 0;
+    }
+    
+    get level() {
+        if (this.jsImpl) return this.jsImpl.level;
+        return 0;
+    }
+    
+    get stage() {
+        if (this.jsImpl) return this.jsImpl.stage;
+        return 'idle';
+    }
+}
+
+class LFOWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._lfoCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM LFO, using JS fallback:', e);
+            }
+        }
+    }
+    
+    set(freqHz, delaySec) {
+        if (this.ptr && dspModule) {
+            dspModule._lfoSet(this.ptr, freqHz ?? 0, delaySec ?? 0);
+        } else if (this.jsImpl) {
+            this.jsImpl.set(freqHz, delaySec);
+        }
+    }
+    
+    next() {
+        if (this.ptr && dspModule) {
+            return dspModule._lfoNext(this.ptr);
+        } else if (this.jsImpl) {
+            return this.jsImpl.next();
+        }
+        return 0;
+    }
+}
+
+class TwoPoleLPFWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._lpfCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM LPF, using JS fallback:', e);
+            }
+        }
+    }
+    
+    setCutoffHz(hz) {
+        if (this.ptr && dspModule) {
+            dspModule._lpfSetCutoffHz(this.ptr, hz ?? 1000);
+        } else if (this.jsImpl) {
+            this.jsImpl.setCutoffHz(hz);
+        }
+    }
+    
+    processL(x) {
+        if (this.ptr && dspModule) {
+            return dspModule._lpfProcessL(this.ptr, x);
+        } else if (this.jsImpl) {
+            return this.jsImpl.processL(x);
+        }
+        return x;
+    }
+    
+    processR(x) {
+        if (this.ptr && dspModule) {
+            return dspModule._lpfProcessR(this.ptr, x);
+        } else if (this.jsImpl) {
+            return this.jsImpl.processR(x);
+        }
+        return x;
+    }
+}
+
+// ---------- JavaScript Fallback DSP Implementations ----------
+// These are used as fallbacks when WASM is not available
+
+class VolEnvJS {
     constructor(sr) {
         this.sr = sr;
         this.stage = "idle";
         this.level = 0;
         this.t = 0;
         this.peak = 1.0;
-
         this.delay = 0;
         this.attack = 0.01;
         this.hold = 0;
         this.decay = 0.1;
-        this.sustain = 0.5; // linear
+        this.sustain = 0.5;
         this.release = 0.2;
-
         this.releaseStart = 0;
     }
-
     setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc }) {
+        const MIN_VOL_RELEASE_SEC = 0.06;
         this.delay = Math.max(0, timecentsToSeconds(delayTc ?? -12000));
         this.attack = Math.max(0, timecentsToSeconds(attackTc ?? -12000));
         this.hold = Math.max(0, timecentsToSeconds(holdTc ?? -12000));
         this.decay = Math.max(0, timecentsToSeconds(decayTc ?? -12000));
         const rel = timecentsToSeconds(releaseTc ?? 0);
         this.release = Math.max(MIN_VOL_RELEASE_SEC, rel);
-
-        // sustainVolEnv is attenuation in centibels; 0 => 1.0
         const sustainDb = -(sustainCb ?? 0) / 10;
         this.sustain = Math.min(1, Math.max(0, Math.pow(10, sustainDb / 20)));
     }
-
     noteOn() {
         this.stage = this.delay > 0 ? "delay" : "attack";
         this.t = 0;
         this.level = 0;
     }
-
     noteOff() {
         if (this.stage === "idle") return;
         this.stage = "release";
         this.t = 0;
         this.releaseStart = this.level;
     }
-
     next() {
         const dt = 1 / this.sr;
         const eps = 1e-5;
-
         switch (this.stage) {
             case "idle":
                 this.level = 0;
                 return 0;
-
             case "delay":
                 this.t += dt;
                 if (this.t >= this.delay) { this.stage = "attack"; this.t = 0; }
                 this.level = 0;
                 return 0;
-
             case "attack": {
                 if (this.attack <= 0) {
                     this.level = this.peak;
@@ -122,10 +326,8 @@ class VolEnv {
                 }
                 this.t += dt;
                 const x = Math.min(1, this.t / this.attack);
-                // smooth-ish rise
                 const shaped = 1 - Math.exp(-x * 6);
                 this.level = this.peak * shaped;
-
                 if (x >= 1) {
                     this.level = this.peak;
                     this.stage = this.hold > 0 ? "hold" : "decay";
@@ -133,13 +335,11 @@ class VolEnv {
                 }
                 return this.level;
             }
-
             case "hold":
                 this.t += dt;
                 this.level = this.peak;
                 if (this.t >= this.hold) { this.stage = "decay"; this.t = 0; }
                 return this.level;
-
             case "decay": {
                 if (this.decay <= 0) {
                     this.level = this.sustain;
@@ -149,13 +349,10 @@ class VolEnv {
                 }
                 this.t += dt;
                 const x = Math.min(1, this.t / this.decay);
-
-                // exp ramp: peak -> sustain
                 const start = Math.max(eps, this.peak);
                 const end = Math.max(eps, this.sustain);
                 const y = Math.exp(Math.log(start) + (Math.log(end) - Math.log(start)) * x);
                 this.level = y;
-
                 if (x >= 1) {
                     this.level = this.sustain;
                     this.stage = "sustain";
@@ -163,11 +360,9 @@ class VolEnv {
                 }
                 return this.level;
             }
-
             case "sustain":
                 this.level = this.sustain;
                 return this.level;
-
             case "release": {
                 if (this.release <= 0) {
                     this.level = 0;
@@ -180,7 +375,6 @@ class VolEnv {
                 const end = eps;
                 const y = Math.exp(Math.log(start) + (Math.log(end) - Math.log(start)) * x);
                 this.level = y;
-
                 if (x >= 1) {
                     this.level = 0;
                     this.stage = "idle";
@@ -191,24 +385,22 @@ class VolEnv {
     }
 }
 
-class ModEnv {
+class ModEnvJS {
     constructor(sr) {
         this.sr = sr;
         this.stage = "idle";
         this.level = 0;
         this.t = 0;
-
         this.delay = 0;
         this.attack = 0.01;
         this.hold = 0;
         this.decay = 0.1;
-        this.sustain = 0; // 0..1
+        this.sustain = 0;
         this.release = 0.2;
-
         this.releaseStart = 0;
     }
-
     setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustain, releaseTc }) {
+        const MIN_MOD_RELEASE_SEC = 0.02;
         this.delay = Math.max(0, timecentsToSeconds(delayTc ?? -12000));
         this.attack = Math.max(0, timecentsToSeconds(attackTc ?? -12000));
         this.hold = Math.max(0, timecentsToSeconds(holdTc ?? -12000));
@@ -217,34 +409,28 @@ class ModEnv {
         this.release = Math.max(MIN_MOD_RELEASE_SEC, rel);
         this.sustain = Math.min(1, Math.max(0, sustain ?? 0));
     }
-
     noteOn() {
         this.stage = this.delay > 0 ? "delay" : "attack";
         this.t = 0;
         this.level = 0;
     }
-
     noteOff() {
         if (this.stage === "idle") return;
         this.stage = "release";
         this.t = 0;
         this.releaseStart = this.level;
     }
-
     next() {
         const dt = 1 / this.sr;
-
         switch (this.stage) {
             case "idle":
                 this.level = 0;
                 return 0;
-
             case "delay":
                 this.t += dt;
                 if (this.t >= this.delay) { this.stage = "attack"; this.t = 0; }
                 this.level = 0;
                 return 0;
-
             case "attack": {
                 if (this.attack <= 0) {
                     this.level = 1;
@@ -254,17 +440,15 @@ class ModEnv {
                 }
                 this.t += dt;
                 const x = Math.min(1, this.t / this.attack);
-                this.level = x; // linear is fine for mod env
+                this.level = x;
                 if (x >= 1) { this.level = 1; this.stage = this.hold > 0 ? "hold" : "decay"; this.t = 0; }
                 return this.level;
             }
-
             case "hold":
                 this.t += dt;
                 this.level = 1;
                 if (this.t >= this.hold) { this.stage = "decay"; this.t = 0; }
                 return this.level;
-
             case "decay": {
                 if (this.decay <= 0) {
                     this.level = this.sustain;
@@ -278,11 +462,9 @@ class ModEnv {
                 if (x >= 1) { this.level = this.sustain; this.stage = "sustain"; this.t = 0; }
                 return this.level;
             }
-
             case "sustain":
                 this.level = this.sustain;
                 return this.level;
-
             case "release": {
                 if (this.release <= 0) {
                     this.level = 0;
@@ -299,8 +481,7 @@ class ModEnv {
     }
 }
 
-// ---------- LFO ----------
-class LFO {
+class LFOJS {
     constructor(sr) {
         this.sr = sr;
         this.phase = 0;
@@ -322,17 +503,13 @@ class LFO {
     }
 }
 
-// ---------- Filter (2-pole LPF using biquad) ----------
-class TwoPoleLPF {
+class TwoPoleLPFJS {
     constructor(sr) {
         this.sr = sr;
-        // State variables for left channel
         this.z1L = 0;
         this.z2L = 0;
-        // State variables for right channel
         this.z1R = 0;
         this.z2R = 0;
-        // Biquad coefficients
         this.b0 = 1;
         this.b1 = 0;
         this.b2 = 0;
@@ -341,15 +518,11 @@ class TwoPoleLPF {
     }
     setCutoffHz(hz) {
         const clamped = Math.max(5, Math.min(hz ?? 1000, this.sr * 0.45));
-        // Q factor for smooth response (typical value for music synthesis)
-        const Q = 0.7071; // Butterworth response (maximally flat)
-        
-        // Calculate biquad coefficients for low-pass filter
+        const Q = 0.7071;
         const w0 = 2 * Math.PI * clamped / this.sr;
         const cosw0 = Math.cos(w0);
         const sinw0 = Math.sin(w0);
         const alpha = sinw0 / (2 * Q);
-        
         const a0 = 1 + alpha;
         this.b0 = ((1 - cosw0) / 2) / a0;
         this.b1 = (1 - cosw0) / a0;
@@ -358,19 +531,35 @@ class TwoPoleLPF {
         this.a2 = (1 - alpha) / a0;
     }
     processL(x) {
-        // Direct Form I biquad: y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
         const y = this.b0 * x + this.z1L;
         this.z1L = this.b1 * x - this.a1 * y + this.z2L;
         this.z2L = this.b2 * x - this.a2 * y;
         return y;
     }
     processR(x) {
-        // Direct Form I biquad: y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
         const y = this.b0 * x + this.z1R;
         this.z1R = this.b1 * x - this.a1 * y + this.z2R;
         this.z2R = this.b2 * x - this.a2 * y;
         return y;
     }
+}
+
+// ---------- Utility Functions (not in WASM wrapper) ----------
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+
+function panToGains(pan) {
+    // SF2 pan: -500..+500
+    const p = Math.max(-500, Math.min(500, pan ?? 0)) / 500; // -1..+1
+    const angle = (p + 1) * 0.25 * Math.PI; // 0..pi/2
+    return { gL: Math.cos(angle), gR: Math.sin(angle) };
+}
+
+function balanceToGains(balance) {
+    const p = Math.max(-1, Math.min(1, balance ?? 0));
+    const angle = (p + 1) * 0.25 * Math.PI;
+    return { gL: Math.cos(angle), gR: Math.sin(angle) };
 }
 
 // ---------- Pitch ----------
@@ -442,12 +631,12 @@ function makeVoice(region, note, velocity, outSr) {
         panL: panG.gL,
         panR: panG.gR,
 
-        // mod
-        volEnv: new VolEnv(outSr),
-        modEnv: new ModEnv(outSr),
-        modLfo: new LFO(outSr),
-        vibLfo: new LFO(outSr),
-        lpf: new TwoPoleLPF(outSr),
+        // mod - using WASM wrapper classes with JS fallback
+        volEnv: new VolEnvWasm(outSr, new VolEnvJS(outSr)),
+        modEnv: new ModEnvWasm(outSr, new ModEnvJS(outSr)),
+        modLfo: new LFOWasm(outSr, new LFOJS(outSr)),
+        vibLfo: new LFOWasm(outSr, new LFOJS(outSr)),
+        lpf: new TwoPoleLPFWasm(outSr, new TwoPoleLPFJS(outSr)),
 
         exclusiveClass: region.exclusiveClass ?? 0,
         finished: false,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseSF2 } from "./sf2-parser.js";
 import { createMidiDriver } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
+import { initDSP } from "./dsp-wasm-wrapper.js";
 
 const QWERTY_NOTE_MAP = {
   a: 60, // C4
@@ -784,6 +785,16 @@ export default function App() {
 
     if (loadWorklet) {
       if (!workletLoadPromiseRef.current) {
+        // Note: WASM DSP module initialization is attempted but AudioWorklet runs in a 
+        // separate context, so it will use the JS fallback implementations for now.
+        // Future enhancement: implement WASM loading within the AudioWorklet context.
+        try {
+          await initDSP();
+          console.log('WASM DSP module initialized in main thread');
+        } catch (error) {
+          console.warn('WASM DSP initialization failed:', error);
+        }
+        
         const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
         workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
       }
