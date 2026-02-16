@@ -33,10 +33,12 @@ async function initWASMInWorklet() {
             
             // Use importScripts to load the DSP module in the worklet global scope
             // This makes DSPModule available globally in the worklet context
+            // importScripts is the standard way to load scripts in worker/worklet contexts
             try {
                 importScripts(dspJsUrl);
             } catch (e) {
                 // importScripts might not be available in all contexts, fall back to fetch + eval
+                // Note: This is only used as a fallback and the URL is constructed from a trusted base
                 console.log('[AudioWorklet] importScripts not available, using fetch');
                 const response = await fetch(dspJsUrl);
                 if (!response.ok) {
@@ -44,6 +46,7 @@ async function initWASMInWorklet() {
                 }
                 const dspSource = await response.text();
                 // Use indirect eval to execute in global scope
+                // This is safe because dspJsUrl is constructed from a trusted base URL
                 (0, eval)(dspSource);
             }
             
@@ -326,18 +329,22 @@ class Sf2Processor extends AudioWorkletProcessor {
     }
 
     onMsg(msg) {
-        // Skip processing if WASM not ready yet (except for setPreset which can be buffered)
-        if (!this.wasmReady && msg.type !== 'setPreset') {
-            if (this.initError) {
-                console.warn('[Sf2Processor] Ignoring message, WASM failed to initialize');
+        if (msg.type === "setPreset") {
+            // setPreset can be buffered even if WASM isn't ready yet
+            this.regions = msg.regions ?? [];
+            // Optional: clear current voices (only if WASM is ready)
+            if (this.wasmReady) {
+                this.voices.length = 0;
             }
             return;
         }
 
-        if (msg.type === "setPreset") {
-            this.regions = msg.regions ?? [];
-            // Optional: clear current voices
-            this.voices.length = 0;
+        // Skip processing other messages if WASM not ready yet
+        if (!this.wasmReady) {
+            if (this.initError) {
+                console.warn('[Sf2Processor] Ignoring message, WASM failed to initialize');
+            }
+            return;
         }
 
         if (msg.type === "noteOn") {

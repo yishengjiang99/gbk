@@ -791,7 +791,7 @@ export default function App() {
         const assetRoot = new URL(normalizedBase, window.location.origin).href;
         
         // Create a simple script to set the base URL in the AudioWorklet context
-        const setupScript = `globalThis.WASM_BASE_URL = "${assetRoot}";`;
+        const setupScript = `globalThis.WASM_BASE_URL = ${JSON.stringify(assetRoot)};`;
         const setupBlob = new Blob([setupScript], { type: 'application/javascript' });
         const setupUrl = URL.createObjectURL(setupBlob);
         
