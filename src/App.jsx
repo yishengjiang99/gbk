@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseSF2 } from "../sf2-parser.js";
+import { parseSF2 } from "./sf2-parser.js";
 import { createMidiDriver } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
 
