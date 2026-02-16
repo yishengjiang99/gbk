@@ -785,12 +785,14 @@ export default function App() {
 
     if (loadWorklet) {
       if (!workletLoadPromiseRef.current) {
-        // Initialize WASM DSP module before loading the AudioWorklet
+        // Note: WASM DSP module initialization is attempted but AudioWorklet runs in a 
+        // separate context, so it will use the JS fallback implementations for now.
+        // Future enhancement: implement WASM loading within the AudioWorklet context.
         try {
           await initDSP();
-          console.log('WASM DSP module initialized successfully');
+          console.log('WASM DSP module initialized in main thread');
         } catch (error) {
-          console.warn('WASM DSP initialization failed, will use JS fallback:', error);
+          console.warn('WASM DSP initialization failed:', error);
         }
         
         const moduleUrl = new URL("./sf2-processor.js", import.meta.url);

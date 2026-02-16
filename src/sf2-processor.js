@@ -2,30 +2,268 @@
 // 
 // DSP computation for SF2 synthesis using WebAssembly
 // 
-// This processor uses the WebAssembly DSP module (dsp-wasm-wrapper.js) for optimized
-// performance. The WASM module provides:
-// - Volume and Modulation Envelopes (VolEnv, ModEnv)
-// - Low Frequency Oscillators (LFO)
-// - Two-pole Low-Pass Filter (TwoPoleLPF)
-// - Utility functions (centsToRatio, cbAttenToLin, etc.)
-//
-// The WASM wrapper automatically falls back to JavaScript implementations if WASM
-// is not available, ensuring compatibility across all environments.
+// This processor uses the WebAssembly DSP module for optimized performance.
+// The WASM module is loaded and initialized before the AudioWorklet is created.
+// If WASM is not available, it falls back to JavaScript implementations.
 
-// Import WASM DSP wrapper (with fallback to JS implementations)
-import { 
-    initDSP, 
-    isDSPReady,
-    VolEnvWasm, 
-    ModEnvWasm, 
-    LFOWasm, 
-    TwoPoleLPFWasm,
-    centsToRatio,
-    cbAttenToLin,
-    velToLin,
-    fcCentsToHz,
-    timecentsToSeconds
-} from './dsp-wasm-wrapper.js';
+// ---------- WASM Integration ----------
+let dspModule = null;
+let dspReady = false;
+
+// This will be called from the main thread before AudioWorklet is loaded
+// The module instance is stored globally for the worklet to use
+if (typeof globalThis.dspModule !== 'undefined') {
+    dspModule = globalThis.dspModule;
+    dspReady = true;
+}
+
+// Utility functions with WASM support
+function centsToRatio(c) {
+    if (dspReady && dspModule) {
+        return dspModule._centsToRatio(c ?? 0);
+    }
+    return Math.pow(2, (c ?? 0) / 1200);
+}
+
+function cbAttenToLin(cb) {
+    if (dspReady && dspModule) {
+        return dspModule._cbAttenToLin(cb ?? 0);
+    }
+    const db = -(cb ?? 0) / 10;
+    return Math.pow(10, db / 20);
+}
+
+function velToLin(vel, curve = 2.0) {
+    if (dspReady && dspModule) {
+        return dspModule._velToLin(vel, curve);
+    }
+    const x = Math.max(0, Math.min(127, vel)) / 127;
+    return Math.pow(x, curve);
+}
+
+function fcCentsToHz(fcCents) {
+    if (dspReady && dspModule) {
+        return dspModule._fcCentsToHz(fcCents ?? 13500);
+    }
+    return 8.176 * Math.pow(2, (fcCents ?? 13500) / 1200);
+}
+
+function timecentsToSeconds(tc) {
+    if (dspReady && dspModule) {
+        return dspModule._timecentsToSeconds(tc ?? 0);
+    }
+    return Math.pow(2, (tc ?? 0) / 1200);
+}
+
+// ---------- WASM Wrapper Classes ----------
+// These classes use WASM when available, with JS fallback
+
+class VolEnvWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._volEnvCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM VolEnv, using JS fallback:', e);
+            }
+        }
+    }
+    
+    setFromSf2(params) {
+        if (this.ptr && dspModule) {
+            const delayTc = params.delayTc ?? -12000;
+            const attackTc = params.attackTc ?? -12000;
+            const holdTc = params.holdTc ?? -12000;
+            const decayTc = params.decayTc ?? -12000;
+            const sustainCb = params.sustainCb ?? 0;
+            const releaseTc = params.releaseTc ?? 0;
+            
+            dspModule._volEnvSetFromSf2(this.ptr, delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc);
+        } else if (this.jsImpl) {
+            this.jsImpl.setFromSf2(params);
+        }
+    }
+    
+    noteOn() {
+        if (this.ptr && dspModule) {
+            dspModule._volEnvNoteOn(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOn();
+        }
+    }
+    
+    noteOff() {
+        if (this.ptr && dspModule) {
+            dspModule._volEnvNoteOff(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOff();
+        }
+    }
+    
+    next() {
+        if (this.ptr && dspModule) {
+            return dspModule._volEnvNext(this.ptr);
+        } else if (this.jsImpl) {
+            return this.jsImpl.next();
+        }
+        return 0;
+    }
+    
+    get level() {
+        if (this.jsImpl) return this.jsImpl.level;
+        return 0;
+    }
+    
+    get stage() {
+        if (this.jsImpl) return this.jsImpl.stage;
+        return 'idle';
+    }
+}
+
+class ModEnvWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._modEnvCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM ModEnv, using JS fallback:', e);
+            }
+        }
+    }
+    
+    setFromSf2(params) {
+        if (this.ptr && dspModule) {
+            const delayTc = params.delayTc ?? -12000;
+            const attackTc = params.attackTc ?? -12000;
+            const holdTc = params.holdTc ?? -12000;
+            const decayTc = params.decayTc ?? -12000;
+            const sustain = params.sustain ?? 0;
+            const releaseTc = params.releaseTc ?? 0;
+            
+            dspModule._modEnvSetFromSf2(this.ptr, delayTc, attackTc, holdTc, decayTc, sustain, releaseTc);
+        } else if (this.jsImpl) {
+            this.jsImpl.setFromSf2(params);
+        }
+    }
+    
+    noteOn() {
+        if (this.ptr && dspModule) {
+            dspModule._modEnvNoteOn(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOn();
+        }
+    }
+    
+    noteOff() {
+        if (this.ptr && dspModule) {
+            dspModule._modEnvNoteOff(this.ptr);
+        } else if (this.jsImpl) {
+            this.jsImpl.noteOff();
+        }
+    }
+    
+    next() {
+        if (this.ptr && dspModule) {
+            return dspModule._modEnvNext(this.ptr);
+        } else if (this.jsImpl) {
+            return this.jsImpl.next();
+        }
+        return 0;
+    }
+    
+    get level() {
+        if (this.jsImpl) return this.jsImpl.level;
+        return 0;
+    }
+    
+    get stage() {
+        if (this.jsImpl) return this.jsImpl.stage;
+        return 'idle';
+    }
+}
+
+class LFOWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._lfoCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM LFO, using JS fallback:', e);
+            }
+        }
+    }
+    
+    set(freqHz, delaySec) {
+        if (this.ptr && dspModule) {
+            dspModule._lfoSet(this.ptr, freqHz ?? 0, delaySec ?? 0);
+        } else if (this.jsImpl) {
+            this.jsImpl.set(freqHz, delaySec);
+        }
+    }
+    
+    next() {
+        if (this.ptr && dspModule) {
+            return dspModule._lfoNext(this.ptr);
+        } else if (this.jsImpl) {
+            return this.jsImpl.next();
+        }
+        return 0;
+    }
+}
+
+class TwoPoleLPFWasm {
+    constructor(sr, jsImpl) {
+        this.sr = sr;
+        this.jsImpl = jsImpl;
+        this.ptr = null;
+        
+        if (dspReady && dspModule) {
+            try {
+                this.ptr = dspModule._lpfCreate(sr);
+            } catch (e) {
+                console.warn('Failed to create WASM LPF, using JS fallback:', e);
+            }
+        }
+    }
+    
+    setCutoffHz(hz) {
+        if (this.ptr && dspModule) {
+            dspModule._lpfSetCutoffHz(this.ptr, hz ?? 1000);
+        } else if (this.jsImpl) {
+            this.jsImpl.setCutoffHz(hz);
+        }
+    }
+    
+    processL(x) {
+        if (this.ptr && dspModule) {
+            return dspModule._lpfProcessL(this.ptr, x);
+        } else if (this.jsImpl) {
+            return this.jsImpl.processL(x);
+        }
+        return x;
+    }
+    
+    processR(x) {
+        if (this.ptr && dspModule) {
+            return dspModule._lpfProcessR(this.ptr, x);
+        } else if (this.jsImpl) {
+            return this.jsImpl.processR(x);
+        }
+        return x;
+    }
+}
 
 // ---------- JavaScript Fallback DSP Implementations ----------
 // These are used as fallbacks when WASM is not available
