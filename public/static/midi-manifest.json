@@ -1,11 +1,43 @@
 [
   {
+    "name": "1080-c01.mid",
+    "path": "static/1080-c01.mid"
+  },
+  {
+    "name": "1080-c02.mid",
+    "path": "static/1080-c02.mid"
+  },
+  {
+    "name": "1080-c12.mid",
+    "path": "static/1080-c12.mid"
+  },
+  {
+    "name": "1080c02b.mid",
+    "path": "static/1080c02b.mid"
+  },
+  {
     "name": "60884_Beethoven-Symphony-No51.mid",
     "path": "static/60884_Beethoven-Symphony-No51.mid"
   },
   {
     "name": "bizet_carmen_act-1_05_habanera_(c)yogore.mid",
     "path": "static/bizet_carmen_act-1_05_habanera_(c)yogore.mid"
+  },
+  {
+    "name": "bwv0202.mid",
+    "path": "static/bwv0202.mid"
+  },
+  {
+    "name": "bwv0205.mid",
+    "path": "static/bwv0205.mid"
+  },
+  {
+    "name": "bwv0212.mid",
+    "path": "static/bwv0212.mid"
+  },
+  {
+    "name": "bwv971.mid",
+    "path": "static/bwv971.mid"
   },
   {
     "name": "Dr Dre - Still Dre.mid",
