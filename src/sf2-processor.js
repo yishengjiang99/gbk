@@ -19,12 +19,21 @@ async function initWasmFromBinary(wasmBinary, glueCode, basePath) {
         throw new Error('WASM binary and glue code are required');
     }
     
-    // Create a function from the glue code
-    const createModule = new Function('wasmBinary', 'basePath', glueCode + '; return Module;');
-    
+    // Evaluate glue and get the Emscripten factory (typically DSPModule).
+    // Some glue builds do not expose a top-level "Module" symbol.
+    const createFactory = new Function(
+        `${glueCode}
+        return (typeof DSPModule === "function")
+            ? DSPModule
+            : (typeof Module === "function" ? Module : null);`
+    );
+    const moduleFactory = createFactory();
+    if (typeof moduleFactory !== "function") {
+        throw new Error("WASM glue did not expose a callable module factory");
+    }
+
     // Initialize the module with the binary
-    const ModuleFactory = createModule(wasmBinary, basePath || '');
-    dspModule = await ModuleFactory({
+    dspModule = await moduleFactory({
         wasmBinary: wasmBinary,
         locateFile: (path) => {
             if (basePath) {
@@ -390,13 +399,19 @@ class Sf2Processor extends AudioWorkletProcessor {
             // This is a synchronous constructor, so we'll assume WASM is already available
             // or the initialization happens before voice creation
             this.wasmInitialized = false;
+            this.initError = null;
+            this.pendingMessages = [];
             this.initPromise = initWasmFromBinary(wasmBinary, glueCode, basePath)
                 .then(() => {
                     this.wasmInitialized = true;
+                    for (const pending of this.pendingMessages) {
+                        this.onMsg(pending);
+                    }
+                    this.pendingMessages.length = 0;
                 })
                 .catch(error => {
+                    this.initError = error;
                     console.error('Failed to initialize WASM:', error);
-                    throw error;
                 });
         } else {
             throw new Error('WASM binary and glue code must be provided in processorOptions');
@@ -413,6 +428,14 @@ class Sf2Processor extends AudioWorkletProcessor {
     }
 
     onMsg(msg) {
+        if (this.initError) {
+            return;
+        }
+        if (!this.wasmInitialized) {
+            this.pendingMessages.push(msg);
+            return;
+        }
+
         if (msg.type === "setPreset") {
             this.regions = msg.regions ?? [];
             // Optional: clear current voices

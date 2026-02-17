@@ -803,11 +803,19 @@ export default function App() {
       setAudioReady(true);
     }
     startAnalyzerLoop();
-    return { ctx, analyser };
+    return {
+      ctx,
+      analyser,
+      processorOptions: {
+        wasmBinary: wasmDataRef.current?.wasmBinary,
+        glueCode: wasmDataRef.current?.glueCode,
+        basePath: wasmDataRef.current?.basePath,
+      },
+    };
   }, []);
 
   const ensureAudioGraph = useCallback(async (autoResume = false) => {
-    const { ctx, analyser } = await ensureAudioInfrastructure();
+    const { ctx, analyser, processorOptions } = await ensureAudioInfrastructure();
     if (autoResume && ctx.state !== "running") {
       await ctx.resume();
     }
@@ -820,11 +828,7 @@ export default function App() {
         numberOfInputs: 0,
         numberOfOutputs: 1,
         outputChannelCount: [2],
-        processorOptions: {
-          wasmBinary: wasmDataRef.current?.wasmBinary,
-          glueCode: wasmDataRef.current?.glueCode,
-          basePath: wasmDataRef.current?.basePath,
-        },
+        processorOptions,
       });
       workletNodeRef.current = node;
       node.connect(analyser);

@@ -555,13 +555,17 @@ export default function MidiReader({
     if (!song || !workerRef.current) return;
     if (portsAttachedRef.current) return;
 
-    const { ctx, analyser } = await ensureAudioInfrastructure();
+    const { ctx, analyser, processorOptions } = await ensureAudioInfrastructure();
+    if (!processorOptions?.wasmBinary || !processorOptions?.glueCode) {
+      throw new Error("AudioWorklet WASM data is not ready");
+    }
     const trackNodes = [];
     for (let i = 0; i < song.tracks.length; i += 1) {
       const node = new AudioWorkletNode(ctx, "sf2-processor", {
         numberOfInputs: 0,
         numberOfOutputs: 1,
         outputChannelCount: [2],
+        processorOptions,
       });
       const panner = new StereoPannerNode(ctx, { pan: 0 });
       const gain = ctx.createGain();
