@@ -230,10 +230,18 @@ describe('WASM AudioWorklet Integration Tests', () => {
 
     await page.waitForSelector('#root', { timeout: 10000 });
 
-    // Check that sf2-processor.js doesn't contain JS fallback patterns
+    // Dynamically find the sf2-processor file in assets
     const jsContent = await page.evaluate(() => {
-      return fetch('/gbk/assets/sf2-processor-ubyI87_I.js')
+      return fetch('/gbk/index.html')
         .then(r => r.text())
+        .then(html => {
+          // Extract the sf2-processor filename from the HTML
+          const match = html.match(/sf2-processor-[a-zA-Z0-9_-]+\.js/);
+          if (match) {
+            return fetch(`/gbk/assets/${match[0]}`).then(r => r.text());
+          }
+          return '';
+        })
         .catch(() => '');
     });
 
