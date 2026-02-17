@@ -1,6 +1,6 @@
-## SF2 + MIDI Explorer Architecture
+## WASM MIDI SoundFont Player
 
-This project is a React + Vite web app for:
+This project is a WASM MIDI SoundFont player built with React + Vite for:
 - exploring SoundFont2 (`.sf2`) data,
 - loading and visualizing MIDI files,
 - playing MIDI through a custom SF2 AudioWorklet synth,
@@ -125,4 +125,4 @@ This project uses WebAssembly for high-performance DSP computation. The DSP algo
 - **Documentation**: See [WASM_README.md](WASM_README.md)
 - **Testing**: Open `/gbk/test-wasm.html` in dev mode
 
-# gbk
+# WASM MIDI SoundFont Player

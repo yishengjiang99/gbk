@@ -1011,8 +1011,8 @@ export default function App() {
     <div className={`app ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
       <header className="topHeader">
         <div>
-          <h1>SoundFont2 Explorer</h1>
-          <p>Inspect INFO tags, presets, instruments, and samples from an SF2 file.</p>
+          <h1>WASM MIDI SoundFont Player</h1>
+          <p>Play MIDI with a WebAssembly SoundFont engine.</p>
         </div>
         <div className="toolbar">
           <button
