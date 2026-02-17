@@ -1,2 +1,3 @@
 node_modules
 dist
+_codeql_detected_source_root
