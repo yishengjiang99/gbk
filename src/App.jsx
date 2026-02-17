@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseSF2 } from "./sf2-parser.js";
 import { createMidiDriver } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
-import { initDSP } from "./dsp-wasm-wrapper.js";
+import { fetchWasmBinary } from "./dsp-wasm-wrapper.js";
 
 const QWERTY_NOTE_MAP = {
   a: 60, // C4
@@ -522,6 +522,7 @@ export default function App() {
   const presetRegionCacheRef = useRef(new Map());
   const activeKeyboardKeysRef = useRef(new Map());
   const workletLoadPromiseRef = useRef(null);
+  const wasmDataRef = useRef(null);
 
   const presets = useMemo(() => getPresetRows(sf2), [sf2]);
   const visiblePresets = useMemo(() => {
@@ -785,14 +786,14 @@ export default function App() {
 
     if (loadWorklet) {
       if (!workletLoadPromiseRef.current) {
-        // Note: WASM DSP module initialization is attempted but AudioWorklet runs in a 
-        // separate context, so it will use the JS fallback implementations for now.
-        // Future enhancement: implement WASM loading within the AudioWorklet context.
+        // Fetch WASM binary in main thread to pass to AudioWorklet
         try {
-          await initDSP();
-          console.log('WASM DSP module initialized in main thread');
+          const wasmData = await fetchWasmBinary();
+          wasmDataRef.current = wasmData;
+          console.log('WASM binary fetched in main thread for AudioWorklet');
         } catch (error) {
-          console.warn('WASM DSP initialization failed:', error);
+          console.error('Failed to fetch WASM binary:', error);
+          throw error;
         }
         
         const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
@@ -819,6 +820,11 @@ export default function App() {
         numberOfInputs: 0,
         numberOfOutputs: 1,
         outputChannelCount: [2],
+        processorOptions: {
+          wasmBinary: wasmDataRef.current?.wasmBinary,
+          glueCode: wasmDataRef.current?.glueCode,
+          basePath: wasmDataRef.current?.basePath,
+        },
       });
       workletNodeRef.current = node;
       node.connect(analyser);

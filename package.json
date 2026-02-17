@@ -9,14 +9,19 @@
     "build:wasm": "bash scripts/build-wasm.sh",
     "dev": "npm run gen:midi-manifest && npm run gen:sf2-manifest && vite",
     "build": "npm run gen:midi-manifest && npm run gen:sf2-manifest && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "jest --testTimeout=60000",
+    "test:integration": "jest tests/wasm-audioworklet-integration.test.js --testTimeout=60000"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "jest": "^30.2.0",
+    "puppeteer": "^24.37.3",
     "vite": "^5.4.11"
   }
 }

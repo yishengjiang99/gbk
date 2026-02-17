@@ -4,7 +4,44 @@
 let dspModule = null;
 let dspReady = false;
 
-// Initialize the WebAssembly module
+// Fetch WASM binary and glue code for passing to AudioWorklet
+export async function fetchWasmBinary() {
+    try {
+        const basePath = import.meta.env?.BASE_URL || '/';
+        const normalizedBase = basePath.endsWith('/') ? basePath : `${basePath}/`;
+        const assetRoot = new URL(normalizedBase, window.location.origin);
+        
+        const wasmUrl = new URL('dsp.wasm', assetRoot).href;
+        const glueUrl = new URL('dsp.js', assetRoot).href;
+        
+        console.log(`Fetching WASM binary from: ${wasmUrl}`);
+        console.log(`Fetching WASM glue code from: ${glueUrl}`);
+        
+        const [wasmResponse, glueResponse] = await Promise.all([
+            fetch(wasmUrl),
+            fetch(glueUrl)
+        ]);
+        
+        if (!wasmResponse.ok) {
+            throw new Error(`Failed to fetch WASM binary (${wasmResponse.status})`);
+        }
+        if (!glueResponse.ok) {
+            throw new Error(`Failed to fetch WASM glue code (${glueResponse.status})`);
+        }
+        
+        const wasmBinary = await wasmResponse.arrayBuffer();
+        const glueCode = await glueResponse.text();
+        
+        console.log(`WASM binary fetched: ${wasmBinary.byteLength} bytes`);
+        
+        return { wasmBinary, glueCode, basePath: normalizedBase };
+    } catch (error) {
+        console.error('Failed to fetch WASM files:', error);
+        throw error;
+    }
+}
+
+// Initialize the WebAssembly module (for main thread use if needed)
 export async function initDSP() {
     if (dspReady) return dspModule;
     
