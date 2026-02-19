@@ -975,11 +975,17 @@ export default function App() {
       // Create an AudioBuffer with the PCM data
       const sampleRate = preview.sample.sampleRate || 44100;
       const dataL = preview.sample.dataL;
-      const buffer = ctx.createBuffer(1, dataL.length, sampleRate);
+      const dataR = preview.sample.dataR;
+      
+      // Create mono or stereo buffer based on available data
+      const numChannels = dataR && dataR.length === dataL.length ? 2 : 1;
+      const buffer = ctx.createBuffer(numChannels, dataL.length, sampleRate);
       
       // Copy the Float32Array data to the buffer
-      const channelData = buffer.getChannelData(0);
-      channelData.set(dataL);
+      buffer.getChannelData(0).set(dataL);
+      if (numChannels === 2) {
+        buffer.getChannelData(1).set(dataR);
+      }
       
       // Create and configure the source node
       const source = ctx.createBufferSource();
