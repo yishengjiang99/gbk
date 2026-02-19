@@ -902,6 +902,20 @@ export default function App() {
     }
   }
 
+  async function onPlaySelectedLayer() {
+    if (!sf2 || !selectedLayer || effectivePresetIndex == null) return;
+    try {
+      await ensureAudioGraph(true);
+      await triggerNoteOn(midiNote, midiVelocity);
+      if (noteOffTimerRef.current) clearTimeout(noteOffTimerRef.current);
+      noteOffTimerRef.current = setTimeout(() => {
+        triggerNoteOff(midiNote);
+      }, 900);
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function onTogglePower() {
     try {
       const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
@@ -1268,6 +1282,12 @@ export default function App() {
                         />
                       </div>
                     </div>
+                    <div className="playControls">
+                      <button type="button" onClick={onPlaySample} disabled={selectedPreset == null || !sf2}>
+                        Play Note
+                      </button>
+                      <span className="audioState">{audioReady ? "Audio ready" : "Audio not initialized"}</span>
+                    </div>
                     <div className="detailBlock">
                       <h3>Program Header Info</h3>
                       <p>
@@ -1448,10 +1468,9 @@ export default function App() {
                 </div>
                 <div className="panelBody">
                   <div className="playControls">
-                    <button type="button" onClick={onPlaySample} disabled={selectedPreset == null || !sf2}>
+                    <button type="button" onClick={onPlaySelectedLayer} disabled={!selectedLayer || !sf2}>
                       Play Sample
                     </button>
-                    <span className="audioState">{audioReady ? "Audio ready" : "Audio not initialized"}</span>
                   </div>
                   {audioError ? <p className="status error">{audioError}</p> : null}
                   {selectedPreset == null || !programDetails?.previewRegion ? (
