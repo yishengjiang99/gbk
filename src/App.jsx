@@ -912,7 +912,8 @@ export default function App() {
   }
 
   // Handler for "Play Sample" button (in PCM Sample Preview panel)
-  // Plays the sample for the currently selected layer
+  // Plays a note using the current preset and MIDI settings. The audio engine
+  // will use the regions that match the selected layer's key/velocity range.
   async function onPlaySelectedLayer() {
     if (!selectedLayer) return;
     await playCurrentNote();
@@ -1470,7 +1471,7 @@ export default function App() {
                 </div>
                 <div className="panelBody">
                   <div className="playControls">
-                    <button type="button" onClick={onPlaySelectedLayer} disabled={!selectedLayer || !sf2}>
+                    <button type="button" onClick={onPlaySelectedLayer} disabled={!selectedLayer || selectedPreset == null || !sf2}>
                       Play Sample
                     </button>
                   </div>
