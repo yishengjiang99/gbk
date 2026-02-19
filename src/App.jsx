@@ -4,6 +4,8 @@ import { createMidiDriver } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
 import { fetchWasmBinary } from "./dsp-wasm-wrapper.js";
 
+const INT16_MAX_VALUE = 32768;
+
 const QWERTY_NOTE_MAP = {
   a: 60, // C4
   w: 61, // C#4
@@ -305,6 +307,9 @@ function buildSelectionFromInstrumentRegion(programDetails, inst, zone, midiNote
     context: `sample ${zone.sampleID} (${zone.sampleName})`,
     levels,
     bagIndex: zone.bagIndex,
+    sampleID: zone.sampleID,
+    sampleName: zone.sampleName,
+    sampleRate: zone.sampleRate,
   };
 }
 
@@ -557,6 +562,43 @@ export default function App() {
     if (selectedPreset != null) return selectedPreset;
     return presets.length > 0 ? 0 : null;
   }, [sf2, selectedPreset, presets.length]);
+
+  const selectedSamplePreview = useMemo(() => {
+    if (!sf2 || !selectedLayer) return null;
+    
+    // Only extract sample for instrumentRegion type layers
+    if (selectedLayer.type !== "instrumentRegion") return null;
+    if (selectedLayer.sampleID == null) return null;
+    
+    const { pdta, sdta } = sf2;
+    const sampleID = selectedLayer.sampleID;
+    const sh = pdta.shdr[sampleID];
+    
+    if (!sh || !sdta.smpl) return null;
+    
+    // Extract sample data using similar approach to decodeSampleData
+    const start = sh.start;
+    const end = sh.end;
+    
+    if (end <= start || end > sdta.smpl.length) return null;
+    
+    // Convert Int16 to Float32
+    const n = end - start;
+    const dataL = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      dataL[i] = sdta.smpl[start + i] / INT16_MAX_VALUE;
+    }
+    
+    return {
+      sample: {
+        dataL,
+        dataR: null,
+        sampleRate: sh.sampleRate,
+      },
+      sampleID: selectedLayer.sampleID,
+      sampleName: selectedLayer.sampleName,
+    };
+  }, [sf2, selectedLayer]);
 
   useEffect(() => {
     if (!programDetails) {
@@ -1490,17 +1532,29 @@ export default function App() {
                     </button>
                   </div>
                   {audioError ? <p className="status error">{audioError}</p> : null}
-                  {selectedPreset == null || !programDetails?.previewRegion ? (
-                    <p>Waveform appears when the selected program has playable regions.</p>
-                  ) : (
-                    <>
-                      <WaveformCanvas data={programDetails.previewRegion.sample.dataL} />
-                      <p>
-                        <strong>Frames:</strong> {programDetails.previewRegion.sample.dataL.length}{" "}
-                        <strong>Sample Rate:</strong> {programDetails.previewRegion.sample.sampleRate}
-                      </p>
-                    </>
-                  )}
+                  {(() => {
+                    // Use selectedSamplePreview if available (for instrumentRegion), otherwise use previewRegion
+                    const preview = selectedSamplePreview || programDetails?.previewRegion;
+                    
+                    if (selectedPreset == null || !preview) {
+                      return <p>Waveform appears when the selected program has playable regions.</p>;
+                    }
+                    
+                    return (
+                      <>
+                        <WaveformCanvas data={preview.sample.dataL} />
+                        <p>
+                          {selectedSamplePreview && (
+                            <>
+                              <strong>Sample ID:</strong> {selectedSamplePreview.sampleID} ({selectedSamplePreview.sampleName})<br />
+                            </>
+                          )}
+                          <strong>Frames:</strong> {preview.sample.dataL.length}{" "}
+                          <strong>Sample Rate:</strong> {preview.sample.sampleRate}
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
               </section>
               <section className="card sf2Panel levelPanel">
