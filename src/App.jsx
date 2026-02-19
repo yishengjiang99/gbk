@@ -978,7 +978,7 @@ export default function App() {
       const dataR = preview.sample.dataR;
       
       // Create mono or stereo buffer based on available data
-      const numChannels = dataR && dataR.length === dataL.length ? 2 : 1;
+      const numChannels = dataR && dataR.length > 0 && dataR.length === dataL.length ? 2 : 1;
       const buffer = ctx.createBuffer(numChannels, dataL.length, sampleRate);
       
       // Copy the Float32Array data to the buffer
@@ -995,6 +995,7 @@ export default function App() {
       // Play once and clean up
       source.onended = () => {
         source.disconnect();
+        source.buffer = null;
       };
       
       source.start(0);
