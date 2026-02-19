@@ -907,7 +907,7 @@ export default function App() {
   }
 
   // Handler for "Play Note" button (next to MIDI sliders)
-  async function onPlaySample() {
+  async function onPlayNote() {
     await playCurrentNote();
   }
 
@@ -1285,7 +1285,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="playControls">
-                      <button type="button" onClick={onPlaySample} disabled={selectedPreset == null || !sf2}>
+                      <button type="button" onClick={onPlayNote} disabled={selectedPreset == null || !sf2}>
                         Play Note
                       </button>
                       <span className="audioState">{audioReady ? "Audio ready" : "Audio not initialized"}</span>
