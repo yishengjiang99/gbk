@@ -998,12 +998,6 @@ export default function App() {
           setMidiStatus(`MIDI inputs: ${names.join(", ")}`);
         },
       });
-      if (!driver) {
-        setMidiError("Web MIDI is not supported in this browser.");
-        setMidiEnabled(false);
-        setMidiStatus("MIDI not supported");
-        return;
-      }
       midiDriverRef.current = driver;
       setMidiEnabled(true);
       setMidiStatus("MIDI enabled");
@@ -1112,7 +1106,7 @@ export default function App() {
 
       {loading && <p className="status">Parsing...</p>}
       {error && <p className="status error">{error}</p>}
-      {webMidiSupported && midiError && <p className="status error">{midiError}</p>}
+      {midiError && <p className="status error">{midiError}</p>}
 
       {activeTab === "midi" && (
         <MidiReader
