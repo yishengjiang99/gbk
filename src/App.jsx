@@ -888,7 +888,11 @@ export default function App() {
     node.port.postMessage({ type: "noteOff", note });
   }
 
-  async function onPlaySample() {
+  // Shared function to play a note with current MIDI settings
+  // Both "Play Note" and "Play Sample" buttons use this, as the audio engine
+  // automatically selects the appropriate regions based on the current preset,
+  // MIDI note, and velocity values.
+  async function playCurrentNote() {
     if (!sf2 || effectivePresetIndex == null) return;
     try {
       await ensureAudioGraph(true);
@@ -900,6 +904,19 @@ export default function App() {
     } catch (err) {
       setAudioError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  // Handler for "Play Note" button (next to MIDI sliders)
+  async function onPlayNote() {
+    await playCurrentNote();
+  }
+
+  // Handler for "Play Sample" button (in PCM Sample Preview panel)
+  // Plays a note using the current preset and MIDI settings. The audio engine
+  // will use the regions that match the selected layer's key/velocity range.
+  async function onPlaySelectedLayer() {
+    if (!selectedLayer) return;
+    await playCurrentNote();
   }
 
   async function onTogglePower() {
@@ -1268,6 +1285,12 @@ export default function App() {
                         />
                       </div>
                     </div>
+                    <div className="playControls">
+                      <button type="button" onClick={onPlayNote} disabled={selectedPreset == null || !sf2}>
+                        Play Note
+                      </button>
+                      <span className="audioState">{audioReady ? "Audio ready" : "Audio not initialized"}</span>
+                    </div>
                     <div className="detailBlock">
                       <h3>Program Header Info</h3>
                       <p>
@@ -1448,10 +1471,13 @@ export default function App() {
                 </div>
                 <div className="panelBody">
                   <div className="playControls">
-                    <button type="button" onClick={onPlaySample} disabled={selectedPreset == null || !sf2}>
+                    {/* Button is disabled when layer, preset, or sf2 is missing.
+                        The handler has a simpler guard that only checks selectedLayer
+                        since playCurrentNote() validates preset/sf2, but we disable
+                        the button proactively for better UX. */}
+                    <button type="button" onClick={onPlaySelectedLayer} disabled={!selectedLayer || selectedPreset == null || !sf2}>
                       Play Sample
                     </button>
-                    <span className="audioState">{audioReady ? "Audio ready" : "Audio not initialized"}</span>
                   </div>
                   {audioError ? <p className="status error">{audioError}</p> : null}
                   {selectedPreset == null || !programDetails?.previewRegion ? (
