@@ -960,11 +960,53 @@ export default function App() {
   }
 
   // Handler for "Play Sample" button (in PCM Sample Preview panel)
-  // Plays a note using the current preset and MIDI settings. The audio engine
-  // will use the regions that match the selected layer's key/velocity range.
+  // Plays the PCM sample directly using AudioBufferSourceNode
   async function onPlaySelectedLayer() {
     if (!selectedLayer) return;
-    await playCurrentNote();
+    
+    // Get the preview data (same logic as in the UI)
+    const preview = selectedSamplePreview || programDetails?.previewRegion;
+    if (!preview || !preview.sample || !preview.sample.dataL) return;
+    
+    try {
+      // Ensure we have an audio context
+      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
+      
+      // Create an AudioBuffer with the PCM data
+      const sampleRate = preview.sample.sampleRate || 44100;
+      const dataL = preview.sample.dataL;
+      const dataR = preview.sample.dataR;
+      
+      // Create mono or stereo buffer based on available data
+      const numChannels = dataR && dataR.length > 0 && dataR.length === dataL.length && dataL.length > 0 ? 2 : 1;
+      if (dataL.length === 0) {
+        throw new Error("Cannot play empty sample data");
+      }
+      const buffer = ctx.createBuffer(numChannels, dataL.length, sampleRate);
+      
+      // Copy the Float32Array data to the buffer
+      buffer.getChannelData(0).set(dataL);
+      if (numChannels === 2) {
+        buffer.getChannelData(1).set(dataR);
+      }
+      
+      // Create and configure the source node
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      
+      // Play once and clean up
+      source.onended = () => {
+        source.disconnect();
+        source.buffer = null;
+      };
+      
+      source.start(0);
+      
+      setAudioError("");
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function onTogglePower() {
