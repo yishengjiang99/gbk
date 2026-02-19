@@ -888,7 +888,11 @@ export default function App() {
     node.port.postMessage({ type: "noteOff", note });
   }
 
-  async function onPlaySample() {
+  // Shared function to play a note with current MIDI settings
+  // Both "Play Note" and "Play Sample" buttons use this, as the audio engine
+  // automatically selects the appropriate regions based on the current preset,
+  // MIDI note, and velocity values.
+  async function playCurrentNote() {
     if (!sf2 || effectivePresetIndex == null) return;
     try {
       await ensureAudioGraph(true);
@@ -902,18 +906,16 @@ export default function App() {
     }
   }
 
+  // Handler for "Play Note" button (next to MIDI sliders)
+  async function onPlaySample() {
+    await playCurrentNote();
+  }
+
+  // Handler for "Play Sample" button (in PCM Sample Preview panel)
+  // Plays the sample for the currently selected layer
   async function onPlaySelectedLayer() {
-    if (!sf2 || !selectedLayer || effectivePresetIndex == null) return;
-    try {
-      await ensureAudioGraph(true);
-      await triggerNoteOn(midiNote, midiVelocity);
-      if (noteOffTimerRef.current) clearTimeout(noteOffTimerRef.current);
-      noteOffTimerRef.current = setTimeout(() => {
-        triggerNoteOff(midiNote);
-      }, 900);
-    } catch (err) {
-      setAudioError(err instanceof Error ? err.message : String(err));
-    }
+    if (!selectedLayer) return;
+    await playCurrentNote();
   }
 
   async function onTogglePower() {
