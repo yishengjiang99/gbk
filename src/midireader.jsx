@@ -13,6 +13,10 @@ function clampCc(value) {
   return Math.max(0, Math.min(127, Number(value) | 0));
 }
 
+function resolveAssetPath(path) {
+  return /^https?:\/\//i.test(path) ? path : `${import.meta.env.BASE_URL}${path}`;
+}
+
 function CcKnob({ label, value, onChange, disabled = false }) {
   const startRef = useRef({ active: false, startY: 0, startValue: value });
 
@@ -507,7 +511,7 @@ export default function MidiReader({
         const first = preferred ?? normalized[0];
         if (first) {
           setSelectedMidiPath(first.path);
-          const midiRes = await fetch(`${import.meta.env.BASE_URL}${first.path}`);
+          const midiRes = await fetch(resolveAssetPath(first.path));
           if (!midiRes.ok) throw new Error(`Failed to fetch ${first.path}`);
           const buf = await midiRes.arrayBuffer();
           workerRef.current?.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
@@ -657,7 +661,7 @@ export default function MidiReader({
     try {
       if (isPlaying) workerRef.current?.postMessage({ type: "pause" });
       disconnectTrackNodes();
-      const res = await fetch(`${import.meta.env.BASE_URL}${nextPath}`);
+      const res = await fetch(resolveAssetPath(nextPath));
       if (!res.ok) throw new Error(`Failed to fetch ${nextPath}`);
       const buf = await res.arrayBuffer();
       workerRef.current?.postMessage({ type: "loadMidi", midiData: buf }, [buf]);

@@ -8,6 +8,10 @@
     "path": "static/eawpats.sf2"
   },
   {
+    "name": "FluidR3_GM.sf2",
+    "path": "https://grepawk.com/static/FluidR3_GM.sf2"
+  },
+  {
     "name": "GeneralUser-GS.sf2",
     "path": "static/GeneralUser-GS.sf2"
   },
