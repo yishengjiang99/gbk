@@ -979,6 +979,9 @@ export default function App() {
       
       // Create mono or stereo buffer based on available data
       const numChannels = dataR && dataR.length > 0 && dataR.length === dataL.length && dataL.length > 0 ? 2 : 1;
+      if (dataL.length === 0) {
+        throw new Error("Cannot play empty sample data");
+      }
       const buffer = ctx.createBuffer(numChannels, dataL.length, sampleRate);
       
       // Copy the Float32Array data to the buffer
