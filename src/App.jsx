@@ -960,11 +960,43 @@ export default function App() {
   }
 
   // Handler for "Play Sample" button (in PCM Sample Preview panel)
-  // Plays a note using the current preset and MIDI settings. The audio engine
-  // will use the regions that match the selected layer's key/velocity range.
+  // Plays the PCM sample directly using AudioBufferSourceNode
   async function onPlaySelectedLayer() {
     if (!selectedLayer) return;
-    await playCurrentNote();
+    
+    // Get the preview data (same logic as in the UI)
+    const preview = selectedSamplePreview || programDetails?.previewRegion;
+    if (!preview || !preview.sample || !preview.sample.dataL) return;
+    
+    try {
+      // Ensure we have an audio context
+      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
+      
+      // Create an AudioBuffer with the PCM data
+      const sampleRate = preview.sample.sampleRate || 44100;
+      const dataL = preview.sample.dataL;
+      const buffer = ctx.createBuffer(1, dataL.length, sampleRate);
+      
+      // Copy the Float32Array data to the buffer
+      const channelData = buffer.getChannelData(0);
+      channelData.set(dataL);
+      
+      // Create and configure the source node
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      
+      // Play once and clean up
+      source.onended = () => {
+        source.disconnect();
+      };
+      
+      source.start(0);
+      
+      setAudioError("");
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function onTogglePower() {
