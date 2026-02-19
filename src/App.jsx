@@ -1471,6 +1471,10 @@ export default function App() {
                 </div>
                 <div className="panelBody">
                   <div className="playControls">
+                    {/* Button is disabled when layer, preset, or sf2 is missing.
+                        The handler has a simpler guard that only checks selectedLayer
+                        since playCurrentNote() validates preset/sf2, but we disable
+                        the button proactively for better UX. */}
                     <button type="button" onClick={onPlaySelectedLayer} disabled={!selectedLayer || selectedPreset == null || !sf2}>
                       Play Sample
                     </button>
