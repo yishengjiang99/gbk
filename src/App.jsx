@@ -139,6 +139,55 @@ function rangeFromGenerators(gens) {
   return { keyLo, keyHi, velLo, velHi };
 }
 
+function rangeFilterLabelFromGenerators(gens) {
+  const keyRange = getLastGeneratorAmount(gens ?? [], 43);
+  const velRange = getLastGeneratorAmount(gens ?? [], 44);
+  if (keyRange == null && velRange == null) return null;
+  const parts = [];
+  if (keyRange != null) {
+    const [keyLo, keyHi] = unpackRange(keyRange);
+    parts.push(`key ${keyLo}-${keyHi}`);
+  }
+  if (velRange != null) {
+    const [velLo, velHi] = unpackRange(velRange);
+    parts.push(`vel ${velLo}-${velHi}`);
+  }
+  return parts.join(", ");
+}
+
+function getSamplePreviewForLayer(sf2, layer) {
+  if (!sf2 || !layer) return null;
+  if (layer.type !== "instrumentRegion") return null;
+  if (layer.sampleID == null) return null;
+
+  const { pdta, sdta } = sf2;
+  const sampleID = layer.sampleID;
+  const sh = pdta.shdr[sampleID];
+
+  if (!sh || !sdta.smpl) return null;
+
+  const start = sh.start;
+  const end = sh.end;
+
+  if (end <= start || end > sdta.smpl.length) return null;
+
+  const n = end - start;
+  const dataL = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    dataL[i] = sdta.smpl[start + i] / INT16_MAX_VALUE;
+  }
+
+  return {
+    sample: {
+      dataL,
+      dataR: null,
+      sampleRate: sh.sampleRate,
+    },
+    sampleID: layer.sampleID,
+    sampleName: layer.sampleName,
+  };
+}
+
 function selectLayerFromMidi(programDetails, note, velocity) {
   if (!programDetails) return null;
   const matchedRegion = programDetails.regionZones.find((zone) => zoneMatches(zone, note, velocity));
@@ -564,40 +613,7 @@ export default function App() {
   }, [sf2, selectedPreset, presets.length]);
 
   const selectedSamplePreview = useMemo(() => {
-    if (!sf2 || !selectedLayer) return null;
-    
-    // Only extract sample for instrumentRegion type layers
-    if (selectedLayer.type !== "instrumentRegion") return null;
-    if (selectedLayer.sampleID == null) return null;
-    
-    const { pdta, sdta } = sf2;
-    const sampleID = selectedLayer.sampleID;
-    const sh = pdta.shdr[sampleID];
-    
-    if (!sh || !sdta.smpl) return null;
-    
-    // Extract sample data using similar approach to decodeSampleData
-    const start = sh.start;
-    const end = sh.end;
-    
-    if (end <= start || end > sdta.smpl.length) return null;
-    
-    // Convert Int16 to Float32
-    const n = end - start;
-    const dataL = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      dataL[i] = sdta.smpl[start + i] / INT16_MAX_VALUE;
-    }
-    
-    return {
-      sample: {
-        dataL,
-        dataR: null,
-        sampleRate: sh.sampleRate,
-      },
-      sampleID: selectedLayer.sampleID,
-      sampleName: selectedLayer.sampleName,
-    };
+    return getSamplePreviewForLayer(sf2, selectedLayer);
   }, [sf2, selectedLayer]);
 
   useEffect(() => {
@@ -959,54 +975,50 @@ export default function App() {
     await playCurrentNote();
   }
 
-  // Handler for "Play Sample" button (in PCM Sample Preview panel)
-  // Plays the PCM sample directly using AudioBufferSourceNode
-  async function onPlaySelectedLayer() {
-    if (!selectedLayer) return;
-    
-    // Get the preview data (same logic as in the UI)
-    const preview = selectedSamplePreview || programDetails?.previewRegion;
+  // Plays the PCM sample directly using AudioBufferSourceNode.
+  async function playSelectedLayer(layer = selectedLayer) {
+    if (!layer) return;
+    const preview = getSamplePreviewForLayer(sf2, layer) || programDetails?.previewRegion;
     if (!preview || !preview.sample || !preview.sample.dataL) return;
-    
+
     try {
-      // Ensure we have an audio context
       const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
-      
-      // Create an AudioBuffer with the PCM data
+
       const sampleRate = preview.sample.sampleRate || 44100;
       const dataL = preview.sample.dataL;
       const dataR = preview.sample.dataR;
-      
-      // Create mono or stereo buffer based on available data
-      const numChannels = dataR && dataR.length > 0 && dataR.length === dataL.length && dataL.length > 0 ? 2 : 1;
+      const numChannels =
+        dataR && dataR.length > 0 && dataR.length === dataL.length && dataL.length > 0 ? 2 : 1;
       if (dataL.length === 0) {
         throw new Error("Cannot play empty sample data");
       }
       const buffer = ctx.createBuffer(numChannels, dataL.length, sampleRate);
-      
-      // Copy the Float32Array data to the buffer
+
       buffer.getChannelData(0).set(dataL);
       if (numChannels === 2) {
         buffer.getChannelData(1).set(dataR);
       }
-      
-      // Create and configure the source node
+
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
-      
-      // Play once and clean up
+
       source.onended = () => {
         source.disconnect();
         source.buffer = null;
       };
-      
+
       source.start(0);
-      
+
       setAudioError("");
     } catch (err) {
       setAudioError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  // Handler for "Play Sample" button (in PCM Sample Preview panel)
+  async function onPlaySelectedLayer() {
+    await playSelectedLayer();
   }
 
   async function onTogglePower() {
@@ -1520,32 +1532,53 @@ export default function App() {
                                 </p>
                               )}
                               <ul className="monoList">
-                                {inst.sampleZones.map((zone) => (
-                                  <li key={`iz-${inst.index}-${zone.bagIndex}`}>
-                                    <button
-                                      type="button"
-                                      className={`layerButton ${selectedLayer?.type === "instrumentRegion" &&
-                                          selectedLayer?.bagIndex === zone.bagIndex
-                                          ? "selected"
-                                          : ""
-                                        }`}
-                                      onClick={() =>
-                                        setSelectedLayer(
-                                          buildSelectionFromInstrumentRegion(
+                                {inst.sampleZones.map((zone) => {
+                                  const isSelected =
+                                    selectedLayer?.type === "instrumentRegion" &&
+                                    selectedLayer?.bagIndex === zone.bagIndex;
+                                  const rangeFilter = rangeFilterLabelFromGenerators(zone.gens);
+                                  return (
+                                    <li key={`iz-${inst.index}-${zone.bagIndex}`} className="layerRow">
+                                      <button
+                                        type="button"
+                                        className={`layerButton ${isSelected ? "selected" : ""}`}
+                                        onClick={() =>
+                                          setSelectedLayer(
+                                            buildSelectionFromInstrumentRegion(
+                                              programDetails,
+                                              inst,
+                                              zone,
+                                              midiNote,
+                                              midiVelocity
+                                            )
+                                          )
+                                        }
+                                      >
+                                        bag {zone.bagIndex}: sample {zone.sampleID} ({zone.sampleName}) @{" "}
+                                        {zone.sampleRate}Hz
+                                        {rangeFilter ? `, filter ${rangeFilter}` : ""}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="layerPlayButton"
+                                        onClick={async () => {
+                                          const layer = buildSelectionFromInstrumentRegion(
                                             programDetails,
                                             inst,
                                             zone,
                                             midiNote,
                                             midiVelocity
-                                          )
-                                        )
-                                      }
-                                    >
-                                      bag {zone.bagIndex}: sample {zone.sampleID} ({zone.sampleName}) @{" "}
-                                      {zone.sampleRate}Hz
-                                    </button>
-                                  </li>
-                                ))}
+                                          );
+                                          setSelectedLayer(layer);
+                                          await playSelectedLayer(layer);
+                                        }}
+                                        title="Select this layer and play sample"
+                                      >
+                                        Play
+                                      </button>
+                                    </li>
+                                  );
+                                })}
                               </ul>
                             </div>
                           ))}

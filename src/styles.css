@@ -683,6 +683,22 @@ button:disabled {
   border-color: #5f8096;
 }
 
+.layerRow {
+  display: flex;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
+.layerPlayButton {
+  border: 1px solid #b5c7d4;
+  border-radius: 6px;
+  background: #eef5fa;
+  padding: 0.35rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
 .thSort {
   border: none;
   background: transparent;
