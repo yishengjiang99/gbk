@@ -6,7 +6,7 @@ export async function createMidiDriver({
   selectedInputId = "all",
 }) {
   if (!navigator.requestMIDIAccess) {
-    throw new Error("Web MIDI is not supported in this browser.");
+    return null;
   }
 
   const midi = await navigator.requestMIDIAccess({ sysex: false });

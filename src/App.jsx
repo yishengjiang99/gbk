@@ -506,6 +506,7 @@ export default function App() {
   const [sf2Options, setSf2Options] = useState([]);
   const [selectedSf2Path, setSelectedSf2Path] = useState("");
   const [didAutoEnableMidi, setDidAutoEnableMidi] = useState(false);
+  const [webMidiSupported, setWebMidiSupported] = useState(true);
 
   const audioCtxRef = useRef(null);
   const workletNodeRef = useRef(null);
@@ -580,6 +581,11 @@ export default function App() {
         midiDriverRef.current.disconnect();
       }
     };
+  }, []);
+
+  useEffect(() => {
+    // Check if Web MIDI API is supported
+    setWebMidiSupported(!!navigator.requestMIDIAccess);
   }, []);
 
   useEffect(() => {
@@ -1042,30 +1048,34 @@ export default function App() {
             <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
           </button>
           <span className="midiStatus">Audio: {audioCtxState}</span>
-          <button
-            type="button"
-            onClick={onToggleMidi}
-            disabled={!sf2}
-            className={`toggleBtn ${midiEnabled ? "tintOn" : ""}`}
-            title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-          >
-            <i className="fa-solid fa-music" aria-hidden="true" />
-            <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
-          </button>
-          <select
-            value={selectedMidiInput}
-            onChange={(e) => setSelectedMidiInput(e.target.value)}
-            disabled={!midiEnabled}
-            title="MIDI input source"
-          >
-            <option value="all">All MIDI Inputs</option>
-            {midiInputs.map((input) => (
-              <option key={input.id} value={input.id}>
-                {input.name}
-              </option>
-            ))}
-          </select>
-          <span className="midiStatus">{midiStatus}</span>
+          {webMidiSupported && (
+            <>
+              <button
+                type="button"
+                onClick={onToggleMidi}
+                disabled={!sf2}
+                className={`toggleBtn ${midiEnabled ? "tintOn" : ""}`}
+                title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+              >
+                <i className="fa-solid fa-music" aria-hidden="true" />
+                <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
+              </button>
+              <select
+                value={selectedMidiInput}
+                onChange={(e) => setSelectedMidiInput(e.target.value)}
+                disabled={!midiEnabled}
+                title="MIDI input source"
+              >
+                <option value="all">All MIDI Inputs</option>
+                {midiInputs.map((input) => (
+                  <option key={input.id} value={input.id}>
+                    {input.name}
+                  </option>
+                ))}
+              </select>
+              <span className="midiStatus">{midiStatus}</span>
+            </>
+          )}
           <button
             type="button"
             className="menuToggleBtn"
