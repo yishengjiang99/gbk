@@ -4,6 +4,8 @@ import { createMidiDriver } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
 import { fetchWasmBinary } from "./dsp-wasm-wrapper.js";
 
+const INT16_MAX_VALUE = 32768;
+
 const QWERTY_NOTE_MAP = {
   a: 60, // C4
   w: 61, // C#4
@@ -583,7 +585,7 @@ export default function App() {
     const n = end - start;
     const dataL = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      dataL[i] = sdta.smpl[start + i] / 32768;
+      dataL[i] = sdta.smpl[start + i] / INT16_MAX_VALUE;
     }
     
     return {
