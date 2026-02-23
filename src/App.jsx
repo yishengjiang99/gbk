@@ -847,6 +847,7 @@ export default function App() {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.82;
+      analyser.connect(ctx.destination);
       analyserRef.current = analyser;
       timeDomainRef.current = new Float32Array(analyser.fftSize);
       freqDomainRef.current = new Uint8Array(analyser.frequencyBinCount);
@@ -899,7 +900,6 @@ export default function App() {
         processorOptions,
       });
       workletNodeRef.current = node;
-      node.connect(ctx.destination);
       node.connect(analyser);
       node.port.postMessage({ type: "setMasterFx", ...masterFxSettings });
     }
