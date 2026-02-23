@@ -16,6 +16,26 @@ const DEFAULT_MASTER_FX = {
     releaseSec: 0.25,
     masterGainDb: 0,
 };
+const SAFE_WORKLET_SAMPLE_RATE = (Number.isFinite(sampleRate) && sampleRate > 1000) ? sampleRate : 44100;
+
+function finiteOrZero(v) {
+    return Number.isFinite(v) ? v : 0;
+}
+
+function finiteOr(v, fallback) {
+    return Number.isFinite(v) ? v : fallback;
+}
+
+function safeAudioRate(sr) {
+    return (Number.isFinite(sr) && sr > 1000) ? sr : SAFE_WORKLET_SAMPLE_RATE;
+}
+
+function clampAbs(v, maxAbs = 16) {
+    if (!Number.isFinite(v)) return 0;
+    if (v > maxAbs) return maxAbs;
+    if (v < -maxAbs) return -maxAbs;
+    return v;
+}
 
 // Initialize WASM module from binary data
 async function initWasmFromBinary(wasmBinary, glueCode, basePath) {
@@ -246,14 +266,14 @@ class LFOWasm {
 
 class TwoPoleLPFWasm {
     constructor(sr) {
-        this.sr = sr;
+        this.sr = safeAudioRate(sr);
         this.ptr = null;
         
         if (!dspReady || !dspModule) {
             throw new Error('WASM module not initialized');
         }
         
-        this.ptr = dspModule._lpfCreate(sr);
+        this.ptr = dspModule._lpfCreate(this.sr);
         if (!this.ptr) {
             throw new Error('Failed to create WASM LPF');
         }
@@ -263,27 +283,28 @@ class TwoPoleLPFWasm {
         if (!this.ptr || !dspModule) {
             throw new Error('WASM module not available');
         }
-        dspModule._lpfSetCutoffHz(this.ptr, hz ?? 1000);
+        const safeHz = finiteOr(hz, 1000);
+        dspModule._lpfSetCutoffHz(this.ptr, safeHz > 0 ? safeHz : 5);
     }
     
     processL(x) {
         if (!this.ptr || !dspModule) {
             throw new Error('WASM module not available');
         }
-        return dspModule._lpfProcessL(this.ptr, x);
+        return finiteOrZero(dspModule._lpfProcessL(this.ptr, finiteOrZero(x)));
     }
     
     processR(x) {
         if (!this.ptr || !dspModule) {
             throw new Error('WASM module not available');
         }
-        return dspModule._lpfProcessR(this.ptr, x);
+        return finiteOrZero(dspModule._lpfProcessR(this.ptr, finiteOrZero(x)));
     }
 }
 
 class MasterFxWasm {
     constructor(sr) {
-        this.sr = sr;
+        this.sr = safeAudioRate(sr);
         this.ptr = null;
         this.outL = 0;
         this.outR = 0;
@@ -292,7 +313,7 @@ class MasterFxWasm {
             throw new Error('WASM module not initialized');
         }
 
-        this.ptr = dspModule._masterFxCreate(sr);
+        this.ptr = dspModule._masterFxCreate(this.sr);
         if (!this.ptr) {
             throw new Error('Failed to create WASM MasterFx');
         }
@@ -315,12 +336,12 @@ class MasterFxWasm {
 
     processStereo(xL, xR) {
         if (!this.ptr || !dspModule) {
-            this.outL = xL;
-            this.outR = xR;
+            this.outL = finiteOrZero(xL);
+            this.outR = finiteOrZero(xR);
             return;
         }
-        this.outL = dspModule._masterFxProcessStereoOutL(this.ptr, xL, xR);
-        this.outR = dspModule._masterFxGetLastOutR(this.ptr);
+        this.outL = finiteOrZero(dspModule._masterFxProcessStereoOutL(this.ptr, finiteOrZero(xL), finiteOrZero(xR)));
+        this.outR = finiteOrZero(dspModule._masterFxGetLastOutR(this.ptr));
     }
 }
 
@@ -341,14 +362,18 @@ function balanceToGains(balance) {
 
 // ---------- Pitch ----------
 function regionBaseRate(region, midiNote, outSr) {
+    const safeOutSr = safeAudioRate(outSr);
     const root = (region.overridingRootKey ?? region.originalKey ?? 60);
     const scale = (region.scaleTuning ?? 100);
     const keyTrackCents = (midiNote - root) * scale;
     const tuneCents = (region.coarseTune ?? 0) * 100 + (region.fineTune ?? 0);
     const totalCents = keyTrackCents + tuneCents;
 
-    const srRatio = (region.sample.sampleRate ?? outSr) / outSr;
-    return centsToRatio(totalCents) * srRatio;
+    const sourceSr = (Number.isFinite(region.sample.sampleRate) && region.sample.sampleRate > 0)
+        ? region.sample.sampleRate
+        : safeOutSr;
+    const srRatio = sourceSr / safeOutSr;
+    return finiteOr(centsToRatio(totalCents) * srRatio, 1);
 }
 
 // ---------- Sample read (linear interpolation) ----------
@@ -362,6 +387,7 @@ function readSampleMono(data, pos) {
 
 // ---------- Voice ----------
 function makeVoice(region, note, velocity, outSr) {
+    outSr = safeAudioRate(outSr);
     const sample = region.sample;
     const start = sample.start ?? 0;
     const end = sample.end ?? sample.dataL.length;
@@ -372,12 +398,12 @@ function makeVoice(region, note, velocity, outSr) {
     const looping = sampleModes === 1 || sampleModes === 3;
     const loopUntilReleaseThenTail = sampleModes === 3;
 
-    const baseRate = regionBaseRate(region, note, outSr);
+    const baseRate = finiteOr(regionBaseRate(region, note, outSr), 1);
 
     const panG = panToGains(region.pan ?? 0);
     const velGain = velToLin(velocity, 2.0);
     const attenGain = cbAttenToLin(region.initialAttenuationCb ?? 0);
-    const baseGain = velGain * attenGain;
+    const baseGain = finiteOrZero(velGain * attenGain);
 
     const v = {
         note,
@@ -455,7 +481,7 @@ class Sf2Processor extends AudioWorkletProcessor {
             this.initPromise = initWasmFromBinary(wasmBinary, glueCode, basePath)
                 .then(() => {
                     this.wasmInitialized = true;
-                    this.masterFx = new MasterFxWasm(sampleRate);
+                    this.masterFx = new MasterFxWasm(safeAudioRate(sampleRate));
                     this.masterFx.setParams(this.masterFxParams);
                     for (const pending of this.pendingMessages) {
                         this.onMsg(pending);
@@ -513,7 +539,7 @@ class Sf2Processor extends AudioWorkletProcessor {
             // allocate voices (layering allowed)
             for (const r of matching) {
                 this.ensurePolyphony();
-                this.voices.push(makeVoice(r, note, velocity, sampleRate));
+                this.voices.push(makeVoice(r, note, velocity, safeAudioRate(sampleRate)));
             }
         }
 
@@ -631,9 +657,9 @@ class Sf2Processor extends AudioWorkletProcessor {
                 }
 
                 // --- Mod sources ---
-                const modEnv = v.modEnv.next(); // 0..1
-                const modLfo = v.modLfo.next(); // -1..1
-                const vibLfo = v.vibLfo.next(); // -1..1
+                const modEnv = finiteOrZero(v.modEnv.next()); // 0..1
+                const modLfo = finiteOrZero(v.modLfo.next()); // -1..1
+                const vibLfo = finiteOrZero(v.vibLfo.next()); // -1..1
 
                 // --- Pitch modulation (cents) ---
                 const r = v.region;
@@ -641,11 +667,15 @@ class Sf2Processor extends AudioWorkletProcessor {
                     vibLfo * (r.vibLfoToPitchCents ?? 0) +
                     modLfo * (r.modLfoToPitchCents ?? 0);
 
-                v.rate = v.baseRate * centsToRatio(pitchCents);
+                v.rate = finiteOr(v.baseRate * centsToRatio(pitchCents), v.baseRate);
+                if (!Number.isFinite(v.rate) || v.rate <= 0) {
+                    v.finished = true;
+                    continue;
+                }
 
                 // --- Read sample (stereo if provided; else mono) ---
-                const sL = readSampleMono(v.dataL, v.pos);
-                const sR = v.dataR ? readSampleMono(v.dataR, v.pos) : sL;
+                const sL = finiteOrZero(readSampleMono(v.dataL, v.pos));
+                const sR = v.dataR ? finiteOrZero(readSampleMono(v.dataR, v.pos)) : sL;
 
                 // --- Filter cutoff modulation ---
                 const fcCents =
@@ -653,19 +683,21 @@ class Sf2Processor extends AudioWorkletProcessor {
                     modEnv * (r.modEnvToFilterFcCents ?? 0) +
                     modLfo * (r.modLfoToFilterFcCents ?? 0);
 
-                v.lpf.setCutoffHz(fcCentsToHz(fcCents));
+                v.lpf.setCutoffHz(finiteOr(fcCentsToHz(fcCents), 1000));
 
-                const fL = v.lpf.processL(sL);
-                const fR = v.lpf.processR(sR);
+                const fL = finiteOrZero(v.lpf.processL(sL));
+                const fR = finiteOrZero(v.lpf.processR(sR));
 
                 // --- Volume envelope & gain ---
-                const env = v.volEnv.next();
-                const g = v.baseGain * env * volumeMul;
+                const env = finiteOrZero(v.volEnv.next());
+                const g = finiteOrZero(v.baseGain * env * volumeMul);
                 const mixPan = Math.max(-1, Math.min(1, v.regionPanPos + ccPanPos));
                 const panG = balanceToGains(mixPan);
 
-                sumL += fL * g * panG.gL;
-                sumR += fR * g * panG.gR;
+                sumL += finiteOrZero(fL * g * panG.gL);
+                sumR += finiteOrZero(fR * g * panG.gR);
+                sumL = clampAbs(sumL);
+                sumR = clampAbs(sumR);
 
                 // --- Advance position (looping/tail) ---
                 this.advancePos(v);
@@ -673,12 +705,15 @@ class Sf2Processor extends AudioWorkletProcessor {
 
             if (this.masterFx) {
                 this.masterFx.processStereo(sumL, sumR);
-                outL[i] = this.masterFx.outL;
-                outR[i] = this.masterFx.outR;
+                outL[i] = clampAbs(this.masterFx.outL, 8);
+                outR[i] = clampAbs(this.masterFx.outR, 8);
             } else {
-                outL[i] = sumL;
-                outR[i] = sumR;
+                outL[i] = clampAbs(sumL, 8);
+                outR[i] = clampAbs(sumR, 8);
             }
+
+            if (!Number.isFinite(outL[i])) outL[i] = 0;
+            if (!Number.isFinite(outR[i])) outR[i] = 0;
         }
 
         return true;

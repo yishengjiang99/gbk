@@ -6,6 +6,16 @@
 #define MIN_VOL_RELEASE_SEC 0.06
 #define MIN_MOD_RELEASE_SEC 0.02
 #define EPS 1e-5
+#define DEFAULT_SR 44100.0
+
+static double sanitizeSampleRate(double sr) {
+    if (!isfinite(sr) || sr < 1000.0) return DEFAULT_SR;
+    return sr;
+}
+
+static double finiteOr(double v, double fallback) {
+    return isfinite(v) ? v : fallback;
+}
 
 // Utility functions
 EMSCRIPTEN_KEEPALIVE
@@ -458,11 +468,14 @@ typedef struct {
 } MasterFx;
 
 static double dbToLin(double db) {
-    return pow(10.0, db / 20.0);
+    if (!isfinite(db)) return 1.0;
+    double clampedDb = fmax(-200.0, fmin(60.0, db));
+    return pow(10.0, clampedDb / 20.0);
 }
 
 static double smoothCoeff(double sr, double sec) {
-    if (sec <= 0.0) return 0.0;
+    sr = sanitizeSampleRate(sr);
+    if (!isfinite(sec) || sec <= 0.0) return 0.0;
     return exp(-1.0 / (sr * sec));
 }
 
@@ -493,7 +506,7 @@ MasterFx* masterFxCreate(double sr) {
     MasterFx* fx = (MasterFx*)malloc(sizeof(MasterFx));
     if (!fx) return NULL;
 
-    fx->sr = sr;
+    fx->sr = sanitizeSampleRate(sr);
     fx->thresholdDb = -24.0;
     fx->kneeDb = 30.0;
     fx->ratio = 2.0;
@@ -522,11 +535,12 @@ EMSCRIPTEN_KEEPALIVE
 void masterFxSetParams(MasterFx* fx, double thresholdDb, double kneeDb, double ratio,
                        double attackSec, double releaseSec, double masterGainDb) {
     if (!fx) return;
-    fx->thresholdDb = thresholdDb;
-    fx->kneeDb = fmax(0.0, kneeDb);
-    fx->ratio = fmax(1.0, ratio);
-    fx->attackSec = fmax(0.0, attackSec);
-    fx->releaseSec = fmax(0.0, releaseSec);
+    fx->sr = sanitizeSampleRate(fx->sr);
+    fx->thresholdDb = finiteOr(thresholdDb, -24.0);
+    fx->kneeDb = fmax(0.0, finiteOr(kneeDb, 30.0));
+    fx->ratio = fmax(1.0, finiteOr(ratio, 2.0));
+    fx->attackSec = fmax(0.0, finiteOr(attackSec, 0.01));
+    fx->releaseSec = fmax(0.0, finiteOr(releaseSec, 0.25));
     fx->masterGainLin = dbToLin(masterGainDb);
 }
 
@@ -534,15 +548,20 @@ EMSCRIPTEN_KEEPALIVE
 void masterFxProcessStereo(MasterFx* fx, double* ioL, double* ioR) {
     if (!fx || !ioL || !ioR) return;
 
-    double xL = *ioL;
-    double xR = *ioR;
+    fx->sr = sanitizeSampleRate(fx->sr);
+    double xL = finiteOr(*ioL, 0.0);
+    double xR = finiteOr(*ioR, 0.0);
     double detector = fmax(fabs(xL), fabs(xR));
     double detectorDb = 20.0 * log10(fmax(EPS, detector));
+    detectorDb = finiteOr(detectorDb, -120.0);
 
     double coeff = (detectorDb > fx->detectorDb)
         ? smoothCoeff(fx->sr, fx->attackSec)
         : smoothCoeff(fx->sr, fx->releaseSec);
+    coeff = fmax(0.0, fmin(1.0, finiteOr(coeff, 0.0)));
+    fx->detectorDb = finiteOr(fx->detectorDb, -120.0);
     fx->detectorDb = coeff * fx->detectorDb + (1.0 - coeff) * detectorDb;
+    fx->detectorDb = finiteOr(fx->detectorDb, detectorDb);
 
     double grDb = compressorGainReductionDb(
         fx->detectorDb,
@@ -550,10 +569,12 @@ void masterFxProcessStereo(MasterFx* fx, double* ioL, double* ioR) {
         fx->kneeDb,
         fx->ratio
     );
+    grDb = fmax(0.0, finiteOr(grDb, 0.0));
     double gain = dbToLin(-grDb) * fx->masterGainLin;
+    gain = finiteOr(gain, 1.0);
 
-    *ioL = xL * gain;
-    *ioR = xR * gain;
+    *ioL = finiteOr(xL * gain, 0.0);
+    *ioR = finiteOr(xR * gain, 0.0);
     fx->lastOutR = *ioR;
 }
 
@@ -578,7 +599,7 @@ TwoPoleLPF* lpfCreate(double sr) {
     TwoPoleLPF* lpf = (TwoPoleLPF*)malloc(sizeof(TwoPoleLPF));
     if (!lpf) return NULL;
     
-    lpf->sr = sr;
+    lpf->sr = sanitizeSampleRate(sr);
     lpf->z1L = 0.0;
     lpf->z2L = 0.0;
     lpf->z1R = 0.0;
@@ -598,7 +619,12 @@ void lpfDestroy(TwoPoleLPF* lpf) {
 
 EMSCRIPTEN_KEEPALIVE
 void lpfSetCutoffHz(TwoPoleLPF* lpf, double hz) {
-    double clamped = fmax(5.0, fmin(hz, lpf->sr * 0.45));
+    if (!lpf) return;
+    lpf->sr = sanitizeSampleRate(lpf->sr);
+    if (!isfinite(hz)) hz = 1000.0;
+    double nyquistSafe = lpf->sr * 0.45;
+    if (!isfinite(nyquistSafe) || nyquistSafe <= 5.0) nyquistSafe = 1000.0;
+    double clamped = fmax(5.0, fmin(hz, nyquistSafe));
     double Q = 0.7071; // Butterworth response
     
     double w0 = 2.0 * M_PI * clamped / lpf->sr;
@@ -607,26 +633,56 @@ void lpfSetCutoffHz(TwoPoleLPF* lpf, double hz) {
     double alpha = sinw0 / (2.0 * Q);
     
     double a0 = 1.0 + alpha;
+    if (!isfinite(a0) || fabs(a0) < EPS) {
+        lpf->b0 = 1.0;
+        lpf->b1 = 0.0;
+        lpf->b2 = 0.0;
+        lpf->a1 = 0.0;
+        lpf->a2 = 0.0;
+        return;
+    }
     lpf->b0 = ((1.0 - cosw0) / 2.0) / a0;
     lpf->b1 = (1.0 - cosw0) / a0;
     lpf->b2 = ((1.0 - cosw0) / 2.0) / a0;
     lpf->a1 = (-2.0 * cosw0) / a0;
     lpf->a2 = (1.0 - alpha) / a0;
+    if (!isfinite(lpf->b0) || !isfinite(lpf->b1) || !isfinite(lpf->b2) ||
+        !isfinite(lpf->a1) || !isfinite(lpf->a2)) {
+        lpf->b0 = 1.0;
+        lpf->b1 = 0.0;
+        lpf->b2 = 0.0;
+        lpf->a1 = 0.0;
+        lpf->a2 = 0.0;
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE
 double lpfProcessL(TwoPoleLPF* lpf, double x) {
+    if (!lpf) return 0.0;
+    x = finiteOr(x, 0.0);
     double y = lpf->b0 * x + lpf->z1L;
     lpf->z1L = lpf->b1 * x - lpf->a1 * y + lpf->z2L;
     lpf->z2L = lpf->b2 * x - lpf->a2 * y;
+    if (!isfinite(y) || !isfinite(lpf->z1L) || !isfinite(lpf->z2L)) {
+        lpf->z1L = 0.0;
+        lpf->z2L = 0.0;
+        return 0.0;
+    }
     return y;
 }
 
 EMSCRIPTEN_KEEPALIVE
 double lpfProcessR(TwoPoleLPF* lpf, double x) {
+    if (!lpf) return 0.0;
+    x = finiteOr(x, 0.0);
     double y = lpf->b0 * x + lpf->z1R;
     lpf->z1R = lpf->b1 * x - lpf->a1 * y + lpf->z2R;
     lpf->z2R = lpf->b2 * x - lpf->a2 * y;
+    if (!isfinite(y) || !isfinite(lpf->z1R) || !isfinite(lpf->z2R)) {
+        lpf->z1R = 0.0;
+        lpf->z2R = 0.0;
+        return 0.0;
+    }
     return y;
 }
 
