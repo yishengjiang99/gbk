@@ -578,6 +578,10 @@ export default function App() {
   const activeKeyboardKeysRef = useRef(new Map());
   const workletLoadPromiseRef = useRef(null);
   const wasmDataRef = useRef(null);
+  const triggerNoteOnRef = useRef(null);
+  const triggerNoteOffRef = useRef(null);
+  const resolvePresetIndexRef = useRef(null);
+  const syncMidiDriverProgramForPresetRef = useRef(null);
 
   const presets = useMemo(() => getPresetRows(sf2), [sf2]);
   const visiblePresets = useMemo(() => {
@@ -859,7 +863,7 @@ export default function App() {
           console.error('Failed to fetch WASM binary:', error);
           throw error;
         }
-        
+
         const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
         workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
       }
@@ -910,6 +914,16 @@ export default function App() {
     return null;
   }, [presets]);
 
+  const syncMidiDriverProgramForPreset = useCallback(
+    (presetIndex) => {
+      if (presetIndex == null || presetIndex < 0) return;
+      const preset = presets[presetIndex];
+      if (!preset) return;
+      midiDriverRef.current?.setChannelProgram?.(0, preset.preset, preset.bank);
+    },
+    [presets]
+  );
+
   const getRegionsForPresetIndex = useCallback((presetIndex) => {
     if (!sf2 || presetIndex == null || presetIndex < 0) return [];
     if (presetRegionCacheRef.current.has(presetIndex)) {
@@ -940,6 +954,7 @@ export default function App() {
   async function triggerNoteOn(note, velocity) {
     if (!sf2 || effectivePresetIndex == null) return;
     if (selectedPreset == null) setSelectedPreset(effectivePresetIndex);
+    console.log(effectivePresetIndex, 'effectivePresetIndex');
     const node = await ensureAudioGraph(false);
     const regions = getCurrentPresetRegions();
     node.port.postMessage({ type: "setPreset", regions });
@@ -951,6 +966,11 @@ export default function App() {
     if (!node) return;
     node.port.postMessage({ type: "noteOff", note });
   }
+
+  triggerNoteOnRef.current = triggerNoteOn;
+  triggerNoteOffRef.current = triggerNoteOff;
+  resolvePresetIndexRef.current = resolvePresetIndex;
+  syncMidiDriverProgramForPresetRef.current = syncMidiDriverProgramForPreset;
 
   // Shared function to play a note with current MIDI settings
   // Both "Play Note" and "Play Sample" buttons use this, as the audio engine
@@ -1065,19 +1085,20 @@ export default function App() {
           setMidiVelocity(velocity);
           setMidiStatus(`MIDI noteOn ${note} vel ${velocity}`);
           try {
-            await triggerNoteOn(note, velocity);
+            await triggerNoteOnRef.current?.(note, velocity);
           } catch (err) {
             setAudioError(err instanceof Error ? err.message : String(err));
           }
         },
         onNoteOff: (note) => {
           setMidiStatus(`MIDI noteOff ${note}`);
-          triggerNoteOff(note);
+          triggerNoteOffRef.current?.(note);
         },
         onProgramChange: (program, bank, channel) => {
-          const nextIndex = resolvePresetIndex(program, bank);
+          const nextIndex = resolvePresetIndexRef.current?.(program, bank);
           if (nextIndex != null && nextIndex >= 0) {
             setSelectedPreset(nextIndex);
+            syncMidiDriverProgramForPresetRef.current?.(nextIndex);
             setMidiStatus(
               `MIDI program ch${channel + 1}: bank ${bank}, program ${program} -> preset #${nextIndex}`
             );
@@ -1095,6 +1116,11 @@ export default function App() {
         },
       });
       midiDriverRef.current = driver;
+      if (selectedPreset != null) {
+        syncMidiDriverProgramForPreset(selectedPreset);
+      } else if (effectivePresetIndex != null) {
+        syncMidiDriverProgramForPreset(effectivePresetIndex);
+      }
       setMidiEnabled(true);
       setMidiStatus("MIDI enabled");
     } catch (err) {
@@ -1134,14 +1160,15 @@ export default function App() {
           <p>Play MIDI with a WebAssembly SoundFont engine.</p>
         </div>
         <div className="toolbar">
+          {webMidiSupported && <span className="midiStatus">{midiStatus}</span>}
           <button
             type="button"
             onClick={onTogglePower}
             className={`toggleBtn ${audioCtxState === "running" ? "tintOn" : ""}`}
             title={audioCtxState === "running" ? "Power Off" : "Power On"}
+            aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
           >
             <i className="fa-solid fa-power-off" aria-hidden="true" />
-            <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
           </button>
           <span className="midiStatus">Audio: {audioCtxState}</span>
           {webMidiSupported && (
@@ -1169,7 +1196,6 @@ export default function App() {
                   </option>
                 ))}
               </select>
-              <span className="midiStatus">{midiStatus}</span>
             </>
           )}
           <button
@@ -1338,6 +1364,7 @@ export default function App() {
                           className={selectedPreset === preset._index ? "selected" : ""}
                           onClick={() => {
                             setSelectedPreset(preset._index);
+                            syncMidiDriverProgramForPreset(preset._index);
                           }}
                         >
                           <td>{preset._index}</td>
@@ -1508,9 +1535,9 @@ export default function App() {
                                   <button
                                     type="button"
                                     className={`layerButton ${selectedLayer?.type === "instrumentGlobal" &&
-                                        selectedLayer?.bagIndex === inst.globalZone.bagIndex
-                                        ? "selected"
-                                        : ""
+                                      selectedLayer?.bagIndex === inst.globalZone.bagIndex
+                                      ? "selected"
+                                      : ""
                                       }`}
                                     onClick={() =>
                                       setSelectedLayer(
@@ -1610,11 +1637,11 @@ export default function App() {
                   {(() => {
                     // Use selectedSamplePreview if available (for instrumentRegion), otherwise use previewRegion
                     const preview = selectedSamplePreview || programDetails?.previewRegion;
-                    
+
                     if (selectedPreset == null || !preview) {
                       return <p>Waveform appears when the selected program has playable regions.</p>;
                     }
-                    
+
                     return (
                       <>
                         <WaveformCanvas data={preview.sample.dataL} />
