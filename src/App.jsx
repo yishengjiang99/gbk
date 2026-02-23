@@ -589,6 +589,7 @@ export default function App() {
   const triggerNoteOffRef = useRef(null);
   const resolvePresetIndexRef = useRef(null);
   const syncMidiDriverProgramForPresetRef = useRef(null);
+  const midiVelocityRef = useRef(midiVelocity);
 
   const presets = useMemo(() => getPresetRows(sf2), [sf2]);
   const visiblePresets = useMemo(() => {
@@ -677,7 +678,7 @@ export default function App() {
       const active = [...activeKeyboardKeysRef.current.values()];
       activeKeyboardKeysRef.current.clear();
       for (const note of active) {
-        triggerNoteOff(note);
+        triggerNoteOffRef.current?.(note);
       }
     }
 
@@ -690,7 +691,7 @@ export default function App() {
       if (activeKeyboardKeysRef.current.has(key)) return;
       activeKeyboardKeysRef.current.set(key, note);
       setMidiNote(note);
-      triggerNoteOn(note, midiVelocity).catch((err) => {
+      triggerNoteOnRef.current?.(note, midiVelocityRef.current).catch((err) => {
         setAudioError(err instanceof Error ? err.message : String(err));
       });
     }
@@ -701,7 +702,7 @@ export default function App() {
       if (note == null) return;
       event.preventDefault();
       activeKeyboardKeysRef.current.delete(key);
-      triggerNoteOff(note);
+      triggerNoteOffRef.current?.(note);
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -713,7 +714,7 @@ export default function App() {
       window.removeEventListener("blur", releaseAllKeys);
       releaseAllKeys();
     };
-  }, [midiVelocity, sf2, effectivePresetIndex]);
+  }, []);
 
   useEffect(() => {
     if (!midiDriverRef.current) return;
@@ -973,6 +974,7 @@ export default function App() {
   triggerNoteOffRef.current = triggerNoteOff;
   resolvePresetIndexRef.current = resolvePresetIndex;
   syncMidiDriverProgramForPresetRef.current = syncMidiDriverProgramForPreset;
+  midiVelocityRef.current = midiVelocity;
 
   // Shared function to play a note with current MIDI settings
   // Both "Play Note" and "Play Sample" buttons use this, as the audio engine
