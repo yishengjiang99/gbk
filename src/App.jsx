@@ -528,6 +528,11 @@ export default function App() {
   const presetRegionCacheRef = useRef(new Map());
   const activeKeyboardKeysRef = useRef(new Map());
   const workletLoadPromiseRef = useRef(null);
+  const selectedPresetRef = useRef(null);
+  const livePresetIndexRef = useRef(null);
+  const triggerNoteOnRef = useRef(null);
+  const triggerNoteOffRef = useRef(null);
+  const resolvePresetIndexRef = useRef(null);
 
   const presets = useMemo(() => getPresetRows(sf2), [sf2]);
   const visiblePresets = useMemo(() => {
@@ -561,6 +566,8 @@ export default function App() {
     if (selectedPreset != null) return selectedPreset;
     return presets.length > 0 ? 0 : null;
   }, [sf2, selectedPreset, presets.length]);
+  selectedPresetRef.current = selectedPreset;
+  livePresetIndexRef.current = effectivePresetIndex;
 
   useEffect(() => {
     if (!programDetails) {
@@ -827,24 +834,28 @@ export default function App() {
     return regions;
   }, [sf2]);
 
-  function getCurrentPresetRegions() {
-    if (!sf2 || effectivePresetIndex == null) return [];
+  function getCurrentPresetRegions(presetIndex = effectivePresetIndex) {
+    if (!sf2 || presetIndex == null) return [];
     if (
-      presetRegionsRef.current.presetIndex === effectivePresetIndex &&
+      presetRegionsRef.current.presetIndex === presetIndex &&
       presetRegionsRef.current.regions.length
     ) {
       return presetRegionsRef.current.regions;
     }
-    const regions = getRegionsForPresetIndex(effectivePresetIndex);
-    presetRegionsRef.current = { presetIndex: effectivePresetIndex, regions };
+    const regions = getRegionsForPresetIndex(presetIndex);
+    presetRegionsRef.current = { presetIndex, regions };
     return regions;
   }
 
   async function triggerNoteOn(note, velocity) {
-    if (!sf2 || effectivePresetIndex == null) return;
-    if (selectedPreset == null) setSelectedPreset(effectivePresetIndex);
+    const presetIndex = livePresetIndexRef.current;
+    if (!sf2 || presetIndex == null) return;
+    if (selectedPresetRef.current == null) {
+      selectedPresetRef.current = presetIndex;
+      setSelectedPreset(presetIndex);
+    }
     const node = await ensureAudioGraph(false);
-    const regions = getCurrentPresetRegions();
+    const regions = getCurrentPresetRegions(presetIndex);
     node.port.postMessage({ type: "setPreset", regions });
     node.port.postMessage({ type: "noteOn", note, velocity });
   }
@@ -854,6 +865,9 @@ export default function App() {
     if (!node) return;
     node.port.postMessage({ type: "noteOff", note });
   }
+  triggerNoteOnRef.current = triggerNoteOn;
+  triggerNoteOffRef.current = triggerNoteOff;
+  resolvePresetIndexRef.current = resolvePresetIndex;
 
   async function onPlaySample() {
     if (!sf2 || effectivePresetIndex == null) return;
@@ -913,18 +927,20 @@ export default function App() {
           setMidiVelocity(velocity);
           setMidiStatus(`MIDI noteOn ${note} vel ${velocity}`);
           try {
-            await triggerNoteOn(note, velocity);
+            await triggerNoteOnRef.current?.(note, velocity);
           } catch (err) {
             setAudioError(err instanceof Error ? err.message : String(err));
           }
         },
         onNoteOff: (note) => {
           setMidiStatus(`MIDI noteOff ${note}`);
-          triggerNoteOff(note);
+          triggerNoteOffRef.current?.(note);
         },
         onProgramChange: (program, bank, channel) => {
-          const nextIndex = resolvePresetIndex(program, bank);
+          const nextIndex = resolvePresetIndexRef.current?.(program, bank);
           if (nextIndex != null && nextIndex >= 0) {
+            selectedPresetRef.current = nextIndex;
+            livePresetIndexRef.current = nextIndex;
             setSelectedPreset(nextIndex);
             setMidiStatus(
               `MIDI program ch${channel + 1}: bank ${bank}, program ${program} -> preset #${nextIndex}`
@@ -982,8 +998,14 @@ export default function App() {
           <p>Inspect INFO tags, presets, instruments, and samples from an SF2 file.</p>
         </div>
         <div className="toolbar">
-          <button type="button" onClick={onTogglePower}>
-            {audioCtxState === "running" ? "Power Off" : "Power On"}
+          <span className="midiStatus">{midiStatus}</span>
+          <button
+            type="button"
+            onClick={onTogglePower}
+            aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
+            title={audioCtxState === "running" ? "Power Off" : "Power On"}
+          >
+            ⏻
           </button>
           <span className="midiStatus">Audio: {audioCtxState}</span>
           <button type="button" onClick={onToggleMidi} disabled={!sf2}>
@@ -1002,7 +1024,6 @@ export default function App() {
               </option>
             ))}
           </select>
-          <span className="midiStatus">{midiStatus}</span>
           <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
             {analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
           </button>
