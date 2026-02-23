@@ -8,6 +8,14 @@
 // ---------- WASM Integration ----------
 let dspModule = null;
 let dspReady = false;
+const DEFAULT_MASTER_FX = {
+    thresholdDb: -24,
+    kneeDb: 30,
+    ratio: 2,
+    attackSec: 0.01,
+    releaseSec: 0.25,
+    masterGainDb: 0,
+};
 
 // Initialize WASM module from binary data
 async function initWasmFromBinary(wasmBinary, glueCode, basePath) {
@@ -273,6 +281,49 @@ class TwoPoleLPFWasm {
     }
 }
 
+class MasterFxWasm {
+    constructor(sr) {
+        this.sr = sr;
+        this.ptr = null;
+        this.outL = 0;
+        this.outR = 0;
+
+        if (!dspReady || !dspModule) {
+            throw new Error('WASM module not initialized');
+        }
+
+        this.ptr = dspModule._masterFxCreate(sr);
+        if (!this.ptr) {
+            throw new Error('Failed to create WASM MasterFx');
+        }
+    }
+
+    setParams(params = {}) {
+        if (!this.ptr || !dspModule) {
+            throw new Error('WASM module not available');
+        }
+        dspModule._masterFxSetParams(
+            this.ptr,
+            params.thresholdDb ?? DEFAULT_MASTER_FX.thresholdDb,
+            params.kneeDb ?? DEFAULT_MASTER_FX.kneeDb,
+            params.ratio ?? DEFAULT_MASTER_FX.ratio,
+            params.attackSec ?? DEFAULT_MASTER_FX.attackSec,
+            params.releaseSec ?? DEFAULT_MASTER_FX.releaseSec,
+            params.masterGainDb ?? DEFAULT_MASTER_FX.masterGainDb
+        );
+    }
+
+    processStereo(xL, xR) {
+        if (!this.ptr || !dspModule) {
+            this.outL = xL;
+            this.outR = xR;
+            return;
+        }
+        this.outL = dspModule._masterFxProcessStereoOutL(this.ptr, xL, xR);
+        this.outR = dspModule._masterFxGetLastOutR(this.ptr);
+    }
+}
+
 // ---------- Utility Functions ----------
 
 function panToGains(pan) {
@@ -404,6 +455,8 @@ class Sf2Processor extends AudioWorkletProcessor {
             this.initPromise = initWasmFromBinary(wasmBinary, glueCode, basePath)
                 .then(() => {
                     this.wasmInitialized = true;
+                    this.masterFx = new MasterFxWasm(sampleRate);
+                    this.masterFx.setParams(this.masterFxParams);
                     for (const pending of this.pendingMessages) {
                         this.onMsg(pending);
                     }
@@ -423,6 +476,8 @@ class Sf2Processor extends AudioWorkletProcessor {
         this.cc7Volume = 100;
         this.cc10Pan = 64;
         this.cc11Expression = 127;
+        this.masterFx = null;
+        this.masterFxParams = { ...DEFAULT_MASTER_FX };
 
         this.port.onmessage = (e) => this.onMsg(e.data);
     }
@@ -492,6 +547,18 @@ class Sf2Processor extends AudioWorkletProcessor {
             }
             if (Number.isFinite(msg.cc11Expression)) {
                 this.cc11Expression = Math.max(0, Math.min(127, msg.cc11Expression | 0));
+            }
+        }
+
+        if (msg.type === "setMasterFx") {
+            if (Number.isFinite(msg.thresholdDb)) this.masterFxParams.thresholdDb = msg.thresholdDb;
+            if (Number.isFinite(msg.kneeDb)) this.masterFxParams.kneeDb = msg.kneeDb;
+            if (Number.isFinite(msg.ratio)) this.masterFxParams.ratio = msg.ratio;
+            if (Number.isFinite(msg.attackSec)) this.masterFxParams.attackSec = msg.attackSec;
+            if (Number.isFinite(msg.releaseSec)) this.masterFxParams.releaseSec = msg.releaseSec;
+            if (Number.isFinite(msg.masterGainDb)) this.masterFxParams.masterGainDb = msg.masterGainDb;
+            if (this.masterFx) {
+                this.masterFx.setParams(this.masterFxParams);
             }
         }
     }
@@ -604,8 +671,14 @@ class Sf2Processor extends AudioWorkletProcessor {
                 this.advancePos(v);
             }
 
-            outL[i] = sumL;
-            outR[i] = sumR;
+            if (this.masterFx) {
+                this.masterFx.processStereo(sumL, sumR);
+                outL[i] = this.masterFx.outL;
+                outR[i] = this.masterFx.outR;
+            } else {
+                outL[i] = sumL;
+                outR[i] = sumR;
+            }
         }
 
         return true;

@@ -444,6 +444,135 @@ typedef struct {
     double a2;
 } TwoPoleLPF;
 
+// Master output FX (stereo-linked compressor + master gain)
+typedef struct {
+    double sr;
+    double thresholdDb;
+    double kneeDb;
+    double ratio;
+    double attackSec;
+    double releaseSec;
+    double masterGainLin;
+    double detectorDb;
+    double lastOutR;
+} MasterFx;
+
+static double dbToLin(double db) {
+    return pow(10.0, db / 20.0);
+}
+
+static double smoothCoeff(double sr, double sec) {
+    if (sec <= 0.0) return 0.0;
+    return exp(-1.0 / (sr * sec));
+}
+
+static double compressorGainReductionDb(double inputDb, double thresholdDb, double kneeDb, double ratio) {
+    if (ratio <= 1.0) return 0.0;
+    double slope = 1.0 - (1.0 / ratio);
+    double over = inputDb - thresholdDb;
+    double knee = fmax(0.0, kneeDb);
+
+    if (knee <= 0.0) {
+        return (over > 0.0) ? slope * over : 0.0;
+    }
+
+    double halfKnee = knee * 0.5;
+    if (over <= -halfKnee) {
+        return 0.0;
+    }
+    if (over >= halfKnee) {
+        return slope * over;
+    }
+
+    double x = over + halfKnee; // 0..knee
+    return slope * (x * x) / (2.0 * knee);
+}
+
+EMSCRIPTEN_KEEPALIVE
+MasterFx* masterFxCreate(double sr) {
+    MasterFx* fx = (MasterFx*)malloc(sizeof(MasterFx));
+    if (!fx) return NULL;
+
+    fx->sr = sr;
+    fx->thresholdDb = -24.0;
+    fx->kneeDb = 30.0;
+    fx->ratio = 2.0;
+    fx->attackSec = 0.01;
+    fx->releaseSec = 0.25;
+    fx->masterGainLin = 1.0;
+    fx->detectorDb = -120.0;
+    fx->lastOutR = 0.0;
+    return fx;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void masterFxDestroy(MasterFx* fx) {
+    if (!fx) return;
+    free(fx);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void masterFxReset(MasterFx* fx) {
+    if (!fx) return;
+    fx->detectorDb = -120.0;
+    fx->lastOutR = 0.0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void masterFxSetParams(MasterFx* fx, double thresholdDb, double kneeDb, double ratio,
+                       double attackSec, double releaseSec, double masterGainDb) {
+    if (!fx) return;
+    fx->thresholdDb = thresholdDb;
+    fx->kneeDb = fmax(0.0, kneeDb);
+    fx->ratio = fmax(1.0, ratio);
+    fx->attackSec = fmax(0.0, attackSec);
+    fx->releaseSec = fmax(0.0, releaseSec);
+    fx->masterGainLin = dbToLin(masterGainDb);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void masterFxProcessStereo(MasterFx* fx, double* ioL, double* ioR) {
+    if (!fx || !ioL || !ioR) return;
+
+    double xL = *ioL;
+    double xR = *ioR;
+    double detector = fmax(fabs(xL), fabs(xR));
+    double detectorDb = 20.0 * log10(fmax(EPS, detector));
+
+    double coeff = (detectorDb > fx->detectorDb)
+        ? smoothCoeff(fx->sr, fx->attackSec)
+        : smoothCoeff(fx->sr, fx->releaseSec);
+    fx->detectorDb = coeff * fx->detectorDb + (1.0 - coeff) * detectorDb;
+
+    double grDb = compressorGainReductionDb(
+        fx->detectorDb,
+        fx->thresholdDb,
+        fx->kneeDb,
+        fx->ratio
+    );
+    double gain = dbToLin(-grDb) * fx->masterGainLin;
+
+    *ioL = xL * gain;
+    *ioR = xR * gain;
+    fx->lastOutR = *ioR;
+}
+
+EMSCRIPTEN_KEEPALIVE
+double masterFxProcessStereoOutL(MasterFx* fx, double inL, double inR) {
+    if (!fx) return inL;
+    double outL = inL;
+    double outR = inR;
+    masterFxProcessStereo(fx, &outL, &outR);
+    fx->lastOutR = outR;
+    return outL;
+}
+
+EMSCRIPTEN_KEEPALIVE
+double masterFxGetLastOutR(MasterFx* fx) {
+    if (!fx) return 0.0;
+    return fx->lastOutR;
+}
+
 EMSCRIPTEN_KEEPALIVE
 TwoPoleLPF* lpfCreate(double sr) {
     TwoPoleLPF* lpf = (TwoPoleLPF*)malloc(sizeof(TwoPoleLPF));

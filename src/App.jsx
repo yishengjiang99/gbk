@@ -5,6 +5,14 @@ import MidiReader from "./midireader.jsx";
 import { fetchWasmBinary } from "./dsp-wasm-wrapper.js";
 
 const INT16_MAX_VALUE = 32768;
+const DEFAULT_MASTER_FX_SETTINGS = {
+  thresholdDb: -24,
+  kneeDb: 30,
+  ratio: 2,
+  attackSec: 0.01,
+  releaseSec: 0.25,
+  masterGainDb: 0,
+};
 
 const QWERTY_NOTE_MAP = {
   a: 60, // C4
@@ -561,12 +569,11 @@ export default function App() {
   const [selectedSf2Path, setSelectedSf2Path] = useState("");
   const [didAutoEnableMidi, setDidAutoEnableMidi] = useState(false);
   const [webMidiSupported, setWebMidiSupported] = useState(true);
+  const [masterFxSettings, setMasterFxSettings] = useState(DEFAULT_MASTER_FX_SETTINGS);
 
   const audioCtxRef = useRef(null);
   const workletNodeRef = useRef(null);
   const analyserRef = useRef(null);
-  const masterGainRef = useRef(null);
-  const compressorRef = useRef(null);
   const timeDomainRef = useRef(null);
   const freqDomainRef = useRef(null);
   const rafRef = useRef(null);
@@ -650,6 +657,10 @@ export default function App() {
     presetRegionsRef.current = { presetIndex: null, regions: [] };
     presetRegionCacheRef.current = new Map();
   }, [sf2, effectivePresetIndex]);
+
+  useEffect(() => {
+    postMasterFxSettings(workletNodeRef.current, masterFxSettings);
+  }, [masterFxSettings]);
 
   useEffect(() => {
     function isTypingTarget(target) {
@@ -799,6 +810,23 @@ export default function App() {
     rafRef.current = requestAnimationFrame(tick);
   }
 
+  function postMasterFxSettings(node, settings = masterFxSettings) {
+    if (!node) return;
+    node.port.postMessage({
+      type: "setMasterFx",
+      thresholdDb: settings.thresholdDb,
+      kneeDb: settings.kneeDb,
+      ratio: settings.ratio,
+      attackSec: settings.attackSec,
+      releaseSec: settings.releaseSec,
+      masterGainDb: settings.masterGainDb,
+    });
+  }
+
+  function updateMasterFxSetting(key, value) {
+    setMasterFxSettings((prev) => ({ ...prev, [key]: value }));
+  }
+
   const ensureAudioInfrastructure = useCallback(async ({ loadWorklet = true } = {}) => {
     setAudioError("");
     let ctx = audioCtxRef.current;
@@ -809,10 +837,7 @@ export default function App() {
       ctx.onstatechange = () => setAudioCtxState(ctx.state);
     }
 
-    const currentTime = ctx.currentTime;
     let analyser = analyserRef.current;
-    let masterGain = masterGainRef.current;
-    let compressor = compressorRef.current;
 
     if (!analyser) {
       analyser = ctx.createAnalyser();
@@ -821,31 +846,6 @@ export default function App() {
       analyserRef.current = analyser;
       timeDomainRef.current = new Float32Array(analyser.fftSize);
       freqDomainRef.current = new Uint8Array(analyser.frequencyBinCount);
-    }
-
-    if (!masterGain) {
-      masterGain = ctx.createGain();
-      masterGain.gain.setValueAtTime(1.0, currentTime);
-      masterGainRef.current = masterGain;
-    }
-
-    if (!compressor) {
-      compressor = ctx.createDynamicsCompressor();
-      // The point at which compression begins (in dB)
-      compressor.threshold.setValueAtTime(-24, currentTime);
-      // A range above the threshold where the curve smoothly transitions to the ratio (in dB)
-      compressor.knee.setValueAtTime(30, currentTime);
-      // The amount of change in dB input vs output (ratio)
-      compressor.ratio.setValueAtTime(2, currentTime);
-      // How quickly the compressor reduces the volume (in seconds)
-      compressor.attack.setValueAtTime(0.01, currentTime);
-      // How quickly the volume returns to normal (in seconds)
-      compressor.release.setValueAtTime(0.25, currentTime);
-      compressorRef.current = compressor;
-      // Connect the audio graph: analyser -> masterGain -> compressor -> destination
-      analyser.connect(masterGain);
-      masterGain.connect(compressor);
-      compressor.connect(ctx.destination);
     }
 
     if (loadWorklet) {
@@ -895,10 +895,12 @@ export default function App() {
         processorOptions,
       });
       workletNodeRef.current = node;
+      node.connect(ctx.destination);
       node.connect(analyser);
+      node.port.postMessage({ type: "setMasterFx", ...masterFxSettings });
     }
     return node;
-  }, [ensureAudioInfrastructure]);
+  }, [ensureAudioInfrastructure, masterFxSettings]);
 
   const resolvePresetIndex = useCallback((program, bank) => {
     const exactIndex = presets.findIndex((p) => p.preset === program && p.bank === bank);
@@ -1711,6 +1713,87 @@ export default function App() {
         </div>
         {!analyzerCollapsed && (
           <div className="analyzerBody">
+            <h3>Master FX (WASM)</h3>
+            <div className="analyzerFxControls">
+              <div className="sliderBlock">
+                <label>
+                  Master gain: <strong>{masterFxSettings.masterGainDb.toFixed(1)} dB</strong>
+                </label>
+                <input
+                  type="range"
+                  min="-24"
+                  max="12"
+                  step="0.1"
+                  value={masterFxSettings.masterGainDb}
+                  onChange={(e) => updateMasterFxSetting("masterGainDb", Number(e.target.value))}
+                />
+              </div>
+              <div className="sliderBlock">
+                <label>
+                  Threshold: <strong>{masterFxSettings.thresholdDb.toFixed(1)} dB</strong>
+                </label>
+                <input
+                  type="range"
+                  min="-60"
+                  max="0"
+                  step="0.5"
+                  value={masterFxSettings.thresholdDb}
+                  onChange={(e) => updateMasterFxSetting("thresholdDb", Number(e.target.value))}
+                />
+              </div>
+              <div className="sliderBlock">
+                <label>
+                  Knee: <strong>{masterFxSettings.kneeDb.toFixed(1)} dB</strong>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="40"
+                  step="0.5"
+                  value={masterFxSettings.kneeDb}
+                  onChange={(e) => updateMasterFxSetting("kneeDb", Number(e.target.value))}
+                />
+              </div>
+              <div className="sliderBlock">
+                <label>
+                  Ratio: <strong>{masterFxSettings.ratio.toFixed(2)}:1</strong>
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="20"
+                  step="0.1"
+                  value={masterFxSettings.ratio}
+                  onChange={(e) => updateMasterFxSetting("ratio", Number(e.target.value))}
+                />
+              </div>
+              <div className="sliderBlock">
+                <label>
+                  Attack: <strong>{(masterFxSettings.attackSec * 1000).toFixed(1)} ms</strong>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.2"
+                  step="0.001"
+                  value={masterFxSettings.attackSec}
+                  onChange={(e) => updateMasterFxSetting("attackSec", Number(e.target.value))}
+                />
+              </div>
+              <div className="sliderBlock">
+                <label>
+                  Release: <strong>{(masterFxSettings.releaseSec * 1000).toFixed(0)} ms</strong>
+                </label>
+                <input
+                  type="range"
+                  min="0.01"
+                  max="1"
+                  step="0.005"
+                  value={masterFxSettings.releaseSec}
+                  onChange={(e) => updateMasterFxSetting("releaseSec", Number(e.target.value))}
+                />
+              </div>
+            </div>
             <h3>Recent Time Domain</h3>
             <AnalyzerCanvas data={recentTimeData} mode="time" />
             <h3>Recent Frequency Domain</h3>
