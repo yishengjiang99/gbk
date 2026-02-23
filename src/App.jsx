@@ -552,7 +552,7 @@ export default function App() {
   const [sortDirection, setSortDirection] = useState("asc");
   const [midiNote, setMidiNote] = useState(60);
   const [midiVelocity, setMidiVelocity] = useState(100);
-  const [selectedLayer, setSelectedLayer] = useState(null);
+  const [userSelectedLayer, setUserSelectedLayer] = useState({ layer: null, midiNote: null, midiVelocity: null });
   const [audioReady, setAudioReady] = useState(false);
   const [audioError, setAudioError] = useState("");
   const [recentTimeData, setRecentTimeData] = useState([]);
@@ -624,18 +624,29 @@ export default function App() {
     return presets.length > 0 ? 0 : null;
   }, [sf2, selectedPreset, presets.length]);
 
+  const selectedLayer = useMemo(() => {
+    if (
+      userSelectedLayer.layer !== null &&
+      userSelectedLayer.midiNote === midiNote &&
+      userSelectedLayer.midiVelocity === midiVelocity
+    ) {
+      return userSelectedLayer.layer;
+    }
+    if (!programDetails) return null;
+    return selectLayerFromMidi(programDetails, midiNote, midiVelocity);
+  }, [userSelectedLayer, programDetails, midiNote, midiVelocity]);
+
+  function setSelectedLayer(layer) {
+    if (layer === null) {
+      setUserSelectedLayer({ layer: null, midiNote: null, midiVelocity: null });
+    } else {
+      setUserSelectedLayer({ layer, midiNote, midiVelocity });
+    }
+  }
+
   const selectedSamplePreview = useMemo(() => {
     return getSamplePreviewForLayer(sf2, selectedLayer);
   }, [sf2, selectedLayer]);
-
-  useEffect(() => {
-    if (!programDetails) {
-      setSelectedLayer(null);
-      return;
-    }
-    const auto = selectLayerFromMidi(programDetails, midiNote, midiVelocity);
-    setSelectedLayer(auto);
-  }, [programDetails, midiNote, midiVelocity]);
 
   useEffect(() => {
     return () => {

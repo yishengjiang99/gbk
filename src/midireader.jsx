@@ -19,6 +19,10 @@ function resolveAssetPath(path) {
 
 function CcKnob({ label, value, onChange, disabled = false }) {
   const startRef = useRef({ active: false, startY: 0, startValue: value });
+  const onChangeRef = useRef(onChange);
+  const disabledRef = useRef(disabled);
+  onChangeRef.current = onChange;
+  disabledRef.current = disabled;
 
   useEffect(() => {
     if (!startRef.current.active) startRef.current.startValue = value;
@@ -36,20 +40,20 @@ function CcKnob({ label, value, onChange, disabled = false }) {
     startRef.current = { active: true, startY: event.clientY, startValue: value };
   };
 
-  const onPointerMove = (event) => {
-    if (!startRef.current.active || disabled) return;
-    event.preventDefault();
-    const delta = startRef.current.startY - event.clientY;
-    const next = clampCc(startRef.current.startValue + Math.round(delta * 0.8));
-    onChange(next);
-  };
-
-  const onPointerUp = () => {
-    if (!startRef.current.active) return;
-    startRef.current.active = false;
-  };
-
   useEffect(() => {
+    const onPointerMove = (event) => {
+      if (!startRef.current.active || disabledRef.current) return;
+      event.preventDefault();
+      const delta = startRef.current.startY - event.clientY;
+      const next = clampCc(startRef.current.startValue + Math.round(delta * 0.8));
+      onChangeRef.current(next);
+    };
+
+    const onPointerUp = () => {
+      if (!startRef.current.active) return;
+      startRef.current.active = false;
+    };
+
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerUp);
@@ -58,7 +62,7 @@ function CcKnob({ label, value, onChange, disabled = false }) {
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
     };
-  });
+  }, []);
 
   return (
     <button
