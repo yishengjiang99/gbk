@@ -1024,8 +1024,13 @@ export default function App() {
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
-            {analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+          <button
+            type="button"
+            onClick={() => setAnalyzerCollapsed((v) => !v)}
+            aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+            title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+          >
+            ☰
           </button>
         </div>
       </header>
