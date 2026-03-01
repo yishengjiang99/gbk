@@ -1,0 +1,25 @@
+/* Local replacement for the small subset of Font Awesome icons used by the app. */
+.fa-solid {
+  display: inline-block;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  width: 1em;
+  text-align: center;
+}
+
+.fa-play::before {
+  content: "\25B6";
+}
+
+.fa-pause::before {
+  content: "\23F8";
+}
+
+.fa-volume-xmark::before {
+  content: "\1F507";
+}
+
+.fa-headphones::before {
+  content: "\1F3A7";
+}
