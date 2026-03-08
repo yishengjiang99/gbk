@@ -13,6 +13,41 @@ function clampCc(value) {
   return Math.max(0, Math.min(127, Number(value) | 0));
 }
 
+function encodeWav(audioBuffer) {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const numSamples = audioBuffer.length;
+  const bytesPerSample = 2;
+  const dataSize = numChannels * numSamples * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const s = Math.max(-1, Math.min(1, audioBuffer.getChannelData(ch)[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return buffer;
+}
+
 function CcKnob({ label, value, onChange, disabled = false }) {
   const startRef = useRef({ active: false, startY: 0, startValue: value });
 
@@ -115,6 +150,7 @@ export default function MidiReader({
   const [songName, setSongName] = useState("");
   const [songError, setSongError] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [songTime, setSongTime] = useState(0);
   const [midiOptions, setMidiOptions] = useState([]);
   const [selectedMidiPath, setSelectedMidiPath] = useState("");
@@ -592,6 +628,128 @@ export default function MidiReader({
     }
   }
 
+  async function onExportWav() {
+    if (!song || !sf2Ready || isExporting) return;
+    setIsExporting(true);
+    setSongError("");
+    try {
+      const sampleRate = 44100;
+      const numChannels = 2;
+      const tailSec = 3;
+      const durationSec = song.durationSec + tailSec;
+      const offlineCtx = new OfflineAudioContext(
+        numChannels,
+        Math.ceil(durationSec * sampleRate),
+        sampleRate
+      );
+      const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
+      await offlineCtx.audioWorklet.addModule(moduleUrl);
+
+      const anySolo = song.tracks.some((t) => !!trackMixStateRef.current[t.index]?.solo);
+      const offlineNodes = [];
+      for (const track of song.tracks) {
+        const node = new AudioWorkletNode(offlineCtx, "sf2-processor", {
+          numberOfInputs: 0,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+        });
+        const panner = new StereoPannerNode(offlineCtx, { pan: 0 });
+        const gain = offlineCtx.createGain();
+        node.connect(panner);
+        panner.connect(gain);
+        gain.connect(offlineCtx.destination);
+
+        const overridePreset = trackPresetOverridesRef.current[track.index];
+        const defaultPreset = trackDefaultPresetMap[track.index];
+        const presetIndex = overridePreset ?? defaultPreset ?? fallbackPresetRef.current;
+        const regions = getRegionsRef.current(presetIndex);
+        node.port.postMessage({ type: "setPreset", regions });
+
+        const cc = getTrackCc(track.index);
+        node.port.postMessage({ type: "setControllers", ...cc });
+
+        const preset = presetOptionMapRef.current.get(presetIndex);
+        const pan = resolveOrchestraPan(track.instrumentName, track.name, preset?.name);
+        panner.pan.setValueAtTime(pan ?? 0, 0);
+
+        const muted = !!trackMixStateRef.current[track.index]?.mute;
+        const solo = !!trackMixStateRef.current[track.index]?.solo;
+        const audible = anySolo ? solo : !muted;
+        gain.gain.setValueAtTime(audible ? 1 : 0, 0);
+
+        offlineNodes.push({ node, panner, gain });
+      }
+
+      // Group events by time for suspend/resume scheduling
+      const eventMap = new Map();
+      for (let i = 0; i < song.tracks.length; i++) {
+        for (const ev of song.tracks[i].playEvents) {
+          const key = ev.sec;
+          if (!eventMap.has(key)) eventMap.set(key, []);
+          eventMap.get(key).push({ trackIdx: i, ev });
+        }
+      }
+
+      // Handle time=0 events immediately (before startRendering)
+      const zeroEvents = eventMap.get(0) ?? [];
+      for (const { trackIdx, ev } of zeroEvents) {
+        const rec = offlineNodes[trackIdx];
+        if (!rec) continue;
+        if (ev.type === "noteOn") {
+          rec.node.port.postMessage({ type: "noteOn", note: ev.note, velocity: ev.velocity });
+        } else if (ev.type === "noteOff") {
+          rec.node.port.postMessage({ type: "noteOff", note: ev.note });
+        } else if (ev.type === "program" && trackPresetOverridesRef.current[trackIdx] == null) {
+          const pIdx = resolvePresetRef.current(ev.program, ev.bank) ?? fallbackPresetRef.current;
+          rec.node.port.postMessage({ type: "setPreset", regions: getRegionsRef.current(pIdx) });
+        }
+      }
+
+      // Schedule suspensions for all non-zero event times
+      const sortedTimes = [...eventMap.keys()].filter((t) => t > 0).sort((a, b) => a - b);
+      for (const time of sortedTimes) {
+        const events = eventMap.get(time);
+        offlineCtx.suspend(time).then(() => {
+          for (const { trackIdx, ev } of events) {
+            const rec = offlineNodes[trackIdx];
+            if (!rec) continue;
+            if (ev.type === "noteOn") {
+              rec.node.port.postMessage({ type: "noteOn", note: ev.note, velocity: ev.velocity });
+            } else if (ev.type === "noteOff") {
+              rec.node.port.postMessage({ type: "noteOff", note: ev.note });
+            } else if (ev.type === "program" && trackPresetOverridesRef.current[trackIdx] == null) {
+              const pIdx =
+                resolvePresetRef.current(ev.program, ev.bank) ?? fallbackPresetRef.current;
+              rec.node.port.postMessage({
+                type: "setPreset",
+                regions: getRegionsRef.current(pIdx),
+              });
+            }
+          }
+          offlineCtx.resume();
+        });
+      }
+
+      const audioBuffer = await offlineCtx.startRendering();
+      const wavBuffer = encodeWav(audioBuffer);
+      const blob = new Blob([wavBuffer], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(songName || "export").replace(/\.[^.]+$/, "")}.wav`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
   async function onUploadMidi(event) {
     const file = event.target.files?.[0];
     if (!file || !workerRef.current) return;
@@ -740,6 +898,18 @@ export default function MidiReader({
             title={isPlaying ? "Pause" : "Play"}
           >
             <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="transportBtn"
+            onClick={onExportWav}
+            disabled={!song || !sf2Ready || isExporting}
+            aria-label="Export WAV"
+            title="Generate offline WAV export"
+          >
+            {isExporting
+              ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
+              : <i className="fa-solid fa-download" aria-hidden="true" />}
           </button>
           <strong className="chip">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
           <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
