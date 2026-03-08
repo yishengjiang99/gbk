@@ -599,6 +599,32 @@ button:disabled {
   border-color: #5f8096;
 }
 
+.sampleZoneRow {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sampleZoneRow .layerButton {
+  flex: 1;
+}
+
+.samplePlayButton {
+  flex-shrink: 0;
+  border: 1px solid #b5c7d4;
+  border-radius: 6px;
+  background: #e8f4e8;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.samplePlayButton:hover {
+  background: #c8e8c8;
+  border-color: #5f9060;
+}
+
 .thSort {
   border: none;
   background: transparent;

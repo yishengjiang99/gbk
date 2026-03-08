@@ -883,6 +883,33 @@ export default function App() {
     }
   }
 
+  async function playRawSample(sampleID) {
+    if (!sf2) return;
+    try {
+      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
+      if (ctx.state !== "running") await ctx.resume();
+      const sh = sf2.pdta.shdr[sampleID];
+      if (!sh || !sf2.sdta.smpl) return;
+      const smpl = sf2.sdta.smpl;
+      const start = sh.start;
+      const end = sh.end > sh.start ? sh.end : smpl.length;
+      const frameCount = end - start;
+      if (frameCount <= 0) return;
+      const audioBuffer = ctx.createBuffer(1, frameCount, sh.sampleRate);
+      const channelData = audioBuffer.getChannelData(0);
+      const slice = smpl.subarray(start, end);
+      for (let i = 0; i < frameCount; i++) {
+        channelData[i] = slice[i] / 32768;
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+      source.start();
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function onTogglePower() {
     try {
       const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
@@ -1367,7 +1394,7 @@ export default function App() {
                               )}
                               <ul className="monoList">
                                 {inst.sampleZones.map((zone) => (
-                                  <li key={`iz-${inst.index}-${zone.bagIndex}`}>
+                                  <li key={`iz-${inst.index}-${zone.bagIndex}`} className="sampleZoneRow">
                                     <button
                                       type="button"
                                       className={`layerButton ${selectedLayer?.type === "instrumentRegion" &&
@@ -1389,6 +1416,14 @@ export default function App() {
                                     >
                                       bag {zone.bagIndex}: sample {zone.sampleID} ({zone.sampleName}) @{" "}
                                       {zone.sampleRate}Hz
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="samplePlayButton"
+                                      title={`Play sample ${zone.sampleID} (${zone.sampleName}) raw`}
+                                      onClick={() => playRawSample(zone.sampleID)}
+                                    >
+                                      ▶
                                     </button>
                                   </li>
                                 ))}
