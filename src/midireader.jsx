@@ -680,54 +680,27 @@ export default function MidiReader({
         offlineNodes.push({ node, panner, gain });
       }
 
-      // Group events by time for suspend/resume scheduling
-      const eventMap = new Map();
-      for (let i = 0; i < song.tracks.length; i++) {
-        for (const ev of song.tracks[i].playEvents) {
-          const key = ev.sec;
-          if (!eventMap.has(key)) eventMap.set(key, []);
-          eventMap.get(key).push({ trackIdx: i, ev });
-        }
-      }
-
-      // Handle time=0 events immediately (before startRendering)
-      const zeroEvents = eventMap.get(0) ?? [];
-      for (const { trackIdx, ev } of zeroEvents) {
+      for (let trackIdx = 0; trackIdx < song.tracks.length; trackIdx += 1) {
         const rec = offlineNodes[trackIdx];
         if (!rec) continue;
-        if (ev.type === "noteOn") {
-          rec.node.port.postMessage({ type: "noteOn", note: ev.note, velocity: ev.velocity });
-        } else if (ev.type === "noteOff") {
-          rec.node.port.postMessage({ type: "noteOff", note: ev.note });
-        } else if (ev.type === "program" && trackPresetOverridesRef.current[trackIdx] == null) {
-          const pIdx = resolvePresetRef.current(ev.program, ev.bank) ?? fallbackPresetRef.current;
-          rec.node.port.postMessage({ type: "setPreset", regions: getRegionsRef.current(pIdx) });
-        }
-      }
-
-      // Schedule suspensions for all non-zero event times
-      const sortedTimes = [...eventMap.keys()].filter((t) => t > 0).sort((a, b) => a - b);
-      for (const time of sortedTimes) {
-        const events = eventMap.get(time);
-        offlineCtx.suspend(time).then(() => {
-          for (const { trackIdx, ev } of events) {
-            const rec = offlineNodes[trackIdx];
-            if (!rec) continue;
-            if (ev.type === "noteOn") {
-              rec.node.port.postMessage({ type: "noteOn", note: ev.note, velocity: ev.velocity });
-            } else if (ev.type === "noteOff") {
-              rec.node.port.postMessage({ type: "noteOff", note: ev.note });
-            } else if (ev.type === "program" && trackPresetOverridesRef.current[trackIdx] == null) {
-              const pIdx =
-                resolvePresetRef.current(ev.program, ev.bank) ?? fallbackPresetRef.current;
-              rec.node.port.postMessage({
-                type: "setPreset",
-                regions: getRegionsRef.current(pIdx),
-              });
-            }
+        const overridePreset = trackPresetOverridesRef.current[trackIdx];
+        const events = [];
+        for (const ev of song.tracks[trackIdx].playEvents) {
+          const frame = Math.max(0, Math.round(ev.sec * sampleRate));
+          if (ev.type === "noteOn") {
+            events.push({ frame, type: "noteOn", note: ev.note, velocity: ev.velocity });
+          } else if (ev.type === "noteOff") {
+            events.push({ frame, type: "noteOff", note: ev.note });
+          } else if (ev.type === "program" && overridePreset == null) {
+            const pIdx = resolvePresetRef.current(ev.program, ev.bank) ?? fallbackPresetRef.current;
+            events.push({
+              frame,
+              type: "setPreset",
+              regions: getRegionsRef.current(pIdx),
+            });
           }
-          offlineCtx.resume();
-        });
+        }
+        rec.node.port.postMessage({ type: "setSequence", events });
       }
 
       const audioBuffer = await offlineCtx.startRendering();
@@ -867,57 +840,65 @@ export default function MidiReader({
   return (
     <section className="card midiReader">
       <div className="midiTop">
-        <div className="midiTopGroup midiTopLoad">
-          <label className="fileInput midiFileInputCompact">
-            <span>Upload MIDI</span>
-            <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
-          </label>
-          <select
-            value={selectedMidiPath}
-            onChange={(e) => onSelectMidiPath(e.target.value)}
-            disabled={!midiOptions.length}
-            title="MIDI files from public/static"
-          >
-            <option value="">Select MIDI</option>
-            {midiOptions.map((midi) => (
-              <option key={midi.path} value={midi.path}>
-                {midi.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={onLoadSelectedMidi} disabled={!selectedMidiPath}>Reload</button>
+        <div className="midiTopUpper">
+          <div className="midiTopGroup midiTopLoad">
+            <label className="fileInput midiFileInputCompact">
+              <span className="midiFileInputLabel">MIDI</span>
+              <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
+            </label>
+            <select
+              value={selectedMidiPath}
+              onChange={(e) => onSelectMidiPath(e.target.value)}
+              disabled={!midiOptions.length}
+              title="MIDI files from public/static"
+            >
+              <option value="">Select MIDI</option>
+              {midiOptions.map((midi) => (
+                <option key={midi.path} value={midi.path}>
+                  {midi.name}
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={onLoadSelectedMidi} disabled={!selectedMidiPath}>Reload</button>
+          </div>
+
+          <div className="midiTopGroup midiTopSong">
+            <span className="songChipLabel">Loaded</span>
+            <span className="songChip">{songName || "No MIDI loaded"}</span>
+          </div>
         </div>
 
-        <div className="midiTopGroup midiTopTransport">
-          <button
-            type="button"
-            className="transportBtn"
-            onClick={onPlayPause}
-            disabled={!song || !sf2Ready}
-            aria-label={isPlaying ? "Pause" : "Play"}
-            title={isPlaying ? "Pause" : "Play"}
-          >
-            <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="transportBtn"
-            onClick={onExportWav}
-            disabled={!song || !sf2Ready || isExporting}
-            aria-label="Export WAV"
-            title="Generate offline WAV export"
-          >
-            {isExporting
-              ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
-              : <i className="fa-solid fa-download" aria-hidden="true" />}
-          </button>
-          <strong className="chip">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-          <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
-          <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
-        </div>
-
-        <div className="midiTopGroup midiTopSong">
-          <span className="songChip">{songName || "No MIDI loaded"}</span>
+        <div className="midiTopGroup midiTopTransport midiTopTransportFull">
+          <div className="transportHero">
+            <button
+              type="button"
+              className="transportBtn transportBtnPrimary"
+              onClick={onPlayPause}
+              disabled={!song || !sf2Ready}
+              aria-label={isPlaying ? "Pause" : "Play"}
+              title={isPlaying ? "Pause" : "Play"}
+            >
+              <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="transportBtn"
+              onClick={onExportWav}
+              disabled={!song || !sf2Ready || isExporting}
+              aria-label="Export WAV"
+              title="Generate offline WAV export"
+            >
+              {isExporting
+                ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
+                : <i className="fa-solid fa-download" aria-hidden="true" />}
+            </button>
+            <span className="transportState">
+              {!song ? "No song loaded" : isPlaying ? "Playing" : "Paused"}
+            </span>
+            <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+            <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
+            <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+          </div>
         </div>
       </div>
       {songError ? <p className="status error">{songError}</p> : null}

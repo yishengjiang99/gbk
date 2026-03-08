@@ -463,11 +463,14 @@ class Sf2Processor extends AudioWorkletProcessor {
         this.cc7Volume = 100;
         this.cc10Pan = 64;
         this.cc11Expression = 127;
+        this.scheduledEvents = [];
+        this.scheduledEventIndex = 0;
+        this.renderedSamples = 0;
 
         this.port.onmessage = (e) => this.onMsg(e.data);
     }
 
-    onMsg(msg) {
+    dispatchEvent(msg) {
         if (msg.type === "setPreset") {
             this.regions = msg.regions ?? [];
             // Optional: clear current voices
@@ -518,6 +521,16 @@ class Sf2Processor extends AudioWorkletProcessor {
                 this.cc11Expression = Math.max(0, Math.min(127, msg.cc11Expression | 0));
             }
         }
+    }
+
+    onMsg(msg) {
+        if (msg.type === "setSequence") {
+            this.scheduledEvents = Array.isArray(msg.events) ? msg.events : [];
+            this.scheduledEventIndex = 0;
+            this.renderedSamples = 0;
+            return;
+        }
+        this.dispatchEvent(msg);
     }
 
     pickRegions(note, velocity) {
@@ -587,6 +600,14 @@ class Sf2Processor extends AudioWorkletProcessor {
             let sumL = 0;
             let sumR = 0;
 
+            while (
+                this.scheduledEventIndex < this.scheduledEvents.length &&
+                (this.scheduledEvents[this.scheduledEventIndex]?.frame ?? Infinity) <= this.renderedSamples
+            ) {
+                this.dispatchEvent(this.scheduledEvents[this.scheduledEventIndex]);
+                this.scheduledEventIndex += 1;
+            }
+
             for (let vi = this.voices.length - 1; vi >= 0; vi--) {
                 const v = this.voices[vi];
                 if (v.finished || v.volEnv.stage === "idle") {
@@ -637,6 +658,7 @@ class Sf2Processor extends AudioWorkletProcessor {
 
             outL[i] = sumL;
             outR[i] = sumR;
+            this.renderedSamples += 1;
         }
 
         return true;
