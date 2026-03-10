@@ -184,6 +184,21 @@ function resolveOrchestraPan(...labels) {
 
 export default function MidiReader({
   sf2Ready,
+  sf2Name,
+  sf2Loading,
+  onUploadSf2,
+  onLoadDefaultSf2,
+  activeTab,
+  onSelectTab,
+  audioCtxState,
+  onTogglePower,
+  midiEnabled,
+  onToggleMidi,
+  selectedMidiInput,
+  onSelectMidiInput,
+  midiInputs = [],
+  analyzerCollapsed,
+  onToggleAnalyzer,
   ensureAudioInfrastructure,
   getRegionsForPreset,
   resolvePresetIndex,
@@ -204,6 +219,7 @@ export default function MidiReader({
   const [trackPresetOverrides, setTrackPresetOverrides] = useState({});
   const [trackCcControls, setTrackCcControls] = useState({});
   const [trackMixState, setTrackMixState] = useState({});
+  const [toolbarHint, setToolbarHint] = useState("MIDI Explorer");
 
   const viewportRef = useRef(null);
   const playheadRef = useRef(null);
@@ -903,20 +919,108 @@ export default function MidiReader({
     return generic ? "" : (track?.name || "");
   }
 
+  const transportStateLabel = !sf2Ready
+    ? sf2Loading
+      ? "Loading SoundFont..."
+      : "Load SoundFont to enable playback/export"
+    : !song
+      ? "No song loaded"
+      : isPlaying
+        ? "Playing"
+        : "Paused";
+
   return (
     <section className="card midiReader">
       <div className="midiTop">
-        <div className="midiTopUpper">
+        <div className="toolbar toolbarUnified midiUnifiedToolbar">
+          <button
+            type="button"
+            className={`toolbarIconBtn ${activeTab === "midi" ? "active" : ""}`}
+            onClick={() => onSelectTab("midi")}
+            aria-label="MIDI Explorer"
+            title="MIDI Explorer"
+            onMouseEnter={() => setToolbarHint("MIDI Explorer")}
+            onFocus={() => setToolbarHint("MIDI Explorer")}
+          >
+            <i className="fa-solid fa-music" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={`toolbarIconBtn ${activeTab === "sf2" ? "active" : ""}`}
+            onClick={() => onSelectTab("sf2")}
+            aria-label="SF2 Explorer"
+            title="SF2 Explorer"
+            onMouseEnter={() => setToolbarHint("SF2 Explorer")}
+            onFocus={() => setToolbarHint("SF2 Explorer")}
+          >
+            <i className="fa-solid fa-wave-square" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={`toolbarIconBtn ${audioCtxState === "running" ? "active" : ""}`}
+            onClick={onTogglePower}
+            aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
+            title={audioCtxState === "running" ? "Power Off" : "Power On"}
+            onMouseEnter={() => setToolbarHint(audioCtxState === "running" ? "Power Off" : "Power On")}
+            onFocus={() => setToolbarHint(audioCtxState === "running" ? "Power Off" : "Power On")}
+          >
+            <i className="fa-solid fa-power-off" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={`toolbarIconBtn ${midiEnabled ? "active" : ""}`}
+            onClick={onToggleMidi}
+            disabled={!sf2Ready}
+            aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+            title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+            onMouseEnter={() => setToolbarHint(midiEnabled ? "Disable MIDI" : "Enable MIDI")}
+            onFocus={() => setToolbarHint(midiEnabled ? "Disable MIDI" : "Enable MIDI")}
+          >
+            <i className="fa-solid fa-plug" aria-hidden="true" />
+          </button>
+          <select
+            className="toolbarSelect"
+            value={selectedMidiInput}
+            onChange={(e) => onSelectMidiInput(e.target.value)}
+            disabled={!midiEnabled}
+            title="MIDI input source"
+            onMouseEnter={() => setToolbarHint("MIDI input source")}
+            onFocus={() => setToolbarHint("MIDI input source")}
+          >
+            <option value="all">All MIDI Inputs</option>
+            {midiInputs.map((input) => (
+              <option key={input.id} value={input.id}>
+                {input.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={`toolbarIconBtn ${!analyzerCollapsed ? "active" : ""}`}
+            onClick={onToggleAnalyzer}
+            aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+            title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+            onMouseEnter={() => setToolbarHint(analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer")}
+            onFocus={() => setToolbarHint(analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer")}
+          >
+            <i className="fa-solid fa-chart-column" aria-hidden="true" />
+          </button>
+
           <div className="midiTopGroup midiTopLoad">
             <label className="fileInput midiFileInputCompact">
-              <span className="midiFileInputLabel">MIDI</span>
+              <span className="midiFileInputLabel" aria-hidden="true">
+                <i className="fa-solid fa-file-arrow-up" />
+              </span>
               <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
             </label>
             <select
+              className="toolbarSelect"
               value={selectedMidiPath}
               onChange={(e) => onSelectMidiPath(e.target.value)}
               disabled={!midiOptions.length}
               title="MIDI files from public/static"
+              onMouseEnter={() => setToolbarHint("Select MIDI")}
+              onFocus={() => setToolbarHint("Select MIDI")}
             >
               <option value="">Select MIDI</option>
               {midiOptions.map((midi) => (
@@ -925,15 +1029,46 @@ export default function MidiReader({
                 </option>
               ))}
             </select>
-            <button type="button" onClick={onLoadSelectedMidi} disabled={!selectedMidiPath}>Reload</button>
+            <button
+              type="button"
+              className="toolbarIconBtn"
+              onClick={onLoadSelectedMidi}
+              disabled={!selectedMidiPath}
+              aria-label="Reload MIDI"
+              title="Reload MIDI"
+              onMouseEnter={() => setToolbarHint("Reload MIDI")}
+              onFocus={() => setToolbarHint("Reload MIDI")}
+            >
+              <i className="fa-solid fa-rotate-right" aria-hidden="true" />
+            </button>
           </div>
 
-          <div className="midiTopGroup midiTopSong">
-            <span className="songChipLabel">Loaded</span>
-            <span className="songChip">{songName || "No MIDI loaded"}</span>
+          <div className="midiTopGroup midiTopLoad">
+            <label className="fileInput midiFileInputCompact">
+              <span className="midiFileInputLabel" aria-hidden="true">
+                <i className="fa-solid fa-folder-open" />
+              </span>
+              <input type="file" accept=".sf2" onChange={onUploadSf2} />
+            </label>
+            <button
+              type="button"
+              className="toolbarIconBtn"
+              onClick={onLoadDefaultSf2}
+              disabled={sf2Loading}
+              aria-label={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+              title={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+              onMouseEnter={() => setToolbarHint(sf2Loading ? "Loading default SF2" : "Load Default SF2")}
+              onFocus={() => setToolbarHint(sf2Loading ? "Loading default SF2" : "Load Default SF2")}
+            >
+              <i className={`fa-solid ${sf2Loading ? "fa-spinner fa-spin" : "fa-database"}`} aria-hidden="true" />
+            </button>
+            <span className="songChip">{sf2Name || "No SoundFont loaded"}</span>
+          </div>
+
+          <div className="toolbarHoverText" aria-live="polite">
+            {toolbarHint}
           </div>
         </div>
-
         <div className="midiTopGroup midiTopTransport midiTopTransportFull">
           <div className="transportHero">
             <button
@@ -959,7 +1094,7 @@ export default function MidiReader({
                 : <i className="fa-solid fa-download" aria-hidden="true" />}
             </button>
             <span className="transportState">
-              {!song ? "No song loaded" : isPlaying ? "Playing" : "Paused"}
+              {transportStateLabel}
             </span>
             {isExporting ? (
               <div className="exportProgress" aria-live="polite">

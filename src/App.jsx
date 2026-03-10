@@ -1019,65 +1019,6 @@ export default function App() {
 
   return (
     <div className={`app ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
-      <header className="topHeader">
-        <div>
-          <h1>SoundFont2 Explorer</h1>
-          <p>Inspect INFO tags, presets, instruments, and samples from an SF2 file.</p>
-        </div>
-        <div className="toolbar">
-          <span className="midiStatus">{midiStatus}</span>
-          <button
-            type="button"
-            onClick={onTogglePower}
-            aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
-            title={audioCtxState === "running" ? "Power Off" : "Power On"}
-          >
-            ⏻
-          </button>
-          <span className="midiStatus">Audio: {audioCtxState}</span>
-          <button type="button" onClick={onToggleMidi} disabled={!sf2}>
-            {midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-          </button>
-          <select
-            value={selectedMidiInput}
-            onChange={(e) => setSelectedMidiInput(e.target.value)}
-            disabled={!midiEnabled}
-            title="MIDI input source"
-          >
-            <option value="all">All MIDI Inputs</option>
-            {midiInputs.map((input) => (
-              <option key={input.id} value={input.id}>
-                {input.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => setAnalyzerCollapsed((v) => !v)}
-            aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-            title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-          >
-            ☰
-          </button>
-        </div>
-      </header>
-      <section className="tabsRow">
-        <button
-          type="button"
-          className={`tabButton ${activeTab === "midi" ? "active" : ""}`}
-          onClick={() => setActiveTab("midi")}
-        >
-          MIDI Explorer
-        </button>
-        <button
-          type="button"
-          className={`tabButton ${activeTab === "sf2" ? "active" : ""}`}
-          onClick={() => setActiveTab("sf2")}
-        >
-          SF2 Explorer
-        </button>
-      </section>
-
       {loading && <p className="status">Parsing...</p>}
       {error && <p className="status error">{error}</p>}
       {midiError && <p className="status error">{midiError}</p>}
@@ -1085,6 +1026,21 @@ export default function App() {
       {activeTab === "midi" && (
         <MidiReader
           sf2Ready={!!sf2}
+          sf2Name={sourceName}
+          sf2Loading={loading}
+          onUploadSf2={onUploadFile}
+          onLoadDefaultSf2={() => onSelectSample(DEFAULT_SF2.path, DEFAULT_SF2.label)}
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          audioCtxState={audioCtxState}
+          onTogglePower={onTogglePower}
+          midiEnabled={midiEnabled}
+          onToggleMidi={onToggleMidi}
+          selectedMidiInput={selectedMidiInput}
+          onSelectMidiInput={setSelectedMidiInput}
+          midiInputs={midiInputs}
+          analyzerCollapsed={analyzerCollapsed}
+          onToggleAnalyzer={() => setAnalyzerCollapsed((v) => !v)}
           ensureAudioInfrastructure={ensureAudioInfrastructure}
           getRegionsForPreset={(presetIndex) => getRegionsForPresetIndex(presetIndex)}
           resolvePresetIndex={resolvePresetIndex}
@@ -1101,6 +1057,70 @@ export default function App() {
 
       {activeTab === "sf2" && (
         <>
+          <header className="topToolbar card">
+            <div className="toolbar toolbarUnified">
+              <button
+                type="button"
+                className={`toolbarIconBtn ${activeTab === "midi" ? "active" : ""}`}
+                onClick={() => setActiveTab("midi")}
+                aria-label="MIDI Explorer"
+                title="MIDI Explorer"
+              >
+                <i className="fa-solid fa-music" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`toolbarIconBtn ${activeTab === "sf2" ? "active" : ""}`}
+                onClick={() => setActiveTab("sf2")}
+                aria-label="SF2 Explorer"
+                title="SF2 Explorer"
+              >
+                <i className="fa-solid fa-wave-square" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`toolbarIconBtn ${audioCtxState === "running" ? "active" : ""}`}
+                onClick={onTogglePower}
+                aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
+                title={audioCtxState === "running" ? "Power Off" : "Power On"}
+              >
+                <i className="fa-solid fa-power-off" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`toolbarIconBtn ${midiEnabled ? "active" : ""}`}
+                onClick={onToggleMidi}
+                disabled={!sf2}
+                aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+                title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+              >
+                <i className="fa-solid fa-plug" aria-hidden="true" />
+              </button>
+              <select
+                className="toolbarSelect"
+                value={selectedMidiInput}
+                onChange={(e) => setSelectedMidiInput(e.target.value)}
+                disabled={!midiEnabled}
+                title="MIDI input source"
+              >
+                <option value="all">All MIDI Inputs</option>
+                {midiInputs.map((input) => (
+                  <option key={input.id} value={input.id}>
+                    {input.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={`toolbarIconBtn ${!analyzerCollapsed ? "active" : ""}`}
+                onClick={() => setAnalyzerCollapsed((v) => !v)}
+                aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+                title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+              >
+                <i className="fa-solid fa-chart-column" aria-hidden="true" />
+              </button>
+            </div>
+          </header>
           <section className="card controls">
             <label className="fileInput">
               <span>Open SF2 File</span>
@@ -1109,7 +1129,6 @@ export default function App() {
             <button type="button" onClick={() => setShowSummaryModal((v) => !v)} disabled={!sf2}>
               {showSummaryModal ? "Hide File Summary" : "Show File Summary"}
             </button>
-            <span className="midiStatus">Keyboard: a w s e d f t g y h</span>
             <div className="sampleButtons">
               {SAMPLE_FILES.map((sample) => (
                 <button
@@ -1532,6 +1551,12 @@ export default function App() {
           </main>}
         </>
       )}
+
+      <div className="statusDock">
+        <span className="midiStatus">{midiStatus}</span>
+        <span className="midiStatus">Audio: {audioCtxState}</span>
+        <span className="midiStatus">Keyboard: a w s e d f t g y h</span>
+      </div>
 
       <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
         <div className="analyzerHead">
