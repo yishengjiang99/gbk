@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.js";
 
 function fmtTime(sec) {
   const s = Math.max(0, sec | 0);
@@ -45,6 +46,49 @@ function encodeWav(audioBuffer) {
       view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
       offset += 2;
     }
+  }
+  return buffer;
+}
+
+async function encodeWavIncremental(audioBuffer, chunkSamples = 16384, onProgress) {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const numSamples = audioBuffer.length;
+  const bytesPerSample = 2;
+  const dataSize = numChannels * numSamples * bytesPerSample;
+  const channelData = Array.from({ length: numChannels }, (_, ch) => audioBuffer.getChannelData(ch));
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (offset, str) => {
+    for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let start = 0; start < numSamples; start += chunkSamples) {
+    const end = Math.min(numSamples, start + chunkSamples);
+    for (let i = start; i < end; i += 1) {
+      for (let ch = 0; ch < numChannels; ch += 1) {
+        const s = Math.max(-1, Math.min(1, channelData[ch][i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        offset += 2;
+      }
+    }
+    onProgress?.(end / numSamples);
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   return buffer;
 }
@@ -152,6 +196,8 @@ export default function MidiReader({
   const [songError, setSongError] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [exportStage, setExportStage] = useState("");
   const [songTime, setSongTime] = useState(0);
   const [midiOptions, setMidiOptions] = useState([]);
   const [selectedMidiPath, setSelectedMidiPath] = useState("");
@@ -632,6 +678,8 @@ export default function MidiReader({
   async function onExportWav() {
     if (!song || !sf2Ready || isExporting) return;
     setIsExporting(true);
+    setExportProgress(0);
+    setExportStage("Preparing");
     setSongError("");
     try {
       const sampleRate = 44100;
@@ -643,14 +691,11 @@ export default function MidiReader({
         Math.ceil(durationSec * sampleRate),
         sampleRate
       );
-      const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
-      await offlineCtx.audioWorklet.addModule(moduleUrl);
-      const offlineNode = new AudioWorkletNode(offlineCtx, "sf2-processor", {
-        numberOfInputs: 0,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-      });
-      offlineNode.connect(offlineCtx.destination);
+      const audioBuffer = offlineCtx.createBuffer(
+        numChannels,
+        Math.ceil(durationSec * sampleRate),
+        sampleRate
+      );
 
       const anySolo = song.tracks.some((t) => !!trackMixStateRef.current[t.index]?.solo);
       const offlineTracks = [];
@@ -709,16 +754,22 @@ export default function MidiReader({
           }
         }
       }
-      events.sort((a, b) => (a.frame - b.frame) || (a.seq - b.seq) || (a.trackIndex - b.trackIndex));
-      offlineNode.port.postMessage({
-        type: "setOfflineTracks",
+      setExportStage("Rendering");
+      await renderOfflineSequenceToAudioBufferIncremental({
+        audioBuffer,
         tracks: offlineTracks,
+        events,
         maxVoices: Math.max(96, song.tracks.length * 24),
+        onProgress: (progress) => {
+          setExportProgress(Math.max(0, Math.min(0.85, progress * 0.85)));
+        },
       });
-      offlineNode.port.postMessage({ type: "setSequence", events });
-
-      const audioBuffer = await offlineCtx.startRendering();
-      const wavBuffer = encodeWav(audioBuffer);
+      setExportStage("Encoding WAV");
+      const wavBuffer = await encodeWavIncremental(audioBuffer, 16384, (progress) => {
+        setExportProgress(0.85 + Math.max(0, Math.min(0.15, progress * 0.15)));
+      });
+      setExportProgress(1);
+      setExportStage("Saving");
       const blob = new Blob([wavBuffer], { type: "audio/wav" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -733,6 +784,7 @@ export default function MidiReader({
       setSongError(msg);
       onError?.(msg);
     } finally {
+      setExportStage("");
       setIsExporting(false);
     }
   }
@@ -909,6 +961,16 @@ export default function MidiReader({
             <span className="transportState">
               {!song ? "No song loaded" : isPlaying ? "Playing" : "Paused"}
             </span>
+            {isExporting ? (
+              <div className="exportProgress" aria-live="polite">
+                <div className="exportProgressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(exportProgress * 100)}>
+                  <span className="exportProgressFill" style={{ width: `${Math.round(exportProgress * 100)}%` }} />
+                </div>
+                <span className="exportProgressLabel">
+                  {exportStage} {Math.round(exportProgress * 100)}%
+                </span>
+              </div>
+            ) : null}
             <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
             <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
             <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
