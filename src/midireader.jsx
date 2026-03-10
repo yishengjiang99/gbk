@@ -19,6 +19,7 @@ function encodeWav(audioBuffer) {
   const numSamples = audioBuffer.length;
   const bytesPerSample = 2;
   const dataSize = numChannels * numSamples * bytesPerSample;
+  const channelData = Array.from({ length: numChannels }, (_, ch) => audioBuffer.getChannelData(ch));
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
   const writeStr = (offset, str) => {
@@ -40,7 +41,7 @@ function encodeWav(audioBuffer) {
   let offset = 44;
   for (let i = 0; i < numSamples; i++) {
     for (let ch = 0; ch < numChannels; ch++) {
-      const s = Math.max(-1, Math.min(1, audioBuffer.getChannelData(ch)[i]));
+      const s = Math.max(-1, Math.min(1, channelData[ch][i]));
       view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
       offset += 2;
     }
@@ -644,64 +645,77 @@ export default function MidiReader({
       );
       const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
       await offlineCtx.audioWorklet.addModule(moduleUrl);
+      const offlineNode = new AudioWorkletNode(offlineCtx, "sf2-processor", {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+      });
+      offlineNode.connect(offlineCtx.destination);
 
       const anySolo = song.tracks.some((t) => !!trackMixStateRef.current[t.index]?.solo);
-      const offlineNodes = [];
+      const offlineTracks = [];
+      const events = [];
       for (const track of song.tracks) {
-        const node = new AudioWorkletNode(offlineCtx, "sf2-processor", {
-          numberOfInputs: 0,
-          numberOfOutputs: 1,
-          outputChannelCount: [2],
-        });
-        const panner = new StereoPannerNode(offlineCtx, { pan: 0 });
-        const gain = offlineCtx.createGain();
-        node.connect(panner);
-        panner.connect(gain);
-        gain.connect(offlineCtx.destination);
-
         const overridePreset = trackPresetOverridesRef.current[track.index];
         const defaultPreset = trackDefaultPresetMap[track.index];
         const presetIndex = overridePreset ?? defaultPreset ?? fallbackPresetRef.current;
         const regions = getRegionsRef.current(presetIndex);
-        node.port.postMessage({ type: "setPreset", regions });
-
         const cc = getTrackCc(track.index);
-        node.port.postMessage({ type: "setControllers", ...cc });
-
         const preset = presetOptionMapRef.current.get(presetIndex);
         const pan = resolveOrchestraPan(track.instrumentName, track.name, preset?.name);
-        panner.pan.setValueAtTime(pan ?? 0, 0);
 
         const muted = !!trackMixStateRef.current[track.index]?.mute;
         const solo = !!trackMixStateRef.current[track.index]?.solo;
         const audible = anySolo ? solo : !muted;
-        gain.gain.setValueAtTime(audible ? 1 : 0, 0);
-
-        offlineNodes.push({ node, panner, gain });
-      }
-
-      for (let trackIdx = 0; trackIdx < song.tracks.length; trackIdx += 1) {
-        const rec = offlineNodes[trackIdx];
-        if (!rec) continue;
-        const overridePreset = trackPresetOverridesRef.current[trackIdx];
-        const events = [];
-        for (const ev of song.tracks[trackIdx].playEvents) {
+        offlineTracks.push({
+          trackIndex: track.index,
+          regions,
+          cc7Volume: cc.cc7Volume,
+          cc10Pan: cc.cc10Pan,
+          cc11Expression: cc.cc11Expression,
+          pan: pan ?? 0,
+          gain: audible ? 1 : 0,
+        });
+        for (const ev of track.playEvents) {
           const frame = Math.max(0, Math.round(ev.sec * sampleRate));
           if (ev.type === "noteOn") {
-            events.push({ frame, type: "noteOn", note: ev.note, velocity: ev.velocity });
+            events.push({
+              frame,
+              seq: ev.seq ?? 0,
+              type: "noteOn",
+              trackIndex: track.index,
+              channel: ev.channel,
+              note: ev.note,
+              velocity: ev.velocity,
+            });
           } else if (ev.type === "noteOff") {
-            events.push({ frame, type: "noteOff", note: ev.note });
+            events.push({
+              frame,
+              seq: ev.seq ?? 0,
+              type: "noteOff",
+              trackIndex: track.index,
+              channel: ev.channel,
+              note: ev.note,
+            });
           } else if (ev.type === "program" && overridePreset == null) {
             const pIdx = resolvePresetRef.current(ev.program, ev.bank) ?? fallbackPresetRef.current;
             events.push({
               frame,
+              seq: ev.seq ?? 0,
               type: "setPreset",
+              trackIndex: track.index,
               regions: getRegionsRef.current(pIdx),
             });
           }
         }
-        rec.node.port.postMessage({ type: "setSequence", events });
       }
+      events.sort((a, b) => (a.frame - b.frame) || (a.seq - b.seq) || (a.trackIndex - b.trackIndex));
+      offlineNode.port.postMessage({
+        type: "setOfflineTracks",
+        tracks: offlineTracks,
+        maxVoices: Math.max(96, song.tracks.length * 24),
+      });
+      offlineNode.port.postMessage({ type: "setSequence", events });
 
       const audioBuffer = await offlineCtx.startRendering();
       const wavBuffer = encodeWav(audioBuffer);

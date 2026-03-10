@@ -379,7 +379,7 @@ function readSampleMono(data, pos) {
 }
 
 // ---------- Voice ----------
-function makeVoice(region, note, velocity, outSr) {
+function makeVoice(region, note, velocity, outSr, options = {}) {
     const sample = region.sample;
     const start = sample.start ?? 0;
     const end = sample.end ?? sample.dataL.length;
@@ -391,14 +391,16 @@ function makeVoice(region, note, velocity, outSr) {
     const loopUntilReleaseThenTail = sampleModes === 3;
 
     const baseRate = regionBaseRate(region, note, outSr);
-
-    const panG = panToGains(region.pan ?? 0);
     const velGain = velToLin(velocity, 2.0);
     const attenGain = cbAttenToLin(region.initialAttenuationCb ?? 0);
     const baseGain = velGain * attenGain;
+    const trackPanPos = Math.max(-1, Math.min(1, options.trackPanPos ?? 0));
+    const trackVolumeMul = Math.max(0, options.trackVolumeMul ?? 1);
 
     const v = {
         note,
+        channel: options.channel ?? 0,
+        trackIndex: options.trackIndex ?? null,
         velocity,
         region,
 
@@ -423,8 +425,8 @@ function makeVoice(region, note, velocity, outSr) {
         // gains
         baseGain,
         regionPanPos: Math.max(-500, Math.min(500, region.pan ?? 0)) / 500,
-        panL: panG.gL,
-        panR: panG.gR,
+        trackPanPos,
+        trackVolumeMul,
 
         // mod
         volEnv: new VolEnv(outSr),
@@ -463,6 +465,7 @@ class Sf2Processor extends AudioWorkletProcessor {
         this.cc7Volume = 100;
         this.cc10Pan = 64;
         this.cc11Expression = 127;
+        this.trackStates = new Map();
         this.scheduledEvents = [];
         this.scheduledEventIndex = 0;
         this.renderedSamples = 0;
@@ -471,36 +474,58 @@ class Sf2Processor extends AudioWorkletProcessor {
     }
 
     dispatchEvent(msg) {
+        if (!msg) return;
+
         if (msg.type === "setPreset") {
+            if (Number.isInteger(msg.trackIndex)) {
+                const trackState = this.trackStates.get(msg.trackIndex);
+                if (trackState) trackState.regions = msg.regions ?? [];
+                return;
+            }
             this.regions = msg.regions ?? [];
             // Optional: clear current voices
             this.voices.length = 0;
+            return;
         }
 
         if (msg.type === "noteOn") {
             const note = msg.note | 0;
             const velocity = msg.velocity | 0;
+            const trackState = Number.isInteger(msg.trackIndex) ? this.trackStates.get(msg.trackIndex) : null;
+            const regions = trackState?.regions ?? this.regions;
 
-            const matching = this.pickRegions(note, velocity);
+            const matching = this.pickRegions(note, velocity, regions);
             if (!matching.length) return;
 
             // exclusiveClass choke
             for (const r of matching) {
                 const excl = r.exclusiveClass ?? 0;
-                if (excl) this.chokeExclusive(excl);
+                if (excl) this.chokeExclusive(excl, msg.trackIndex ?? null);
             }
 
             // allocate voices (layering allowed)
+            const trackVolumeMul = trackState
+                ? (trackState.cc7Volume / 127) * (trackState.cc11Expression / 127) * trackState.gain
+                : 1;
+            const trackPanPos = trackState ? (trackState.cc10Pan - 64) / 63 + trackState.pan : 0;
             for (const r of matching) {
                 this.ensurePolyphony();
-                this.voices.push(makeVoice(r, note, velocity, sampleRate));
+                this.voices.push(makeVoice(r, note, velocity, sampleRate, {
+                    channel: msg.channel ?? 0,
+                    trackIndex: msg.trackIndex ?? null,
+                    trackPanPos,
+                    trackVolumeMul,
+                }));
             }
+            return;
         }
 
         if (msg.type === "noteOff") {
             const note = msg.note | 0;
             for (const v of this.voices) {
-                if (v.note === note) {
+                const sameTrack = msg.trackIndex == null || v.trackIndex === msg.trackIndex;
+                const sameChannel = msg.channel == null || v.channel === msg.channel;
+                if (v.note === note && sameTrack && sameChannel) {
                     v.volEnv.noteOff();
                     v.modEnv.noteOff();
 
@@ -508,9 +533,30 @@ class Sf2Processor extends AudioWorkletProcessor {
                     if (v.loopUntilReleaseThenTail) v.inReleaseTail = true;
                 }
             }
+            return;
         }
 
         if (msg.type === "setControllers") {
+            if (Number.isInteger(msg.trackIndex)) {
+                const trackState = this.trackStates.get(msg.trackIndex);
+                if (!trackState) return;
+                if (Number.isFinite(msg.cc7Volume)) {
+                    trackState.cc7Volume = Math.max(0, Math.min(127, msg.cc7Volume | 0));
+                }
+                if (Number.isFinite(msg.cc10Pan)) {
+                    trackState.cc10Pan = Math.max(0, Math.min(127, msg.cc10Pan | 0));
+                }
+                if (Number.isFinite(msg.cc11Expression)) {
+                    trackState.cc11Expression = Math.max(0, Math.min(127, msg.cc11Expression | 0));
+                }
+                if (Number.isFinite(msg.pan)) {
+                    trackState.pan = Math.max(-1, Math.min(1, msg.pan));
+                }
+                if (Number.isFinite(msg.gain)) {
+                    trackState.gain = Math.max(0, msg.gain);
+                }
+                return;
+            }
             if (Number.isFinite(msg.cc7Volume)) {
                 this.cc7Volume = Math.max(0, Math.min(127, msg.cc7Volume | 0));
             }
@@ -520,10 +566,29 @@ class Sf2Processor extends AudioWorkletProcessor {
             if (Number.isFinite(msg.cc11Expression)) {
                 this.cc11Expression = Math.max(0, Math.min(127, msg.cc11Expression | 0));
             }
+            return;
         }
     }
 
     onMsg(msg) {
+        if (msg.type === "setOfflineTracks") {
+            this.trackStates = new Map(
+                (msg.tracks ?? []).map((track) => [
+                    track.trackIndex,
+                    {
+                        regions: track.regions ?? [],
+                        cc7Volume: Math.max(0, Math.min(127, track.cc7Volume ?? 100)),
+                        cc10Pan: Math.max(0, Math.min(127, track.cc10Pan ?? 64)),
+                        cc11Expression: Math.max(0, Math.min(127, track.cc11Expression ?? 127)),
+                        pan: Math.max(-1, Math.min(1, track.pan ?? 0)),
+                        gain: Math.max(0, track.gain ?? 1),
+                    },
+                ])
+            );
+            this.maxVoices = Math.max(64, msg.maxVoices ?? this.maxVoices);
+            this.voices.length = 0;
+            return;
+        }
         if (msg.type === "setSequence") {
             this.scheduledEvents = Array.isArray(msg.events) ? msg.events : [];
             this.scheduledEventIndex = 0;
@@ -533,9 +598,9 @@ class Sf2Processor extends AudioWorkletProcessor {
         this.dispatchEvent(msg);
     }
 
-    pickRegions(note, velocity) {
+    pickRegions(note, velocity, regions = this.regions) {
         const out = [];
-        for (const r of this.regions) {
+        for (const r of regions) {
             const [kl, kh] = r.keyRange ?? [0, 127];
             const [vl, vh] = r.velRange ?? [0, 127];
             if (note >= kl && note <= kh && velocity >= vl && velocity <= vh) out.push(r);
@@ -543,9 +608,10 @@ class Sf2Processor extends AudioWorkletProcessor {
         return out;
     }
 
-    chokeExclusive(excl) {
+    chokeExclusive(excl, trackIndex = null) {
         for (const v of this.voices) {
-            if (v.exclusiveClass === excl) {
+            const sameTrack = trackIndex == null || v.trackIndex === trackIndex;
+            if (v.exclusiveClass === excl && sameTrack) {
                 v.volEnv.noteOff();
                 v.modEnv.noteOff();
                 if (v.loopUntilReleaseThenTail) v.inReleaseTail = true;
@@ -593,6 +659,10 @@ class Sf2Processor extends AudioWorkletProcessor {
         outL.fill(0);
         outR.fill(0);
 
+        const scheduledEvents = this.scheduledEvents;
+        let scheduledEventIndex = this.scheduledEventIndex;
+        let renderedSamples = this.renderedSamples;
+        let nextScheduledEvent = scheduledEvents[scheduledEventIndex];
         const volumeMul = (this.cc7Volume / 127) * (this.cc11Expression / 127);
         const ccPanPos = (this.cc10Pan - 64) / 63;
 
@@ -600,12 +670,10 @@ class Sf2Processor extends AudioWorkletProcessor {
             let sumL = 0;
             let sumR = 0;
 
-            while (
-                this.scheduledEventIndex < this.scheduledEvents.length &&
-                (this.scheduledEvents[this.scheduledEventIndex]?.frame ?? Infinity) <= this.renderedSamples
-            ) {
-                this.dispatchEvent(this.scheduledEvents[this.scheduledEventIndex]);
-                this.scheduledEventIndex += 1;
+            while (nextScheduledEvent && nextScheduledEvent.frame <= renderedSamples) {
+                this.dispatchEvent(nextScheduledEvent);
+                scheduledEventIndex += 1;
+                nextScheduledEvent = scheduledEvents[scheduledEventIndex];
             }
 
             for (let vi = this.voices.length - 1; vi >= 0; vi--) {
@@ -645,8 +713,11 @@ class Sf2Processor extends AudioWorkletProcessor {
 
                 // --- Volume envelope & gain ---
                 const env = v.volEnv.next();
-                const g = v.baseGain * env * volumeMul;
-                const mixPan = Math.max(-1, Math.min(1, v.regionPanPos + ccPanPos));
+                const g = v.baseGain * env * (v.trackVolumeMul ?? volumeMul);
+                const mixPan = Math.max(
+                    -1,
+                    Math.min(1, v.regionPanPos + (v.trackIndex == null ? ccPanPos : v.trackPanPos))
+                );
                 const panG = balanceToGains(mixPan);
 
                 sumL += fL * g * panG.gL;
@@ -658,9 +729,11 @@ class Sf2Processor extends AudioWorkletProcessor {
 
             outL[i] = sumL;
             outR[i] = sumR;
-            this.renderedSamples += 1;
+            renderedSamples += 1;
         }
 
+        this.scheduledEventIndex = scheduledEventIndex;
+        this.renderedSamples = renderedSamples;
         return true;
     }
 }
