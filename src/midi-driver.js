@@ -1,3 +1,52 @@
+function normalizeMidiData(data) {
+  if (data == null) return null;
+  if (Array.isArray(data)) return data;
+  if (ArrayBuffer.isView(data)) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  return null;
+}
+
+export function createMidiMessageHandler({ onNoteOn, onNoteOff, onProgramChange }) {
+  const bankMsb = new Uint8Array(16);
+  const bankLsb = new Uint8Array(16);
+
+  return {
+    handleMidiMessage(data) {
+      const bytes = normalizeMidiData(data);
+      if (!bytes || bytes.length === 0) return false;
+
+      const status = Number(bytes[0]) || 0;
+      const data1 = Number(bytes[1]) || 0;
+      const data2 = Number(bytes[2]) || 0;
+      const command = status & 0xf0;
+      const channel = status & 0x0f;
+
+      if (command === 0x90 && data2 > 0) {
+        onNoteOn?.(data1 & 0x7f, data2 & 0x7f, channel);
+        return true;
+      }
+      if (command === 0x80 || (command === 0x90 && data2 === 0)) {
+        onNoteOff?.(data1 & 0x7f, channel);
+        return true;
+      }
+      if (command === 0xb0) {
+        const cc = data1 & 0x7f;
+        const value = data2 & 0x7f;
+        if (cc === 0) bankMsb[channel] = value;
+        if (cc === 32) bankLsb[channel] = value;
+        return true;
+      }
+      if (command === 0xc0) {
+        const program = data1 & 0x7f;
+        const bank = ((bankMsb[channel] & 0x7f) << 7) | (bankLsb[channel] & 0x7f);
+        onProgramChange?.(program, bank, channel);
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
 export async function createMidiDriver({
   onNoteOn,
   onNoteOff,
@@ -12,8 +61,7 @@ export async function createMidiDriver({
   const midi = await navigator.requestMIDIAccess({ sysex: false });
   const inputHandlers = new Map();
   let activeInputId = selectedInputId;
-  const bankMsb = new Uint8Array(16);
-  const bankLsb = new Uint8Array(16);
+  const messageHandler = createMidiMessageHandler({ onNoteOn, onNoteOff, onProgramChange });
 
   function shouldHandle(inputId) {
     return activeInputId === "all" || activeInputId === inputId;
@@ -23,30 +71,7 @@ export async function createMidiDriver({
     if (!input || inputHandlers.has(input.id)) return;
     const handler = (event) => {
       if (!shouldHandle(input.id)) return;
-      const [status = 0, note = 0, velocity = 0] = event.data ?? [];
-      const command = status & 0xf0;
-      const channel = status & 0x0f;
-
-      if (command === 0x90 && velocity > 0) {
-        onNoteOn?.(note & 0x7f, velocity & 0x7f, channel);
-        return;
-      }
-      if (command === 0x80 || (command === 0x90 && velocity === 0)) {
-        onNoteOff?.(note & 0x7f, channel);
-        return;
-      }
-      if (command === 0xb0) {
-        const cc = note & 0x7f;
-        const value = velocity & 0x7f;
-        if (cc === 0) bankMsb[channel] = value;
-        if (cc === 32) bankLsb[channel] = value;
-        return;
-      }
-      if (command === 0xc0) {
-        const program = note & 0x7f;
-        const bank = ((bankMsb[channel] & 0x7f) << 7) | (bankLsb[channel] & 0x7f);
-        onProgramChange?.(program, bank, channel);
-      }
+      messageHandler.handleMidiMessage(event.data);
     };
     input.addEventListener("midimessage", handler);
     inputHandlers.set(input.id, { input, handler });

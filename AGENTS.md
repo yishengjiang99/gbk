@@ -48,6 +48,56 @@ When debugging playback, check all three layers. Many bugs are boundary bugs rat
 - Audio render: [`src/sf2-processor.js`](/Users/yishengj/synth/src/sf2-processor.js) turns preset regions plus note events into stereo output.
 - Export: [`src/midireader.jsx`](/Users/yishengj/synth/src/midireader.jsx) uses [`src/sf2-renderer.js`](/Users/yishengj/synth/src/sf2-renderer.js) to render offline and encode a WAV in chunks.
 
+## MIDI Signal Paths
+
+There are two main note/event pathways in this app, and they are intentionally different.
+
+### 1. Live MIDI Input Path
+
+This is the path for a hardware keyboard/controller or the app's direct note triggering:
+
+1. [`src/midi-driver.js`](/Users/yishengj/synth/src/midi-driver.js) receives browser `midimessage` events.
+2. It decodes note on/off, bank-select CCs, and program changes, then calls callbacks supplied by [`src/App.jsx`](/Users/yishengj/synth/src/App.jsx).
+3. [`src/App.jsx`](/Users/yishengj/synth/src/App.jsx) handles those callbacks on the main thread:
+   - `onProgramChange` resolves the requested bank/program to a preset index and pushes `setPreset` to the main synth node.
+   - `onNoteOn` and `onNoteOff` post directly to the main worklet node port.
+4. [`src/sf2-processor.js`](/Users/yishengj/synth/src/sf2-processor.js) renders audio immediately.
+
+Important properties of the live path:
+
+- No worker is involved for note scheduling.
+- It uses one main synth node owned by [`src/App.jsx`](/Users/yishengj/synth/src/App.jsx), not the per-track nodes from the MIDI file player.
+- Bank/program state is driven from incoming MIDI controller/program messages.
+- Bugs here usually live in [`src/midi-driver.js`](/Users/yishengj/synth/src/midi-driver.js), preset resolution in [`src/App.jsx`](/Users/yishengj/synth/src/App.jsx), or note handling in [`src/sf2-processor.js`](/Users/yishengj/synth/src/sf2-processor.js).
+
+### 2. MIDI File Playback Path
+
+This is the path for `.mid` files loaded in the MIDI Explorer:
+
+1. [`src/midireader.jsx`](/Users/yishengj/synth/src/midireader.jsx) loads a MIDI file and transfers its `ArrayBuffer` to [`src/midi-timer.worker.js`](/Users/yishengj/synth/src/midi-timer.worker.js) with `loadMidi`.
+2. The worker parses tracks and events into `playEvents`, computes tempo/time-signature timing, and sends back `songLoaded`.
+3. [`src/midireader.jsx`](/Users/yishengj/synth/src/midireader.jsx) creates one `AudioWorkletNode` per track, connects them through gain/pan nodes, then transfers each node's `MessagePort` back to the worker with `attachPorts`.
+4. When playback starts, the worker runs the timer loop, advances `nextEventIndex` per track, and emits:
+   - `programChangeRequest` to the main thread when a track needs a preset and no manual override is active.
+   - direct `noteOn` / `noteOff` messages to that track's transferred port.
+5. [`src/midireader.jsx`](/Users/yishengj/synth/src/midireader.jsx) resolves `programChangeRequest` into regions and sends `setTrackPreset` back to the worker, which forwards `setPreset` to the track's processor port.
+6. Each per-track instance of [`src/sf2-processor.js`](/Users/yishengj/synth/src/sf2-processor.js) renders its own track audio.
+
+Important properties of the MIDI file path:
+
+- Timing is worker-driven, with a small lookahead loop in [`src/midi-timer.worker.js`](/Users/yishengj/synth/src/midi-timer.worker.js).
+- Playback uses per-track synth nodes, not the live-input synth node.
+- Program changes found inside the MIDI file are resolved lazily during playback unless the user has set a manual track override.
+- Seeking and pausing are worker operations; the worker also sends `noteOff` to stop any currently active notes.
+
+### Practical Debug Rule
+
+If a bug happens only with a hardware controller, inspect the live path first.
+
+If a bug happens only when loading or seeking a `.mid` file, inspect the worker/per-track path first.
+
+If both fail the same way, inspect preset-region construction in [`sf2-parser.js`](/Users/yishengj/synth/sf2-parser.js) or note rendering in [`src/sf2-processor.js`](/Users/yishengj/synth/src/sf2-processor.js).
+
 ## Key Files To Inspect Before Editing
 
 - If the prompt mentions transport, seeking, playhead drift, tempo, or track timing:

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseSF2 } from "../sf2-parser.js";
-import { createMidiDriver } from "./midi-driver.js";
+import { createExternalMidiBridge } from "./external-midi-bridge.js";
+import { createMidiDriver, createMidiMessageHandler } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
 
 const SAMPLE_FILES = [
@@ -524,6 +525,8 @@ export default function App() {
   const lastVizUpdateRef = useRef(0);
   const noteOffTimerRef = useRef(null);
   const midiDriverRef = useRef(null);
+  const externalMidiMessageHandlerRef = useRef(null);
+  const externalMidiBridgeRef = useRef(null);
   const presetRegionsRef = useRef({ presetIndex: null, regions: [] });
   const presetRegionCacheRef = useRef(new Map());
   const activeKeyboardKeysRef = useRef(new Map());
@@ -591,6 +594,7 @@ export default function App() {
       if (midiDriverRef.current) {
         midiDriverRef.current.disconnect();
       }
+      externalMidiBridgeRef.current?.dispose();
     };
   }, []);
 
@@ -869,6 +873,64 @@ export default function App() {
   triggerNoteOffRef.current = triggerNoteOff;
   resolvePresetIndexRef.current = resolvePresetIndex;
 
+  const handleMidiNoteOn = useCallback(async (note, velocity, _channel, sourceLabel = "MIDI") => {
+    setMidiNote(note);
+    setMidiVelocity(velocity);
+    setMidiStatus(`${sourceLabel} noteOn ${note} vel ${velocity}`);
+    try {
+      await triggerNoteOnRef.current?.(note, velocity);
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const handleMidiNoteOff = useCallback((note, _channel, sourceLabel = "MIDI") => {
+    setMidiStatus(`${sourceLabel} noteOff ${note}`);
+    triggerNoteOffRef.current?.(note);
+  }, []);
+
+  const handleMidiProgramChange = useCallback((program, bank, channel, sourceLabel = "MIDI") => {
+    const nextIndex = resolvePresetIndexRef.current?.(program, bank);
+    if (nextIndex != null && nextIndex >= 0) {
+      selectedPresetRef.current = nextIndex;
+      livePresetIndexRef.current = nextIndex;
+      setSelectedPreset(nextIndex);
+      setMidiStatus(
+        `${sourceLabel} program ch${channel + 1}: bank ${bank}, program ${program} -> preset #${nextIndex}`
+      );
+    } else {
+      setMidiStatus(
+        `${sourceLabel} program ch${channel + 1}: bank ${bank}, program ${program} (not found)`
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    externalMidiMessageHandlerRef.current = createMidiMessageHandler({
+      onNoteOn: (note, velocity, channel) => handleMidiNoteOn(note, velocity, channel, "Embedded MIDI"),
+      onNoteOff: (note, channel) => handleMidiNoteOff(note, channel, "Embedded MIDI"),
+      onProgramChange: (program, bank, channel) =>
+        handleMidiProgramChange(program, bank, channel, "Embedded MIDI"),
+    });
+    return () => {
+      externalMidiMessageHandlerRef.current = null;
+    };
+  }, [handleMidiNoteOff, handleMidiNoteOn, handleMidiProgramChange]);
+
+  useEffect(() => {
+    const bridge = createExternalMidiBridge({
+      windowLike: window,
+      onMidiData: (data) => externalMidiMessageHandlerRef.current?.handleMidiMessage(data) ?? false,
+      onStatusChange: setMidiStatus,
+    });
+    externalMidiBridgeRef.current = bridge;
+    bridge.start();
+    return () => {
+      bridge.dispose();
+      externalMidiBridgeRef.current = null;
+    };
+  }, []);
+
   async function onPlaySample() {
     if (!sf2 || effectivePresetIndex == null) return;
     try {
@@ -949,33 +1011,10 @@ export default function App() {
       setMidiError("");
       const driver = await createMidiDriver({
         selectedInputId: selectedMidiInput,
-        onNoteOn: async (note, velocity) => {
-          setMidiNote(note);
-          setMidiVelocity(velocity);
-          setMidiStatus(`MIDI noteOn ${note} vel ${velocity}`);
-          try {
-            await triggerNoteOnRef.current?.(note, velocity);
-          } catch (err) {
-            setAudioError(err instanceof Error ? err.message : String(err));
-          }
-        },
-        onNoteOff: (note) => {
-          setMidiStatus(`MIDI noteOff ${note}`);
-          triggerNoteOffRef.current?.(note);
-        },
-        onProgramChange: (program, bank, channel) => {
-          const nextIndex = resolvePresetIndexRef.current?.(program, bank);
-          if (nextIndex != null && nextIndex >= 0) {
-            selectedPresetRef.current = nextIndex;
-            livePresetIndexRef.current = nextIndex;
-            setSelectedPreset(nextIndex);
-            setMidiStatus(
-              `MIDI program ch${channel + 1}: bank ${bank}, program ${program} -> preset #${nextIndex}`
-            );
-          } else {
-            setMidiStatus(`MIDI program ch${channel + 1}: bank ${bank}, program ${program} (not found)`);
-          }
-        },
+        onNoteOn: (note, velocity, channel) => handleMidiNoteOn(note, velocity, channel, "MIDI"),
+        onNoteOff: (note, channel) => handleMidiNoteOff(note, channel, "MIDI"),
+        onProgramChange: (program, bank, channel) =>
+          handleMidiProgramChange(program, bank, channel, "MIDI"),
         onStateChange: ({ connected, names, inputs }) => {
           setMidiInputs(inputs ?? []);
           if (connected === 0) {
