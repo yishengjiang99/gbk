@@ -141,6 +141,32 @@ test("external bridge accepts direct parent sf2:midi messages and disconnects cl
   bridge.dispose();
 });
 
+test("external bridge forwards midiInfo payloads", async () => {
+  const parent = new FakeParent();
+  const windowLike = new FakeWindow(parent);
+  const infos = [];
+
+  const bridge = createExternalMidiBridge({
+    windowLike,
+    onMidiData: () => true,
+    onMidiInfo: (info) => infos.push(info),
+  });
+
+  bridge.start();
+  windowLike.dispatchMessage({
+    source: parent,
+    data: { type: "sf2:midi", data: [0x90, 60, 100] },
+    ports: [],
+  });
+  windowLike.dispatchMessage({
+    source: parent,
+    data: { type: "midiInfo", infoType: "tempo", bpm: 92 },
+    ports: [],
+  });
+
+  assert.deepEqual(infos, [{ type: "midiInfo", infoType: "tempo", bpm: 92 }]);
+});
+
 test("external bridge ignores non-parent messages", async () => {
   const parent = new FakeParent();
   const stranger = new FakeParent();

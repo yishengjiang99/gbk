@@ -5,6 +5,7 @@ function isRawMidiPayload(payload) {
 export function createExternalMidiBridge({
   windowLike,
   onMidiData,
+  onMidiInfo,
   onStatusChange,
   onConnect,
   onDisconnect,
@@ -33,6 +34,10 @@ export function createExternalMidiBridge({
     if (typeof payload !== "object") return false;
     if (payload.type === "midi" || payload.type === "midimessage") {
       return onMidiData?.(payload.data) ?? false;
+    }
+    if (payload.type === "midiInfo") {
+      onMidiInfo?.(payload);
+      return true;
     }
     if (payload.type === "disconnect") {
       disconnectExternalMidiPort();
@@ -69,6 +74,12 @@ export function createExternalMidiBridge({
     }
     if (payload?.type === "sf2:midi") {
       handleExternalMidiPayload({ type: "midi", data: payload.data });
+      return;
+    }
+    if (payload?.type === "midiInfo" || payload?.type === "sf2:midiInfo") {
+      handleExternalMidiPayload(
+        payload?.type === "sf2:midiInfo" ? { ...payload, type: "midiInfo" } : payload
+      );
     }
   }
 

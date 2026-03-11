@@ -921,6 +921,11 @@ export default function App() {
     const bridge = createExternalMidiBridge({
       windowLike: window,
       onMidiData: (data) => externalMidiMessageHandlerRef.current?.handleMidiMessage(data) ?? false,
+      onMidiInfo: (info) => {
+        if (info?.infoType === "tempo" && Number.isFinite(info.bpm)) {
+          setMidiStatus(`Embedded MIDI tempo ${info.bpm} BPM`);
+        }
+      },
       onStatusChange: setMidiStatus,
     });
     externalMidiBridgeRef.current = bridge;
