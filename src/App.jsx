@@ -3,6 +3,7 @@ import { parseSF2 } from "../sf2-parser.js";
 import { createExternalMidiBridge } from "./external-midi-bridge.js";
 import { createMidiDriver, createMidiMessageHandler } from "./midi-driver.js";
 import MidiReader from "./midireader.jsx";
+import sf2ProcessorUrl from "./sf2-processor.js?worker&url";
 
 const SAMPLE_FILES = [
   {
@@ -783,8 +784,7 @@ export default function App() {
 
     if (loadWorklet) {
       if (!workletLoadPromiseRef.current) {
-        const moduleUrl = new URL("./sf2-processor.js", import.meta.url);
-        workletLoadPromiseRef.current = ctx.audioWorklet.addModule(moduleUrl);
+        workletLoadPromiseRef.current = ctx.audioWorklet.addModule(sf2ProcessorUrl);
       }
       await workletLoadPromiseRef.current;
       setAudioReady(true);
