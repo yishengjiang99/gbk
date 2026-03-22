@@ -87,9 +87,9 @@ interface PlayProgramEvent {
   seq: number;
 }
 
-type PlayEvent = PlayNoteOnEvent | PlayNoteOffEvent | PlayProgramEvent;
+export type PlayEvent = PlayNoteOnEvent | PlayNoteOffEvent | PlayProgramEvent;
 
-interface NoteRecord {
+export interface NoteRecord {
   note: number;
   velocity: number;
   channel: number;
@@ -110,7 +110,7 @@ interface ParsedTrack {
   events: ParsedTrackEvent[];
 }
 
-interface SongTrack {
+export interface SongTrack {
   index: number;
   name: string;
   instrumentName: string;
@@ -118,7 +118,7 @@ interface SongTrack {
   playEvents: PlayEvent[];
 }
 
-interface Song {
+export interface Song {
   format: number;
   division: number;
   durationSec: number;
@@ -178,7 +178,10 @@ interface WorkerGlobalCtx {
 // `self` in a Web Worker is `DedicatedWorkerGlobalScope`, which uses the broader Window-scope
 // DOM lib types that aren't directly assignable to our narrower typed interface. The double
 // assertion is needed to bridge the incompatible `onmessage` overload signatures.
-const workerGlobal = self as unknown as WorkerGlobalCtx;
+// Falls back to a no-op stub when running in plain Node.js (e.g. during tests).
+const workerGlobal: WorkerGlobalCtx = typeof self !== "undefined"
+  ? (self as unknown as WorkerGlobalCtx)
+  : { postMessage: () => undefined, onmessage: null };
 
 function readVarLen(u8: Uint8Array, posRef: { pos: number }): number {
   let v = 0;
@@ -305,7 +308,7 @@ function tickToSec(segments: TempoSegment[], division: number, tick: number): nu
   return seg.startSec + ((tick - seg.tick) * seg.microPerQuarter) / 1000000 / division;
 }
 
-function parseMidiBuffer(buffer: ArrayBuffer): Song {
+export function parseMidiBuffer(buffer: ArrayBuffer): Song {
   const u8 = new Uint8Array(buffer);
   if (ascii(u8, 0, 4) !== "MThd") throw new Error("Invalid MIDI header");
   const headerLen = u32be(u8, 4);
