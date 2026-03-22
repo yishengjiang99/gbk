@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createMidiMessageHandler } from "../src/midi-driver.js";
+import { createMidiMessageHandler, type MidiData } from "../src/midi-driver.ts";
 
 test("createMidiMessageHandler decodes note on/off messages", async () => {
-  const events = [];
+  const events: unknown[] = [];
   const handler = createMidiMessageHandler({
     onNoteOn: (note, velocity, channel) => events.push({ type: "noteOn", note, velocity, channel }),
     onNoteOff: (note, channel) => events.push({ type: "noteOff", note, channel }),
@@ -22,7 +22,7 @@ test("createMidiMessageHandler decodes note on/off messages", async () => {
 });
 
 test("createMidiMessageHandler tracks bank select before program change", async () => {
-  const events = [];
+  const events: unknown[] = [];
   const handler = createMidiMessageHandler({
     onProgramChange: (program, bank, channel) =>
       events.push({ type: "programChange", program, bank, channel }),
@@ -41,6 +41,6 @@ test("createMidiMessageHandler ignores unsupported payloads", async () => {
   const handler = createMidiMessageHandler({});
 
   assert.equal(handler.handleMidiMessage(null), false);
-  assert.equal(handler.handleMidiMessage("bad"), false);
+  assert.equal(handler.handleMidiMessage("bad" as unknown as MidiData), false);
   assert.equal(handler.handleMidiMessage([0xe0, 0, 64]), false);
 });

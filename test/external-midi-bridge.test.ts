@@ -1,60 +1,62 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createExternalMidiBridge } from "../src/external-midi-bridge.js";
+import { createExternalMidiBridge, type WindowLike } from "../src/external-midi-bridge.ts";
 
 class FakePort {
-  constructor() {
-    this.messages = [];
-    this.onmessage = null;
-    this.started = false;
-    this.closed = false;
-  }
+  messages: unknown[] = [];
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  started = false;
+  closed = false;
 
-  postMessage(message) {
+  postMessage(message: unknown): void {
     this.messages.push(message);
   }
 
-  start() {
+  start(): void {
     this.started = true;
   }
 
-  close() {
+  close(): void {
     this.closed = true;
   }
 
-  dispatch(data) {
+  dispatch(data: unknown): void {
     this.onmessage?.({ data });
   }
 }
 
 class FakeParent {
-  constructor() {
-    this.messages = [];
-  }
+  messages: { message: unknown; origin: string }[] = [];
 
-  postMessage(message, origin) {
+  postMessage(message: unknown, origin: string): void {
     this.messages.push({ message, origin });
   }
 }
 
 class FakeWindow {
-  constructor(parent) {
+  parent: FakeParent;
+  listeners = new Map<string, (event: unknown) => void>();
+
+  constructor(parent: FakeParent) {
     this.parent = parent;
-    this.listeners = new Map();
   }
 
-  addEventListener(type, handler) {
+  addEventListener(type: string, handler: (event: unknown) => void): void {
     this.listeners.set(type, handler);
   }
 
-  removeEventListener(type, handler) {
+  removeEventListener(type: string, handler: (event: unknown) => void): void {
     if (this.listeners.get(type) === handler) {
       this.listeners.delete(type);
     }
   }
 
-  dispatchMessage(event) {
+  postMessage(_message: unknown, _origin: string): void {
+    // not called on the child window in tests
+  }
+
+  dispatchMessage(event: unknown): void {
     this.listeners.get("message")?.(event);
   }
 }
@@ -63,13 +65,13 @@ test("external bridge announces readiness and routes midi from MessagePort", asy
   const parent = new FakeParent();
   const windowLike = new FakeWindow(parent);
   const port = new FakePort();
-  const midiPayloads = [];
-  const statuses = [];
+  const midiPayloads: number[][] = [];
+  const statuses: string[] = [];
 
   const bridge = createExternalMidiBridge({
-    windowLike,
+    windowLike: windowLike as unknown as WindowLike,
     onMidiData: (data) => {
-      midiPayloads.push(Array.from(data));
+      midiPayloads.push(Array.from(data as ArrayLike<number>));
       return true;
     },
     onStatusChange: (status) => statuses.push(status),
@@ -100,13 +102,13 @@ test("external bridge accepts direct parent sf2:midi messages and disconnects cl
   const parent = new FakeParent();
   const windowLike = new FakeWindow(parent);
   const port = new FakePort();
-  const midiPayloads = [];
-  const statuses = [];
+  const midiPayloads: number[][] = [];
+  const statuses: string[] = [];
 
   const bridge = createExternalMidiBridge({
-    windowLike,
+    windowLike: windowLike as unknown as WindowLike,
     onMidiData: (data) => {
-      midiPayloads.push(Array.from(data));
+      midiPayloads.push(Array.from(data as ArrayLike<number>));
       return true;
     },
     onStatusChange: (status) => statuses.push(status),
@@ -144,10 +146,10 @@ test("external bridge accepts direct parent sf2:midi messages and disconnects cl
 test("external bridge forwards midiInfo payloads", async () => {
   const parent = new FakeParent();
   const windowLike = new FakeWindow(parent);
-  const infos = [];
+  const infos: Record<string, unknown>[] = [];
 
   const bridge = createExternalMidiBridge({
-    windowLike,
+    windowLike: windowLike as unknown as WindowLike,
     onMidiData: () => true,
     onMidiInfo: (info) => infos.push(info),
   });
@@ -175,7 +177,7 @@ test("external bridge ignores non-parent messages", async () => {
   let connected = false;
 
   const bridge = createExternalMidiBridge({
-    windowLike,
+    windowLike: windowLike as unknown as WindowLike,
     onMidiData: () => true,
     onConnect: () => {
       connected = true;

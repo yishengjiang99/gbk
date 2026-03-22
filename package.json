@@ -8,13 +8,15 @@
     "dev": "npm run gen:midi-manifest && vite",
     "build": "npm run gen:midi-manifest && vite build",
     "preview": "vite preview",
-    "test": "node --test"
+    "test": "node --import tsx/esm --test test/*.test.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.test.json"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",

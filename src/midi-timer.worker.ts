@@ -175,6 +175,9 @@ interface WorkerGlobalCtx {
   onmessage: ((event: MessageEvent<InboundMsg>) => void) | null;
 }
 
+// `self` in a Web Worker is `DedicatedWorkerGlobalScope`, which uses the broader Window-scope
+// DOM lib types that aren't directly assignable to our narrower typed interface. The double
+// assertion is needed to bridge the incompatible `onmessage` overload signatures.
 const workerGlobal = self as unknown as WorkerGlobalCtx;
 
 function readVarLen(u8: Uint8Array, posRef: { pos: number }): number {
