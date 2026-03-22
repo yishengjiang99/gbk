@@ -7,7 +7,7 @@ import {
   MidiDriver,
   MidiMessageHandler,
 } from "./midi-driver";
-import MidiReader from "./midireader.jsx";
+import MidiReader from "./midireader";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 
 // ---------------------------------------------------------------------------

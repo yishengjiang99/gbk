@@ -1,20 +1,72 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { SF2Region } from "../sf2-parser.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
 
-function fmtTime(sec) {
+// ---------------------------------------------------------------------------
+// Local type definitions
+// ---------------------------------------------------------------------------
+
+interface NoteRecord {
+  note: number;
+  velocity: number;
+  channel: number;
+  startSec: number;
+  durationSec: number;
+}
+
+interface PlayEvent {
+  type: string;
+  sec: number;
+  seq?: number;
+  channel?: number;
+  note?: number;
+  velocity?: number;
+  program?: number;
+  bank?: number;
+}
+
+interface SongTrack {
+  index: number;
+  name: string;
+  instrumentName: string;
+  notes: NoteRecord[];
+  playEvents: PlayEvent[];
+}
+
+interface Song {
+  format: number;
+  division: number;
+  durationSec: number;
+  tracks: SongTrack[];
+  totalBars: number;
+  bpm: number;
+  timeSig: string;
+}
+
+type TrackCc = { cc7Volume: number; cc10Pan: number; cc11Expression: number };
+type TrackMix = { mute: boolean; solo: boolean };
+type PresetOption = { index: number; bank: number; program: number; name: string };
+type MidiOption = { name: string; path: string };
+type TrackNode = { node: AudioWorkletNode; panner: StereoPannerNode; gain: GainNode };
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
+
+function fmtTime(sec: number): string {
   const s = Math.max(0, sec | 0);
   const m = (s / 60) | 0;
   const r = s % 60;
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-const DEFAULT_TRACK_CC = { cc7Volume: 100, cc10Pan: 64, cc11Expression: 127 };
+const DEFAULT_TRACK_CC: TrackCc = { cc7Volume: 100, cc10Pan: 64, cc11Expression: 127 };
 
-function clampCc(value) {
+function clampCc(value: number): number {
   return Math.max(0, Math.min(127, Number(value) | 0));
 }
 
-function encodeWav(audioBuffer) {
+function encodeWav(audioBuffer: AudioBuffer): ArrayBuffer {
   const numChannels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;
   const numSamples = audioBuffer.length;
@@ -23,7 +75,7 @@ function encodeWav(audioBuffer) {
   const channelData = Array.from({ length: numChannels }, (_, ch) => audioBuffer.getChannelData(ch));
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
-  const writeStr = (offset, str) => {
+  const writeStr = (offset: number, str: string) => {
     for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
   };
   writeStr(0, "RIFF");
@@ -50,7 +102,11 @@ function encodeWav(audioBuffer) {
   return buffer;
 }
 
-async function encodeWavIncremental(audioBuffer, chunkSamples = 16384, onProgress) {
+async function encodeWavIncremental(
+  audioBuffer: AudioBuffer,
+  chunkSamples = 16384,
+  onProgress?: (progress: number) => void
+): Promise<ArrayBuffer> {
   const numChannels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;
   const numSamples = audioBuffer.length;
@@ -59,7 +115,7 @@ async function encodeWavIncremental(audioBuffer, chunkSamples = 16384, onProgres
   const channelData = Array.from({ length: numChannels }, (_, ch) => audioBuffer.getChannelData(ch));
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
-  const writeStr = (offset, str) => {
+  const writeStr = (offset: number, str: string) => {
     for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
   };
 
@@ -88,13 +144,28 @@ async function encodeWavIncremental(audioBuffer, chunkSamples = 16384, onProgres
       }
     }
     onProgress?.(end / numSamples);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
   return buffer;
 }
 
-function CcKnob({ label, value, onChange, disabled = false }) {
-  const startRef = useRef({ active: false, startY: 0, startValue: value });
+// ---------------------------------------------------------------------------
+// CcKnob component
+// ---------------------------------------------------------------------------
+
+interface CcKnobProps {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+}
+
+function CcKnob({ label, value, onChange, disabled = false }: CcKnobProps) {
+  const startRef = useRef<{ active: boolean; startY: number; startValue: number }>({
+    active: false,
+    startY: 0,
+    startValue: value,
+  });
 
   useEffect(() => {
     if (!startRef.current.active) startRef.current.startValue = value;
@@ -105,14 +176,14 @@ function CcKnob({ label, value, onChange, disabled = false }) {
   const x2 = 20 + Math.cos(rad) * 11;
   const y2 = 20 + Math.sin(rad) * 11;
 
-  const onPointerDown = (event) => {
+  const onPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (disabled) return;
     if (event.button !== 0) return;
     event.preventDefault();
     startRef.current = { active: true, startY: event.clientY, startValue: value };
   };
 
-  const onPointerMove = (event) => {
+  const onPointerMove = (event: PointerEvent) => {
     if (!startRef.current.active || disabled) return;
     event.preventDefault();
     const delta = startRef.current.startY - event.clientY;
@@ -154,7 +225,16 @@ function CcKnob({ label, value, onChange, disabled = false }) {
   );
 }
 
-const ORCHESTRA_PAN_RULES = [
+// ---------------------------------------------------------------------------
+// Orchestra pan heuristics
+// ---------------------------------------------------------------------------
+
+interface PanRule {
+  test: RegExp;
+  pan: number;
+}
+
+const ORCHESTRA_PAN_RULES: PanRule[] = [
   { test: /\bviolin\s*(?:ii|2)\b/i, pan: -0.35 },
   { test: /\bviolin\b/i, pan: -0.75 },
   { test: /\bviola\b/i, pan: 0.3 },
@@ -170,7 +250,7 @@ const ORCHESTRA_PAN_RULES = [
   { test: /\btimpani\b/i, pan: -0.1 },
 ];
 
-function resolveOrchestraPan(...labels) {
+function resolveOrchestraPan(...labels: (string | undefined)[]): number | null {
   const merged = labels
     .filter(Boolean)
     .join(" | ")
@@ -181,6 +261,41 @@ function resolveOrchestraPan(...labels) {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// MidiReader props
+// ---------------------------------------------------------------------------
+
+interface MidiReaderProps {
+  sf2Ready: boolean;
+  sf2Name: string;
+  sf2Loading: boolean;
+  onUploadSf2: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onLoadDefaultSf2: () => void;
+  activeTab: string;
+  onSelectTab: (tab: string) => void;
+  audioCtxState: string;
+  onTogglePower: () => void;
+  midiEnabled: boolean;
+  onToggleMidi: () => void;
+  selectedMidiInput: string;
+  onSelectMidiInput: (id: string) => void;
+  midiInputs?: { id: string; name: string }[];
+  analyzerCollapsed: boolean;
+  onToggleAnalyzer: () => void;
+  ensureAudioInfrastructure: (
+    opts?: { loadWorklet?: boolean }
+  ) => Promise<{ ctx: AudioContext; analyser: AnalyserNode }>;
+  getRegionsForPreset: (presetIndex: number) => SF2Region[];
+  resolvePresetIndex: (program: number, bank: number) => number | null;
+  fallbackPresetIndex: number;
+  presetOptions?: PresetOption[];
+  onError?: (msg: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// MidiReader component
+// ---------------------------------------------------------------------------
 
 export default function MidiReader({
   sf2Ready,
@@ -205,40 +320,44 @@ export default function MidiReader({
   fallbackPresetIndex,
   presetOptions = [],
   onError,
-}) {
-  const [song, setSong] = useState(null);
-  const [songName, setSongName] = useState("");
-  const [songError, setSongError] = useState("");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
-  const [exportStage, setExportStage] = useState("");
-  const [songTime, setSongTime] = useState(0);
-  const [midiOptions, setMidiOptions] = useState([]);
-  const [selectedMidiPath, setSelectedMidiPath] = useState("");
-  const [trackPresetOverrides, setTrackPresetOverrides] = useState({});
-  const [trackCcControls, setTrackCcControls] = useState({});
-  const [trackMixState, setTrackMixState] = useState({});
-  const [toolbarHint, setToolbarHint] = useState("MIDI Explorer");
+}: MidiReaderProps) {
+  const [song, setSong] = useState<Song | null>(null);
+  const [songName, setSongName] = useState<string>("");
+  const [songError, setSongError] = useState<string>("");
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportProgress, setExportProgress] = useState<number>(0);
+  const [exportStage, setExportStage] = useState<string>("");
+  const [songTime, setSongTime] = useState<number>(0);
+  const [midiOptions, setMidiOptions] = useState<MidiOption[]>([]);
+  const [selectedMidiPath, setSelectedMidiPath] = useState<string>("");
+  const [trackPresetOverrides, setTrackPresetOverrides] = useState<Record<number, number | null>>({});
+  const [trackCcControls, setTrackCcControls] = useState<Record<number, TrackCc>>({});
+  const [trackMixState, setTrackMixState] = useState<Record<number, TrackMix>>({});
+  const [toolbarHint, setToolbarHint] = useState<string>("MIDI Explorer");
 
-  const viewportRef = useRef(null);
-  const playheadRef = useRef(null);
-  const contentRef = useRef(null);
-  const workerRef = useRef(null);
-  const trackNodesRef = useRef([]);
-  const portsAttachedRef = useRef(false);
-  const dragStateRef = useRef({ active: false, startX: 0, startLeft: 0 });
-  const isSeekingRef = useRef(false);
-  const onErrorRef = useRef(onError);
-  const trackPresetOverridesRef = useRef({});
-  const trackCcControlsRef = useRef({});
-  const trackMixStateRef = useRef({});
-  const resolvePresetRef = useRef(resolvePresetIndex);
-  const getRegionsRef = useRef(getRegionsForPreset);
-  const fallbackPresetRef = useRef(fallbackPresetIndex);
-  const durationRef = useRef(0.01);
-  const contentWRef = useRef(1000);
-  const presetOptionMapRef = useRef(new Map());
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const playheadRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const trackNodesRef = useRef<TrackNode[]>([]);
+  const portsAttachedRef = useRef<boolean>(false);
+  const dragStateRef = useRef<{ active: boolean; startX: number; startLeft: number }>({
+    active: false,
+    startX: 0,
+    startLeft: 0,
+  });
+  const isSeekingRef = useRef<boolean>(false);
+  const onErrorRef = useRef<((msg: string) => void) | undefined>(onError);
+  const trackPresetOverridesRef = useRef<Record<number, number | null>>({});
+  const trackCcControlsRef = useRef<Record<number, TrackCc>>({});
+  const trackMixStateRef = useRef<Record<number, TrackMix>>({});
+  const resolvePresetRef = useRef<(program: number, bank: number) => number | null>(resolvePresetIndex);
+  const getRegionsRef = useRef<(presetIndex: number) => SF2Region[]>(getRegionsForPreset);
+  const fallbackPresetRef = useRef<number>(fallbackPresetIndex);
+  const durationRef = useRef<number>(0.01);
+  const contentWRef = useRef<number>(1000);
+  const presetOptionMapRef = useRef<Map<number, PresetOption>>(new Map());
 
   const timelineW = 1000;
   const trackH = 108;
@@ -248,18 +367,18 @@ export default function MidiReader({
   const zoomFactor = totalBars > visibleBars ? totalBars / visibleBars : 1;
   const contentW = Math.round(timelineW * zoomFactor);
 
-  const visibleTracks = useMemo(() => song?.tracks ?? [], [song]);
-  const presetOptionMap = useMemo(
+  const visibleTracks = useMemo<SongTrack[]>(() => song?.tracks ?? [], [song]);
+  const presetOptionMap = useMemo<Map<number, PresetOption>>(
     () => new Map((presetOptions ?? []).map((p) => [p.index, p])),
     [presetOptions]
   );
-  const trackDefaultPresetMap = useMemo(() => {
-    const out = {};
+  const trackDefaultPresetMap = useMemo<Record<number, number>>(() => {
+    const out: Record<number, number> = {};
     if (!song?.tracks?.length) return out;
     for (const track of song.tracks) {
       const programEvent = track.playEvents.find((e) => e.type === "program");
       if (!programEvent) continue;
-      const presetIndex = resolvePresetIndex(programEvent.program, programEvent.bank);
+      const presetIndex = resolvePresetIndex(programEvent.program ?? 0, programEvent.bank ?? 0);
       if (presetIndex != null && presetIndex >= 0) out[track.index] = presetIndex;
     }
     return out;
@@ -294,7 +413,7 @@ export default function MidiReader({
     presetOptionMapRef.current = presetOptionMap;
   }, [presetOptionMap]);
 
-  const updatePlayhead = (sec) => {
+  const updatePlayhead = (sec: number) => {
     const line = playheadRef.current;
     if (!line) return;
     const safeDuration = Math.max(0.01, durationRef.current);
@@ -303,7 +422,7 @@ export default function MidiReader({
     line.style.transform = `translateX(${x}px)`;
   };
 
-  const seekToClientX = (clientX) => {
+  const seekToClientX = (clientX: number): number => {
     const content = contentRef.current;
     if (!content) return 0;
     const rect = content.getBoundingClientRect();
@@ -339,7 +458,7 @@ export default function MidiReader({
     portsAttachedRef.current = false;
   };
 
-  const getTrackCc = (trackIndex, controls = trackCcControlsRef.current) => {
+  const getTrackCc = (trackIndex: number, controls: Record<number, TrackCc> = trackCcControlsRef.current): TrackCc => {
     const cc = controls?.[trackIndex];
     return {
       cc7Volume: clampCc(cc?.cc7Volume ?? DEFAULT_TRACK_CC.cc7Volume),
@@ -348,7 +467,7 @@ export default function MidiReader({
     };
   };
 
-  const applyTrackControllers = (songData, controls = trackCcControlsRef.current) => {
+  const applyTrackControllers = (songData: Song | null, controls: Record<number, TrackCc> = trackCcControlsRef.current) => {
     if (!songData?.tracks?.length) return;
     for (let i = 0; i < songData.tracks.length; i += 1) {
       const track = songData.tracks[i];
@@ -359,7 +478,7 @@ export default function MidiReader({
     }
   };
 
-  const applyTrackMuteSolo = (songData, mix = trackMixStateRef.current) => {
+  const applyTrackMuteSolo = (songData: Song | null, mix: Record<number, TrackMix> = trackMixStateRef.current) => {
     if (!songData?.tracks?.length) return;
     const anySolo = songData.tracks.some((track) => !!mix?.[track.index]?.solo);
     for (let i = 0; i < songData.tracks.length; i += 1) {
@@ -375,7 +494,7 @@ export default function MidiReader({
     }
   };
 
-  const applyTrackPanning = (songData, overrides) => {
+  const applyTrackPanning = (songData: Song | null, overrides: Record<number, number | null> | undefined) => {
     if (!songData?.tracks?.length) return;
     for (let i = 0; i < songData.tracks.length; i += 1) {
       const track = songData.tracks[i];
@@ -403,10 +522,10 @@ export default function MidiReader({
     const worker = new Worker(new URL("./midi-timer.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
 
-    worker.onmessage = (event) => {
-      const msg = event.data;
+    worker.onmessage = (event: MessageEvent) => {
+      const msg = event.data as { type: string; [key: string]: unknown };
       if (msg.type === "songLoaded") {
-        setSong(msg.song);
+        setSong(msg.song as Song);
         setSongTime(0);
         setIsPlaying(false);
         setSongError("");
@@ -418,14 +537,14 @@ export default function MidiReader({
       }
       if (msg.type === "tick") {
         if (!isSeekingRef.current) {
-          setSongTime(msg.sec ?? 0);
-          updatePlayhead(msg.sec ?? 0);
+          setSongTime((msg.sec as number) ?? 0);
+          updatePlayhead((msg.sec as number) ?? 0);
         }
         const viewport = viewportRef.current;
         if (viewport && !isSeekingRef.current) {
           const safeDuration = Math.max(0.01, durationRef.current);
           const width = contentWRef.current;
-          const playX = ((msg.sec ?? 0) / safeDuration) * width;
+          const playX = (((msg.sec as number) ?? 0) / safeDuration) * width;
           const target = Math.max(0, playX - viewport.clientWidth * 0.2);
           const maxLeft = Math.max(0, width - viewport.clientWidth);
           viewport.scrollLeft = Math.min(maxLeft, target);
@@ -433,35 +552,36 @@ export default function MidiReader({
         return;
       }
       if (msg.type === "paused") {
-        setSongTime(msg.sec ?? 0);
-        updatePlayhead(msg.sec ?? 0);
+        setSongTime((msg.sec as number) ?? 0);
+        updatePlayhead((msg.sec as number) ?? 0);
         setIsPlaying(false);
         return;
       }
       if (msg.type === "ended") {
-        setSongTime(msg.sec ?? 0);
-        updatePlayhead(msg.sec ?? 0);
+        setSongTime((msg.sec as number) ?? 0);
+        updatePlayhead((msg.sec as number) ?? 0);
         setIsPlaying(false);
         return;
       }
       if (msg.type === "programChangeRequest") {
+        const trackIndex = msg.trackIndex as number;
         const presetIndex =
-          trackPresetOverridesRef.current[msg.trackIndex] != null
-            ? trackPresetOverridesRef.current[msg.trackIndex]
-            : resolvePresetRef.current(msg.program, msg.bank) ?? fallbackPresetRef.current;
+          trackPresetOverridesRef.current[trackIndex] != null
+            ? (trackPresetOverridesRef.current[trackIndex] as number)
+            : resolvePresetRef.current(msg.program as number, msg.bank as number) ?? fallbackPresetRef.current;
         const regions = getRegionsRef.current(presetIndex);
         worker.postMessage({
           type: "setTrackPreset",
-          trackIndex: msg.trackIndex,
+          trackIndex,
           presetIndex,
-          override: trackPresetOverridesRef.current[msg.trackIndex] != null,
+          override: trackPresetOverridesRef.current[trackIndex] != null,
           regions,
         });
         return;
       }
       if (msg.type === "error") {
-        setSongError(msg.message || "Worker error");
-        onErrorRef.current?.(msg.message || "Worker error");
+        setSongError((msg.message as string) || "Worker error");
+        onErrorRef.current?.((msg.message as string) || "Worker error");
       }
     };
 
@@ -483,7 +603,7 @@ export default function MidiReader({
 
     viewport.classList.add("dragScroll");
 
-    const onPointerDown = (event) => {
+    const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
       dragStateRef.current.active = true;
       dragStateRef.current.startX = event.clientX;
@@ -493,13 +613,13 @@ export default function MidiReader({
       event.preventDefault();
     };
 
-    const onPointerMove = (event) => {
+    const onPointerMove = (event: PointerEvent) => {
       if (!dragStateRef.current.active) return;
       const dx = event.clientX - dragStateRef.current.startX;
       viewport.scrollLeft = dragStateRef.current.startLeft - dx;
     };
 
-    const endDrag = (event) => {
+    const endDrag = (event: PointerEvent) => {
       if (!dragStateRef.current.active) return;
       dragStateRef.current.active = false;
       viewport.classList.remove("dragging");
@@ -524,7 +644,7 @@ export default function MidiReader({
     const line = playheadRef.current;
     if (!line) return;
 
-    const onPointerDown = (event) => {
+    const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
@@ -534,12 +654,12 @@ export default function MidiReader({
       seekToClientX(event.clientX);
     };
 
-    const onPointerMove = (event) => {
+    const onPointerMove = (event: PointerEvent) => {
       if (!isSeekingRef.current) return;
       seekToClientX(event.clientX);
     };
 
-    const endSeek = (event) => {
+    const endSeek = (event: PointerEvent) => {
       if (!isSeekingRef.current) return;
       isSeekingRef.current = false;
       line.classList.remove("seeking");
@@ -566,9 +686,15 @@ export default function MidiReader({
         const manifestUrl = `${import.meta.env.BASE_URL}static/midi-manifest.json`;
         const res = await fetch(manifestUrl);
         if (!res.ok) throw new Error(`Failed to fetch ${manifestUrl}`);
-        const list = await res.json();
-        const normalized = Array.isArray(list)
-          ? list.filter((m) => m?.path && m?.name)
+        const list = await res.json() as unknown;
+        const normalized: MidiOption[] = Array.isArray(list)
+          ? (list as unknown[]).filter(
+              (m): m is MidiOption =>
+                m != null &&
+                typeof m === "object" &&
+                "path" in (m as object) &&
+                "name" in (m as object)
+            )
           : [];
         setMidiOptions(normalized);
 
@@ -625,7 +751,7 @@ export default function MidiReader({
     if (portsAttachedRef.current) return;
 
     const { ctx, analyser } = await ensureAudioInfrastructure();
-    const trackNodes = [];
+    const trackNodes: TrackNode[] = [];
     for (let i = 0; i < song.tracks.length; i += 1) {
       const node = new AudioWorkletNode(ctx, "sf2-processor", {
         numberOfInputs: 0,
@@ -671,7 +797,6 @@ export default function MidiReader({
     }
     try {
       await ensureTrackInfrastructure();
-      // Resume audio context if it's not running (e.g., suspended or interrupted)
       const { ctx } = await ensureAudioInfrastructure();
       if (ctx.state !== "running") {
         try {
@@ -714,8 +839,26 @@ export default function MidiReader({
       );
 
       const anySolo = song.tracks.some((t) => !!trackMixStateRef.current[t.index]?.solo);
-      const offlineTracks = [];
-      const events = [];
+      const offlineTracks: {
+        trackIndex: number;
+        regions: SF2Region[];
+        cc7Volume: number;
+        cc10Pan: number;
+        cc11Expression: number;
+        pan: number;
+        gain: number;
+      }[] = [];
+      const events: {
+        frame: number;
+        seq: number;
+        type: string;
+        trackIndex: number;
+        channel?: number;
+        note?: number;
+        velocity?: number;
+        regions?: SF2Region[];
+      }[] = [];
+
       for (const track of song.tracks) {
         const overridePreset = trackPresetOverridesRef.current[track.index];
         const defaultPreset = trackDefaultPresetMap[track.index];
@@ -759,7 +902,7 @@ export default function MidiReader({
               note: ev.note,
             });
           } else if (ev.type === "program" && overridePreset == null) {
-            const pIdx = resolvePresetRef.current(ev.program, ev.bank) ?? fallbackPresetRef.current;
+            const pIdx = resolvePresetRef.current(ev.program ?? 0, ev.bank ?? 0) ?? fallbackPresetRef.current;
             events.push({
               frame,
               seq: ev.seq ?? 0,
@@ -776,7 +919,7 @@ export default function MidiReader({
         tracks: offlineTracks,
         events,
         maxVoices: Math.max(96, song.tracks.length * 24),
-        onProgress: (progress) => {
+        onProgress: (progress: number) => {
           setExportProgress(Math.max(0, Math.min(0.85, progress * 0.85)));
         },
       });
@@ -805,7 +948,7 @@ export default function MidiReader({
     }
   }
 
-  async function onUploadMidi(event) {
+  async function onUploadMidi(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !workerRef.current) return;
     try {
@@ -844,7 +987,7 @@ export default function MidiReader({
     }
   }
 
-  async function onSelectMidiPath(nextPath) {
+  async function onSelectMidiPath(nextPath: string) {
     setSelectedMidiPath(nextPath);
     if (!nextPath) return;
     try {
@@ -865,9 +1008,9 @@ export default function MidiReader({
     }
   }
 
-  function onTrackPresetChange(trackIndex, nextValue) {
+  function onTrackPresetChange(trackIndex: number, nextValue: string) {
     const parsed = Number(nextValue);
-    const nextPreset = Number.isFinite(parsed) ? parsed : null;
+    const nextPreset: number | null = Number.isFinite(parsed) ? parsed : null;
     setTrackPresetOverrides((prev) => ({ ...prev, [trackIndex]: nextPreset }));
     if (!workerRef.current || !portsAttachedRef.current) return;
     const presetIndex = nextPreset ?? fallbackPresetIndex;
@@ -882,10 +1025,10 @@ export default function MidiReader({
     applyTrackPanning(song, { ...trackPresetOverridesRef.current, [trackIndex]: nextPreset });
   }
 
-  function onTrackCcChange(trackIndex, key, rawValue) {
+  function onTrackCcChange(trackIndex: number, key: keyof TrackCc, rawValue: number) {
     const value = clampCc(rawValue);
     const current = getTrackCc(trackIndex);
-    const nextTrack = { ...current, [key]: value };
+    const nextTrack: TrackCc = { ...current, [key]: value };
     const nextAll = { ...trackCcControlsRef.current, [trackIndex]: nextTrack };
     trackCcControlsRef.current = nextAll;
     setTrackCcControls(nextAll);
@@ -894,9 +1037,9 @@ export default function MidiReader({
     applyTrackMuteSolo(song, trackMixStateRef.current);
   }
 
-  function onToggleTrackMute(trackIndex) {
+  function onToggleTrackMute(trackIndex: number) {
     const current = trackMixStateRef.current[trackIndex] ?? { mute: false, solo: false };
-    const nextAll = {
+    const nextAll: Record<number, TrackMix> = {
       ...trackMixStateRef.current,
       [trackIndex]: { ...current, mute: !current.mute },
     };
@@ -904,9 +1047,9 @@ export default function MidiReader({
     applyTrackMuteSolo(song, nextAll);
   }
 
-  function onToggleTrackSolo(trackIndex) {
+  function onToggleTrackSolo(trackIndex: number) {
     const current = trackMixStateRef.current[trackIndex] ?? { mute: false, solo: false };
-    const nextAll = {
+    const nextAll: Record<number, TrackMix> = {
       ...trackMixStateRef.current,
       [trackIndex]: { ...current, solo: !current.solo },
     };
@@ -914,7 +1057,7 @@ export default function MidiReader({
     applyTrackMuteSolo(song, nextAll);
   }
 
-  function formatTrackInlineName(track) {
+  function formatTrackInlineName(track: SongTrack): string {
     const generic = /^track\s+\d+$/i.test(track?.name || "");
     return generic ? "" : (track?.name || "");
   }
@@ -1098,7 +1241,7 @@ export default function MidiReader({
             </span>
             {isExporting ? (
               <div className="exportProgress" aria-live="polite">
-                <div className="exportProgressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(exportProgress * 100)}>
+                <div className="exportProgressBar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportProgress * 100)}>
                   <span className="exportProgressFill" style={{ width: `${Math.round(exportProgress * 100)}%` }} />
                 </div>
                 <span className="exportProgressLabel">
