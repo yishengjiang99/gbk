@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseSF2 } from "../sf2-parser.js";
-import { createExternalMidiBridge } from "./external-midi-bridge.js";
-import { createMidiDriver, createMidiMessageHandler } from "./midi-driver.js";
+import { createExternalMidiBridge } from "./external-midi-bridge";
+import { createMidiDriver, createMidiMessageHandler } from "./midi-driver";
 import MidiReader from "./midireader.jsx";
 import sf2ProcessorUrl from "./sf2-processor.js?worker&url";
 

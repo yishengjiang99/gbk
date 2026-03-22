@@ -1,17 +1,49 @@
-function normalizeMidiData(data) {
+export type MidiData = number[] | ArrayBufferView | ArrayBuffer | null;
+
+export interface MidiDriverCallbacks {
+  onNoteOn?: (note: number, velocity: number, channel: number) => void;
+  onNoteOff?: (note: number, channel: number) => void;
+  onProgramChange?: (program: number, bank: number, channel: number) => void;
+}
+
+export interface MidiStateChange {
+  connected: number;
+  names: string[];
+  inputs: { id: string; name: string }[];
+}
+
+export interface MidiDriverOptions extends MidiDriverCallbacks {
+  onStateChange?: (state: MidiStateChange) => void;
+  selectedInputId?: string;
+}
+
+export interface MidiMessageHandler {
+  handleMidiMessage(data: MidiData): boolean;
+}
+
+export interface MidiDriver {
+  setSelectedInput(inputId: string): void;
+  disconnect(): void;
+}
+
+function normalizeMidiData(data: MidiData): ArrayLike<number> | null {
   if (data == null) return null;
   if (Array.isArray(data)) return data;
-  if (ArrayBuffer.isView(data)) return data;
+  if (ArrayBuffer.isView(data)) return data as unknown as ArrayLike<number>;
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return null;
 }
 
-export function createMidiMessageHandler({ onNoteOn, onNoteOff, onProgramChange }) {
+export function createMidiMessageHandler({
+  onNoteOn,
+  onNoteOff,
+  onProgramChange,
+}: MidiDriverCallbacks): MidiMessageHandler {
   const bankMsb = new Uint8Array(16);
   const bankLsb = new Uint8Array(16);
 
   return {
-    handleMidiMessage(data) {
+    handleMidiMessage(data: MidiData): boolean {
       const bytes = normalizeMidiData(data);
       if (!bytes || bytes.length === 0) return false;
 
@@ -53,23 +85,25 @@ export async function createMidiDriver({
   onProgramChange,
   onStateChange,
   selectedInputId = "all",
-}) {
+}: MidiDriverOptions): Promise<MidiDriver> {
   if (!navigator.requestMIDIAccess) {
     throw new Error("Web MIDI is not supported in this browser.");
   }
 
   const midi = await navigator.requestMIDIAccess({ sysex: false });
-  const inputHandlers = new Map();
+
+  type InputRecord = { input: MIDIInput; handler: (event: MIDIMessageEvent) => void };
+  const inputHandlers = new Map<string, InputRecord>();
   let activeInputId = selectedInputId;
   const messageHandler = createMidiMessageHandler({ onNoteOn, onNoteOff, onProgramChange });
 
-  function shouldHandle(inputId) {
+  function shouldHandle(inputId: string): boolean {
     return activeInputId === "all" || activeInputId === inputId;
   }
 
-  function attachInput(input) {
+  function attachInput(input: MIDIInput): void {
     if (!input || inputHandlers.has(input.id)) return;
-    const handler = (event) => {
+    const handler = (event: MIDIMessageEvent): void => {
       if (!shouldHandle(input.id)) return;
       messageHandler.handleMidiMessage(event.data);
     };
@@ -77,15 +111,15 @@ export async function createMidiDriver({
     inputHandlers.set(input.id, { input, handler });
   }
 
-  function detachInputById(inputId) {
+  function detachInputById(inputId: string): void {
     const rec = inputHandlers.get(inputId);
     if (!rec) return;
     rec.input.removeEventListener("midimessage", rec.handler);
     inputHandlers.delete(inputId);
   }
 
-  function refreshInputs() {
-    const liveIds = new Set();
+  function refreshInputs(): void {
+    const liveIds = new Set<string>();
     for (const input of midi.inputs.values()) {
       liveIds.add(input.id);
       attachInput(input);
@@ -100,14 +134,14 @@ export async function createMidiDriver({
     onStateChange?.({ connected: inputHandlers.size, names: inputs.map((i) => i.name), inputs });
   }
 
-  midi.onstatechange = refreshInputs;
+  midi.onstatechange = () => refreshInputs();
   refreshInputs();
 
   return {
-    setSelectedInput(inputId) {
+    setSelectedInput(inputId: string): void {
       activeInputId = inputId || "all";
     },
-    disconnect() {
+    disconnect(): void {
       midi.onstatechange = null;
       for (const inputId of inputHandlers.keys()) {
         detachInputById(inputId);
