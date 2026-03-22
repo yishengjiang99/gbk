@@ -400,7 +400,7 @@ export default function MidiReader({
   };
 
   useEffect(() => {
-    const worker = new Worker(new URL("./midi-timer.worker.js", import.meta.url), { type: "module" });
+    const worker = new Worker(new URL("./midi-timer.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
 
     worker.onmessage = (event) => {
