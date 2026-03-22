@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.js";
+import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
 
 function fmtTime(sec) {
   const s = Math.max(0, sec | 0);

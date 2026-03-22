@@ -1,40 +1,126 @@
-function timecentsToSeconds(tc) {
+import type { SF2Region } from "../sf2-parser.ts";
+
+// ── Envelope stage ────────────────────────────────────────────────────────────
+
+export type EnvStage =
+  | "idle"
+  | "delay"
+  | "attack"
+  | "hold"
+  | "decay"
+  | "sustain"
+  | "release";
+
+// ── Envelope parameter shapes (all optional so SF2VolEnv/SF2ModEnv are assignable) ──
+
+export interface VolEnvParams {
+  delayTc?: number;
+  attackTc?: number;
+  holdTc?: number;
+  decayTc?: number;
+  sustainCb?: number;
+  releaseTc?: number;
+}
+
+export interface ModEnvParams {
+  delayTc?: number;
+  attackTc?: number;
+  holdTc?: number;
+  decayTc?: number;
+  sustain?: number;
+  releaseTc?: number;
+}
+
+// ── Public data-transfer shapes ───────────────────────────────────────────────
+
+/** Input element for {@link Sf2SynthEngine.setTrackStates}. */
+export interface TrackState {
+  trackIndex: number;
+  regions?: SF2Region[];
+  cc7Volume?: number;
+  cc10Pan?: number;
+  cc11Expression?: number;
+  pan?: number;
+  gain?: number;
+}
+
+/** Generic synth event sent to the engine (covers all message sub-types). */
+export interface SynthEvent {
+  type: string;
+  frame?: number;
+  seq?: number;
+  trackIndex?: number | null;
+  note?: number;
+  velocity?: number;
+  regions?: SF2Region[];
+  channel?: number;
+  cc7Volume?: number;
+  cc10Pan?: number;
+  cc11Expression?: number;
+  pan?: number;
+  gain?: number;
+  /** Used by the AudioWorklet processor for setOfflineTracks. */
+  tracks?: TrackState[];
+  /** Used by the AudioWorklet processor for setOfflineTracks. */
+  maxVoices?: number;
+  /** Used by the AudioWorklet processor for setSequence. */
+  events?: SynthEvent[];
+}
+
+// ── Helper constants / functions ──────────────────────────────────────────────
+
+function timecentsToSeconds(tc: number): number {
   return Math.pow(2, (tc ?? 0) / 1200);
 }
 
-function centsToRatio(c) {
+function centsToRatio(c: number): number {
   return Math.pow(2, (c ?? 0) / 1200);
 }
 
-function cbAttenToLin(cb) {
+function cbAttenToLin(cb: number): number {
   const db = -(cb ?? 0) / 10;
   return Math.pow(10, db / 20);
 }
 
-function velToLin(vel, curve = 2.0) {
+function velToLin(vel: number, curve = 2.0): number {
   const x = Math.max(0, Math.min(127, vel)) / 127;
   return Math.pow(x, curve);
 }
 
-function balanceToGains(balance) {
+function balanceToGains(balance: number): { gL: number; gR: number } {
   const p = Math.max(-1, Math.min(1, balance ?? 0));
   const angle = (p + 1) * 0.25 * Math.PI;
   return { gL: Math.cos(angle), gR: Math.sin(angle) };
 }
 
-function fcCentsToHz(fcCents) {
+function fcCentsToHz(fcCents: number): number {
   return 8.176 * Math.pow(2, (fcCents ?? 13500) / 1200);
 }
 
-function lerp(a, b, t) {
+function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
 const MIN_VOL_RELEASE_SEC = 0.06;
 const MIN_MOD_RELEASE_SEC = 0.02;
 
+// ── VolEnv ────────────────────────────────────────────────────────────────────
+
 class VolEnv {
-  constructor(sr) {
+  sr: number;
+  stage: EnvStage;
+  level: number;
+  t: number;
+  peak: number;
+  delay: number;
+  attack: number;
+  hold: number;
+  decay: number;
+  sustain: number;
+  release: number;
+  releaseStart: number;
+
+  constructor(sr: number) {
     this.sr = sr;
     this.stage = "idle";
     this.level = 0;
@@ -49,7 +135,7 @@ class VolEnv {
     this.releaseStart = 0;
   }
 
-  setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc }) {
+  setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustainCb, releaseTc }: VolEnvParams): void {
     this.delay = Math.max(0, timecentsToSeconds(delayTc ?? -12000));
     this.attack = Math.max(0, timecentsToSeconds(attackTc ?? -12000));
     this.hold = Math.max(0, timecentsToSeconds(holdTc ?? -12000));
@@ -59,20 +145,20 @@ class VolEnv {
     this.sustain = Math.min(1, Math.max(0, Math.pow(10, sustainDb / 20)));
   }
 
-  noteOn() {
+  noteOn(): void {
     this.stage = this.delay > 0 ? "delay" : "attack";
     this.t = 0;
     this.level = 0;
   }
 
-  noteOff() {
+  noteOff(): void {
     if (this.stage === "idle") return;
     this.stage = "release";
     this.t = 0;
     this.releaseStart = this.level;
   }
 
-  next() {
+  next(): number {
     const dt = 1 / this.sr;
     const eps = 1e-5;
 
@@ -157,8 +243,22 @@ class VolEnv {
   }
 }
 
+// ── ModEnv ────────────────────────────────────────────────────────────────────
+
 class ModEnv {
-  constructor(sr) {
+  sr: number;
+  stage: EnvStage;
+  level: number;
+  t: number;
+  delay: number;
+  attack: number;
+  hold: number;
+  decay: number;
+  sustain: number;
+  release: number;
+  releaseStart: number;
+
+  constructor(sr: number) {
     this.sr = sr;
     this.stage = "idle";
     this.level = 0;
@@ -172,7 +272,7 @@ class ModEnv {
     this.releaseStart = 0;
   }
 
-  setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustain, releaseTc }) {
+  setFromSf2({ delayTc, attackTc, holdTc, decayTc, sustain, releaseTc }: ModEnvParams): void {
     this.delay = Math.max(0, timecentsToSeconds(delayTc ?? -12000));
     this.attack = Math.max(0, timecentsToSeconds(attackTc ?? -12000));
     this.hold = Math.max(0, timecentsToSeconds(holdTc ?? -12000));
@@ -181,20 +281,20 @@ class ModEnv {
     this.sustain = Math.min(1, Math.max(0, sustain ?? 0));
   }
 
-  noteOn() {
+  noteOn(): void {
     this.stage = this.delay > 0 ? "delay" : "attack";
     this.t = 0;
     this.level = 0;
   }
 
-  noteOff() {
+  noteOff(): void {
     if (this.stage === "idle") return;
     this.stage = "release";
     this.t = 0;
     this.releaseStart = this.level;
   }
 
-  next() {
+  next(): number {
     const dt = 1 / this.sr;
 
     switch (this.stage) {
@@ -275,20 +375,27 @@ class ModEnv {
   }
 }
 
+// ── LFO ───────────────────────────────────────────────────────────────────────
+
 class LFO {
-  constructor(sr) {
+  sr: number;
+  phase: number;
+  freqHz: number;
+  delayLeft: number;
+
+  constructor(sr: number) {
     this.sr = sr;
     this.phase = 0;
     this.freqHz = 5;
     this.delayLeft = 0;
   }
 
-  set(freqHz, delaySec) {
+  set(freqHz: number, delaySec: number): void {
     this.freqHz = Math.max(0, freqHz ?? 0);
     this.delayLeft = Math.max(0, delaySec ?? 0);
   }
 
-  next() {
+  next(): number {
     if (this.delayLeft > 0) {
       this.delayLeft -= 1 / this.sr;
       return 0;
@@ -299,8 +406,21 @@ class LFO {
   }
 }
 
+// ── TwoPoleLPF ────────────────────────────────────────────────────────────────
+
 class TwoPoleLPF {
-  constructor(sr) {
+  sr: number;
+  z1L: number;
+  z2L: number;
+  z1R: number;
+  z2R: number;
+  b0: number;
+  b1: number;
+  b2: number;
+  a1: number;
+  a2: number;
+
+  constructor(sr: number) {
     this.sr = sr;
     this.z1L = 0;
     this.z2L = 0;
@@ -313,7 +433,7 @@ class TwoPoleLPF {
     this.a2 = 0;
   }
 
-  setCutoffHz(hz) {
+  setCutoffHz(hz: number): void {
     const clamped = Math.max(5, Math.min(hz ?? 1000, this.sr * 0.45));
     const q = 0.7071;
     const w0 = (2 * Math.PI * clamped) / this.sr;
@@ -328,14 +448,14 @@ class TwoPoleLPF {
     this.a2 = (1 - alpha) / a0;
   }
 
-  processL(x) {
+  processL(x: number): number {
     const y = this.b0 * x + this.z1L;
     this.z1L = this.b1 * x - this.a1 * y + this.z2L;
     this.z2L = this.b2 * x - this.a2 * y;
     return y;
   }
 
-  processR(x) {
+  processR(x: number): number {
     const y = this.b0 * x + this.z1R;
     this.z1R = this.b1 * x - this.a1 * y + this.z2R;
     this.z2R = this.b2 * x - this.a2 * y;
@@ -343,7 +463,60 @@ class TwoPoleLPF {
   }
 }
 
-function regionBaseRate(region, midiNote, outSr) {
+// ── Voice ─────────────────────────────────────────────────────────────────────
+
+interface Voice {
+  note: number;
+  channel: number;
+  trackIndex: number | null;
+  velocity: number;
+  region: SF2Region;
+  pos: number;
+  baseRate: number;
+  rate: number;
+  start: number;
+  end: number;
+  loopStart: number;
+  loopEnd: number;
+  looping: boolean;
+  loopUntilReleaseThenTail: boolean;
+  inReleaseTail: boolean;
+  dataL: Float32Array;
+  dataR: Float32Array | null | undefined;
+  baseGain: number;
+  regionPanPos: number;
+  trackPanPos: number;
+  trackVolumeMul: number;
+  volEnv: VolEnv;
+  modEnv: ModEnv;
+  modLfo: LFO;
+  vibLfo: LFO;
+  lpf: TwoPoleLPF;
+  exclusiveClass: number;
+  finished: boolean;
+}
+
+interface MakeVoiceOptions {
+  channel?: number;
+  trackIndex?: number | null;
+  trackPanPos?: number;
+  trackVolumeMul?: number;
+}
+
+// ── Internal per-track state (stored in Map) ───────────────────────────────────
+
+interface InternalTrackState {
+  regions: SF2Region[];
+  cc7Volume: number;
+  cc10Pan: number;
+  cc11Expression: number;
+  pan: number;
+  gain: number;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function regionBaseRate(region: SF2Region, midiNote: number, outSr: number): number {
   const root = region.overridingRootKey ?? region.originalKey ?? 60;
   const scale = region.scaleTuning ?? 100;
   const keyTrackCents = (midiNote - root) * scale;
@@ -352,7 +525,7 @@ function regionBaseRate(region, midiNote, outSr) {
   return centsToRatio(keyTrackCents + tuneCents) * srRatio;
 }
 
-function readSampleMono(data, pos) {
+function readSampleMono(data: Float32Array, pos: number): number {
   const i = pos | 0;
   const f = pos - i;
   const a = data[i] ?? 0;
@@ -360,7 +533,13 @@ function readSampleMono(data, pos) {
   return a + (b - a) * f;
 }
 
-function makeVoice(region, note, velocity, outSr, options = {}) {
+function makeVoice(
+  region: SF2Region,
+  note: number,
+  velocity: number,
+  outSr: number,
+  options: MakeVoiceOptions = {}
+): Voice {
   const sample = region.sample;
   const start = sample.start ?? 0;
   const end = sample.end ?? sample.dataL.length;
@@ -370,7 +549,7 @@ function makeVoice(region, note, velocity, outSr, options = {}) {
   const looping = sampleModes === 1 || sampleModes === 3;
   const loopUntilReleaseThenTail = sampleModes === 3;
 
-  const voice = {
+  const voice: Voice = {
     note,
     channel: options.channel ?? 0,
     trackIndex: options.trackIndex ?? null,
@@ -411,8 +590,25 @@ function makeVoice(region, note, velocity, outSr, options = {}) {
   return voice;
 }
 
+// ── Sf2SynthEngine options ────────────────────────────────────────────────────
+
+interface Sf2SynthEngineOptions {
+  maxVoices?: number;
+}
+
+// ── Sf2SynthEngine ────────────────────────────────────────────────────────────
+
 export class Sf2SynthEngine {
-  constructor(outSr, options = {}) {
+  outSr: number;
+  regions: SF2Region[];
+  voices: Voice[];
+  maxVoices: number;
+  cc7Volume: number;
+  cc10Pan: number;
+  cc11Expression: number;
+  trackStates: Map<number, InternalTrackState>;
+
+  constructor(outSr: number, options: Sf2SynthEngineOptions = {}) {
     this.outSr = outSr;
     this.regions = [];
     this.voices = [];
@@ -423,11 +619,11 @@ export class Sf2SynthEngine {
     this.trackStates = new Map();
   }
 
-  setMaxVoices(maxVoices) {
+  setMaxVoices(maxVoices: number): void {
     this.maxVoices = Math.max(1, maxVoices ?? this.maxVoices);
   }
 
-  setTrackStates(tracks) {
+  setTrackStates(tracks: TrackState[]): void {
     this.trackStates = new Map(
       (tracks ?? []).map((track) => [
         track.trackIndex,
@@ -444,12 +640,12 @@ export class Sf2SynthEngine {
     this.voices.length = 0;
   }
 
-  dispatchEvent(msg) {
+  dispatchEvent(msg: SynthEvent): void {
     if (!msg) return;
 
     if (msg.type === "setPreset") {
       if (Number.isInteger(msg.trackIndex)) {
-        const trackState = this.trackStates.get(msg.trackIndex);
+        const trackState = this.trackStates.get(msg.trackIndex as number);
         if (trackState) trackState.regions = msg.regions ?? [];
         return;
       }
@@ -459,9 +655,11 @@ export class Sf2SynthEngine {
     }
 
     if (msg.type === "noteOn") {
-      const note = msg.note | 0;
-      const velocity = msg.velocity | 0;
-      const trackState = Number.isInteger(msg.trackIndex) ? this.trackStates.get(msg.trackIndex) : null;
+      const note = (msg.note ?? 0) | 0;
+      const velocity = (msg.velocity ?? 0) | 0;
+      const trackState = Number.isInteger(msg.trackIndex)
+        ? this.trackStates.get(msg.trackIndex as number)
+        : null;
       const regions = trackState?.regions ?? this.regions;
       const matching = this.pickRegions(note, velocity, regions);
       if (!matching.length) return;
@@ -491,7 +689,7 @@ export class Sf2SynthEngine {
     }
 
     if (msg.type === "noteOff") {
-      const note = msg.note | 0;
+      const note = (msg.note ?? 0) | 0;
       for (const voice of this.voices) {
         const sameTrack = msg.trackIndex == null || voice.trackIndex === msg.trackIndex;
         const sameChannel = msg.channel == null || voice.channel === msg.channel;
@@ -506,25 +704,25 @@ export class Sf2SynthEngine {
 
     if (msg.type === "setControllers") {
       if (Number.isInteger(msg.trackIndex)) {
-        const trackState = this.trackStates.get(msg.trackIndex);
+        const trackState = this.trackStates.get(msg.trackIndex as number);
         if (!trackState) return;
-        if (Number.isFinite(msg.cc7Volume)) trackState.cc7Volume = Math.max(0, Math.min(127, msg.cc7Volume | 0));
-        if (Number.isFinite(msg.cc10Pan)) trackState.cc10Pan = Math.max(0, Math.min(127, msg.cc10Pan | 0));
+        if (Number.isFinite(msg.cc7Volume)) trackState.cc7Volume = Math.max(0, Math.min(127, (msg.cc7Volume as number) | 0));
+        if (Number.isFinite(msg.cc10Pan)) trackState.cc10Pan = Math.max(0, Math.min(127, (msg.cc10Pan as number) | 0));
         if (Number.isFinite(msg.cc11Expression)) {
-          trackState.cc11Expression = Math.max(0, Math.min(127, msg.cc11Expression | 0));
+          trackState.cc11Expression = Math.max(0, Math.min(127, (msg.cc11Expression as number) | 0));
         }
-        if (Number.isFinite(msg.pan)) trackState.pan = Math.max(-1, Math.min(1, msg.pan));
-        if (Number.isFinite(msg.gain)) trackState.gain = Math.max(0, msg.gain);
+        if (Number.isFinite(msg.pan)) trackState.pan = Math.max(-1, Math.min(1, msg.pan as number));
+        if (Number.isFinite(msg.gain)) trackState.gain = Math.max(0, msg.gain as number);
         return;
       }
-      if (Number.isFinite(msg.cc7Volume)) this.cc7Volume = Math.max(0, Math.min(127, msg.cc7Volume | 0));
-      if (Number.isFinite(msg.cc10Pan)) this.cc10Pan = Math.max(0, Math.min(127, msg.cc10Pan | 0));
-      if (Number.isFinite(msg.cc11Expression)) this.cc11Expression = Math.max(0, Math.min(127, msg.cc11Expression | 0));
+      if (Number.isFinite(msg.cc7Volume)) this.cc7Volume = Math.max(0, Math.min(127, (msg.cc7Volume as number) | 0));
+      if (Number.isFinite(msg.cc10Pan)) this.cc10Pan = Math.max(0, Math.min(127, (msg.cc10Pan as number) | 0));
+      if (Number.isFinite(msg.cc11Expression)) this.cc11Expression = Math.max(0, Math.min(127, (msg.cc11Expression as number) | 0));
     }
   }
 
-  pickRegions(note, velocity, regions = this.regions) {
-    const out = [];
+  pickRegions(note: number, velocity: number, regions: SF2Region[] = this.regions): SF2Region[] {
+    const out: SF2Region[] = [];
     for (const region of regions) {
       const [kl, kh] = region.keyRange ?? [0, 127];
       const [vl, vh] = region.velRange ?? [0, 127];
@@ -533,7 +731,7 @@ export class Sf2SynthEngine {
     return out;
   }
 
-  chokeExclusive(exclusiveClass, trackIndex = null) {
+  chokeExclusive(exclusiveClass: number, trackIndex: number | null = null): void {
     for (const voice of this.voices) {
       const sameTrack = trackIndex == null || voice.trackIndex === trackIndex;
       if (voice.exclusiveClass === exclusiveClass && sameTrack) {
@@ -544,7 +742,7 @@ export class Sf2SynthEngine {
     }
   }
 
-  ensurePolyphony() {
+  ensurePolyphony(): void {
     if (this.voices.length < this.maxVoices) return;
     let minIdx = 0;
     let minVal = Infinity;
@@ -559,7 +757,7 @@ export class Sf2SynthEngine {
     this.voices.splice(minIdx, 1);
   }
 
-  advancePos(voice) {
+  advancePos(voice: Voice): void {
     voice.pos += voice.rate;
     const effectiveLooping = voice.looping && !voice.inReleaseTail;
     if (effectiveLooping) {
@@ -572,7 +770,7 @@ export class Sf2SynthEngine {
     if (voice.pos >= voice.end) voice.finished = true;
   }
 
-  renderRange(outL, outR) {
+  renderRange(outL: Float32Array, outR: Float32Array): void {
     outL.fill(0);
     outR.fill(0);
 
@@ -627,7 +825,13 @@ export class Sf2SynthEngine {
     }
   }
 
-  renderScheduled(outL, outR, events, eventIndex = 0, renderedSamples = 0) {
+  renderScheduled(
+    outL: Float32Array,
+    outR: Float32Array,
+    events: SynthEvent[],
+    eventIndex = 0,
+    renderedSamples = 0
+  ): { eventIndex: number; renderedSamples: number } {
     outL.fill(0);
     outR.fill(0);
 
@@ -639,7 +843,7 @@ export class Sf2SynthEngine {
       let sumL = 0;
       let sumR = 0;
 
-      while (nextEvent && nextEvent.frame <= renderedSamples) {
+      while (nextEvent && (nextEvent.frame ?? Infinity) <= renderedSamples) {
         this.dispatchEvent(nextEvent);
         eventIndex += 1;
         nextEvent = events[eventIndex];
@@ -693,24 +897,49 @@ export class Sf2SynthEngine {
   }
 }
 
+// ── Offline render parameter shapes ───────────────────────────────────────────
+
+export interface RenderOfflineParams {
+  audioBuffer: AudioBuffer;
+  tracks: TrackState[];
+  events: SynthEvent[];
+  maxVoices?: number;
+}
+
+export interface RenderOfflineIncrementalParams {
+  audioBuffer: AudioBuffer;
+  tracks: TrackState[];
+  events: SynthEvent[];
+  maxVoices?: number;
+  chunkFrames?: number;
+  onProgress?: (progress: number) => void;
+}
+
+// ── Offline renderers ─────────────────────────────────────────────────────────
+
 export function renderOfflineSequenceToAudioBuffer({
   audioBuffer,
   tracks,
   events,
   maxVoices = 64,
-}) {
+}: RenderOfflineParams): AudioBuffer {
   const outL = audioBuffer.getChannelData(0);
   const outR = audioBuffer.getChannelData(Math.min(1, audioBuffer.numberOfChannels - 1));
   const engine = new Sf2SynthEngine(audioBuffer.sampleRate, { maxVoices });
   engine.setTrackStates(tracks);
 
   const sortedEvents = Array.isArray(events)
-    ? [...events].sort((a, b) => (a.frame - b.frame) || (a.seq - b.seq) || (a.trackIndex - b.trackIndex))
+    ? [...events].sort(
+        (a, b) =>
+          ((a.frame ?? 0) - (b.frame ?? 0)) ||
+          ((a.seq ?? 0) - (b.seq ?? 0)) ||
+          ((a.trackIndex ?? 0) - (b.trackIndex ?? 0))
+      )
     : [];
 
   let cursor = 0;
   for (const event of sortedEvents) {
-    const frame = Math.max(0, Math.min(audioBuffer.length, event.frame | 0));
+    const frame = Math.max(0, Math.min(audioBuffer.length, (event.frame ?? 0) | 0));
     if (frame > cursor) {
       engine.renderRange(outL.subarray(cursor, frame), outR.subarray(cursor, frame));
       cursor = frame;
@@ -725,7 +954,7 @@ export function renderOfflineSequenceToAudioBuffer({
   return audioBuffer;
 }
 
-function yieldToBrowser() {
+function yieldToBrowser(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
@@ -738,21 +967,26 @@ export async function renderOfflineSequenceToAudioBufferIncremental({
   maxVoices = 64,
   chunkFrames = 8192,
   onProgress,
-}) {
+}: RenderOfflineIncrementalParams): Promise<AudioBuffer> {
   const outL = audioBuffer.getChannelData(0);
   const outR = audioBuffer.getChannelData(Math.min(1, audioBuffer.numberOfChannels - 1));
   const engine = new Sf2SynthEngine(audioBuffer.sampleRate, { maxVoices });
   engine.setTrackStates(tracks);
 
   const sortedEvents = Array.isArray(events)
-    ? [...events].sort((a, b) => (a.frame - b.frame) || (a.seq - b.seq) || (a.trackIndex - b.trackIndex))
+    ? [...events].sort(
+        (a, b) =>
+          ((a.frame ?? 0) - (b.frame ?? 0)) ||
+          ((a.seq ?? 0) - (b.seq ?? 0)) ||
+          ((a.trackIndex ?? 0) - (b.trackIndex ?? 0))
+      )
     : [];
 
   const totalFrames = audioBuffer.length;
   let cursor = 0;
   let eventIndex = 0;
 
-  while (eventIndex < sortedEvents.length && sortedEvents[eventIndex].frame <= 0) {
+  while (eventIndex < sortedEvents.length && (sortedEvents[eventIndex].frame ?? 0) <= 0) {
     engine.dispatchEvent(sortedEvents[eventIndex]);
     eventIndex += 1;
   }
@@ -763,7 +997,9 @@ export async function renderOfflineSequenceToAudioBufferIncremental({
 
     while (chunkCursor < chunkEnd) {
       const nextEvent = sortedEvents[eventIndex];
-      const nextEventFrame = nextEvent ? Math.max(0, Math.min(totalFrames, nextEvent.frame | 0)) : totalFrames;
+      const nextEventFrame = nextEvent
+        ? Math.max(0, Math.min(totalFrames, (nextEvent.frame ?? 0) | 0))
+        : totalFrames;
       const renderEnd = Math.min(chunkEnd, nextEventFrame);
 
       if (renderEnd > chunkCursor) {
@@ -775,7 +1011,7 @@ export async function renderOfflineSequenceToAudioBufferIncremental({
 
       while (eventIndex < sortedEvents.length) {
         const event = sortedEvents[eventIndex];
-        const frame = Math.max(0, Math.min(totalFrames, event.frame | 0));
+        const frame = Math.max(0, Math.min(totalFrames, (event.frame ?? 0) | 0));
         if (frame !== chunkCursor) break;
         engine.dispatchEvent(event);
         eventIndex += 1;

@@ -3,7 +3,7 @@ import { parseSF2 } from "../sf2-parser.ts";
 import { createExternalMidiBridge } from "./external-midi-bridge";
 import { createMidiDriver, createMidiMessageHandler } from "./midi-driver";
 import MidiReader from "./midireader.jsx";
-import sf2ProcessorUrl from "./sf2-processor.js?worker&url";
+import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 
 const SAMPLE_FILES = [
   {
