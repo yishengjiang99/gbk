@@ -728,13 +728,16 @@ function makeRegionFromMerged(sf2: SF2Internal, g: ZoneGens, opts: DecodeOpts): 
     const { dataL, dataR } = decodeSampleData(sf2, sh, { start, end }, opts);
 
     // Ranges
-    const keyRange: [number, number] = g[Gen.keyRange] != null ? unpackRange(g[Gen.keyRange]!) : [0, 127];
-    const velRange: [number, number] = g[Gen.velRange] != null ? unpackRange(g[Gen.velRange]!) : [0, 127];
+    const keyRangeRaw = g[Gen.keyRange];
+    const velRangeRaw = g[Gen.velRange];
+    const keyRange: [number, number] = keyRangeRaw != null ? unpackRange(keyRangeRaw) : [0, 127];
+    const velRange: [number, number] = velRangeRaw != null ? unpackRange(velRangeRaw) : [0, 127];
 
     // Pitch-related
     const originalKey = sh.originalPitch ?? 60;
     const pitchCorrection = sh.pitchCorrection ?? 0; // cents
-    const overridingRootKey = g[Gen.overridingRootKey] != null ? (g[Gen.overridingRootKey]! & 0xFF) : null;
+    const rootKeyRaw = g[Gen.overridingRootKey];
+    const overridingRootKey = rootKeyRaw != null ? (rootKeyRaw & 0xFF) : null;
     const coarseTune = g[Gen.coarseTune] ?? 0; // semitones
     const fineTune = (g[Gen.fineTune] ?? 0) + pitchCorrection; // cents + correction
     const scaleTuning = g[Gen.scaleTuning] ?? 100;
