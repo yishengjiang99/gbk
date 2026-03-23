@@ -1,4 +1,189 @@
-function readVarLen(u8, posRef) {
+interface ParsedTempoEvent {
+  seq: number;
+  tick: number;
+  type: "tempo";
+  microPerQuarter: number;
+}
+
+interface ParsedTimeSigEvent {
+  seq: number;
+  tick: number;
+  type: "timeSig";
+  numerator: number;
+  denominator: number;
+}
+
+interface ParsedNoteOnEvent {
+  seq: number;
+  tick: number;
+  type: "noteOn";
+  note: number;
+  velocity: number;
+  channel: number;
+}
+
+interface ParsedNoteOffEvent {
+  seq: number;
+  tick: number;
+  type: "noteOff";
+  note: number;
+  channel: number;
+}
+
+interface ParsedCCEvent {
+  seq: number;
+  tick: number;
+  type: "cc";
+  cc: number;
+  value: number;
+  channel: number;
+}
+
+interface ParsedProgramEvent {
+  seq: number;
+  tick: number;
+  type: "program";
+  program: number;
+  channel: number;
+}
+
+type ParsedTrackEvent =
+  | ParsedTempoEvent
+  | ParsedTimeSigEvent
+  | ParsedNoteOnEvent
+  | ParsedNoteOffEvent
+  | ParsedCCEvent
+  | ParsedProgramEvent;
+
+interface TempoSegment {
+  tick: number;
+  startSec: number;
+  microPerQuarter: number;
+}
+
+interface PlayNoteOnEvent {
+  sec: number;
+  type: "noteOn";
+  channel: number;
+  note: number;
+  velocity: number;
+  seq: number;
+}
+
+interface PlayNoteOffEvent {
+  sec: number;
+  type: "noteOff";
+  channel: number;
+  note: number;
+  seq: number;
+}
+
+interface PlayProgramEvent {
+  sec: number;
+  type: "program";
+  channel: number;
+  program: number;
+  bank: number;
+  seq: number;
+}
+
+export type PlayEvent = PlayNoteOnEvent | PlayNoteOffEvent | PlayProgramEvent;
+
+export interface NoteRecord {
+  note: number;
+  velocity: number;
+  channel: number;
+  startSec: number;
+  durationSec: number;
+}
+
+interface ActiveNote {
+  startSec: number;
+  velocity: number;
+  note: number;
+  channel: number;
+}
+
+interface ParsedTrack {
+  trackName: string;
+  instrumentName: string;
+  events: ParsedTrackEvent[];
+}
+
+export interface SongTrack {
+  index: number;
+  name: string;
+  instrumentName: string;
+  notes: NoteRecord[];
+  playEvents: PlayEvent[];
+}
+
+export interface Song {
+  format: number;
+  division: number;
+  durationSec: number;
+  tracks: SongTrack[];
+  totalBars: number;
+  bpm: number;
+  timeSig: string;
+}
+
+interface WorkerTrackState {
+  nextEventIndex: number;
+  active: Set<string>;
+  override: boolean;
+  presetIndex: number | null;
+  port: MessagePort | null;
+}
+
+interface LoadMidiMsg {
+  type: "loadMidi";
+  midiData: ArrayBuffer;
+}
+
+interface AttachPortsMsg {
+  type: "attachPorts";
+  ports?: Array<{ trackIndex: number; port: MessagePort }>;
+}
+
+interface SetTrackPresetMsg {
+  type: "setTrackPreset";
+  trackIndex: number;
+  regions?: unknown[];
+  override?: boolean;
+  presetIndex?: number | null;
+}
+
+interface PlayMsg {
+  type: "play";
+  startSec?: number;
+}
+
+interface PauseMsg {
+  type: "pause";
+}
+
+interface SeekMsg {
+  type: "seek";
+  sec?: number;
+}
+
+type InboundMsg = LoadMidiMsg | AttachPortsMsg | SetTrackPresetMsg | PlayMsg | PauseMsg | SeekMsg;
+
+interface WorkerGlobalCtx {
+  postMessage(data: unknown): void;
+  onmessage: ((event: MessageEvent<InboundMsg>) => void) | null;
+}
+
+// `self` in a Web Worker is `DedicatedWorkerGlobalScope`, which uses the broader Window-scope
+// DOM lib types that aren't directly assignable to our narrower typed interface. The double
+// assertion is needed to bridge the incompatible `onmessage` overload signatures.
+// Falls back to a no-op stub when running in plain Node.js (e.g. during tests).
+const workerGlobal: WorkerGlobalCtx = typeof self !== "undefined"
+  ? (self as unknown as WorkerGlobalCtx)
+  : { postMessage: () => undefined, onmessage: null };
+
+function readVarLen(u8: Uint8Array, posRef: { pos: number }): number {
   let v = 0;
   for (let i = 0; i < 4; i += 1) {
     const b = u8[posRef.pos++];
@@ -8,20 +193,20 @@ function readVarLen(u8, posRef) {
   return v >>> 0;
 }
 
-function u16be(u8, p) {
+function u16be(u8: Uint8Array, p: number): number {
   return (u8[p] << 8) | u8[p + 1];
 }
 
-function u32be(u8, p) {
+function u32be(u8: Uint8Array, p: number): number {
   return ((u8[p] << 24) | (u8[p + 1] << 16) | (u8[p + 2] << 8) | u8[p + 3]) >>> 0;
 }
 
-function ascii(u8, start, len) {
+function ascii(u8: Uint8Array, start: number, len: number): string {
   return new TextDecoder("ascii").decode(u8.subarray(start, start + len));
 }
 
-function parseTrackBytes(trackU8) {
-  const events = [];
+function parseTrackBytes(trackU8: Uint8Array): ParsedTrack {
+  const events: ParsedTrackEvent[] = [];
   let trackName = "";
   let instrumentName = "";
   const posRef = { pos: 0 };
@@ -89,18 +274,18 @@ function parseTrackBytes(trackU8) {
   return { trackName, instrumentName, events };
 }
 
-function buildTempoMap(allEvents, division) {
+function buildTempoMap(allEvents: ParsedTrackEvent[], division: number): TempoSegment[] {
   const tempos = allEvents
-    .filter((e) => e.type === "tempo")
+    .filter((e): e is ParsedTempoEvent => e.type === "tempo")
     .map((e) => ({ tick: e.tick, microPerQuarter: e.microPerQuarter }))
     .sort((a, b) => a.tick - b.tick);
   if (!tempos.length || tempos[0].tick !== 0) tempos.unshift({ tick: 0, microPerQuarter: 500000 });
-  const compact = [];
+  const compact: Array<{ tick: number; microPerQuarter: number }> = [];
   for (const t of tempos) {
     if (compact.length && compact[compact.length - 1].tick === t.tick) compact[compact.length - 1] = t;
     else compact.push(t);
   }
-  const segments = [];
+  const segments: TempoSegment[] = [];
   let startSec = 0;
   for (let i = 0; i < compact.length; i += 1) {
     const cur = compact[i];
@@ -114,7 +299,7 @@ function buildTempoMap(allEvents, division) {
   return segments;
 }
 
-function tickToSec(segments, division, tick) {
+function tickToSec(segments: TempoSegment[], division: number, tick: number): number {
   let seg = segments[0];
   for (let i = 1; i < segments.length; i += 1) {
     if (segments[i].tick > tick) break;
@@ -123,7 +308,7 @@ function tickToSec(segments, division, tick) {
   return seg.startSec + ((tick - seg.tick) * seg.microPerQuarter) / 1000000 / division;
 }
 
-function parseMidiBuffer(buffer) {
+export function parseMidiBuffer(buffer: ArrayBuffer): Song {
   const u8 = new Uint8Array(buffer);
   if (ascii(u8, 0, 4) !== "MThd") throw new Error("Invalid MIDI header");
   const headerLen = u32be(u8, 4);
@@ -133,7 +318,7 @@ function parseMidiBuffer(buffer) {
   if (division & 0x8000) throw new Error("SMPTE time division is not supported");
 
   let pos = 8 + headerLen;
-  const parsedTracks = [];
+  const parsedTracks: ParsedTrack[] = [];
   for (let i = 0; i < ntrks; i += 1) {
     const id = ascii(u8, pos, 4);
     if (id !== "MTrk") throw new Error(`Missing MTrk at track ${i}`);
@@ -148,10 +333,10 @@ function parseMidiBuffer(buffer) {
   const tempoMap = buildTempoMap(allEvents, division);
   let maxTick = 0;
 
-  const tracks = parsedTracks.map((track, idx) => {
-    const notes = [];
-    const playEvents = [];
-    const active = new Map();
+  const tracks: SongTrack[] = parsedTracks.map((track, idx) => {
+    const notes: NoteRecord[] = [];
+    const playEvents: PlayEvent[] = [];
+    const active = new Map<string, ActiveNote[]>();
     const bankMsb = new Uint8Array(16);
     const bankLsb = new Uint8Array(16);
     const sorted = [...track.events].sort((a, b) => (a.tick - b.tick) || (a.seq - b.seq));
@@ -211,12 +396,12 @@ function parseMidiBuffer(buffer) {
   });
 
   const timeSigEvents = allEvents
-    .filter((e) => e.type === "timeSig")
+    .filter((e): e is ParsedTimeSigEvent => e.type === "timeSig")
     .sort((a, b) => (a.tick - b.tick) || (a.seq - b.seq));
   const primaryTimeSig = timeSigEvents[0] ?? { numerator: 4, denominator: 4 };
   const primaryTempo =
     allEvents
-      .filter((e) => e.type === "tempo")
+      .filter((e): e is ParsedTempoEvent => e.type === "tempo")
       .sort((a, b) => (a.tick - b.tick) || (a.seq - b.seq))[0]?.microPerQuarter ?? 500000;
   const barTicks = Math.max(1, primaryTimeSig.numerator * division * (4 / primaryTimeSig.denominator));
   const totalBars = Math.max(1, maxTick / barTicks);
@@ -232,21 +417,21 @@ function parseMidiBuffer(buffer) {
   };
 }
 
-let song = null;
-let ports = new Map();
-let trackState = [];
-let timer = null;
+let song: Song | null = null;
+let ports = new Map<number, MessagePort>();
+let trackState: WorkerTrackState[] = [];
+let timer: ReturnType<typeof setInterval> | null = null;
 let playing = false;
 let startPerf = 0;
 let startSec = 0;
 let lastTickEmit = 0;
 
-function clearTimer() {
+function clearTimer(): void {
   if (timer != null) clearInterval(timer);
   timer = null;
 }
 
-function stopNotes() {
+function stopNotes(): void {
   for (const state of trackState) {
     if (!state?.port) continue;
     for (const key of state.active) {
@@ -257,16 +442,16 @@ function stopNotes() {
   }
 }
 
-function pauseInternal() {
+function pauseInternal(): void {
   if (!playing) return;
   const nowSec = startSec + (performance.now() - startPerf) / 1000;
   clearTimer();
   stopNotes();
   playing = false;
-  self.postMessage({ type: "paused", sec: nowSec });
+  workerGlobal.postMessage({ type: "paused", sec: nowSec });
 }
 
-function setTrackPreset(payload) {
+function setTrackPreset(payload: SetTrackPresetMsg): void {
   const state = trackState[payload.trackIndex];
   if (!state?.port) return;
   state.port.postMessage({ type: "setPreset", regions: payload.regions ?? [] });
@@ -274,7 +459,7 @@ function setTrackPreset(payload) {
   state.presetIndex = payload.presetIndex ?? null;
 }
 
-function runTick() {
+function runTick(): void {
   if (!playing || !song) return;
   const nowSec = startSec + (performance.now() - startPerf) / 1000;
   const lookahead = nowSec + 0.03;
@@ -288,7 +473,7 @@ function runTick() {
       if (ev.sec > lookahead) break;
       if (ev.type === "program") {
         if (!state.override) {
-          self.postMessage({
+          workerGlobal.postMessage({
             type: "programChangeRequest",
             trackIndex: i,
             program: ev.program,
@@ -307,7 +492,7 @@ function runTick() {
   }
 
   if (nowSec - lastTickEmit > 0.09) {
-    self.postMessage({ type: "tick", sec: nowSec });
+    workerGlobal.postMessage({ type: "tick", sec: nowSec });
     lastTickEmit = nowSec;
   }
 
@@ -315,11 +500,11 @@ function runTick() {
     clearTimer();
     stopNotes();
     playing = false;
-    self.postMessage({ type: "ended", sec: song.durationSec });
+    workerGlobal.postMessage({ type: "ended", sec: song.durationSec });
   }
 }
 
-self.onmessage = (event) => {
+workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
   const msg = event.data;
   if (msg.type === "loadMidi") {
     try {
@@ -327,14 +512,14 @@ self.onmessage = (event) => {
       song = parseMidiBuffer(msg.midiData);
       trackState = (song.tracks ?? []).map((t) => ({
         nextEventIndex: 0,
-        active: new Set(),
+        active: new Set<string>(),
         override: false,
         presetIndex: null,
         port: ports.get(t.index) ?? null,
       }));
-      self.postMessage({ type: "songLoaded", song });
+      workerGlobal.postMessage({ type: "songLoaded", song });
     } catch (err) {
-      self.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
+      workerGlobal.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
@@ -392,7 +577,6 @@ self.onmessage = (event) => {
     }
     startSec = sec;
     startPerf = performance.now();
-    self.postMessage({ type: "tick", sec });
+    workerGlobal.postMessage({ type: "tick", sec });
   }
 };
-

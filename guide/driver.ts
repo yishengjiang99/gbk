@@ -1,4 +1,7 @@
-// main.js
+// driver.ts
+// Reference/demo snippet for driving the sf2-processor AudioWorklet directly.
+export {};
+
 const ctx = new AudioContext();
 await ctx.audioWorklet.addModule("sf2-processor.js");
 
@@ -15,11 +18,11 @@ node.connect(ctx.destination);
  *
  * For demo purposes, this is the expected region shape:
  */
-function exampleRegionFromYourSf2(sampleL, sampleR, sampleRate) {
+function exampleRegionFromYourSf2(sampleL: Float32Array, sampleR: Float32Array | null, sampleRate: number) {
     return {
         // ranges
-        keyRange: [0, 127],
-        velRange: [0, 127],
+        keyRange: [0, 127] as [number, number],
+        velRange: [0, 127] as [number, number],
 
         // sample
         sample: {
@@ -35,7 +38,7 @@ function exampleRegionFromYourSf2(sampleL, sampleR, sampleRate) {
 
         // pitch
         originalKey: 60,
-        overridingRootKey: null,
+        overridingRootKey: null as number | null,
         coarseTune: 0,
         fineTune: 0,
         scaleTuning: 100,
@@ -90,21 +93,21 @@ function exampleRegionFromYourSf2(sampleL, sampleR, sampleRate) {
  *
  * Then call:
  */
-function setPresetRegions(regions) {
+function setPresetRegions(regions: ReturnType<typeof exampleRegionFromYourSf2>[]): void {
     // Transfer buffers (fast) if not using SharedArrayBuffer
-    const transfers = [];
+    const transfers: ArrayBuffer[] = [];
     for (const r of regions) {
-        transfers.push(r.sample.dataL.buffer);
-        if (r.sample.dataR) transfers.push(r.sample.dataR.buffer);
+        transfers.push(r.sample.dataL.buffer as ArrayBuffer);
+        if (r.sample.dataR) transfers.push(r.sample.dataR.buffer as ArrayBuffer);
     }
     node.port.postMessage({ type: "setPreset", regions }, transfers);
 }
 
 // NOTE ON / OFF
-function noteOn(note, velocity) {
+function noteOn(note: number, velocity: number): void {
     node.port.postMessage({ type: "noteOn", note, velocity });
 }
-function noteOff(note) {
+function noteOff(note: number): void {
     node.port.postMessage({ type: "noteOff", note });
 }
 
@@ -116,5 +119,5 @@ await ctx.resume();
 // setPresetRegions(regions);
 
 // Quick test trigger after you set regions:
-window.sf2NoteOn = noteOn;
-window.sf2NoteOff = noteOff;
+(window as Window & { sf2NoteOn?: typeof noteOn; sf2NoteOff?: typeof noteOff }).sf2NoteOn = noteOn;
+(window as Window & { sf2NoteOn?: typeof noteOn; sf2NoteOff?: typeof noteOff }).sf2NoteOff = noteOff;

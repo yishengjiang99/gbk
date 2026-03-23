@@ -17,7 +17,180 @@
  *  - Modulators (pmod/imod) are parsed but not applied (SF2 mod routing is bigger).
  */
 
-export function parseSF2(u8) {
+// ============================================================
+// Public interfaces
+// ============================================================
+
+export type SF2Info = Record<string, string>;
+
+export interface SF2SampleHeader {
+    sampleName: string;
+    start: number;
+    end: number;
+    startLoop: number;
+    endLoop: number;
+    sampleRate: number;
+    originalPitch: number;
+    pitchCorrection: number;
+    sampleLink: number;
+    sampleType: number;
+}
+
+export interface SF2VolEnv {
+    delayTc: number;
+    attackTc: number;
+    holdTc: number;
+    decayTc: number;
+    sustainCb: number;
+    releaseTc: number;
+}
+
+export interface SF2ModEnv {
+    delayTc: number;
+    attackTc: number;
+    holdTc: number;
+    decayTc: number;
+    sustain: number;
+    releaseTc: number;
+}
+
+export interface SF2SampleData {
+    dataL: Float32Array;
+    dataR: Float32Array | null;
+    sampleRate: number;
+    start: number;
+    end: number;
+    loopStart: number;
+    loopEnd: number;
+}
+
+export interface SF2Region {
+    keyRange: [number, number];
+    velRange: [number, number];
+    sample: SF2SampleData;
+    sampleModes: number;
+    originalKey: number;
+    overridingRootKey: number | null;
+    coarseTune: number;
+    fineTune: number;
+    scaleTuning: number;
+    initialAttenuationCb: number;
+    pan: number;
+    volEnv: SF2VolEnv;
+    modEnv: SF2ModEnv;
+    initialFilterFcCents: number;
+    initialFilterQCb: number;
+    modEnvToFilterFcCents: number;
+    modLfoToFilterFcCents: number;
+    modLfoDelayTc: number;
+    modLfoFreqCents: number;
+    modLfoToPitchCents: number;
+    vibLfoDelayTc: number;
+    vibLfoFreqCents: number;
+    vibLfoToPitchCents: number;
+    exclusiveClass: number;
+}
+
+export interface BuildRegionsOptions {
+    decodeToFloat32?: boolean;
+    normalize?: boolean;
+    includeStereoLinks?: boolean;
+}
+
+// ============================================================
+// Internal table record types
+// ============================================================
+
+interface SF2Phdr {
+    presetName: string;
+    preset: number;
+    bank: number;
+    presetBagNdx: number;
+    library: number;
+    genre: number;
+    morphology: number;
+}
+
+interface SF2Inst {
+    instName: string;
+    instBagNdx: number;
+}
+
+interface SF2Bag {
+    genNdx: number;
+    modNdx: number;
+}
+
+interface SF2GenRecord {
+    oper: number;
+    amount: number;
+}
+
+interface SF2ModRecord {
+    srcOper: number;
+    destOper: number;
+    amount: number;
+    amtSrcOper: number;
+    transOper: number;
+}
+
+interface SF2PDta {
+    phdr: SF2Phdr[];
+    pbag: SF2Bag[];
+    pmod: SF2ModRecord[];
+    pgen: SF2GenRecord[];
+    inst: SF2Inst[];
+    ibag: SF2Bag[];
+    imod: SF2ModRecord[];
+    igen: SF2GenRecord[];
+    shdr: SF2SampleHeader[];
+}
+
+interface SF2Sdta {
+    smpl: Int16Array | null;
+    sm24: Uint8Array | null;
+}
+
+interface SF2Internal {
+    info: SF2Info;
+    sdta: SF2Sdta;
+    pdta: SF2PDta;
+    raw: { riffSize: number };
+}
+
+interface SF2PresetResult extends SF2Phdr {
+    _bagStart: number;
+    _bagEnd: number;
+}
+
+interface SF2InstrumentResult extends SF2Inst {
+    _bagStart: number;
+    _bagEnd: number;
+}
+
+/** Zone gens: sparse map of generator operator number → raw value. */
+type ZoneGens = { [key: number]: number | undefined };
+
+export interface SF2Data extends SF2Internal {
+    getPreset: (presetIndex: number) => SF2PresetResult;
+    buildRegionsForPreset: (presetIndex: number, options?: BuildRegionsOptions) => SF2Region[];
+}
+
+// ============================================================
+// Decode options (internal, all fields required after defaulting)
+// ============================================================
+
+interface DecodeOpts {
+    decodeToFloat32: boolean;
+    normalize: boolean;
+    includeStereoLinks: boolean;
+}
+
+// ============================================================
+// parseSF2 (main export)
+// ============================================================
+
+export function parseSF2(u8: Uint8Array): SF2Data {
     const r = new Reader(u8);
 
     // --- RIFF header ---
@@ -27,21 +200,18 @@ export function parseSF2(u8) {
     const form = r.readFourCC();
     if (form !== "sfbk") throw new Error("Not sfbk (SoundFont2)");
 
-    const sf2 = {
-        info: {},
-        sdta: { smpl: null, sm24: null },
-        pdta: {
-            phdr: [],
-            pbag: [],
-            pmod: [],
-            pgen: [],
-            inst: [],
-            ibag: [],
-            imod: [],
-            igen: [],
-            shdr: [],
-        },
-        raw: { riffSize },
+    const info: SF2Info = {};
+    const sdta: SF2Sdta = { smpl: null, sm24: null };
+    const pdta: SF2PDta = {
+        phdr: [],
+        pbag: [],
+        pmod: [],
+        pgen: [],
+        inst: [],
+        ibag: [],
+        imod: [],
+        igen: [],
+        shdr: [],
     };
 
     // RIFF chunks
@@ -53,9 +223,9 @@ export function parseSF2(u8) {
         if (id === "LIST") {
             const listType = r.readFourCC();
             const listEnd = chunkStart + size;
-            if (listType === "INFO") parseINFO(r, sf2.info, listEnd);
-            else if (listType === "sdta") parseSDTA(r, sf2.sdta, listEnd);
-            else if (listType === "pdta") parsePDTA(r, sf2.pdta, listEnd);
+            if (listType === "INFO") parseINFO(r, info, listEnd);
+            else if (listType === "sdta") parseSDTA(r, sdta, listEnd);
+            else if (listType === "pdta") parsePDTA(r, pdta, listEnd);
             else r.pos = listEnd;
             r.pos = align2(r.pos);
         } else {
@@ -65,12 +235,17 @@ export function parseSF2(u8) {
         }
     }
 
-    validatePDTA(sf2.pdta);
+    validatePDTA(pdta);
+
+    const sf2Internal: SF2Internal = { info, sdta, pdta, raw: { riffSize } };
 
     // Public helpers attached
-    sf2.getPreset = (presetIndex) => getPreset(sf2.pdta, presetIndex);
-    sf2.buildRegionsForPreset = (presetIndex, options = {}) =>
-        buildRegionsForPreset(sf2, presetIndex, options);
+    const sf2: SF2Data = {
+        ...sf2Internal,
+        getPreset: (presetIndex: number) => getPreset(pdta, presetIndex),
+        buildRegionsForPreset: (presetIndex: number, options: BuildRegionsOptions = {}) =>
+            buildRegionsForPreset(sf2Internal, presetIndex, options),
+    };
 
     return sf2;
 }
@@ -80,32 +255,36 @@ export function parseSF2(u8) {
 // ============================================================
 
 class Reader {
-    constructor(u8) {
+    u8: Uint8Array;
+    dv: DataView;
+    pos: number;
+
+    constructor(u8: Uint8Array) {
         this.u8 = u8;
         this.dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
         this.pos = 0;
     }
-    eof() { return this.pos >= this.u8.length; }
-    seek(p) { this.pos = p; }
-    skip(n) { this.pos += n; }
-    readU8() { return this.u8[this.pos++]; }
-    readI16LE() { const v = this.dv.getInt16(this.pos, true); this.pos += 2; return v; }
-    readU16LE() { const v = this.dv.getUint16(this.pos, true); this.pos += 2; return v; }
-    readU32LE() { const v = this.dv.getUint32(this.pos, true); this.pos += 4; return v; }
-    readI32LE() { const v = this.dv.getInt32(this.pos, true); this.pos += 4; return v; }
-    readFourCC() {
+    eof(): boolean { return this.pos >= this.u8.length; }
+    seek(p: number): void { this.pos = p; }
+    skip(n: number): void { this.pos += n; }
+    readU8(): number { return this.u8[this.pos++]; }
+    readI16LE(): number { const v = this.dv.getInt16(this.pos, true); this.pos += 2; return v; }
+    readU16LE(): number { const v = this.dv.getUint16(this.pos, true); this.pos += 2; return v; }
+    readU32LE(): number { const v = this.dv.getUint32(this.pos, true); this.pos += 4; return v; }
+    readI32LE(): number { const v = this.dv.getInt32(this.pos, true); this.pos += 4; return v; }
+    readFourCC(): string {
         const a = String.fromCharCode(
             this.u8[this.pos], this.u8[this.pos + 1], this.u8[this.pos + 2], this.u8[this.pos + 3]
         );
         this.pos += 4;
         return a;
     }
-    readBytes(n) {
+    readBytes(n: number): Uint8Array {
         const out = this.u8.subarray(this.pos, this.pos + n);
         this.pos += n;
         return out;
     }
-    readZStr(maxBytes) {
+    readZStr(maxBytes: number): string {
         const start = this.pos;
         const end = start + maxBytes;
         let i = start;
@@ -116,13 +295,13 @@ class Reader {
     }
 }
 
-function align2(pos) { return (pos + 1) & ~1; }
+function align2(pos: number): number { return (pos + 1) & ~1; }
 
 // ============================================================
 // INFO
 // ============================================================
 
-function parseINFO(r, infoOut, endPos) {
+function parseINFO(r: Reader, infoOut: SF2Info, endPos: number): void {
     while (r.pos < endPos) {
         const id = r.readFourCC();
         const size = r.readU32LE();
@@ -140,7 +319,7 @@ function parseINFO(r, infoOut, endPos) {
 // sdta
 // ============================================================
 
-function parseSDTA(r, sdtaOut, endPos) {
+function parseSDTA(r: Reader, sdtaOut: SF2Sdta, endPos: number): void {
     while (r.pos < endPos) {
         const id = r.readFourCC();
         const size = r.readU32LE();
@@ -169,7 +348,7 @@ function parseSDTA(r, sdtaOut, endPos) {
 // pdta tables
 // ============================================================
 
-function parsePDTA(r, pdta, endPos) {
+function parsePDTA(r: Reader, pdta: SF2PDta, endPos: number): void {
     while (r.pos < endPos) {
         const id = r.readFourCC();
         const size = r.readU32LE();
@@ -198,10 +377,10 @@ function parsePDTA(r, pdta, endPos) {
 // WORD preset, WORD bank
 // WORD presetBagNdx
 // DWORD library, genre, morphology
-function readPhdr(r, size) {
+function readPhdr(r: Reader, size: number): SF2Phdr[] {
     const recSize = 38;
     const n = size / recSize;
-    const out = [];
+    const out: SF2Phdr[] = [];
     for (let i = 0; i < n; i++) {
         const presetName = r.readZStr(20);
         const preset = r.readU16LE();
@@ -218,10 +397,10 @@ function readPhdr(r, size) {
 // inst record: 22 bytes
 // char[20] instName
 // WORD instBagNdx
-function readInst(r, size) {
+function readInst(r: Reader, size: number): SF2Inst[] {
     const recSize = 22;
     const n = size / recSize;
-    const out = [];
+    const out: SF2Inst[] = [];
     for (let i = 0; i < n; i++) {
         const instName = r.readZStr(20);
         const instBagNdx = r.readU16LE();
@@ -232,10 +411,10 @@ function readInst(r, size) {
 
 // bag record: 4 bytes
 // WORD genNdx, WORD modNdx
-function readBag(r, size) {
+function readBag(r: Reader, size: number): SF2Bag[] {
     const recSize = 4;
     const n = size / recSize;
-    const out = [];
+    const out: SF2Bag[] = [];
     for (let i = 0; i < n; i++) {
         const genNdx = r.readU16LE();
         const modNdx = r.readU16LE();
@@ -246,10 +425,10 @@ function readBag(r, size) {
 
 // gen record: 4 bytes
 // WORD oper, SHORT amount (raw)
-function readGen(r, size) {
+function readGen(r: Reader, size: number): SF2GenRecord[] {
     const recSize = 4;
     const n = size / recSize;
-    const out = [];
+    const out: SF2GenRecord[] = [];
     for (let i = 0; i < n; i++) {
         const oper = r.readU16LE();
         const amount = r.readI16LE();
@@ -260,10 +439,10 @@ function readGen(r, size) {
 
 // mod record: 10 bytes
 // WORD srcOper, WORD destOper, SHORT amount, WORD amtSrcOper, WORD transOper
-function readMod(r, size) {
+function readMod(r: Reader, size: number): SF2ModRecord[] {
     const recSize = 10;
     const n = size / recSize;
-    const out = [];
+    const out: SF2ModRecord[] = [];
     for (let i = 0; i < n; i++) {
         const srcOper = r.readU16LE();
         const destOper = r.readU16LE();
@@ -281,10 +460,10 @@ function readMod(r, size) {
 // DWORD sampleRate
 // BYTE originalPitch, CHAR pitchCorrection
 // WORD sampleLink, WORD sampleType
-function readShdr(r, size) {
+function readShdr(r: Reader, size: number): SF2SampleHeader[] {
     const recSize = 46;
     const n = size / recSize;
-    const out = [];
+    const out: SF2SampleHeader[] = [];
     for (let i = 0; i < n; i++) {
         const sampleName = r.readZStr(20);
         const start = r.readU32LE();
@@ -304,8 +483,8 @@ function readShdr(r, size) {
     return out;
 }
 
-function validatePDTA(pdta) {
-    const required = ["phdr", "pbag", "pgen", "inst", "ibag", "igen", "shdr"];
+function validatePDTA(pdta: SF2PDta): void {
+    const required = ["phdr", "pbag", "pgen", "inst", "ibag", "igen", "shdr"] as const;
     for (const k of required) {
         if (!pdta[k] || !pdta[k].length) throw new Error(`Missing pdta table: ${k}`);
     }
@@ -371,10 +550,10 @@ const Gen = {
     scaleTuning: 56,
     exclusiveClass: 57,
     overridingRootKey: 58,
-};
+} as const;
 
 // KeyRange / VelRange are packed in amount (low byte = lo, high byte = hi)
-function unpackRange(i16) {
+function unpackRange(i16: number): [number, number] {
     const u = i16 & 0xFFFF;
     const lo = u & 0xFF;
     const hi = (u >> 8) & 0xFF;
@@ -385,7 +564,7 @@ function unpackRange(i16) {
 // Preset access + region building
 // ============================================================
 
-function getPreset(pdta, presetIndex) {
+function getPreset(pdta: SF2PDta, presetIndex: number): SF2PresetResult {
     // Exclude terminal EOP record (last)
     const phdr = pdta.phdr;
     const last = phdr.length - 1;
@@ -395,7 +574,7 @@ function getPreset(pdta, presetIndex) {
     return { ...p, _bagStart: p.presetBagNdx, _bagEnd: pNext.presetBagNdx };
 }
 
-function buildRegionsForPreset(sf2, presetIndex, options = {}) {
+function buildRegionsForPreset(sf2: SF2Internal, presetIndex: number, options: BuildRegionsOptions = {}): SF2Region[] {
     const {
         decodeToFloat32 = true,
         normalize = true,
@@ -409,11 +588,11 @@ function buildRegionsForPreset(sf2, presetIndex, options = {}) {
     const presetZones = zonesFromBags(pdta.pbag, pdta.pgen, preset._bagStart, preset._bagEnd);
 
     // Global preset zone = first zone if it has no instrument generator
-    const presetGlobal = presetZones.length && presetZones[0].gens[Gen.instrument] == null
+    const presetGlobal: ZoneGens = presetZones.length && presetZones[0].gens[Gen.instrument] == null
         ? presetZones[0].gens
         : {};
 
-    const regions = [];
+    const regions: SF2Region[] = [];
 
     // For each preset zone that points to an instrument
     for (const pz of presetZones) {
@@ -423,7 +602,7 @@ function buildRegionsForPreset(sf2, presetIndex, options = {}) {
         const inst = getInstrument(pdta, instIndex);
         const instZones = zonesFromBags(pdta.ibag, pdta.igen, inst._bagStart, inst._bagEnd);
 
-        const instGlobal = instZones.length && instZones[0].gens[Gen.sampleID] == null
+        const instGlobal: ZoneGens = instZones.length && instZones[0].gens[Gen.sampleID] == null
             ? instZones[0].gens
             : {};
 
@@ -448,7 +627,7 @@ function buildRegionsForPreset(sf2, presetIndex, options = {}) {
     return regions;
 }
 
-function getInstrument(pdta, instIndex) {
+function getInstrument(pdta: SF2PDta, instIndex: number): SF2InstrumentResult {
     const inst = pdta.inst;
     const last = inst.length - 1;
     if (instIndex < 0 || instIndex >= last) throw new Error("instIndex out of range");
@@ -457,15 +636,20 @@ function getInstrument(pdta, instIndex) {
     return { ...i, _bagStart: i.instBagNdx, _bagEnd: iNext.instBagNdx };
 }
 
-function zonesFromBags(bags, gens, bagStart, bagEnd) {
-    const zones = [];
+interface SF2Zone {
+    bagIndex: number;
+    gens: ZoneGens;
+}
+
+function zonesFromBags(bags: SF2Bag[], gens: SF2GenRecord[], bagStart: number, bagEnd: number): SF2Zone[] {
+    const zones: SF2Zone[] = [];
     for (let bi = bagStart; bi < bagEnd; bi++) {
         const b = bags[bi];
         const bNext = bags[bi + 1];
         const genStart = b.genNdx;
         const genEnd = bNext ? bNext.genNdx : gens.length;
 
-        const zoneGens = {};
+        const zoneGens: ZoneGens = {};
         for (let gi = genStart; gi < genEnd; gi++) {
             const g = gens[gi];
             // Many generators can appear multiple times; last wins in-zone per spec.
@@ -476,15 +660,16 @@ function zonesFromBags(bags, gens, bagStart, bagEnd) {
     return zones;
 }
 
-function mergeGens(pGlobal, pZone, iGlobal, iZone) {
+function mergeGens(pGlobal: ZoneGens, pZone: ZoneGens, iGlobal: ZoneGens, iZone: ZoneGens): ZoneGens {
     // Start with globals, then specific zones override/accumulate.
     // For most numeric generators: add. For ids/ranges: replace.
-    const out = {};
+    const out: ZoneGens = {};
 
-    function apply(src) {
+    function apply(src: ZoneGens): void {
         for (const kStr of Object.keys(src)) {
             const k = +kStr;
             const v = src[k];
+            if (v === undefined) continue;
 
             if (k === Gen.keyRange || k === Gen.velRange || k === Gen.instrument || k === Gen.sampleID) {
                 out[k] = v; // replace
@@ -505,7 +690,7 @@ function mergeGens(pGlobal, pZone, iGlobal, iZone) {
     return out;
 }
 
-function makeRegionFromMerged(sf2, g, opts) {
+function makeRegionFromMerged(sf2: SF2Internal, g: ZoneGens, opts: DecodeOpts): SF2Region | null {
     const { pdta, sdta } = sf2;
 
     const sampleID = g[Gen.sampleID];
@@ -543,13 +728,16 @@ function makeRegionFromMerged(sf2, g, opts) {
     const { dataL, dataR } = decodeSampleData(sf2, sh, { start, end }, opts);
 
     // Ranges
-    const keyRange = g[Gen.keyRange] != null ? unpackRange(g[Gen.keyRange]) : [0, 127];
-    const velRange = g[Gen.velRange] != null ? unpackRange(g[Gen.velRange]) : [0, 127];
+    const keyRangeRaw = g[Gen.keyRange];
+    const velRangeRaw = g[Gen.velRange];
+    const keyRange: [number, number] = keyRangeRaw != null ? unpackRange(keyRangeRaw) : [0, 127];
+    const velRange: [number, number] = velRangeRaw != null ? unpackRange(velRangeRaw) : [0, 127];
 
     // Pitch-related
     const originalKey = sh.originalPitch ?? 60;
     const pitchCorrection = sh.pitchCorrection ?? 0; // cents
-    const overridingRootKey = g[Gen.overridingRootKey] != null ? (g[Gen.overridingRootKey] & 0xFF) : null;
+    const rootKeyRaw = g[Gen.overridingRootKey];
+    const overridingRootKey = rootKeyRaw != null ? (rootKeyRaw & 0xFF) : null;
     const coarseTune = g[Gen.coarseTune] ?? 0; // semitones
     const fineTune = (g[Gen.fineTune] ?? 0) + pitchCorrection; // cents + correction
     const scaleTuning = g[Gen.scaleTuning] ?? 100;
@@ -559,7 +747,7 @@ function makeRegionFromMerged(sf2, g, opts) {
     const pan = g[Gen.pan] ?? 0; // -500..+500
 
     // Envelopes
-    const volEnv = {
+    const volEnv: SF2VolEnv = {
         delayTc: g[Gen.delayVolEnv] ?? -12000,
         attackTc: g[Gen.attackVolEnv] ?? -12000,
         holdTc: g[Gen.holdVolEnv] ?? -12000,
@@ -571,7 +759,7 @@ function makeRegionFromMerged(sf2, g, opts) {
     // sustainModEnv in SF2 is usually in "centibels"? spec uses 0..1000 (per mille)? Many players map it.
     // For a usable starter, convert sustainModEnv (0..1000) to 0..1 by /1000 if present.
     const sustainModRaw = g[Gen.sustainModEnv];
-    const modEnv = {
+    const modEnv: SF2ModEnv = {
         delayTc: g[Gen.delayModEnv] ?? -12000,
         attackTc: g[Gen.attackModEnv] ?? -12000,
         holdTc: g[Gen.holdModEnv] ?? -12000,
@@ -581,7 +769,7 @@ function makeRegionFromMerged(sf2, g, opts) {
     };
 
     // Filter/LFO
-    const region = {
+    const region: SF2Region = {
         keyRange,
         velRange,
 
@@ -634,13 +822,18 @@ function makeRegionFromMerged(sf2, g, opts) {
     return region;
 }
 
-function computeAddressOffset(g, fineOp, coarseOp) {
+function computeAddressOffset(g: ZoneGens, fineOp: number, coarseOp: number): number {
     const fine = g[fineOp] ?? 0;   // samples
     const coarse = g[coarseOp] ?? 0; // in 32768-sample units
     return fine + coarse * 32768;
 }
 
-function decodeSampleData(sf2, sh, range, opts) {
+function decodeSampleData(
+    sf2: SF2Internal,
+    sh: SF2SampleHeader,
+    range: { start: number; end: number },
+    opts: DecodeOpts
+): { dataL: Float32Array; dataR: Float32Array | null } {
     const { sdta, pdta } = sf2;
     const { decodeToFloat32, normalize, includeStereoLinks } = opts;
 
@@ -652,7 +845,7 @@ function decodeSampleData(sf2, sh, range, opts) {
     // We'll do a conservative approach:
     // - If includeStereoLinks and sampleLink points to valid other sample with same length/rate,
     //   and types suggest L/R, decode both channels.
-    let linked = null;
+    let linked: SF2SampleHeader | null = null;
     if (includeStereoLinks && sh.sampleLink && sh.sampleLink < pdta.shdr.length) {
         const other = pdta.shdr[sh.sampleLink];
         if (other && other.sampleRate === sh.sampleRate) linked = other;
@@ -664,24 +857,25 @@ function decodeSampleData(sf2, sh, range, opts) {
         throw new Error("decodeToFloat32=false not implemented in this minimal parser");
     }
 
-    const dataL = int16ToFloat32(sdta.smpl, start, end, normalize);
+    const smpl = sdta.smpl!;
+    const dataL = int16ToFloat32(smpl, start, end, normalize);
 
-    let dataR = null;
+    let dataR: Float32Array | null = null;
     if (linked) {
         // Try to infer stereo pair: use linked sample's start/end as given by its shdr
         // BUT region offsets are not mirrored here; real SF2 uses separate zones for L/R.
         // This is "best effort".
         const startR = linked.start;
         const endR = linked.end;
-        const sR = clampU32(startR, 0, sdta.smpl.length);
-        const eR = clampU32(endR, 0, sdta.smpl.length);
-        if (eR > sR) dataR = int16ToFloat32(sdta.smpl, sR, eR, normalize);
+        const sR = clampU32(startR, 0, smpl.length);
+        const eR = clampU32(endR, 0, smpl.length);
+        if (eR > sR) dataR = int16ToFloat32(smpl, sR, eR, normalize);
     }
 
     return { dataL, dataR };
 }
 
-function int16ToFloat32(i16, start, end, normalize) {
+function int16ToFloat32(i16: Int16Array, start: number, end: number, normalize: boolean): Float32Array {
     const n = end - start;
     const out = new Float32Array(n);
 
@@ -706,10 +900,13 @@ function int16ToFloat32(i16, start, end, normalize) {
 // Small helpers
 // ============================================================
 
-function clampU32(x, lo, hi) {
+function clampU32(x: number, lo: number, hi: number): number {
     x = x >>> 0;
     if (x < lo) return lo >>> 0;
     if (x > hi) return hi >>> 0;
     return x;
 }
-function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+
+function clamp01(x: number): number {
+    return x < 0 ? 0 : x > 1 ? 1 : x;
+}
