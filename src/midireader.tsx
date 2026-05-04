@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SF2Region } from "../sf2-parser.ts";
+import {
+  BACH_CHARACTER_OPTIONS,
+  BACH_COMPLEXITY_OPTIONS,
+  BACH_KEY_OPTIONS,
+  BACH_LENGTH_OPTIONS,
+  BACH_TEMPO_OPTIONS,
+  BACH_VOICE_OPTIONS,
+  DEFAULT_BACH_CONFIG,
+  generateBachMidi,
+  type BachCharacter,
+  type BachFugueConfig,
+  type BachKey,
+  type BachLength,
+} from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
 
 // ---------------------------------------------------------------------------
@@ -335,6 +349,12 @@ export default function MidiReader({
   const [trackCcControls, setTrackCcControls] = useState<Record<number, TrackCc>>({});
   const [trackMixState, setTrackMixState] = useState<Record<number, TrackMix>>({});
   const [toolbarHint, setToolbarHint] = useState<string>("MIDI Explorer");
+  const [bachModuleOpen, setBachModuleOpen] = useState<boolean>(false);
+  const [isGeneratingBach, setIsGeneratingBach] = useState<boolean>(false);
+  const [bachConfig, setBachConfig] = useState<BachFugueConfig>(() => ({
+    ...DEFAULT_BACH_CONFIG,
+    seed: Math.floor(Math.random() * 1_000_000_000),
+  }));
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
@@ -948,17 +968,23 @@ export default function MidiReader({
     }
   }
 
+  function loadMidiIntoTracks(buf: ArrayBuffer, name: string, selectedPath = "") {
+    if (!workerRef.current) return;
+    if (isPlaying) workerRef.current.postMessage({ type: "pause" });
+    disconnectTrackNodes();
+    workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
+    setSelectedMidiPath(selectedPath);
+    setSongName(name);
+    setSongTime(0);
+    setSongError("");
+  }
+
   async function onUploadMidi(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !workerRef.current) return;
     try {
-      if (isPlaying) workerRef.current.postMessage({ type: "pause" });
-      disconnectTrackNodes();
       const buf = await file.arrayBuffer();
-      workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
-      setSongName(file.name);
-      setSongTime(0);
-      setSongError("");
+      loadMidiIntoTracks(buf, file.name);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -970,16 +996,11 @@ export default function MidiReader({
   async function onLoadSelectedMidi() {
     if (!selectedMidiPath || !workerRef.current) return;
     try {
-      if (isPlaying) workerRef.current.postMessage({ type: "pause" });
-      disconnectTrackNodes();
       const res = await fetch(`${import.meta.env.BASE_URL}${selectedMidiPath}`);
       if (!res.ok) throw new Error(`Failed to fetch ${selectedMidiPath}`);
       const buf = await res.arrayBuffer();
-      workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
       const selected = midiOptions.find((m) => m.path === selectedMidiPath);
-      setSongName(selected?.name || selectedMidiPath);
-      setSongTime(0);
-      setSongError("");
+      loadMidiIntoTracks(buf, selected?.name || selectedMidiPath, selectedMidiPath);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -991,20 +1012,40 @@ export default function MidiReader({
     setSelectedMidiPath(nextPath);
     if (!nextPath) return;
     try {
-      if (isPlaying) workerRef.current?.postMessage({ type: "pause" });
-      disconnectTrackNodes();
       const res = await fetch(`${import.meta.env.BASE_URL}${nextPath}`);
       if (!res.ok) throw new Error(`Failed to fetch ${nextPath}`);
       const buf = await res.arrayBuffer();
-      workerRef.current?.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
       const selected = midiOptions.find((m) => m.path === nextPath);
-      setSongName(selected?.name || nextPath);
-      setSongTime(0);
-      setSongError("");
+      loadMidiIntoTracks(buf, selected?.name || nextPath, nextPath);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
       onError?.(msg);
+    }
+  }
+
+  function onBachConfigChange<K extends keyof BachFugueConfig>(key: K, value: BachFugueConfig[K]) {
+    setBachConfig((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function onGenerateBachMusic(useNewSeed = false) {
+    if (!workerRef.current || isGeneratingBach) return;
+    const seed = useNewSeed ? Math.floor(Math.random() * 1_000_000_000) : bachConfig.seed;
+    const nextConfig = { ...bachConfig, seed };
+    setBachConfig(nextConfig);
+    setIsGeneratingBach(true);
+    setSongError("");
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const generated = generateBachMidi(nextConfig);
+      loadMidiIntoTracks(generated.midiData, generated.fileName);
+      setToolbarHint(`Bach seed ${generated.seed}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    } finally {
+      setIsGeneratingBach(false);
     }
   }
 
@@ -1148,6 +1189,20 @@ export default function MidiReader({
           >
             <i className="fa-solid fa-chart-column" aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            className={`toolbarIconBtn ${bachModuleOpen ? "active" : ""}`}
+            onClick={() => setBachModuleOpen((open) => !open)}
+            aria-label={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
+            title={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
+            onMouseEnter={() => setToolbarHint("Bach Composer")}
+            onFocus={() => setToolbarHint("Bach Composer")}
+          >
+            <i
+              className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`}
+              aria-hidden="true"
+            />
+          </button>
 
           <div className="midiTopGroup midiTopLoad">
             <label className="fileInput midiFileInputCompact">
@@ -1212,6 +1267,111 @@ export default function MidiReader({
             {toolbarHint}
           </div>
         </div>
+        {bachModuleOpen ? (
+          <div className="bachComposerModule">
+            <div className="bachComposerControls">
+              <label>
+                <span>Key</span>
+                <select
+                  value={bachConfig.key}
+                  onChange={(e) => onBachConfigChange("key", e.target.value as BachKey)}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_KEY_OPTIONS.map((key) => (
+                    <option key={key} value={key}>{key}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Length</span>
+                <select
+                  value={bachConfig.length}
+                  onChange={(e) => onBachConfigChange("length", e.target.value as BachLength)}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_LENGTH_OPTIONS.map((length) => (
+                    <option key={length} value={length}>
+                      {length.charAt(0).toUpperCase() + length.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Voices</span>
+                <select
+                  value={bachConfig.voices}
+                  onChange={(e) => onBachConfigChange("voices", Number(e.target.value) as BachFugueConfig["voices"])}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_VOICE_OPTIONS.map((voices) => (
+                    <option key={voices} value={voices}>{voices}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Character</span>
+                <select
+                  value={bachConfig.character}
+                  onChange={(e) => onBachConfigChange("character", e.target.value as BachCharacter)}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_CHARACTER_OPTIONS.map((character) => (
+                    <option key={character} value={character}>{character}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Complexity</span>
+                <select
+                  value={bachConfig.complexity}
+                  onChange={(e) => onBachConfigChange("complexity", Number(e.target.value) as BachFugueConfig["complexity"])}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_COMPLEXITY_OPTIONS.map((complexity) => (
+                    <option key={complexity} value={complexity}>{complexity}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Tempo</span>
+                <select
+                  value={bachConfig.tempo}
+                  onChange={(e) => onBachConfigChange("tempo", Number(e.target.value))}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_TEMPO_OPTIONS.map((tempo) => (
+                    <option key={tempo} value={tempo}>{tempo}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="bachComposerActions">
+              <button
+                type="button"
+                className="bachActionBtn"
+                onClick={() => void onGenerateBachMusic(false)}
+                disabled={isGeneratingBach}
+                aria-label="Generate Bach Music"
+                title="Generate Bach Music"
+              >
+                <i className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`} aria-hidden="true" />
+                <span>{isGeneratingBach ? "Generating" : "Generate"}</span>
+              </button>
+              <button
+                type="button"
+                className="bachActionBtn"
+                onClick={() => void onGenerateBachMusic(true)}
+                disabled={isGeneratingBach}
+                aria-label="New Seed"
+                title="New Seed"
+              >
+                <i className="fa-solid fa-rotate-right" aria-hidden="true" />
+                <span>New Seed</span>
+              </button>
+              <span className="chip bachSeedChip">Seed {bachConfig.seed}</span>
+            </div>
+          </div>
+        ) : null}
         <div className="midiTopGroup midiTopTransport midiTopTransportFull">
           <div className="transportHero">
             <button

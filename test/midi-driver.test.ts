@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createMidiMessageHandler, type MidiData } from "../src/midi-driver.ts";
+import {
+  createMidiMessageHandler,
+  isMidiPermissionDeniedError,
+  type MidiData,
+} from "../src/midi-driver.ts";
 
 test("createMidiMessageHandler decodes note on/off messages", async () => {
   const events: unknown[] = [];
@@ -43,4 +47,12 @@ test("createMidiMessageHandler ignores unsupported payloads", async () => {
   assert.equal(handler.handleMidiMessage(null), false);
   assert.equal(handler.handleMidiMessage("bad" as unknown as MidiData), false);
   assert.equal(handler.handleMidiMessage([0xe0, 0, 64]), false);
+});
+
+test("isMidiPermissionDeniedError recognizes browser MIDI permission denial", () => {
+  assert.equal(
+    isMidiPermissionDeniedError(new DOMException("Permission to use Web MIDI API was not granted.", "NotAllowedError")),
+    true
+  );
+  assert.equal(isMidiPermissionDeniedError(new Error("Web MIDI is not supported in this browser.")), false);
 });

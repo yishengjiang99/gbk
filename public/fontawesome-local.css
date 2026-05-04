@@ -28,6 +28,10 @@
   content: "\1F4CA";
 }
 
+.fa-wand-magic-sparkles::before {
+  content: "\2726";
+}
+
 .fa-file-arrow-up::before {
   content: "\21E7";
 }

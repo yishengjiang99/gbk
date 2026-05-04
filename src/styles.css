@@ -223,6 +223,57 @@ button[aria-label]:disabled::after {
   flex-wrap: nowrap;
 }
 
+.bachComposerModule {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid #c8d8e4;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfdff 0%, #eef5f7 100%);
+}
+
+.bachComposerControls {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(118px, 1fr));
+  gap: 0.5rem;
+}
+
+.bachComposerControls label {
+  min-width: 0;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.bachComposerControls span {
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #587286;
+}
+
+.bachComposerControls select {
+  width: 100%;
+  min-width: 0;
+}
+
+.bachComposerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.bachActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 34px;
+}
+
+.bachSeedChip {
+  margin-left: auto;
+}
+
 .midiFileInputCompact {
   width: 38px;
   height: 38px;
@@ -983,6 +1034,14 @@ tbody tr.selected {
   .midiTop {
     display: flex;
     flex-direction: column;
+  }
+
+  .bachComposerControls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bachSeedChip {
+    margin-left: 0;
   }
 
   .songChip {
