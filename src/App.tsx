@@ -4,6 +4,7 @@ import { createExternalMidiBridge, ExternalMidiBridge } from "./external-midi-br
 import {
   createMidiDriver,
   createMidiMessageHandler,
+  isMidiPermissionDeniedError,
   MidiDriver,
   MidiMessageHandler,
 } from "./midi-driver";
@@ -1207,6 +1208,13 @@ export default function App() {
       setMidiEnabled(true);
       setMidiStatus("MIDI enabled");
     } catch (err) {
+      if (isMidiPermissionDeniedError(err)) {
+        setMidiError("");
+        setMidiEnabled(false);
+        setMidiInputs([]);
+        setMidiStatus("MIDI disabled");
+        return;
+      }
       setMidiError(err instanceof Error ? err.message : String(err));
       setMidiEnabled(false);
       setMidiStatus("MIDI failed");

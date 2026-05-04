@@ -26,6 +26,18 @@ export interface MidiDriver {
   disconnect(): void;
 }
 
+export function isMidiPermissionDeniedError(err: unknown): boolean {
+  if (err == null || typeof err !== "object") return false;
+  const rec = err as { name?: unknown; message?: unknown };
+  const name = typeof rec.name === "string" ? rec.name : "";
+  const message = typeof rec.message === "string" ? rec.message : "";
+  return (
+    name === "NotAllowedError" ||
+    /Permission to use Web MIDI API was not granted/i.test(message) ||
+    /permission\b.*\b(web\s*)?midi\b.*\b(denied|not granted)/i.test(message)
+  );
+}
+
 function normalizeMidiData(data: MidiData): ArrayLike<number> | null {
   if (data == null) return null;
   if (Array.isArray(data)) return data;
