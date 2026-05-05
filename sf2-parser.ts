@@ -796,7 +796,7 @@ function makeRegionFromMerged(sf2: SF2Internal, g: ZoneGens, opts: DecodeOpts): 
         volEnv,
         modEnv,
 
-        initialFilterFcCents: g[Gen.initialFilterFc] ?? 13500,
+        initialFilterFcCents: sanitizeInitialFilterFcCents(g[Gen.initialFilterFc]),
         initialFilterQCb: g[Gen.initialFilterQ] ?? 0,
         modEnvToFilterFcCents: g[Gen.modEnvToFilterFc] ?? 0,
         modLfoToFilterFcCents: g[Gen.modLfoToFilterFc] ?? 0,
@@ -909,4 +909,14 @@ function clampU32(x: number, lo: number, hi: number): number {
 
 function clamp01(x: number): number {
     return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+function sanitizeInitialFilterFcCents(value: number | undefined): number {
+    const defaultOpen = 13500;
+    if (value == null) return defaultOpen;
+    // The SF2 2.1 range is 1500..13500 absolute cents. Some legacy banks contain
+    // sub-range values on otherwise normal instruments; treating those literally
+    // creates a near-DC low-pass and makes mapped notes effectively silent.
+    if (value < 1500) return defaultOpen;
+    return Math.min(value, defaultOpen);
 }

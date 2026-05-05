@@ -71,4 +71,24 @@ test("generated Bach playback primes presets before opening note-ons", async ({ 
 
   const checks = await debugHandle.jsonValue() as unknown[];
   expect(checks).toHaveLength(4);
+
+  const analyzer = page.getByTestId("analyzer-time");
+  const signal = await analyzer.evaluate(async (canvas) => {
+    const startedAt = performance.now();
+    let observedPeak = 0;
+    let observedTimer = "";
+
+    while (performance.now() - startedAt < 1_200) {
+      observedPeak = Math.max(observedPeak, Number(canvas.getAttribute("data-signal-peak") ?? 0));
+      observedTimer =
+        document.querySelector<HTMLElement>(".transportTimer")?.textContent?.trim() ?? "";
+      if (observedPeak > 0.002) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    return { observedPeak, observedTimer };
+  });
+
+  expect(signal.observedPeak).toBeGreaterThan(0.002);
+  expect(signal.observedTimer).toMatch(/^0:0[0-1] /);
 });
