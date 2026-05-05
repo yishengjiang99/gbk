@@ -132,6 +132,7 @@ interface WorkerTrackState {
   nextEventIndex: number;
   active: Set<string>;
   override: boolean;
+  waitingForPreset: boolean;
   presetIndex: number | null;
   port: MessagePort | null;
 }
@@ -168,7 +169,19 @@ interface SeekMsg {
   sec?: number;
 }
 
-type InboundMsg = LoadMidiMsg | AttachPortsMsg | SetTrackPresetMsg | PlayMsg | PauseMsg | SeekMsg;
+interface SetDebugPlaybackMsg {
+  type: "setDebugPlayback";
+  enabled?: boolean;
+}
+
+type InboundMsg =
+  | LoadMidiMsg
+  | AttachPortsMsg
+  | SetTrackPresetMsg
+  | PlayMsg
+  | PauseMsg
+  | SeekMsg
+  | SetDebugPlaybackMsg;
 
 interface WorkerGlobalCtx {
   postMessage(data: unknown): void;
@@ -425,6 +438,22 @@ let playing = false;
 let startPerf = 0;
 let startSec = 0;
 let lastTickEmit = 0;
+let debugPlayback = false;
+let debugEventSeq = 0;
+
+function playbackNowSec(): number {
+  return playing ? startSec + (performance.now() - startPerf) / 1000 : startSec;
+}
+
+function postPlaybackDebug(data: Record<string, unknown>): void {
+  if (!debugPlayback) return;
+  workerGlobal.postMessage({
+    type: "playbackDebug",
+    order: debugEventSeq++,
+    atSec: playbackNowSec(),
+    ...data,
+  });
+}
 
 function clearTimer(): void {
   if (timer != null) clearInterval(timer);
@@ -444,7 +473,7 @@ function stopNotes(): void {
 
 function pauseInternal(): void {
   if (!playing) return;
-  const nowSec = startSec + (performance.now() - startPerf) / 1000;
+  const nowSec = playbackNowSec();
   clearTimer();
   stopNotes();
   playing = false;
@@ -455,8 +484,15 @@ function setTrackPreset(payload: SetTrackPresetMsg): void {
   const state = trackState[payload.trackIndex];
   if (!state?.port) return;
   state.port.postMessage({ type: "setPreset", regions: payload.regions ?? [] });
+  state.waitingForPreset = false;
   state.override = !!payload.override;
   state.presetIndex = payload.presetIndex ?? null;
+  postPlaybackDebug({
+    kind: "presetApplied",
+    trackIndex: payload.trackIndex,
+    presetIndex: state.presetIndex,
+    override: state.override,
+  });
 }
 
 function runTick(): void {
@@ -468,20 +504,38 @@ function runTick(): void {
     const track = song.tracks[i];
     const state = trackState[i];
     if (!state?.port) continue;
+    if (state.waitingForPreset) continue;
     while (state.nextEventIndex < track.playEvents.length) {
       const ev = track.playEvents[state.nextEventIndex];
       if (ev.sec > lookahead) break;
       if (ev.type === "program") {
         if (!state.override) {
+          state.waitingForPreset = true;
+          postPlaybackDebug({
+            kind: "programChangeRequest",
+            trackIndex: i,
+            eventSec: ev.sec,
+            program: ev.program,
+            bank: ev.bank,
+          });
           workerGlobal.postMessage({
             type: "programChangeRequest",
             trackIndex: i,
             program: ev.program,
             bank: ev.bank,
           });
+          state.nextEventIndex += 1;
+          break;
         }
       } else if (ev.type === "noteOn") {
         state.port.postMessage({ type: "noteOn", note: ev.note, velocity: ev.velocity });
+        postPlaybackDebug({
+          kind: "noteOn",
+          trackIndex: i,
+          eventSec: ev.sec,
+          note: ev.note,
+          velocity: ev.velocity,
+        });
         state.active.add(`${ev.channel}:${ev.note}`);
       } else if (ev.type === "noteOff") {
         state.port.postMessage({ type: "noteOff", note: ev.note });
@@ -506,6 +560,12 @@ function runTick(): void {
 
 workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
   const msg = event.data;
+  if (msg.type === "setDebugPlayback") {
+    debugPlayback = !!msg.enabled;
+    debugEventSeq = 0;
+    return;
+  }
+
   if (msg.type === "loadMidi") {
     try {
       pauseInternal();
@@ -514,6 +574,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
         nextEventIndex: 0,
         active: new Set<string>(),
         override: false,
+        waitingForPreset: false,
         presetIndex: null,
         port: ports.get(t.index) ?? null,
       }));
@@ -544,6 +605,8 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
     const sec = Math.max(0, Math.min(song.durationSec, msg.startSec ?? 0));
     startSec = sec;
     startPerf = performance.now();
+    debugEventSeq = 0;
+    postPlaybackDebug({ kind: "play", eventSec: sec });
     for (let i = 0; i < song.tracks.length; i += 1) {
       const track = song.tracks[i];
       const idx = track.playEvents.findIndex((e) => e.sec >= sec);
@@ -551,6 +614,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
       if (!state) continue;
       state.nextEventIndex = idx >= 0 ? idx : track.playEvents.length;
       state.active.clear();
+      state.waitingForPreset = false;
     }
     lastTickEmit = sec;
     clearTimer();
@@ -574,6 +638,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
       if (!state) continue;
       state.nextEventIndex = idx >= 0 ? idx : track.playEvents.length;
       state.active.clear();
+      state.waitingForPreset = false;
     }
     startSec = sec;
     startPerf = performance.now();

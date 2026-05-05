@@ -580,10 +580,15 @@ function WaveformCanvas({ data }: WaveformCanvasProps) {
 interface AnalyzerCanvasProps {
   data: number[];
   mode: "time" | "freq";
+  testId?: string;
 }
 
-function AnalyzerCanvas({ data, mode }: AnalyzerCanvasProps) {
+function AnalyzerCanvas({ data, mode, testId }: AnalyzerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const signalPeak = useMemo(() => {
+    if (!data?.length) return 0;
+    return data.reduce((peak, value) => Math.max(peak, Math.abs(value)), 0);
+  }, [data]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -629,7 +634,16 @@ function AnalyzerCanvas({ data, mode }: AnalyzerCanvasProps) {
     }
   }, [data, mode]);
 
-  return <canvas ref={canvasRef} width={460} height={90} className="analyzerCanvas" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      width={460}
+      height={90}
+      className="analyzerCanvas"
+      data-testid={testId}
+      data-signal-peak={signalPeak.toFixed(6)}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1862,9 +1876,9 @@ export default function App() {
         {!analyzerCollapsed && (
           <div className="analyzerBody">
             <h3>Recent Time Domain</h3>
-            <AnalyzerCanvas data={recentTimeData} mode="time" />
+            <AnalyzerCanvas data={recentTimeData} mode="time" testId="analyzer-time" />
             <h3>Recent Frequency Domain</h3>
-            <AnalyzerCanvas data={recentFreqData} mode="freq" />
+            <AnalyzerCanvas data={recentFreqData} mode="freq" testId="analyzer-frequency" />
           </div>
         )}
       </aside>

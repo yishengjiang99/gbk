@@ -62,6 +62,15 @@ type TrackMix = { mute: boolean; solo: boolean };
 type PresetOption = { index: number; bank: number; program: number; name: string };
 type MidiOption = { name: string; path: string };
 type TrackNode = { node: AudioWorkletNode; panner: StereoPannerNode; gain: GainNode };
+type PlaybackDebugEvent = { type: "playbackDebug"; order: number; [key: string]: unknown };
+
+declare global {
+  interface Window {
+    __sf2E2e?: {
+      playbackEvents: PlaybackDebugEvent[];
+    };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Utility functions
@@ -540,9 +549,18 @@ export default function MidiReader({
   useEffect(() => {
     const worker = new Worker(new URL("./midi-timer.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
+    const debugPlayback = window.localStorage.getItem("sf2-e2e-debug") === "1";
+    if (debugPlayback) {
+      window.__sf2E2e = { playbackEvents: [] };
+      worker.postMessage({ type: "setDebugPlayback", enabled: true });
+    }
 
     worker.onmessage = (event: MessageEvent) => {
       const msg = event.data as { type: string; [key: string]: unknown };
+      if (msg.type === "playbackDebug") {
+        window.__sf2E2e?.playbackEvents.push(msg as PlaybackDebugEvent);
+        return;
+      }
       if (msg.type === "songLoaded") {
         setSong(msg.song as Song);
         setSongTime(0);
@@ -793,7 +811,8 @@ export default function MidiReader({
 
     for (const track of song.tracks) {
       const overridePreset = trackPresetOverrides[track.index];
-      const presetIndex = overridePreset ?? fallbackPresetIndex;
+      const defaultPreset = trackDefaultPresetMap[track.index];
+      const presetIndex = overridePreset ?? defaultPreset ?? fallbackPresetIndex;
       const regions = getRegionsForPreset(presetIndex);
       workerRef.current.postMessage({
         type: "setTrackPreset",
@@ -1052,7 +1071,7 @@ export default function MidiReader({
     const nextPreset: number | null = Number.isFinite(parsed) ? parsed : null;
     setTrackPresetOverrides((prev) => ({ ...prev, [trackIndex]: nextPreset }));
     if (!workerRef.current || !portsAttachedRef.current) return;
-    const presetIndex = nextPreset ?? fallbackPresetIndex;
+    const presetIndex = nextPreset ?? trackDefaultPresetMap[trackIndex] ?? fallbackPresetIndex;
     const regions = getRegionsForPreset(presetIndex);
     workerRef.current.postMessage({
       type: "setTrackPreset",
