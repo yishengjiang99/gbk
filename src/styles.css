@@ -91,8 +91,8 @@ button[aria-label]::after {
   content: attr(aria-label);
   position: absolute;
   left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%) translateY(4px);
+  top: calc(100% + 8px);
+  transform: translateX(-50%) translateY(-4px);
   padding: 0.3rem 0.45rem;
   border-radius: 7px;
   background: rgba(17, 35, 49, 0.94);
@@ -135,6 +135,183 @@ button[aria-label]:disabled::after {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.appHeaderToolbar {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.appHeaderToolbar button[aria-label]::after {
+  display: none;
+}
+
+.toolbarGroup {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 0.28rem;
+  padding: 0.42rem 0.48rem 0.5rem;
+  border: 1px solid #c5d5e0;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f2f7fa 100%);
+}
+
+.toolbarGroupInput {
+  flex: 0 1 370px;
+}
+
+.toolbarGroupSong {
+  flex: 1 1 520px;
+}
+
+.toolbarGroupSoundfont {
+  flex: 1 1 430px;
+}
+
+.toolbarGroupLabel {
+  font-size: 0.62rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #597387;
+}
+
+.toolbarButtonRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.toolbarGroupInput .toolbarButtonRow,
+.toolbarGroupSong .toolbarButtonRow,
+.toolbarGroupSoundfont .toolbarButtonRow {
+  flex-wrap: nowrap;
+}
+
+.toolbarActionBtn {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0.36rem 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.36rem;
+  border: 1px solid #7895a9;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #eaf2f7 100%);
+  color: #1e3d53;
+  font-size: 0.78rem;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.toolbarActionBtn i {
+  width: 1em;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+.toolbarActionBtn span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toolbarActionBtn:hover:not(:disabled),
+.toolbarActionBtn:focus-visible:not(:disabled),
+.toolbarActionBtn:focus-within:not(:disabled) {
+  border-color: #456f8d;
+  background: linear-gradient(180deg, #ffffff 0%, #dcebf5 100%);
+  color: #15364d;
+}
+
+.toolbarActionBtn.active {
+  border-color: #2f6d79;
+  background: linear-gradient(180deg, #eefbf8 0%, #cce7e2 100%);
+  color: #123f45;
+}
+
+.toolbarActionBtn:disabled {
+  background: #edf2f6;
+  border-color: #b7c6d2;
+  color: #95a5b2;
+  box-shadow: none;
+}
+
+.toolbarSegmented {
+  gap: 0.12rem;
+  padding: 0.12rem;
+  border: 1px solid #c0d0dc;
+  border-radius: 8px;
+  background: #e8f0f6;
+}
+
+.toolbarSegmented .toolbarActionBtn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.toolbarSegmented .toolbarActionBtn.active {
+  border-color: #7fa0b6;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(24, 54, 74, 0.12);
+}
+
+.toolbarFileBtn {
+  position: relative;
+  margin: 0;
+  border-style: solid;
+  cursor: pointer;
+}
+
+.appHeaderToolbar .toolbarSelect {
+  height: 36px;
+  min-width: 160px;
+  padding: 0.34rem 0.52rem;
+  font-size: 0.78rem;
+}
+
+.toolbarSelectWide {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.toolbarStatusPill {
+  min-width: 0;
+  max-width: 260px;
+  min-height: 36px;
+  padding: 0.3rem 0.52rem;
+  display: grid;
+  align-content: center;
+  gap: 0.08rem;
+  border: 1px solid #c8d8e4;
+  border-radius: 8px;
+  background: #f8fcff;
+  color: #2a465a;
+}
+
+.toolbarStatusLabel {
+  font-size: 0.56rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6a8091;
+}
+
+.toolbarStatusValue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.74rem;
 }
 
 .card {
@@ -1034,6 +1211,28 @@ tbody tr.selected {
   .midiTop {
     display: flex;
     flex-direction: column;
+  }
+
+  .toolbarGroup,
+  .toolbarGroupInput,
+  .toolbarGroupSong,
+  .toolbarGroupSoundfont {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .toolbarGroupInput .toolbarButtonRow,
+  .toolbarGroupSong .toolbarButtonRow,
+  .toolbarGroupSoundfont .toolbarButtonRow {
+    flex-wrap: wrap;
+  }
+
+  .appHeaderToolbar .toolbarSelect,
+  .toolbarSelectWide,
+  .toolbarStatusPill {
+    width: 100%;
+    max-width: none;
+    flex-basis: 100%;
   }
 
   .bachComposerControls {

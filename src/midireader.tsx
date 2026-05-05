@@ -348,7 +348,6 @@ export default function MidiReader({
   const [trackPresetOverrides, setTrackPresetOverrides] = useState<Record<number, number | null>>({});
   const [trackCcControls, setTrackCcControls] = useState<Record<number, TrackCc>>({});
   const [trackMixState, setTrackMixState] = useState<Record<number, TrackMix>>({});
-  const [toolbarHint, setToolbarHint] = useState<string>("MIDI Explorer");
   const [bachModuleOpen, setBachModuleOpen] = useState<boolean>(false);
   const [isGeneratingBach, setIsGeneratingBach] = useState<boolean>(false);
   const [bachConfig, setBachConfig] = useState<BachFugueConfig>(() => ({
@@ -1039,7 +1038,6 @@ export default function MidiReader({
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const generated = generateBachMidi(nextConfig);
       loadMidiIntoTracks(generated.midiData, generated.fileName);
-      setToolbarHint(`Bach seed ${generated.seed}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -1116,155 +1114,185 @@ export default function MidiReader({
   return (
     <section className="card midiReader">
       <div className="midiTop">
-        <div className="toolbar toolbarUnified midiUnifiedToolbar">
-          <button
-            type="button"
-            className={`toolbarIconBtn ${activeTab === "midi" ? "active" : ""}`}
-            onClick={() => onSelectTab("midi")}
-            aria-label="MIDI Explorer"
-            title="MIDI Explorer"
-            onMouseEnter={() => setToolbarHint("MIDI Explorer")}
-            onFocus={() => setToolbarHint("MIDI Explorer")}
-          >
-            <i className="fa-solid fa-music" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={`toolbarIconBtn ${activeTab === "sf2" ? "active" : ""}`}
-            onClick={() => onSelectTab("sf2")}
-            aria-label="SF2 Explorer"
-            title="SF2 Explorer"
-            onMouseEnter={() => setToolbarHint("SF2 Explorer")}
-            onFocus={() => setToolbarHint("SF2 Explorer")}
-          >
-            <i className="fa-solid fa-wave-square" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={`toolbarIconBtn ${audioCtxState === "running" ? "active" : ""}`}
-            onClick={onTogglePower}
-            aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
-            title={audioCtxState === "running" ? "Power Off" : "Power On"}
-            onMouseEnter={() => setToolbarHint(audioCtxState === "running" ? "Power Off" : "Power On")}
-            onFocus={() => setToolbarHint(audioCtxState === "running" ? "Power Off" : "Power On")}
-          >
-            <i className="fa-solid fa-power-off" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={`toolbarIconBtn ${midiEnabled ? "active" : ""}`}
-            onClick={onToggleMidi}
-            disabled={!sf2Ready}
-            aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-            title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-            onMouseEnter={() => setToolbarHint(midiEnabled ? "Disable MIDI" : "Enable MIDI")}
-            onFocus={() => setToolbarHint(midiEnabled ? "Disable MIDI" : "Enable MIDI")}
-          >
-            <i className="fa-solid fa-plug" aria-hidden="true" />
-          </button>
-          <select
-            className="toolbarSelect"
-            value={selectedMidiInput}
-            onChange={(e) => onSelectMidiInput(e.target.value)}
-            disabled={!midiEnabled}
-            title="MIDI input source"
-            onMouseEnter={() => setToolbarHint("MIDI input source")}
-            onFocus={() => setToolbarHint("MIDI input source")}
-          >
-            <option value="all">All MIDI Inputs</option>
-            {midiInputs.map((input) => (
-              <option key={input.id} value={input.id}>
-                {input.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className={`toolbarIconBtn ${!analyzerCollapsed ? "active" : ""}`}
-            onClick={onToggleAnalyzer}
-            aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-            title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-            onMouseEnter={() => setToolbarHint(analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer")}
-            onFocus={() => setToolbarHint(analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer")}
-          >
-            <i className="fa-solid fa-chart-column" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={`toolbarIconBtn ${bachModuleOpen ? "active" : ""}`}
-            onClick={() => setBachModuleOpen((open) => !open)}
-            aria-label={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
-            title={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
-            onMouseEnter={() => setToolbarHint("Bach Composer")}
-            onFocus={() => setToolbarHint("Bach Composer")}
-          >
-            <i
-              className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`}
-              aria-hidden="true"
-            />
-          </button>
-
-          <div className="midiTopGroup midiTopLoad">
-            <label className="fileInput midiFileInputCompact">
-              <span className="midiFileInputLabel" aria-hidden="true">
-                <i className="fa-solid fa-file-arrow-up" />
-              </span>
-              <input type="file" accept=".mid,.midi" onChange={onUploadMidi} />
-            </label>
-            <select
-              className="toolbarSelect"
-              value={selectedMidiPath}
-              onChange={(e) => onSelectMidiPath(e.target.value)}
-              disabled={!midiOptions.length}
-              title="MIDI files from public/static"
-              onMouseEnter={() => setToolbarHint("Select MIDI")}
-              onFocus={() => setToolbarHint("Select MIDI")}
-            >
-              <option value="">Select MIDI</option>
-              {midiOptions.map((midi) => (
-                <option key={midi.path} value={midi.path}>
-                  {midi.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="toolbarIconBtn"
-              onClick={onLoadSelectedMidi}
-              disabled={!selectedMidiPath}
-              aria-label="Reload MIDI"
-              title="Reload MIDI"
-              onMouseEnter={() => setToolbarHint("Reload MIDI")}
-              onFocus={() => setToolbarHint("Reload MIDI")}
-            >
-              <i className="fa-solid fa-rotate-right" aria-hidden="true" />
-            </button>
+        <div className="appHeaderToolbar midiUnifiedToolbar" aria-label="Main controls">
+          <div className="toolbarGroup" aria-label="View">
+            <span className="toolbarGroupLabel">View</span>
+            <div className="toolbarButtonRow toolbarSegmented">
+              <button
+                type="button"
+                className={`toolbarActionBtn ${activeTab === "midi" ? "active" : ""}`}
+                onClick={() => onSelectTab("midi")}
+                aria-pressed={activeTab === "midi"}
+                aria-label="MIDI Explorer"
+                title="MIDI Explorer"
+              >
+                <i className="fa-solid fa-music" aria-hidden="true" />
+                <span>MIDI</span>
+              </button>
+              <button
+                type="button"
+                className={`toolbarActionBtn ${activeTab === "sf2" ? "active" : ""}`}
+                onClick={() => onSelectTab("sf2")}
+                aria-pressed={activeTab === "sf2"}
+                aria-label="SF2 Explorer"
+                title="SF2 Explorer"
+              >
+                <i className="fa-solid fa-wave-square" aria-hidden="true" />
+                <span>SF2</span>
+              </button>
+            </div>
           </div>
 
-          <div className="midiTopGroup midiTopLoad">
-            <label className="fileInput midiFileInputCompact">
-              <span className="midiFileInputLabel" aria-hidden="true">
-                <i className="fa-solid fa-folder-open" />
-              </span>
-              <input type="file" accept=".sf2" onChange={onUploadSf2} />
-            </label>
-            <button
-              type="button"
-              className="toolbarIconBtn"
-              onClick={onLoadDefaultSf2}
-              disabled={sf2Loading}
-              aria-label={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
-              title={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
-              onMouseEnter={() => setToolbarHint(sf2Loading ? "Loading default SF2" : "Load Default SF2")}
-              onFocus={() => setToolbarHint(sf2Loading ? "Loading default SF2" : "Load Default SF2")}
-            >
-              <i className={`fa-solid ${sf2Loading ? "fa-spinner fa-spin" : "fa-database"}`} aria-hidden="true" />
-            </button>
-            <span className="songChip">{sf2Name || "No SoundFont loaded"}</span>
+          <div className="toolbarGroup" aria-label="Audio">
+            <span className="toolbarGroupLabel">Audio</span>
+            <div className="toolbarButtonRow">
+              <button
+                type="button"
+                className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
+                onClick={onTogglePower}
+                aria-pressed={audioCtxState === "running"}
+                aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
+                title={audioCtxState === "running" ? "Power Off" : "Power On"}
+              >
+                <i className="fa-solid fa-power-off" aria-hidden="true" />
+                <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
+              </button>
+            </div>
           </div>
 
-          <div className="toolbarHoverText" aria-live="polite">
-            {toolbarHint}
+          <div className="toolbarGroup toolbarGroupInput" aria-label="MIDI Input">
+            <span className="toolbarGroupLabel">MIDI Input</span>
+            <div className="toolbarButtonRow">
+              <button
+                type="button"
+                className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
+                onClick={onToggleMidi}
+                disabled={!sf2Ready}
+                aria-pressed={midiEnabled}
+                aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+                title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+              >
+                <i className="fa-solid fa-plug" aria-hidden="true" />
+                <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
+              </button>
+              <select
+                className="toolbarSelect"
+                value={selectedMidiInput}
+                onChange={(e) => onSelectMidiInput(e.target.value)}
+                disabled={!midiEnabled}
+                aria-label="MIDI input source"
+                title="MIDI input source"
+              >
+                <option value="all">All MIDI Inputs</option>
+                {midiInputs.map((input) => (
+                  <option key={input.id} value={input.id}>
+                    {input.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="toolbarGroup toolbarGroupSong" aria-label="MIDI file">
+            <span className="toolbarGroupLabel">MIDI File</span>
+            <div className="toolbarButtonRow">
+              <label className="fileInput toolbarActionBtn toolbarFileBtn">
+                <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
+                <span>Upload MIDI</span>
+                <input
+                  type="file"
+                  accept=".mid,.midi"
+                  onChange={onUploadMidi}
+                  aria-label="Upload MIDI file"
+                />
+              </label>
+              <select
+                className="toolbarSelect toolbarSelectWide"
+                value={selectedMidiPath}
+                onChange={(e) => onSelectMidiPath(e.target.value)}
+                disabled={!midiOptions.length}
+                aria-label="Select bundled MIDI file"
+                title="MIDI files from public/static"
+              >
+                <option value="">Select MIDI</option>
+                {midiOptions.map((midi) => (
+                  <option key={midi.path} value={midi.path}>
+                    {midi.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="toolbarActionBtn"
+                onClick={onLoadSelectedMidi}
+                disabled={!selectedMidiPath}
+                aria-label="Reload MIDI"
+                title="Reload MIDI"
+              >
+                <i className="fa-solid fa-rotate-right" aria-hidden="true" />
+                <span>Reload</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="toolbarGroup toolbarGroupSoundfont" aria-label="SoundFont">
+            <span className="toolbarGroupLabel">SoundFont</span>
+            <div className="toolbarButtonRow">
+              <label className="fileInput toolbarActionBtn toolbarFileBtn">
+                <i className="fa-solid fa-folder-open" aria-hidden="true" />
+                <span>Upload SF2</span>
+                <input type="file" accept=".sf2" onChange={onUploadSf2} aria-label="Upload SF2 file" />
+              </label>
+              <button
+                type="button"
+                className="toolbarActionBtn"
+                onClick={onLoadDefaultSf2}
+                disabled={sf2Loading}
+                aria-label={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+                title={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+              >
+                <i
+                  className={`fa-solid ${sf2Loading ? "fa-spinner fa-spin" : "fa-database"}`}
+                  aria-hidden="true"
+                />
+                <span>{sf2Loading ? "Loading" : "Default SF2"}</span>
+              </button>
+              <span className="toolbarStatusPill">
+                <span className="toolbarStatusLabel">Loaded</span>
+                <span className="toolbarStatusValue">{sf2Name || "No SoundFont"}</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="toolbarGroup" aria-label="Tools">
+            <span className="toolbarGroupLabel">Tools</span>
+            <div className="toolbarButtonRow">
+              <button
+                type="button"
+                className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
+                onClick={onToggleAnalyzer}
+                aria-pressed={!analyzerCollapsed}
+                aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+                title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+              >
+                <i className="fa-solid fa-chart-column" aria-hidden="true" />
+                <span>Analyzer</span>
+              </button>
+              <button
+                type="button"
+                className={`toolbarActionBtn ${bachModuleOpen ? "active" : ""}`}
+                onClick={() => setBachModuleOpen((open) => !open)}
+                aria-pressed={bachModuleOpen}
+                aria-label={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
+                title={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
+              >
+                <i
+                  className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`}
+                  aria-hidden="true"
+                />
+                <span>Bach Composer</span>
+              </button>
+            </div>
           </div>
         </div>
         {bachModuleOpen ? (

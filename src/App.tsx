@@ -1284,69 +1284,103 @@ export default function App() {
       {activeTab === "sf2" && (
         <>
           <header className="topToolbar card">
-            <div className="toolbar toolbarUnified">
-              <button
-                type="button"
-                className={`toolbarIconBtn ${(activeTab as string) === "midi" ? "active" : ""}`}
-                onClick={() => setActiveTab("midi")}
-                aria-label="MIDI Explorer"
-                title="MIDI Explorer"
-              >
-                <i className="fa-solid fa-music" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className={`toolbarIconBtn ${activeTab === "sf2" ? "active" : ""}`}
-                onClick={() => setActiveTab("sf2")}
-                aria-label="SF2 Explorer"
-                title="SF2 Explorer"
-              >
-                <i className="fa-solid fa-wave-square" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className={`toolbarIconBtn ${audioCtxState === "running" ? "active" : ""}`}
-                onClick={onTogglePower}
-                aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
-                title={audioCtxState === "running" ? "Power Off" : "Power On"}
-              >
-                <i className="fa-solid fa-power-off" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className={`toolbarIconBtn ${midiEnabled ? "active" : ""}`}
-                onClick={onToggleMidi}
-                disabled={!sf2}
-                aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-                title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-              >
-                <i className="fa-solid fa-plug" aria-hidden="true" />
-              </button>
-              <select
-                className="toolbarSelect"
-                value={selectedMidiInput}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-                  setSelectedMidiInput(e.target.value)
-                }
-                disabled={!midiEnabled}
-                title="MIDI input source"
-              >
-                <option value="all">All MIDI Inputs</option>
-                {midiInputs.map((input) => (
-                  <option key={input.id} value={input.id}>
-                    {input.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className={`toolbarIconBtn ${!analyzerCollapsed ? "active" : ""}`}
-                onClick={() => setAnalyzerCollapsed((v) => !v)}
-                aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-                title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-              >
-                <i className="fa-solid fa-chart-column" aria-hidden="true" />
-              </button>
+            <div className="appHeaderToolbar" aria-label="Main controls">
+              <div className="toolbarGroup" aria-label="View">
+                <span className="toolbarGroupLabel">View</span>
+                <div className="toolbarButtonRow toolbarSegmented">
+                  <button
+                    type="button"
+                    className={`toolbarActionBtn ${(activeTab as string) === "midi" ? "active" : ""}`}
+                    onClick={() => setActiveTab("midi")}
+                    aria-pressed={(activeTab as string) === "midi"}
+                    aria-label="MIDI Explorer"
+                    title="MIDI Explorer"
+                  >
+                    <i className="fa-solid fa-music" aria-hidden="true" />
+                    <span>MIDI</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`toolbarActionBtn ${activeTab === "sf2" ? "active" : ""}`}
+                    onClick={() => setActiveTab("sf2")}
+                    aria-pressed={activeTab === "sf2"}
+                    aria-label="SF2 Explorer"
+                    title="SF2 Explorer"
+                  >
+                    <i className="fa-solid fa-wave-square" aria-hidden="true" />
+                    <span>SF2</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="toolbarGroup" aria-label="Audio">
+                <span className="toolbarGroupLabel">Audio</span>
+                <div className="toolbarButtonRow">
+                  <button
+                    type="button"
+                    className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
+                    onClick={onTogglePower}
+                    aria-pressed={audioCtxState === "running"}
+                    aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
+                    title={audioCtxState === "running" ? "Power Off" : "Power On"}
+                  >
+                    <i className="fa-solid fa-power-off" aria-hidden="true" />
+                    <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="toolbarGroup toolbarGroupInput" aria-label="MIDI Input">
+                <span className="toolbarGroupLabel">MIDI Input</span>
+                <div className="toolbarButtonRow">
+                  <button
+                    type="button"
+                    className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
+                    onClick={onToggleMidi}
+                    disabled={!sf2}
+                    aria-pressed={midiEnabled}
+                    aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+                    title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+                  >
+                    <i className="fa-solid fa-plug" aria-hidden="true" />
+                    <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
+                  </button>
+                  <select
+                    className="toolbarSelect"
+                    value={selectedMidiInput}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                      setSelectedMidiInput(e.target.value)
+                    }
+                    disabled={!midiEnabled}
+                    aria-label="MIDI input source"
+                    title="MIDI input source"
+                  >
+                    <option value="all">All MIDI Inputs</option>
+                    {midiInputs.map((input) => (
+                      <option key={input.id} value={input.id}>
+                        {input.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="toolbarGroup" aria-label="Tools">
+                <span className="toolbarGroupLabel">Tools</span>
+                <div className="toolbarButtonRow">
+                  <button
+                    type="button"
+                    className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
+                    onClick={() => setAnalyzerCollapsed((v) => !v)}
+                    aria-pressed={!analyzerCollapsed}
+                    aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+                    title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+                  >
+                    <i className="fa-solid fa-chart-column" aria-hidden="true" />
+                    <span>Analyzer</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </header>
           <section className="card controls">
