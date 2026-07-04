@@ -15,6 +15,7 @@ import {
   type BachLength,
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
+import { parseSheetMusicToMidi } from "./sheet-music-reader.ts";
 
 // ---------------------------------------------------------------------------
 // Local type definitions
@@ -419,6 +420,9 @@ export default function MidiReader({
   const [trackMixState, setTrackMixState] = useState<Record<number, TrackMix>>({});
   const [bachModuleOpen, setBachModuleOpen] = useState<boolean>(false);
   const [isGeneratingBach, setIsGeneratingBach] = useState<boolean>(false);
+  const [isParsingSheetMusic, setIsParsingSheetMusic] = useState<boolean>(false);
+  const [sheetMusicStage, setSheetMusicStage] = useState<string>("");
+  const [sheetMusicNotice, setSheetMusicNotice] = useState<string>("");
   const [bachConfig, setBachConfig] = useState<BachFugueConfig>(() => ({
     ...DEFAULT_BACH_CONFIG,
     seed: Math.floor(Math.random() * 1_000_000_000),
@@ -1157,6 +1161,7 @@ export default function MidiReader({
     setSongName(name);
     setSongTime(opts.restoreSec ?? 0);
     setSongError("");
+    setSheetMusicNotice("");
     lastPersistedTimeRef.current = opts.restoreSec ?? 0;
     if (opts.persist !== false && (source.kind === "bundled" || opts.dataUrl)) {
       writePersistedMidiState({
@@ -1185,6 +1190,39 @@ export default function MidiReader({
       setSongError(msg);
       onError?.(msg);
       setSong(null);
+    }
+  }
+
+  async function onUploadSheetMusic(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !workerRef.current || isParsingSheetMusic) return;
+
+    setIsParsingSheetMusic(true);
+    setSheetMusicStage("Reading sheet music image...");
+    setSheetMusicNotice("");
+    setSongError("");
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      setSheetMusicStage("Building MIDI from sheet music...");
+      const parsed = await parseSheetMusicToMidi(file);
+      let dataUrl: string | undefined;
+      if (parsed.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
+        dataUrl = await arrayBufferToDataUrl(parsed.midiData.slice(0));
+      }
+      loadMidiIntoTracks(parsed.midiData, parsed.fileName, {
+        sourceKind: "generated",
+        dataUrl,
+      });
+      if (parsed.warnings?.length) setSheetMusicNotice(parsed.warnings.join(" "));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+      setSong(null);
+    } finally {
+      setSheetMusicStage("");
+      setIsParsingSheetMusic(false);
     }
   }
 
@@ -1413,6 +1451,24 @@ export default function MidiReader({
                   accept=".mid,.midi"
                   onChange={onUploadMidi}
                   aria-label="Upload MIDI file"
+                />
+              </label>
+              <label
+                className={`fileInput toolbarActionBtn toolbarFileBtn ${isParsingSheetMusic ? "disabled" : ""}`}
+                title="Scan or upload a sheet music photo"
+              >
+                <i
+                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-camera"}`}
+                  aria-hidden="true"
+                />
+                <span>{isParsingSheetMusic ? "Scanning" : "Scan Sheet"}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={onUploadSheetMusic}
+                  disabled={isParsingSheetMusic}
+                  aria-label="Scan or upload sheet music"
                 />
               </label>
               <select
@@ -1715,6 +1771,8 @@ export default function MidiReader({
           </div>
         ) : null}
       </div>
+      {sheetMusicStage ? <p className="status">{sheetMusicStage}</p> : null}
+      {sheetMusicNotice ? <p className="status">{sheetMusicNotice}</p> : null}
       {songError ? <p className="status error">{songError}</p> : null}
       {song && (
         <div className="midiTimelineWrap">

@@ -238,7 +238,8 @@ button[aria-label]:disabled::after {
   color: #123f45;
 }
 
-.toolbarActionBtn:disabled {
+.toolbarActionBtn:disabled,
+.toolbarActionBtn.disabled {
   background: #edf2f6;
   border-color: #b7c6d2;
   color: #95a5b2;
