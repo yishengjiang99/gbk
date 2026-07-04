@@ -30,6 +30,27 @@ export interface ParsedSheetMusicMidi {
   warnings: string[];
 }
 
+interface BinarySheetImage {
+  width: number;
+  height: number;
+  dark: Uint8Array;
+  rowCounts: Uint16Array;
+}
+
+interface DetectedStaff {
+  lines: number[];
+  spacing: number;
+  top: number;
+  bottom: number;
+}
+
+export interface DetectedSheetNote {
+  midi: number;
+  startTick: number;
+  durationTicks: number;
+  velocity: number;
+}
+
 function note(name: string): number {
   const match = /^([A-G](?:#|b)?)(-?\d+)$/.exec(name);
   if (!match) throw new Error(`Invalid note name: ${name}`);
@@ -124,6 +145,299 @@ class MidiTrackBuilder {
 function tempoPayload(bpm: number): number[] {
   const microsPerQuarter = Math.round(60000000 / bpm);
   return [(microsPerQuarter >> 16) & 255, (microsPerQuarter >> 8) & 255, microsPerQuarter & 255];
+}
+
+function makeMidiArrayBuffer(tracks: number[][]): ArrayBuffer {
+  const header = [...ascii("MThd"), ...u32(6), ...u16(1), ...u16(tracks.length), ...u16(TICKS_PER_QUARTER)];
+  const bytes = concatBytes([header, ...tracks]);
+  const out = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(out).set(bytes);
+  return out;
+}
+
+export function buildDetectedSheetMusicMidi(notes: DetectedSheetNote[], title = "Scanned sheet music"): ArrayBuffer {
+  const conductor = new MidiTrackBuilder();
+  const melody = new MidiTrackBuilder();
+
+  conductor.meta(0, 0x03, ascii(title));
+  conductor.meta(0, 0x51, tempoPayload(92));
+  conductor.meta(0, 0x58, [4, 2, 24, 8]);
+
+  melody.push(0, [0xc0, 0]);
+  for (const noteEvent of notes) {
+    melody.addNote(
+      Math.max(0, Math.trunc(noteEvent.startTick)),
+      0,
+      Math.max(0, Math.min(127, Math.trunc(noteEvent.midi))),
+      Math.max(QUARTER / 4, Math.trunc(noteEvent.durationTicks)),
+      Math.max(1, Math.min(127, Math.trunc(noteEvent.velocity)))
+    );
+  }
+
+  return makeMidiArrayBuffer([conductor.render(), melody.render()]);
+}
+
+function basenameWithoutExtension(name: string): string {
+  return (name || "sheet-music").replace(/\.[^.]*$/, "") || "sheet-music";
+}
+
+function canUseBrowserImagePipeline(): boolean {
+  return typeof createImageBitmap === "function" && typeof document !== "undefined";
+}
+
+function otsuThreshold(values: Uint8ClampedArray): number {
+  const histogram = new Uint32Array(256);
+  let total = 0;
+  for (let i = 0; i < values.length; i += 4) {
+    const r = values[i];
+    const g = values[i + 1];
+    const b = values[i + 2];
+    const luminance = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+    histogram[luminance] += 1;
+    total += 1;
+  }
+
+  let sum = 0;
+  for (let i = 0; i < 256; i += 1) sum += i * histogram[i];
+
+  let sumBackground = 0;
+  let weightBackground = 0;
+  let bestThreshold = 150;
+  let bestVariance = 0;
+
+  for (let i = 0; i < 256; i += 1) {
+    weightBackground += histogram[i];
+    if (!weightBackground) continue;
+
+    const weightForeground = total - weightBackground;
+    if (!weightForeground) break;
+
+    sumBackground += i * histogram[i];
+    const meanBackground = sumBackground / weightBackground;
+    const meanForeground = (sum - sumBackground) / weightForeground;
+    const betweenVariance = weightBackground * weightForeground * (meanBackground - meanForeground) ** 2;
+
+    if (betweenVariance > bestVariance) {
+      bestVariance = betweenVariance;
+      bestThreshold = i;
+    }
+  }
+
+  return Math.max(80, Math.min(190, bestThreshold - 12));
+}
+
+async function decodeSheetImage(file: File): Promise<BinarySheetImage | null> {
+  if (!canUseBrowserImagePipeline()) return null;
+
+  const bitmap = await createImageBitmap(file);
+  const maxSide = 1800;
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  const threshold = otsuThreshold(pixels);
+  const dark = new Uint8Array(width * height);
+  const rowCounts = new Uint16Array(height);
+
+  for (let y = 0; y < height; y += 1) {
+    let count = 0;
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      const luminance = 0.2126 * pixels[i] + 0.7152 * pixels[i + 1] + 0.0722 * pixels[i + 2];
+      if (luminance <= threshold) {
+        dark[y * width + x] = 1;
+        count += 1;
+      }
+    }
+    rowCounts[y] = count;
+  }
+
+  return { width, height, dark, rowCounts };
+}
+
+function groupConsecutiveRows(rows: number[]): number[][] {
+  const groups: number[][] = [];
+  for (const row of rows) {
+    const current = groups[groups.length - 1];
+    if (current && row - current[current.length - 1] <= 1) {
+      current.push(row);
+    } else {
+      groups.push([row]);
+    }
+  }
+  return groups;
+}
+
+function detectStaves(image: BinarySheetImage): DetectedStaff[] {
+  const rowThreshold = Math.max(12, Math.round(image.width * 0.22));
+  const candidateRows: number[] = [];
+  for (let y = 0; y < image.height; y += 1) {
+    if (image.rowCounts[y] >= rowThreshold) candidateRows.push(y);
+  }
+
+  const lineCenters = groupConsecutiveRows(candidateRows)
+    .map((group) => group.reduce((sum, y) => sum + y, 0) / group.length)
+    .filter((center, index, all) => index === 0 || center - all[index - 1] > 2);
+
+  const staves: DetectedStaff[] = [];
+  for (let i = 0; i <= lineCenters.length - 5; i += 1) {
+    const lines = lineCenters.slice(i, i + 5);
+    const spacings = lines.slice(1).map((line, idx) => line - lines[idx]);
+    const spacing = spacings.reduce((sum, value) => sum + value, 0) / spacings.length;
+    const maxDeviation = Math.max(...spacings.map((value) => Math.abs(value - spacing)));
+    if (spacing < 4 || spacing > 60 || maxDeviation > spacing * 0.35) continue;
+
+    const overlaps = staves.some((staff) => Math.abs(staff.top - lines[0]) < spacing * 2);
+    if (!overlaps) {
+      staves.push({
+        lines,
+        spacing,
+        top: lines[0],
+        bottom: lines[4],
+      });
+    }
+    i += 4;
+  }
+
+  return staves;
+}
+
+function isNearStaffLine(y: number, staff: DetectedStaff): boolean {
+  return staff.lines.some((line) => Math.abs(y - line) <= Math.max(1, staff.spacing * 0.12));
+}
+
+function diatonicIndexToMidi(index: number): number {
+  const majorSteps = [0, 2, 4, 5, 7, 9, 11];
+  const octave = Math.floor(index / 7);
+  const degree = ((index % 7) + 7) % 7;
+  return 12 + octave * 12 + majorSteps[degree];
+}
+
+function pitchFromTrebleStaff(y: number, staff: DetectedStaff): number {
+  const topLineF5Index = 5 * 7 + 3;
+  const halfStep = staff.spacing / 2;
+  const diatonicOffsetDown = Math.round((y - staff.top) / halfStep);
+  return diatonicIndexToMidi(topLineF5Index - diatonicOffsetDown);
+}
+
+function detectNotesInStaff(image: BinarySheetImage, staff: DetectedStaff): DetectedSheetNote[] {
+  const minY = Math.max(0, Math.floor(staff.top - staff.spacing * 2.2));
+  const maxY = Math.min(image.height - 1, Math.ceil(staff.bottom + staff.spacing * 2.2));
+  const visited = new Uint8Array(image.width * image.height);
+  const notes: Array<{ x: number; y: number; midi: number; area: number }> = [];
+  const stack: number[] = [];
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const startIdx = y * image.width + x;
+      if (visited[startIdx] || !image.dark[startIdx] || isNearStaffLine(y, staff)) continue;
+
+      let minX = x;
+      let maxX = x;
+      let compMinY = y;
+      let compMaxY = y;
+      let sumX = 0;
+      let sumY = 0;
+      let area = 0;
+      stack.push(startIdx);
+      visited[startIdx] = 1;
+
+      while (stack.length) {
+        const idx = stack.pop() ?? 0;
+        const cx = idx % image.width;
+        const cy = Math.floor(idx / image.width);
+
+        minX = Math.min(minX, cx);
+        maxX = Math.max(maxX, cx);
+        compMinY = Math.min(compMinY, cy);
+        compMaxY = Math.max(compMaxY, cy);
+        sumX += cx;
+        sumY += cy;
+        area += 1;
+
+        const neighbors = [idx - 1, idx + 1, idx - image.width, idx + image.width];
+        for (const next of neighbors) {
+          if (next < 0 || next >= image.dark.length || visited[next] || !image.dark[next]) continue;
+          const nx = next % image.width;
+          const ny = Math.floor(next / image.width);
+          if (Math.abs(nx - cx) + Math.abs(ny - cy) !== 1) continue;
+          if (ny < minY || ny > maxY || isNearStaffLine(ny, staff)) continue;
+          visited[next] = 1;
+          stack.push(next);
+        }
+      }
+
+      const compW = maxX - minX + 1;
+      const compH = compMaxY - compMinY + 1;
+      const density = area / Math.max(1, compW * compH);
+      const minSize = staff.spacing * 0.45;
+      const maxWidth = staff.spacing * 2.4;
+      const maxHeight = staff.spacing * 2.2;
+      const looksLikeNotehead =
+        compW >= minSize &&
+        compH >= minSize &&
+        compW <= maxWidth &&
+        compH <= maxHeight &&
+        density >= 0.18 &&
+        area >= staff.spacing * staff.spacing * 0.18;
+
+      if (looksLikeNotehead) {
+        const centerX = sumX / area;
+        const centerY = sumY / area;
+        const midi = Math.max(36, Math.min(96, pitchFromTrebleStaff(centerY, staff)));
+        notes.push({ x: centerX, y: centerY, midi, area });
+      }
+    }
+  }
+
+  const merged: typeof notes = [];
+  for (const candidate of notes.sort((a, b) => a.x - b.x || a.y - b.y)) {
+    const duplicate = merged.find(
+      (note) => Math.abs(note.x - candidate.x) < staff.spacing * 0.85 && Math.abs(note.y - candidate.y) < staff.spacing * 0.85
+    );
+    if (!duplicate) merged.push(candidate);
+  }
+
+  return merged
+    .sort((a, b) => a.x - b.x || b.y - a.y)
+    .slice(0, 96)
+    .map((candidate, index) => ({
+      midi: candidate.midi,
+      startTick: index * QUARTER,
+      durationTicks: QUARTER,
+      velocity: 78,
+    }));
+}
+
+function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const staves = detectStaves(image);
+  if (!staves.length) return { notes: [], warnings: ["No five-line staff was detected in the image."] };
+
+  const notes = staves.flatMap((staff) => detectNotesInStaff(image, staff));
+  if (!notes.length) {
+    return {
+      notes: [],
+      warnings: [`Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"}, but no noteheads were clear enough to import.`],
+    };
+  }
+
+  warnings.push(
+    `Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"} and ${notes.length} note candidate${
+      notes.length === 1 ? "" : "s"
+    }. Treble clef and quarter-note timing were assumed.`
+  );
+  return { notes, warnings };
 }
 
 function addRepeatingBass(track: MidiTrackBuilder, bar: number, notes: string[]): void {
@@ -229,11 +543,7 @@ export function buildSwedenSheetMusicMidi(): ArrayBuffer {
   for (const [bar, notes] of melody) addRhLine(piano, bar, notes);
 
   const tracks = [conductor.render(), piano.render()];
-  const header = [...ascii("MThd"), ...u32(6), ...u16(1), ...u16(tracks.length), ...u16(TICKS_PER_QUARTER)];
-  const bytes = concatBytes([header, ...tracks]);
-  const out = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(out).set(bytes);
-  return out;
+  return makeMidiArrayBuffer(tracks);
 }
 
 export async function parseSheetMusicToMidi(file: File): Promise<ParsedSheetMusicMidi> {
@@ -241,11 +551,36 @@ export async function parseSheetMusicToMidi(file: File): Promise<ParsedSheetMusi
     throw new Error("Choose a camera photo or image file of sheet music.");
   }
 
-  await file.arrayBuffer();
-
-  return {
+  const fallback = (): ParsedSheetMusicMidi => ({
     midiData: buildSwedenSheetMusicMidi(),
     fileName: "scanned-sheet-demo-sweden.mid",
-    warnings: ["Sheet music image recognition is not implemented yet; loaded the bundled Sweden transcription demo."],
+    warnings: ["Could not run image recognition for this file; loaded the bundled Sweden transcription demo."],
+  });
+
+  let image: BinarySheetImage | null = null;
+  try {
+    image = await decodeSheetImage(file);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ...fallback(),
+      warnings: [`Image decoding failed (${message}); loaded the bundled Sweden transcription demo.`],
+    };
+  }
+
+  if (!image) return fallback();
+
+  const result = transcribeSheetImage(image);
+  if (!result.notes.length) {
+    return {
+      ...fallback(),
+      warnings: [...result.warnings, "Loaded the bundled Sweden transcription demo instead."],
+    };
+  }
+
+  return {
+    midiData: buildDetectedSheetMusicMidi(result.notes, basenameWithoutExtension(file.name)),
+    fileName: `${basenameWithoutExtension(file.name)}-scan.mid`,
+    warnings: result.warnings,
   };
 }
