@@ -356,7 +356,9 @@ button[aria-label]:disabled::after {
 .midiReader {
   margin-top: 0.8rem;
   width: 100%;
-  max-height: calc(100vh - 210px);
+  height: calc(100vh - 6.6rem);
+  min-height: 520px;
+  max-height: calc(100vh - 6.6rem);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -597,6 +599,7 @@ button[aria-label]:disabled::after {
   background: #fbfdff;
   flex: 1;
   min-height: 0;
+  display: flex;
   overflow: auto;
 }
 
@@ -605,6 +608,8 @@ button[aria-label]:disabled::after {
   overflow-y: hidden;
   cursor: grab;
   user-select: none;
+  min-height: 100%;
+  display: flex;
 }
 
 .midiScrollViewport.dragging {
@@ -613,6 +618,7 @@ button[aria-label]:disabled::after {
 
 .midiTimelineContent {
   min-width: 100%;
+  min-height: 100%;
   position: relative;
 }
 
@@ -639,7 +645,8 @@ button[aria-label]:disabled::after {
   display: grid;
   grid-template-columns: minmax(320px, 360px) 1fr;
   gap: 0.5rem;
-  min-height: max-content;
+  flex: 1;
+  min-height: 100%;
   align-content: start;
   padding-right: 0.25rem;
 }
@@ -1260,6 +1267,8 @@ tbody tr.selected {
   }
 
   .midiReader {
+    height: auto;
+    min-height: 0;
     max-height: none;
     overflow: visible;
   }
