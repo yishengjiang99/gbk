@@ -590,6 +590,52 @@ button[aria-label]:disabled::after {
   text-align: right;
 }
 
+.midiMetadataPanel {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.48rem 0.6rem;
+  border: 1px solid #cad9e6;
+  border-radius: 8px;
+  background: #f8fcff;
+  color: #2d4658;
+}
+
+.midiMetadataTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.midiMetadataTitle strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #13344b;
+}
+
+.midiMetadataGrid {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem 0.7rem;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+}
+
+.midiMetadataGrid span {
+  white-space: nowrap;
+}
+
+.midiMetadataTracks {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: #5a7182;
+}
+
 .midiTimelineWrap {
   margin-top: 0.7rem;
   position: relative;

@@ -63,6 +63,14 @@ type PresetOption = { index: number; bank: number; program: number; name: string
 type MidiOption = { name: string; path: string };
 type TrackNode = { node: AudioWorkletNode; panner: StereoPannerNode; gain: GainNode };
 type PlaybackDebugEvent = { type: "playbackDebug"; order: number; [key: string]: unknown };
+type MidiSourceKind = "bundled" | "uploaded" | "generated";
+type CurrentMidiSource = { kind: MidiSourceKind; name: string; path?: string };
+type PersistedMidiState = CurrentMidiSource & {
+  version: 1;
+  dataUrl?: string;
+  currentSec?: number;
+  savedAt: number;
+};
 
 declare global {
   interface Window {
@@ -84,9 +92,60 @@ function fmtTime(sec: number): string {
 }
 
 const DEFAULT_TRACK_CC: TrackCc = { cc7Volume: 100, cc10Pan: 64, cc11Expression: 127 };
+const CURRENT_MIDI_STORAGE_KEY = "sf2-current-midi";
+const MAX_PERSISTED_MIDI_BYTES = 4 * 1024 * 1024;
 
 function clampCc(value: number): number {
   return Math.max(0, Math.min(127, Number(value) | 0));
+}
+
+function readPersistedMidiState(): PersistedMidiState | null {
+  try {
+    const raw = window.localStorage.getItem(CURRENT_MIDI_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedMidiState>;
+    if (parsed.version !== 1 || !parsed.name || !parsed.kind) return null;
+    if (parsed.kind === "bundled" && !parsed.path) return null;
+    if (parsed.kind !== "bundled" && !parsed.dataUrl) return null;
+    return parsed as PersistedMidiState;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedMidiState(next: Omit<PersistedMidiState, "version" | "savedAt">): void {
+  try {
+    window.localStorage.setItem(
+      CURRENT_MIDI_STORAGE_KEY,
+      JSON.stringify({ ...next, version: 1, savedAt: Date.now() })
+    );
+  } catch {
+    // localStorage can reject larger uploaded MIDI files; playback should still work.
+  }
+}
+
+function updatePersistedMidiTime(sec: number): void {
+  try {
+    const current = readPersistedMidiState();
+    if (!current) return;
+    writePersistedMidiState({ ...current, currentSec: Math.max(0, sec) });
+  } catch {
+    // no-op
+  }
+}
+
+function arrayBufferToDataUrl(buffer: ArrayBuffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read MIDI data"));
+    reader.readAsDataURL(new Blob([buffer], { type: "audio/midi" }));
+  });
+}
+
+async function dataUrlToArrayBuffer(dataUrl: string): Promise<ArrayBuffer> {
+  const res = await fetch(dataUrl);
+  return res.arrayBuffer();
 }
 
 function encodeWav(audioBuffer: AudioBuffer): ArrayBuffer {
@@ -347,6 +406,7 @@ export default function MidiReader({
   const [song, setSong] = useState<Song | null>(null);
   const [songName, setSongName] = useState<string>("");
   const [songError, setSongError] = useState<string>("");
+  const [currentMidiSource, setCurrentMidiSource] = useState<CurrentMidiSource | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportProgress, setExportProgress] = useState<number>(0);
@@ -386,6 +446,8 @@ export default function MidiReader({
   const durationRef = useRef<number>(0.01);
   const contentWRef = useRef<number>(1000);
   const presetOptionMapRef = useRef<Map<number, PresetOption>>(new Map());
+  const pendingRestoreSecRef = useRef<number | null>(null);
+  const lastPersistedTimeRef = useRef<number>(0);
 
   const timelineW = 1000;
   const trackH = 108;
@@ -411,6 +473,19 @@ export default function MidiReader({
     }
     return out;
   }, [song, resolvePresetIndex]);
+  const songMetadata = useMemo(() => {
+    if (!song) return null;
+    const noteCount = song.tracks.reduce((sum, track) => sum + track.notes.length, 0);
+    const eventCount = song.tracks.reduce((sum, track) => sum + track.playEvents.length, 0);
+    const namedTracks = song.tracks
+      .map((track) => formatTrackInlineName(track) || track.instrumentName)
+      .filter(Boolean);
+    return {
+      noteCount,
+      eventCount,
+      namedTrackPreview: namedTracks.slice(0, 3).join(", "),
+    };
+  }, [song]);
 
   useEffect(() => {
     onErrorRef.current = onError;
@@ -456,6 +531,7 @@ export default function MidiReader({
     updatePlayhead(sec);
     setSongTime(sec);
     workerRef.current?.postMessage({ type: "seek", sec });
+    updatePersistedMidiTime(sec);
     return sec;
   };
 
@@ -569,19 +645,28 @@ export default function MidiReader({
       }
       if (msg.type === "songLoaded") {
         setSong(msg.song as Song);
-        setSongTime(0);
+        const restoreSec = pendingRestoreSecRef.current;
+        pendingRestoreSecRef.current = null;
+        const nextSec = restoreSec == null ? 0 : Math.max(0, Math.min((msg.song as Song).durationSec, restoreSec));
+        setSongTime(nextSec);
         setIsPlaying(false);
         setSongError("");
         setTrackPresetOverrides({});
         setTrackCcControls({});
         setTrackMixState({});
-        updatePlayhead(0);
+        updatePlayhead(nextSec);
+        if (nextSec > 0) worker.postMessage({ type: "seek", sec: nextSec });
         return;
       }
       if (msg.type === "tick") {
         if (!isSeekingRef.current) {
-          setSongTime((msg.sec as number) ?? 0);
-          updatePlayhead((msg.sec as number) ?? 0);
+          const sec = (msg.sec as number) ?? 0;
+          setSongTime(sec);
+          updatePlayhead(sec);
+          if (Math.abs(sec - lastPersistedTimeRef.current) >= 1) {
+            lastPersistedTimeRef.current = sec;
+            updatePersistedMidiTime(sec);
+          }
         }
         const viewport = viewportRef.current;
         if (viewport && !isSeekingRef.current) {
@@ -595,14 +680,18 @@ export default function MidiReader({
         return;
       }
       if (msg.type === "paused") {
-        setSongTime((msg.sec as number) ?? 0);
-        updatePlayhead((msg.sec as number) ?? 0);
+        const sec = (msg.sec as number) ?? 0;
+        setSongTime(sec);
+        updatePlayhead(sec);
+        updatePersistedMidiTime(sec);
         setIsPlaying(false);
         return;
       }
       if (msg.type === "ended") {
-        setSongTime((msg.sec as number) ?? 0);
-        updatePlayhead((msg.sec as number) ?? 0);
+        const sec = (msg.sec as number) ?? 0;
+        setSongTime(sec);
+        updatePlayhead(sec);
+        updatePersistedMidiTime(sec);
         setIsPlaying(false);
         return;
       }
@@ -741,6 +830,36 @@ export default function MidiReader({
           : [];
         setMidiOptions(normalized);
 
+        const persisted = readPersistedMidiState();
+        if (persisted?.kind === "bundled" && persisted.path) {
+          const restored = normalized.find((m) => m.path === persisted.path) ?? {
+            name: persisted.name,
+            path: persisted.path,
+          };
+          setSelectedMidiPath(restored.path);
+          const midiRes = await fetch(`${import.meta.env.BASE_URL}${restored.path}`);
+          if (!midiRes.ok) throw new Error(`Failed to fetch ${restored.path}`);
+          const buf = await midiRes.arrayBuffer();
+          loadMidiIntoTracks(buf, restored.name, {
+            selectedPath: restored.path,
+            sourceKind: "bundled",
+            persist: false,
+            restoreSec: persisted.currentSec,
+          });
+          return;
+        }
+
+        if (persisted && persisted.kind !== "bundled" && persisted.dataUrl) {
+          const buf = await dataUrlToArrayBuffer(persisted.dataUrl);
+          loadMidiIntoTracks(buf, persisted.name, {
+            sourceKind: persisted.kind,
+            dataUrl: persisted.dataUrl,
+            persist: false,
+            restoreSec: persisted.currentSec,
+          });
+          return;
+        }
+
         const preferred = normalized.find((m) => m.name === "60884_Beethoven-Symphony-No51.mid");
         const first = preferred ?? normalized[0];
         if (first) {
@@ -748,8 +867,10 @@ export default function MidiReader({
           const midiRes = await fetch(`${import.meta.env.BASE_URL}${first.path}`);
           if (!midiRes.ok) throw new Error(`Failed to fetch ${first.path}`);
           const buf = await midiRes.arrayBuffer();
-          workerRef.current?.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
-          setSongName(first.name);
+          loadMidiIntoTracks(buf, first.name, {
+            selectedPath: first.path,
+            sourceKind: "bundled",
+          });
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1012,15 +1133,38 @@ export default function MidiReader({
     }
   }
 
-  function loadMidiIntoTracks(buf: ArrayBuffer, name: string, selectedPath = "") {
+  function loadMidiIntoTracks(
+    buf: ArrayBuffer,
+    name: string,
+    opts: {
+      selectedPath?: string;
+      sourceKind?: MidiSourceKind;
+      dataUrl?: string;
+      persist?: boolean;
+      restoreSec?: number;
+    } = {}
+  ) {
     if (!workerRef.current) return;
+    const selectedPath = opts.selectedPath ?? "";
+    const sourceKind = opts.sourceKind ?? (selectedPath ? "bundled" : "uploaded");
+    const source: CurrentMidiSource = { kind: sourceKind, name, path: selectedPath || undefined };
     if (isPlaying) workerRef.current.postMessage({ type: "pause" });
     disconnectTrackNodes();
+    pendingRestoreSecRef.current = opts.restoreSec ?? null;
     workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
     setSelectedMidiPath(selectedPath);
+    setCurrentMidiSource(source);
     setSongName(name);
-    setSongTime(0);
+    setSongTime(opts.restoreSec ?? 0);
     setSongError("");
+    lastPersistedTimeRef.current = opts.restoreSec ?? 0;
+    if (opts.persist !== false && (source.kind === "bundled" || opts.dataUrl)) {
+      writePersistedMidiState({
+        ...source,
+        dataUrl: opts.dataUrl,
+        currentSec: opts.restoreSec ?? 0,
+      });
+    }
   }
 
   async function onUploadMidi(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1028,7 +1172,14 @@ export default function MidiReader({
     if (!file || !workerRef.current) return;
     try {
       const buf = await file.arrayBuffer();
-      loadMidiIntoTracks(buf, file.name);
+      let dataUrl: string | undefined;
+      if (buf.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
+        dataUrl = await arrayBufferToDataUrl(buf.slice(0));
+      }
+      loadMidiIntoTracks(buf, file.name, {
+        sourceKind: "uploaded",
+        dataUrl,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -1044,7 +1195,10 @@ export default function MidiReader({
       if (!res.ok) throw new Error(`Failed to fetch ${selectedMidiPath}`);
       const buf = await res.arrayBuffer();
       const selected = midiOptions.find((m) => m.path === selectedMidiPath);
-      loadMidiIntoTracks(buf, selected?.name || selectedMidiPath, selectedMidiPath);
+      loadMidiIntoTracks(buf, selected?.name || selectedMidiPath, {
+        selectedPath: selectedMidiPath,
+        sourceKind: "bundled",
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -1060,7 +1214,10 @@ export default function MidiReader({
       if (!res.ok) throw new Error(`Failed to fetch ${nextPath}`);
       const buf = await res.arrayBuffer();
       const selected = midiOptions.find((m) => m.path === nextPath);
-      loadMidiIntoTracks(buf, selected?.name || nextPath, nextPath);
+      loadMidiIntoTracks(buf, selected?.name || nextPath, {
+        selectedPath: nextPath,
+        sourceKind: "bundled",
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -1082,7 +1239,14 @@ export default function MidiReader({
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const generated = generateBachMidi(nextConfig);
-      loadMidiIntoTracks(generated.midiData, generated.fileName);
+      let dataUrl: string | undefined;
+      if (generated.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
+        dataUrl = await arrayBufferToDataUrl(generated.midiData.slice(0));
+      }
+      loadMidiIntoTracks(generated.midiData, generated.fileName, {
+        sourceKind: "generated",
+        dataUrl,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -1522,6 +1686,34 @@ export default function MidiReader({
             <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
           </div>
         </div>
+        {song ? (
+          <div className="midiMetadataPanel" aria-label="MIDI metadata">
+            <div className="midiMetadataTitle">
+              <span className="songChipLabel">Current MIDI</span>
+              <strong>{songName || "Untitled MIDI"}</strong>
+              <span className="chip">
+                {currentMidiSource?.kind === "bundled"
+                  ? "Bundled"
+                  : currentMidiSource?.kind === "generated"
+                    ? "Generated"
+                    : "Uploaded"}
+              </span>
+            </div>
+            <div className="midiMetadataGrid">
+              <span>Format {song.format}</span>
+              <span>{song.tracks.length} tracks</span>
+              <span>{songMetadata?.noteCount ?? 0} notes</span>
+              <span>{songMetadata?.eventCount ?? 0} events</span>
+              <span>{Math.round(song.totalBars)} bars</span>
+              <span>PPQ {song.division}</span>
+              <span>{fmtTime(song.durationSec)} duration</span>
+              {currentMidiSource?.path ? <span>{currentMidiSource.path}</span> : null}
+            </div>
+            {songMetadata?.namedTrackPreview ? (
+              <div className="midiMetadataTracks">{songMetadata.namedTrackPreview}</div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {songError ? <p className="status error">{songError}</p> : null}
       {song && (
