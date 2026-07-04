@@ -536,15 +536,29 @@ export default function MidiReader({
     const line = playheadRef.current;
     if (!line) return;
     const safeDuration = Math.max(0.01, durationRef.current);
-    const width = Math.max(1, contentWRef.current);
+    const width = getTimelineWidth();
     const x = (Math.max(0, Math.min(safeDuration, sec)) / safeDuration) * width;
     line.style.transform = `translateX(${x}px)`;
   };
 
-  const seekToSec = (rawSec: number): number => {
+  const getTimelineWidth = (): number => {
+    return Math.max(1, contentRef.current?.offsetWidth ?? contentWRef.current);
+  };
+
+  const scrollTimelineToSec = (sec: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const safeDuration = Math.max(0.01, durationRef.current);
+    const progress = clampNumber(sec / safeDuration, 0, 1);
+    const maxLeft = Math.max(0, getTimelineWidth() - viewport.clientWidth);
+    viewport.scrollLeft = progress * maxLeft;
+  };
+
+  const seekToSec = (rawSec: number, opts: { scrollTimeline?: boolean } = {}): number => {
     const safeDuration = Math.max(0.01, durationRef.current);
     const sec = Math.max(0, Math.min(safeDuration, Number.isFinite(rawSec) ? rawSec : 0));
     updatePlayhead(sec);
+    if (opts.scrollTimeline !== false) scrollTimelineToSec(sec);
     setSongTime(sec);
     workerRef.current?.postMessage({ type: "seek", sec });
     updatePersistedMidiTime(sec);
@@ -555,11 +569,11 @@ export default function MidiReader({
     const content = contentRef.current;
     if (!content) return 0;
     const rect = content.getBoundingClientRect();
-    const width = Math.max(1, contentWRef.current);
+    const width = getTimelineWidth();
     const safeDuration = Math.max(0.01, durationRef.current);
     const xInContent = Math.max(0, Math.min(width, clientX - rect.left));
     const sec = (xInContent / width) * safeDuration;
-    return seekToSec(sec);
+    return seekToSec(sec, { scrollTimeline: false });
   };
 
   const disconnectTrackNodes = () => {
@@ -686,12 +700,7 @@ export default function MidiReader({
         }
         const viewport = viewportRef.current;
         if (viewport && !isSeekingRef.current) {
-          const safeDuration = Math.max(0.01, durationRef.current);
-          const width = contentWRef.current;
-          const playX = (((msg.sec as number) ?? 0) / safeDuration) * width;
-          const target = Math.max(0, playX - viewport.clientWidth * 0.2);
-          const maxLeft = Math.max(0, width - viewport.clientWidth);
-          viewport.scrollLeft = Math.min(maxLeft, target);
+          scrollTimelineToSec((msg.sec as number) ?? 0);
         }
         return;
       }
@@ -808,7 +817,7 @@ export default function MidiReader({
       if (!event.deltaY) return;
       event.preventDefault();
 
-      const oldWidth = Math.max(1, contentWRef.current);
+      const oldWidth = getTimelineWidth();
       const focusX = viewport.scrollLeft + event.clientX - viewport.getBoundingClientRect().left;
       const anchorRatio = clampNumber(focusX / oldWidth, 0, 1);
       const delta = getWheelPixels(event);
@@ -817,7 +826,7 @@ export default function MidiReader({
       setTimelineZoom((currentZoom) => {
         const nextZoom = clampNumber(currentZoom * zoomChange, MIN_TIMELINE_ZOOM, MAX_TIMELINE_ZOOM);
         if (Math.abs(nextZoom - currentZoom) < 0.001) return currentZoom;
-        const nextWidth = Math.max(1, oldWidth * (nextZoom / Math.max(0.001, timelineZoomRef.current)));
+        const nextWidth = Math.max(1, oldWidth * (nextZoom / Math.max(0.001, currentZoom)));
         requestAnimationFrame(() => {
           const maxLeft = Math.max(0, nextWidth - viewport.clientWidth);
           viewport.scrollLeft = clampNumber(anchorRatio * nextWidth - (event.clientX - viewport.getBoundingClientRect().left), 0, maxLeft);
