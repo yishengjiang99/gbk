@@ -450,6 +450,15 @@ export default function MidiReader({
     line.style.transform = `translateX(${x}px)`;
   };
 
+  const seekToSec = (rawSec: number): number => {
+    const safeDuration = Math.max(0.01, durationRef.current);
+    const sec = Math.max(0, Math.min(safeDuration, Number.isFinite(rawSec) ? rawSec : 0));
+    updatePlayhead(sec);
+    setSongTime(sec);
+    workerRef.current?.postMessage({ type: "seek", sec });
+    return sec;
+  };
+
   const seekToClientX = (clientX: number): number => {
     const content = contentRef.current;
     if (!content) return 0;
@@ -458,10 +467,7 @@ export default function MidiReader({
     const safeDuration = Math.max(0.01, durationRef.current);
     const xInContent = Math.max(0, Math.min(width, clientX - rect.left));
     const sec = (xInContent / width) * safeDuration;
-    updatePlayhead(sec);
-    setSongTime(sec);
-    workerRef.current?.postMessage({ type: "seek", sec });
-    return sec;
+    return seekToSec(sec);
   };
 
   const disconnectTrackNodes = () => {
@@ -852,6 +858,26 @@ export default function MidiReader({
       setSongError(msg);
       onError?.(msg);
     }
+  }
+
+  function onSeekSliderChange(event: React.ChangeEvent<HTMLInputElement>) {
+    seekToSec(Number(event.target.value));
+  }
+
+  function onSeekSliderPointerDown(event: React.PointerEvent<HTMLInputElement>) {
+    isSeekingRef.current = true;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function onSeekSliderPointerUp(event: React.PointerEvent<HTMLInputElement>) {
+    isSeekingRef.current = false;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    seekToSec(Number(event.currentTarget.value));
+  }
+
+  function seekBy(deltaSec: number) {
+    if (!song) return;
+    seekToSec(songTime + deltaSec);
   }
 
   async function onExportWav() {
@@ -1423,6 +1449,16 @@ export default function MidiReader({
           <div className="transportHero">
             <button
               type="button"
+              className="transportBtn"
+              onClick={() => seekBy(-10)}
+              disabled={!song}
+              aria-label="Rewind 10 seconds"
+              title="Rewind 10 seconds"
+            >
+              <i className="fa-solid fa-backward" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
               className="transportBtn transportBtnPrimary"
               onClick={onPlayPause}
               disabled={!song || !sf2Ready}
@@ -1430,6 +1466,16 @@ export default function MidiReader({
               title={isPlaying ? "Pause" : "Play"}
             >
               <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="transportBtn"
+              onClick={() => seekBy(10)}
+              disabled={!song}
+              aria-label="Forward 10 seconds"
+              title="Forward 10 seconds"
+            >
+              <i className="fa-solid fa-forward" aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -1446,6 +1492,21 @@ export default function MidiReader({
             <span className="transportState">
               {transportStateLabel}
             </span>
+            <input
+              className="transportSeekSlider"
+              type="range"
+              min={0}
+              max={duration}
+              step={0.01}
+              value={Math.max(0, Math.min(duration, songTime))}
+              onChange={onSeekSliderChange}
+              onPointerDown={onSeekSliderPointerDown}
+              onPointerUp={onSeekSliderPointerUp}
+              onPointerCancel={onSeekSliderPointerUp}
+              disabled={!song}
+              aria-label="Playback position"
+              title="Playback position"
+            />
             {isExporting ? (
               <div className="exportProgress" aria-live="polite">
                 <div className="exportProgressBar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportProgress * 100)}>

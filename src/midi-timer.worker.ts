@@ -631,6 +631,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
   if (msg.type === "seek") {
     if (!song) return;
     const sec = Math.max(0, Math.min(song.durationSec, msg.sec ?? 0));
+    stopNotes();
     for (let i = 0; i < song.tracks.length; i += 1) {
       const track = song.tracks[i];
       const idx = track.playEvents.findIndex((e) => e.sec >= sec);
@@ -642,6 +643,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
     }
     startSec = sec;
     startPerf = performance.now();
+    lastTickEmit = sec;
     workerGlobal.postMessage({ type: "tick", sec });
   }
 };

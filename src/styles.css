@@ -511,6 +511,18 @@ button[aria-label]:disabled::after {
   white-space: nowrap;
 }
 
+.transportSeekSlider {
+  flex: 1 1 260px;
+  min-width: 180px;
+  max-width: 520px;
+  height: 28px;
+  accent-color: #2d6a93;
+}
+
+.transportSeekSlider:disabled {
+  opacity: 0.45;
+}
+
 .exportProgress {
   display: inline-flex;
   align-items: center;
