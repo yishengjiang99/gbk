@@ -190,6 +190,10 @@ button[aria-label]:disabled::after {
   flex: 1 1 500px;
 }
 
+.toolbarGroupMidiSend {
+  flex: 1 1 520px;
+}
+
 .toolbarGroupSong {
   flex: 1 1 490px;
 }
