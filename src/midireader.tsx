@@ -95,9 +95,16 @@ function fmtTime(sec: number): string {
 const DEFAULT_TRACK_CC: TrackCc = { cc7Volume: 100, cc10Pan: 64, cc11Expression: 127 };
 const CURRENT_MIDI_STORAGE_KEY = "sf2-current-midi";
 const MAX_PERSISTED_MIDI_BYTES = 4 * 1024 * 1024;
+const MIN_TIMELINE_ZOOM = 1;
+const MAX_TIMELINE_ZOOM = 18;
+const WHEEL_ZOOM_SENSITIVITY = 0.002;
 
 function clampCc(value: number): number {
   return Math.max(0, Math.min(127, Number(value) | 0));
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function readPersistedMidiState(): PersistedMidiState | null {
@@ -423,6 +430,7 @@ export default function MidiReader({
   const [isParsingSheetMusic, setIsParsingSheetMusic] = useState<boolean>(false);
   const [sheetMusicStage, setSheetMusicStage] = useState<string>("");
   const [sheetMusicNotice, setSheetMusicNotice] = useState<string>("");
+  const [timelineZoom, setTimelineZoom] = useState<number>(MIN_TIMELINE_ZOOM);
   const [bachConfig, setBachConfig] = useState<BachFugueConfig>(() => ({
     ...DEFAULT_BACH_CONFIG,
     seed: Math.floor(Math.random() * 1_000_000_000),
@@ -449,6 +457,7 @@ export default function MidiReader({
   const fallbackPresetRef = useRef<number>(fallbackPresetIndex);
   const durationRef = useRef<number>(0.01);
   const contentWRef = useRef<number>(1000);
+  const timelineZoomRef = useRef<number>(MIN_TIMELINE_ZOOM);
   const presetOptionMapRef = useRef<Map<number, PresetOption>>(new Map());
   const pendingRestoreSecRef = useRef<number | null>(null);
   const lastPersistedTimeRef = useRef<number>(0);
@@ -458,7 +467,7 @@ export default function MidiReader({
   const duration = Math.max(0.01, song?.durationSec ?? 0.01);
   const totalBars = Math.max(1, song?.totalBars ?? 1);
   const visibleBars = 30;
-  const zoomFactor = totalBars > visibleBars ? totalBars / visibleBars : 1;
+  const zoomFactor = (totalBars > visibleBars ? totalBars / visibleBars : 1) * timelineZoom;
   const contentW = Math.round(timelineW * zoomFactor);
 
   const visibleTracks = useMemo<SongTrack[]>(() => song?.tracks ?? [], [song]);
@@ -516,6 +525,9 @@ export default function MidiReader({
     durationRef.current = duration;
     contentWRef.current = contentW;
   }, [duration, contentW]);
+  useEffect(() => {
+    timelineZoomRef.current = timelineZoom;
+  }, [timelineZoom]);
   useEffect(() => {
     presetOptionMapRef.current = presetOptionMap;
   }, [presetOptionMap]);
@@ -730,8 +742,13 @@ export default function MidiReader({
 
   useEffect(() => {
     if (viewportRef.current) viewportRef.current.scrollLeft = 0;
+    setTimelineZoom(MIN_TIMELINE_ZOOM);
     updatePlayhead(0);
   }, [songName]);
+
+  useEffect(() => {
+    updatePlayhead(songTime);
+  }, [contentW, songTime]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -741,6 +758,7 @@ export default function MidiReader({
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
+      if (event.target instanceof HTMLElement && event.target.closest("button, select, input, label")) return;
       dragStateRef.current.active = true;
       dragStateRef.current.startX = event.clientX;
       dragStateRef.current.startLeft = viewport.scrollLeft;
@@ -774,6 +792,42 @@ export default function MidiReader({
       viewport.removeEventListener("pointercancel", endDrag);
       viewport.removeEventListener("pointerleave", endDrag);
     };
+  }, [song]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const getWheelPixels = (event: WheelEvent) => {
+      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+      if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * viewport.clientHeight;
+      return event.deltaY;
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.deltaY) return;
+      event.preventDefault();
+
+      const oldWidth = Math.max(1, contentWRef.current);
+      const focusX = viewport.scrollLeft + event.clientX - viewport.getBoundingClientRect().left;
+      const anchorRatio = clampNumber(focusX / oldWidth, 0, 1);
+      const delta = getWheelPixels(event);
+      const zoomChange = Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY);
+
+      setTimelineZoom((currentZoom) => {
+        const nextZoom = clampNumber(currentZoom * zoomChange, MIN_TIMELINE_ZOOM, MAX_TIMELINE_ZOOM);
+        if (Math.abs(nextZoom - currentZoom) < 0.001) return currentZoom;
+        const nextWidth = Math.max(1, oldWidth * (nextZoom / Math.max(0.001, timelineZoomRef.current)));
+        requestAnimationFrame(() => {
+          const maxLeft = Math.max(0, nextWidth - viewport.clientWidth);
+          viewport.scrollLeft = clampNumber(anchorRatio * nextWidth - (event.clientX - viewport.getBoundingClientRect().left), 0, maxLeft);
+        });
+        return nextZoom;
+      });
+    };
+
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
   }, [song]);
 
   useEffect(() => {
