@@ -42,6 +42,8 @@ interface DetectedStaff {
   spacing: number;
   top: number;
   bottom: number;
+  slope: number;
+  systemIndex: number;
 }
 
 export interface DetectedSheetNote {
@@ -49,6 +51,16 @@ export interface DetectedSheetNote {
   startTick: number;
   durationTicks: number;
   velocity: number;
+}
+
+interface NoteCandidate {
+  x: number;
+  y: number;
+  midi: number;
+  area: number;
+  staffTop: number;
+  staffBottom: number;
+  systemIndex: number;
 }
 
 function note(name: string): number {
@@ -278,42 +290,130 @@ function groupConsecutiveRows(rows: number[]): number[][] {
   return groups;
 }
 
-function detectStaves(image: BinarySheetImage): DetectedStaff[] {
-  const rowThreshold = Math.max(12, Math.round(image.width * 0.22));
-  const candidateRows: number[] = [];
+function lineYAtX(staff: DetectedStaff, line: number, x: number, width: number): number {
+  return line + staff.slope * (x - width / 2);
+}
+
+function projectRowsForSlope(image: BinarySheetImage, slope: number): Uint16Array {
+  const extra = Math.ceil(Math.abs(slope) * image.width) + 12;
+  const bins = new Uint16Array(image.height + extra * 2);
+  const offset = extra;
+
   for (let y = 0; y < image.height; y += 1) {
-    if (image.rowCounts[y] >= rowThreshold) candidateRows.push(y);
+    for (let x = 0; x < image.width; x += 1) {
+      if (!image.dark[y * image.width + x]) continue;
+      const projectedY = Math.round(y - slope * (x - image.width / 2)) + offset;
+      if (projectedY >= 0 && projectedY < bins.length) bins[projectedY] += 1;
+    }
   }
 
-  const lineCenters = groupConsecutiveRows(candidateRows)
-    .map((group) => group.reduce((sum, y) => sum + y, 0) / group.length)
-    .filter((center, index, all) => index === 0 || center - all[index - 1] > 2);
+  return bins;
+}
 
+function lineCentersFromProjection(bins: Uint16Array, width: number): Array<{ center: number; strength: number }> {
+  const peakThreshold = Math.max(24, Math.round(width * 0.16));
+  const candidateRows: number[] = [];
+  for (let y = 0; y < bins.length; y += 1) {
+    if (bins[y] >= peakThreshold) candidateRows.push(y);
+  }
+
+  return groupConsecutiveRows(candidateRows)
+    .map((group) => {
+      let weighted = 0;
+      let strength = 0;
+      for (const y of group) {
+        weighted += y * bins[y];
+        strength += bins[y];
+      }
+      return {
+        center: weighted / Math.max(1, strength),
+        strength,
+      };
+    })
+    .filter((center, index, all) => index === 0 || center.center - all[index - 1].center > 2);
+}
+
+function findStaffSequences(
+  centers: Array<{ center: number; strength: number }>,
+  slope: number,
+  image: BinarySheetImage
+): DetectedStaff[] {
   const staves: DetectedStaff[] = [];
-  for (let i = 0; i <= lineCenters.length - 5; i += 1) {
-    const lines = lineCenters.slice(i, i + 5);
-    const spacings = lines.slice(1).map((line, idx) => line - lines[idx]);
-    const spacing = spacings.reduce((sum, value) => sum + value, 0) / spacings.length;
-    const maxDeviation = Math.max(...spacings.map((value) => Math.abs(value - spacing)));
-    if (spacing < 4 || spacing > 60 || maxDeviation > spacing * 0.35) continue;
+  const maxStaffSpacing = Math.min(26, image.height / 20);
 
-    const overlaps = staves.some((staff) => Math.abs(staff.top - lines[0]) < spacing * 2);
-    if (!overlaps) {
-      staves.push({
+  for (let i = 0; i <= centers.length - 5; i += 1) {
+    for (let j = i + 1; j < centers.length; j += 1) {
+      const spacing = centers[j].center - centers[i].center;
+      if (spacing < 3.5) continue;
+      if (spacing > maxStaffSpacing) break;
+
+      const lines = [centers[i].center];
+      let lastMatchIndex = j;
+      for (let step = 1; step < 5; step += 1) {
+        const target = centers[i].center + spacing * step;
+        let bestIndex = -1;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (let k = lastMatchIndex; k < centers.length; k += 1) {
+          const distance = Math.abs(centers[k].center - target);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = k;
+          }
+          if (centers[k].center > target + spacing * 0.6) break;
+        }
+
+        if (bestIndex < 0 || bestDistance > Math.max(1.8, spacing * 0.42)) break;
+        lines.push(centers[bestIndex].center);
+        lastMatchIndex = bestIndex + 1;
+      }
+
+      if (lines.length !== 5) continue;
+
+      const actualSpacings = lines.slice(1).map((line, idx) => line - lines[idx]);
+      const actualSpacing = actualSpacings.reduce((sum, value) => sum + value, 0) / actualSpacings.length;
+      const maxDeviation = Math.max(...actualSpacings.map((value) => Math.abs(value - actualSpacing)));
+      if (maxDeviation > Math.max(1.6, actualSpacing * 0.35)) continue;
+
+      const staff = {
         lines,
-        spacing,
+        spacing: actualSpacing,
         top: lines[0],
         bottom: lines[4],
-      });
+        slope,
+        systemIndex: 0,
+      };
+      const overlaps = staves.some((existing) => Math.abs(existing.top - staff.top) < actualSpacing * 3);
+      if (!overlaps) staves.push(staff);
+      break;
     }
-    i += 4;
   }
 
   return staves;
 }
 
-function isNearStaffLine(y: number, staff: DetectedStaff): boolean {
-  return staff.lines.some((line) => Math.abs(y - line) <= Math.max(1, staff.spacing * 0.12));
+function detectStaves(image: BinarySheetImage): DetectedStaff[] {
+  let best: DetectedStaff[] = [];
+  for (let slope = -0.14; slope <= 0.141; slope += 0.02) {
+    const bins = projectRowsForSlope(image, slope);
+    const offset = Math.ceil(Math.abs(slope) * image.width) + 12;
+    const centers = lineCentersFromProjection(bins, image.width).map((center) => ({
+      ...center,
+      center: center.center - offset,
+    }));
+    const staves = findStaffSequences(centers, slope, image);
+    if (staves.length > best.length) {
+      best = staves;
+    } else if (staves.length === best.length && staves.reduce((sum, staff) => sum + staff.spacing, 0) > best.reduce((sum, staff) => sum + staff.spacing, 0)) {
+      best = staves;
+    }
+  }
+  return best
+    .sort((a, b) => a.top - b.top)
+    .map((staff, index) => ({ ...staff, systemIndex: index }));
+}
+
+function isNearStaffLine(x: number, y: number, staff: DetectedStaff, width: number): boolean {
+  return staff.lines.some((line) => Math.abs(y - lineYAtX(staff, line, x, width)) <= Math.max(1, staff.spacing * 0.22));
 }
 
 function diatonicIndexToMidi(index: number): number {
@@ -330,17 +430,18 @@ function pitchFromTrebleStaff(y: number, staff: DetectedStaff): number {
   return diatonicIndexToMidi(topLineF5Index - diatonicOffsetDown);
 }
 
-function detectNotesInStaff(image: BinarySheetImage, staff: DetectedStaff): DetectedSheetNote[] {
-  const minY = Math.max(0, Math.floor(staff.top - staff.spacing * 2.2));
-  const maxY = Math.min(image.height - 1, Math.ceil(staff.bottom + staff.spacing * 2.2));
+function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedStaff): NoteCandidate[] {
+  const slopeMargin = Math.abs(staff.slope) * image.width;
+  const minY = Math.max(0, Math.floor(staff.top - staff.spacing * 1.45 - slopeMargin));
+  const maxY = Math.min(image.height - 1, Math.ceil(staff.bottom + staff.spacing * 1.05 + slopeMargin));
   const visited = new Uint8Array(image.width * image.height);
-  const notes: Array<{ x: number; y: number; midi: number; area: number }> = [];
+  const notes: NoteCandidate[] = [];
   const stack: number[] = [];
 
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = 0; x < image.width; x += 1) {
       const startIdx = y * image.width + x;
-      if (visited[startIdx] || !image.dark[startIdx] || isNearStaffLine(y, staff)) continue;
+      if (visited[startIdx] || !image.dark[startIdx] || isNearStaffLine(x, y, staff, image.width)) continue;
 
       let minX = x;
       let maxX = x;
@@ -371,7 +472,7 @@ function detectNotesInStaff(image: BinarySheetImage, staff: DetectedStaff): Dete
           const nx = next % image.width;
           const ny = Math.floor(next / image.width);
           if (Math.abs(nx - cx) + Math.abs(ny - cy) !== 1) continue;
-          if (ny < minY || ny > maxY || isNearStaffLine(ny, staff)) continue;
+          if (ny < minY || ny > maxY || isNearStaffLine(nx, ny, staff, image.width)) continue;
           visited[next] = 1;
           stack.push(next);
         }
@@ -380,27 +481,45 @@ function detectNotesInStaff(image: BinarySheetImage, staff: DetectedStaff): Dete
       const compW = maxX - minX + 1;
       const compH = compMaxY - compMinY + 1;
       const density = area / Math.max(1, compW * compH);
-      const minSize = staff.spacing * 0.45;
-      const maxWidth = staff.spacing * 2.4;
-      const maxHeight = staff.spacing * 2.2;
+      const minWidth = Math.max(3, staff.spacing * 0.35);
+      const minHeight = Math.max(3, staff.spacing * 0.28);
+      const maxWidth = staff.spacing * 1.15;
+      const maxHeight = staff.spacing * 0.95;
+      const aspect = compW / Math.max(1, compH);
       const looksLikeNotehead =
-        compW >= minSize &&
-        compH >= minSize &&
+        compW >= minWidth &&
+        compH >= minHeight &&
         compW <= maxWidth &&
         compH <= maxHeight &&
-        density >= 0.18 &&
-        area >= staff.spacing * staff.spacing * 0.18;
+        aspect >= 0.68 &&
+        aspect <= 2.05 &&
+        density >= 0.32 &&
+        area >= staff.spacing * staff.spacing * 0.1 &&
+        area <= staff.spacing * staff.spacing * 0.85;
 
       if (looksLikeNotehead) {
         const centerX = sumX / area;
         const centerY = sumY / area;
-        const midi = Math.max(36, Math.min(96, pitchFromTrebleStaff(centerY, staff)));
-        notes.push({ x: centerX, y: centerY, midi, area });
+        const staffRelativeY = centerY - staff.slope * (centerX - image.width / 2);
+        const inMusicalBand =
+          staffRelativeY >= staff.top - staff.spacing * 1.35 &&
+          staffRelativeY <= staff.bottom + staff.spacing * 0.95;
+        if (!inMusicalBand) continue;
+        const midi = Math.max(36, Math.min(96, pitchFromTrebleStaff(staffRelativeY, staff)));
+        notes.push({
+          x: centerX,
+          y: centerY,
+          midi,
+          area,
+          staffTop: staff.top,
+          staffBottom: staff.bottom,
+          systemIndex: staff.systemIndex,
+        });
       }
     }
   }
 
-  const merged: typeof notes = [];
+  const merged: NoteCandidate[] = [];
   for (const candidate of notes.sort((a, b) => a.x - b.x || a.y - b.y)) {
     const duplicate = merged.find(
       (note) => Math.abs(note.x - candidate.x) < staff.spacing * 0.85 && Math.abs(note.y - candidate.y) < staff.spacing * 0.85
@@ -408,15 +527,60 @@ function detectNotesInStaff(image: BinarySheetImage, staff: DetectedStaff): Dete
     if (!duplicate) merged.push(candidate);
   }
 
-  return merged
-    .sort((a, b) => a.x - b.x || b.y - a.y)
-    .slice(0, 96)
-    .map((candidate, index) => ({
-      midi: candidate.midi,
-      startTick: index * QUARTER,
-      durationTicks: QUARTER,
-      velocity: 78,
-    }));
+  return merged.sort((a, b) => a.x - b.x || b.y - a.y);
+}
+
+function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: BinarySheetImage): DetectedSheetNote[] {
+  if (!candidates.length) return [];
+
+  const systems = [...new Set(candidates.map((candidate) => candidate.systemIndex))].sort((a, b) => a - b);
+  const events: DetectedSheetNote[] = [];
+  let globalStep = 0;
+
+  for (const systemIndex of systems) {
+    const systemCandidates = candidates
+      .filter((candidate) => candidate.systemIndex === systemIndex)
+      .sort((a, b) => a.x - b.x || b.y - a.y);
+    if (!systemCandidates.length) continue;
+
+    const systemTop = Math.min(...systemCandidates.map((candidate) => candidate.staffTop));
+    const systemBottom = Math.max(...systemCandidates.map((candidate) => candidate.staffBottom));
+    const musicalCandidates = systemCandidates.filter(
+      (candidate) => candidate.y >= systemTop - 10 && candidate.y <= systemBottom + 14
+    );
+
+    const clusters: NoteCandidate[][] = [];
+    for (const candidate of musicalCandidates) {
+      const current = clusters[clusters.length - 1];
+      const last = current?.[current.length - 1];
+      const maxSameBeatDistance = Math.max(5, (candidate.staffBottom - candidate.staffTop) * 0.08);
+      if (current && last && candidate.x - last.x <= maxSameBeatDistance) {
+        current.push(candidate);
+      } else {
+        clusters.push([candidate]);
+      }
+    }
+
+    for (const cluster of clusters) {
+      const dedupedPitches = [...new Map(cluster.map((candidate) => [candidate.midi, candidate])).values()];
+      const limited = dedupedPitches
+        .sort((a, b) => b.area - a.area)
+        .slice(0, 4)
+        .sort((a, b) => a.midi - b.midi);
+
+      for (const candidate of limited) {
+        events.push({
+          midi: candidate.midi,
+          startTick: globalStep * QUARTER,
+          durationTicks: QUARTER,
+          velocity: 78,
+        });
+      }
+      globalStep += 1;
+    }
+  }
+
+  return events.slice(0, Math.max(1, Math.floor(image.width * 0.35)));
 }
 
 function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
@@ -424,7 +588,8 @@ function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNo
   const staves = detectStaves(image);
   if (!staves.length) return { notes: [], warnings: ["No five-line staff was detected in the image."] };
 
-  const notes = staves.flatMap((staff) => detectNotesInStaff(image, staff));
+  const candidates = staves.flatMap((staff) => detectNoteCandidatesInStaff(image, staff));
+  const notes = groupNoteCandidatesIntoEvents(candidates, image);
   if (!notes.length) {
     return {
       notes: [],
@@ -433,9 +598,9 @@ function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNo
   }
 
   warnings.push(
-    `Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"} and ${notes.length} note candidate${
-      notes.length === 1 ? "" : "s"
-    }. Treble clef and quarter-note timing were assumed.`
+    `Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"}, ${candidates.length} notehead candidate${
+      candidates.length === 1 ? "" : "s"
+    }, and imported ${notes.length} MIDI note${notes.length === 1 ? "" : "s"}. Treble clef and quarter-note timing were assumed.`
   );
   return { notes, warnings };
 }

@@ -19,7 +19,7 @@ test("generated Bach playback primes presets before opening note-ons", async ({ 
 
   await page.getByRole("button", { name: /Bach Composer/i }).click();
   await page.getByRole("button", { name: "Generate Bach Music" }).click();
-  await expect(page.getByText("Generated Bach Soprano")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Generated Bach Soprano", { exact: true })).toBeVisible({ timeout: 30_000 });
 
   const playButton = page.getByRole("button", { name: "Play" });
   await expect(playButton).toBeEnabled();
