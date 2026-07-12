@@ -1461,6 +1461,15 @@ export default function MidiReader({
       if (parsed.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
         dataUrl = await arrayBufferToDataUrl(parsed.midiData.slice(0));
       }
+      window.dispatchEvent(
+        new CustomEvent("sheetmusicreader:generated-midi", {
+          detail: {
+            fileName: parsed.fileName,
+            midiData: parsed.midiData.slice(0),
+            warnings: parsed.warnings,
+          },
+        })
+      );
       loadMidiIntoTracks(parsed.midiData, parsed.fileName, {
         sourceKind: "generated",
         dataUrl,

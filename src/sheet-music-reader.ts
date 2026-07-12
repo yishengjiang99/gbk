@@ -310,8 +310,25 @@ function projectRowsForSlope(image: BinarySheetImage, slope: number): Uint16Arra
   return bins;
 }
 
+function projectBandRowsForSlope(image: BinarySheetImage, slope: number, minY: number, maxY: number): Uint16Array {
+  const bandHeight = Math.max(1, maxY - minY + 1);
+  const extra = Math.ceil(Math.abs(slope) * image.width) + 12;
+  const bins = new Uint16Array(bandHeight + extra * 2);
+  const offset = extra;
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (!image.dark[y * image.width + x]) continue;
+      const projectedY = Math.round(y - minY - slope * (x - image.width / 2)) + offset;
+      if (projectedY >= 0 && projectedY < bins.length) bins[projectedY] += 1;
+    }
+  }
+
+  return bins;
+}
+
 function lineCentersFromProjection(bins: Uint16Array, width: number): Array<{ center: number; strength: number }> {
-  const peakThreshold = Math.max(24, Math.round(width * 0.16));
+  const peakThreshold = Math.max(18, Math.round(width * 0.09));
   const candidateRows: number[] = [];
   for (let y = 0; y < bins.length; y += 1) {
     if (bins[y] >= peakThreshold) candidateRows.push(y);
@@ -324,6 +341,33 @@ function lineCentersFromProjection(bins: Uint16Array, width: number): Array<{ ce
       for (const y of group) {
         weighted += y * bins[y];
         strength += bins[y];
+      }
+      return {
+        center: weighted / Math.max(1, strength),
+        strength,
+      };
+    })
+    .filter((center, index, all) => index === 0 || center.center - all[index - 1].center > 2);
+}
+
+function lineCentersFromRows(rowCounts: Uint16Array, width: number): Array<{ center: number; strength: number }> {
+  const peakThreshold = Math.max(14, Math.round(width * 0.055));
+  const candidateRows: number[] = [];
+  for (let y = 0; y < rowCounts.length; y += 1) {
+    const prev = rowCounts[y - 1] ?? 0;
+    const next = rowCounts[y + 1] ?? 0;
+    if (rowCounts[y] >= peakThreshold || (rowCounts[y] >= peakThreshold * 0.75 && rowCounts[y] >= prev && rowCounts[y] >= next)) {
+      candidateRows.push(y);
+    }
+  }
+
+  return groupConsecutiveRows(candidateRows)
+    .map((group) => {
+      let weighted = 0;
+      let strength = 0;
+      for (const y of group) {
+        weighted += y * rowCounts[y];
+        strength += rowCounts[y];
       }
       return {
         center: weighted / Math.max(1, strength),
@@ -407,6 +451,34 @@ function detectStaves(image: BinarySheetImage): DetectedStaff[] {
       best = staves;
     }
   }
+  const horizontalStaves = findStaffSequences(lineCentersFromRows(image.rowCounts, image.width), 0, image);
+  for (const staff of horizontalStaves) {
+    const overlaps = best.some((existing) => Math.abs(existing.top - staff.top) < Math.max(existing.spacing, staff.spacing) * 3);
+    if (!overlaps) best.push(staff);
+  }
+
+  const bandHeight = Math.max(220, Math.round(image.height * 0.22));
+  const bandStep = Math.max(120, Math.round(bandHeight * 0.55));
+  for (let minY = 0; minY < image.height; minY += bandStep) {
+    const maxY = Math.min(image.height - 1, minY + bandHeight - 1);
+    const bandImage = { ...image, height: maxY - minY + 1 };
+    let bandBest: DetectedStaff[] = [];
+    for (let slope = -0.2; slope <= 0.201; slope += 0.03) {
+      const bins = projectBandRowsForSlope(image, slope, minY, maxY);
+      const offset = Math.ceil(Math.abs(slope) * image.width) + 12;
+      const centers = lineCentersFromProjection(bins, image.width).map((center) => ({
+        ...center,
+        center: center.center - offset + minY,
+      }));
+      const staves = findStaffSequences(centers, slope, bandImage);
+      if (staves.length > bandBest.length) bandBest = staves;
+    }
+    for (const staff of bandBest) {
+      const overlaps = best.some((existing) => Math.abs(existing.top - staff.top) < Math.max(existing.spacing, staff.spacing) * 3);
+      if (!overlaps) best.push(staff);
+    }
+  }
+
   return best
     .sort((a, b) => a.top - b.top)
     .map((staff, index) => ({ ...staff, systemIndex: index }));
@@ -545,8 +617,9 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
 
     const systemTop = Math.min(...systemCandidates.map((candidate) => candidate.staffTop));
     const systemBottom = Math.max(...systemCandidates.map((candidate) => candidate.staffBottom));
+    const systemSpacing = Math.max(4, (systemBottom - systemTop) / 4);
     const musicalCandidates = systemCandidates.filter(
-      (candidate) => candidate.y >= systemTop - 10 && candidate.y <= systemBottom + 14
+      (candidate) => candidate.y >= systemTop - systemSpacing * 2.2 && candidate.y <= systemBottom + systemSpacing * 2.6
     );
 
     const clusters: NoteCandidate[][] = [];
