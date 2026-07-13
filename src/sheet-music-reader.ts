@@ -172,7 +172,7 @@ export function buildDetectedSheetMusicMidi(notes: DetectedSheetNote[], title = 
   const melody = new MidiTrackBuilder();
 
   conductor.meta(0, 0x03, ascii(title));
-  conductor.meta(0, 0x51, tempoPayload(92));
+  conductor.meta(0, 0x51, tempoPayload(46));
   conductor.meta(0, 0x58, [4, 2, 24, 8]);
 
   melody.push(0, [0xc0, 0]);
@@ -184,6 +184,11 @@ export function buildDetectedSheetMusicMidi(notes: DetectedSheetNote[], title = 
       Math.max(QUARTER / 4, Math.trunc(noteEvent.durationTicks)),
       Math.max(1, Math.min(127, Math.trunc(noteEvent.velocity)))
     );
+  }
+  if (notes.length) {
+    const maxNoteEnd = Math.max(...notes.map((noteEvent) => noteEvent.startTick + noteEvent.durationTicks));
+    const endTick = Math.ceil(maxNoteEnd / (WHOLE * 4)) * (WHOLE * 4);
+    melody.push(endTick, [0xb0, 7, 100]);
   }
 
   return makeMidiArrayBuffer([conductor.render(), melody.render()]);
@@ -479,9 +484,40 @@ function detectStaves(image: BinarySheetImage): DetectedStaff[] {
     }
   }
 
-  return best
+  return assignStaffSystems(best
     .sort((a, b) => a.top - b.top)
-    .map((staff, index) => ({ ...staff, systemIndex: index }));
+    .map((staff, index) => ({ ...staff, systemIndex: index })));
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function assignStaffSystems(staves: DetectedStaff[]): DetectedStaff[] {
+  if (staves.length < 4) return staves.map((staff, index) => ({ ...staff, systemIndex: index }));
+  if (staves.length >= 6) {
+    return staves.map((staff, index) => ({
+      ...staff,
+      systemIndex: Math.floor(index / 2),
+    }));
+  }
+
+  const gaps = staves.slice(1).map((staff, index) => staff.top - staves[index].bottom);
+  const likelyPairGaps = gaps.filter((_, index) => index % 2 === 0);
+  const likelySystemGaps = gaps.filter((_, index) => index % 2 === 1);
+  const pairGap = median(likelyPairGaps);
+  const systemGap = median(likelySystemGaps);
+  const looksLikeGrandStaff = pairGap > 0 && systemGap > 0 && pairGap < systemGap * 0.78;
+
+  if (!looksLikeGrandStaff) return staves.map((staff, index) => ({ ...staff, systemIndex: index }));
+
+  return staves.map((staff, index) => ({
+    ...staff,
+    systemIndex: Math.floor(index / 2),
+  }));
 }
 
 function isNearStaffLine(x: number, y: number, staff: DetectedStaff, width: number): boolean {
@@ -607,9 +643,10 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
 
   const systems = [...new Set(candidates.map((candidate) => candidate.systemIndex))].sort((a, b) => a - b);
   const events: DetectedSheetNote[] = [];
-  let globalStep = 0;
+  const systemTicks = WHOLE * 4;
 
-  for (const systemIndex of systems) {
+  for (let systemOrder = 0; systemOrder < systems.length; systemOrder += 1) {
+    const systemIndex = systems[systemOrder];
     const systemCandidates = candidates
       .filter((candidate) => candidate.systemIndex === systemIndex)
       .sort((a, b) => a.x - b.x || b.y - a.y);
@@ -618,6 +655,9 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
     const systemTop = Math.min(...systemCandidates.map((candidate) => candidate.staffTop));
     const systemBottom = Math.max(...systemCandidates.map((candidate) => candidate.staffBottom));
     const systemSpacing = Math.max(4, (systemBottom - systemTop) / 4);
+    const leftX = Math.min(...systemCandidates.map((candidate) => candidate.x));
+    const rightX = Math.max(...systemCandidates.map((candidate) => candidate.x));
+    const usableWidth = Math.max(1, rightX - leftX);
     const musicalCandidates = systemCandidates.filter(
       (candidate) => candidate.y >= systemTop - systemSpacing * 2.2 && candidate.y <= systemBottom + systemSpacing * 2.6
     );
@@ -640,16 +680,18 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
         .sort((a, b) => b.area - a.area)
         .slice(0, 4)
         .sort((a, b) => a.midi - b.midi);
+      const clusterX = cluster.reduce((sum, candidate) => sum + candidate.x, 0) / cluster.length;
+      const position = Math.max(0, Math.min(1, (clusterX - leftX) / usableWidth));
+      const startTick = systemOrder * systemTicks + Math.round((position * (systemTicks - QUARTER)) / QUARTER) * QUARTER;
 
       for (const candidate of limited) {
         events.push({
           midi: candidate.midi,
-          startTick: globalStep * QUARTER,
+          startTick,
           durationTicks: QUARTER,
           velocity: 78,
         });
       }
-      globalStep += 1;
     }
   }
 

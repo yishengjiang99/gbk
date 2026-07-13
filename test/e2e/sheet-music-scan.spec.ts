@@ -5,7 +5,6 @@ import path from "node:path";
 import { parseMidiBuffer } from "../../src/midi-timer.worker.ts";
 
 test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page }) => {
-  const imagePath = path.resolve(process.cwd(), "sweden.jpg");
   const baselineMidi = fs.readFileSync(path.resolve(process.cwd(), "sweden.midi"));
   const baselineSong = parseMidiBuffer(baselineMidi.buffer.slice(baselineMidi.byteOffset, baselineMidi.byteOffset + baselineMidi.byteLength));
   const baselineNotes = baselineSong.tracks.flatMap((track) => track.notes);
@@ -29,7 +28,10 @@ test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page 
         );
       })
   );
-  await page.getByLabel("Scan or upload sheet music").setInputFiles(imagePath);
+  await page.getByRole("button", { name: "Display Sweden sheet music" }).click();
+  await expect(page.getByLabel("Displayed sheet music")).toContainText("sweden.jpg");
+  await expect(page.getByRole("img", { name: "sweden.jpg sheet music preview" })).toBeVisible();
+  await page.getByRole("button", { name: "Convert previewed sheet music to MIDI" }).click();
   const generatedMidi = await generatedMidiPromise;
   const generatedBytes = Uint8Array.from(generatedMidi.midiBytes);
   const generatedSong = parseMidiBuffer(generatedBytes.buffer.slice(0));
@@ -48,6 +50,7 @@ test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page 
     matchingPitchClasses,
     bpm: generatedSong.bpm,
     timeSig: generatedSong.timeSig,
+    totalBars: generatedSong.totalBars,
   };
 
   await test.step("scan status reflects real detection", async () => {
@@ -64,7 +67,8 @@ test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page 
   expect(result.generatedNoteCount).toBeGreaterThanOrEqual(Math.floor(result.baselineNoteCount * 0.35));
   expect(result.generatedPitchClassCount).toBeGreaterThanOrEqual(Math.min(4, result.baselinePitchClassCount));
   expect(result.matchingPitchClasses).toBeGreaterThanOrEqual(Math.min(4, result.baselinePitchClassCount));
-  expect(result.bpm).toBe(92);
+  expect(result.totalBars).toBeGreaterThanOrEqual(14);
+  expect(result.bpm).toBe(46);
   expect(result.timeSig).toBe("4/4");
 });
 
@@ -77,6 +81,8 @@ test("scan sheet music image imports generated MIDI", async ({ page }) => {
   await expect(page.getByText("GeneralUser-GS.sf2")).toBeVisible({ timeout: 30_000 });
 
   await page.getByLabel("Scan or upload sheet music").setInputFiles(fixturePath);
+  await expect(page.getByLabel("Displayed sheet music")).toContainText("dieLetzteKompanie.jpg");
+  await page.getByRole("button", { name: "Convert previewed sheet music to MIDI" }).click();
 
   const metadata = page.getByLabel("MIDI metadata");
   await expect(metadata).toBeVisible({ timeout: 30_000 });

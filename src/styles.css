@@ -413,6 +413,50 @@ button[aria-label]:disabled::after {
   flex-wrap: nowrap;
 }
 
+.sheetMusicPreviewPanel {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid #c8d8e4;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+
+.sheetMusicPreviewHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.sheetMusicPreviewHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheetMusicConvertBtn {
+  margin-left: auto;
+}
+
+.sheetMusicPreviewFrame {
+  width: 100%;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #d5e0e8;
+  border-radius: 8px;
+  background: #eef3f7;
+}
+
+.sheetMusicPreviewFrame img {
+  display: block;
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  height: auto;
+}
+
 .bachComposerModule {
   display: grid;
   gap: 0.55rem;

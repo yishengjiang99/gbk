@@ -45,7 +45,7 @@ test("buildDetectedSheetMusicMidi encodes detected notes into a parseable MIDI f
 
   assert.equal(song.format, 1);
   assert.equal(song.division, 480);
-  assert.equal(song.bpm, 92);
+  assert.equal(song.bpm, 46);
   assert.equal(song.timeSig, "4/4");
   assert.equal(song.tracks.length, 2);
   assert.equal(song.tracks[1].notes.length, 3);

@@ -67,6 +67,8 @@ type TrackNode = { node: AudioWorkletNode; panner: StereoPannerNode; gain: GainN
 type PlaybackDebugEvent = { type: "playbackDebug"; order: number; [key: string]: unknown };
 type MidiSourceKind = "bundled" | "uploaded" | "generated";
 type CurrentMidiSource = { kind: MidiSourceKind; name: string; path?: string };
+type SheetMusicImageSource = "uploaded" | "sample";
+type SelectedSheetMusicImage = { file: File; name: string; previewUrl: string; source: SheetMusicImageSource };
 type MidiSendEvent = { sec: number; order: number; bytes: number[] };
 type ClearableMidiOutput = MIDIOutput & { clear?: () => void };
 type PersistedMidiState = CurrentMidiSource & {
@@ -101,6 +103,7 @@ const MAX_PERSISTED_MIDI_BYTES = 4 * 1024 * 1024;
 const MIN_TIMELINE_ZOOM = 1;
 const MAX_TIMELINE_ZOOM = 18;
 const WHEEL_ZOOM_SENSITIVITY = 0.002;
+const SWEDEN_SHEET_IMAGE_URL = new URL("../sweden.jpg", import.meta.url).href;
 
 function clampCc(value: number): number {
   return Math.max(0, Math.min(127, Number(value) | 0));
@@ -440,6 +443,7 @@ export default function MidiReader({
   const [bachModuleOpen, setBachModuleOpen] = useState<boolean>(false);
   const [isGeneratingBach, setIsGeneratingBach] = useState<boolean>(false);
   const [isParsingSheetMusic, setIsParsingSheetMusic] = useState<boolean>(false);
+  const [selectedSheetMusicImage, setSelectedSheetMusicImage] = useState<SelectedSheetMusicImage | null>(null);
   const [sheetMusicStage, setSheetMusicStage] = useState<string>("");
   const [sheetMusicNotice, setSheetMusicNotice] = useState<string>("");
   const [timelineZoom, setTimelineZoom] = useState<number>(MIN_TIMELINE_ZOOM);
@@ -546,6 +550,11 @@ export default function MidiReader({
   useEffect(() => {
     presetOptionMapRef.current = presetOptionMap;
   }, [presetOptionMap]);
+  useEffect(() => {
+    return () => {
+      if (selectedSheetMusicImage?.previewUrl) URL.revokeObjectURL(selectedSheetMusicImage.previewUrl);
+    };
+  }, [selectedSheetMusicImage?.previewUrl]);
 
   const updatePlayhead = (sec: number) => {
     const line = playheadRef.current;
@@ -1444,10 +1453,49 @@ export default function MidiReader({
     }
   }
 
-  async function onUploadSheetMusic(event: React.ChangeEvent<HTMLInputElement>) {
+  function selectSheetMusicImage(file: File, source: SheetMusicImageSource) {
+    if (!file.type.startsWith("image/")) {
+      setSongError("Choose a JPG or PNG image of sheet music.");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedSheetMusicImage({ file, name: file.name, previewUrl, source });
+    setSheetMusicStage("");
+    setSheetMusicNotice(`${file.name} is ready to convert to MIDI.`);
+    setSongError("");
+  }
+
+  function onUploadSheetMusic(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !workerRef.current || isParsingSheetMusic) return;
+    if (!file || isParsingSheetMusic) return;
+    selectSheetMusicImage(file, "uploaded");
+  }
+
+  async function onLoadSwedenSheetMusic() {
+    if (isParsingSheetMusic) return;
+
+    setSheetMusicStage("Loading Sweden sheet image...");
+    setSheetMusicNotice("");
+    setSongError("");
+    try {
+      const res = await fetch(SWEDEN_SHEET_IMAGE_URL);
+      if (!res.ok) throw new Error(`Failed to fetch Sweden sheet image (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], "sweden.jpg", { type: blob.type || "image/jpeg" });
+      selectSheetMusicImage(file, "sample");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    } finally {
+      setSheetMusicStage("");
+    }
+  }
+
+  async function onConvertSelectedSheetMusic() {
+    if (!selectedSheetMusicImage || !workerRef.current || isParsingSheetMusic) return;
 
     setIsParsingSheetMusic(true);
     setSheetMusicStage("Reading sheet music image...");
@@ -1456,7 +1504,7 @@ export default function MidiReader({
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       setSheetMusicStage("Building MIDI from sheet music...");
-      const parsed = await parseSheetMusicToMidi(file);
+      const parsed = await parseSheetMusicToMidi(selectedSheetMusicImage.file);
       let dataUrl: string | undefined;
       if (parsed.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
         dataUrl = await arrayBufferToDataUrl(parsed.midiData.slice(0));
@@ -1771,22 +1819,47 @@ export default function MidiReader({
               </label>
               <label
                 className={`fileInput toolbarActionBtn toolbarFileBtn ${isParsingSheetMusic ? "disabled" : ""}`}
-                aria-label="Scan or upload a sheet music photo"
+                aria-label="Upload a sheet music JPG or PNG"
               >
                 <i
-                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-camera"}`}
+                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-image"}`}
                   aria-hidden="true"
                 />
-                <span>{isParsingSheetMusic ? "Scanning" : "Scan Sheet"}</span>
+                <span>Upload Sheet</span>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png"
                   capture="environment"
                   onChange={onUploadSheetMusic}
                   disabled={isParsingSheetMusic}
                   aria-label="Scan or upload sheet music"
                 />
               </label>
+              <button
+                type="button"
+                className="toolbarActionBtn"
+                onClick={onLoadSwedenSheetMusic}
+                disabled={isParsingSheetMusic}
+                aria-label="Display Sweden sheet music"
+                title="Display Sweden sheet music"
+              >
+                <i className="fa-solid fa-music" aria-hidden="true" />
+                <span>Sweden</span>
+              </button>
+              <button
+                type="button"
+                className={`toolbarActionBtn ${isParsingSheetMusic ? "active" : ""}`}
+                onClick={() => void onConvertSelectedSheetMusic()}
+                disabled={!selectedSheetMusicImage || isParsingSheetMusic}
+                aria-label="Convert selected sheet music to MIDI"
+                title="Convert displayed sheet music to MIDI"
+              >
+                <i
+                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
+                  aria-hidden="true"
+                />
+                <span>{isParsingSheetMusic ? "Converting" : "Convert"}</span>
+              </button>
               <select
                 className="toolbarSelect toolbarSelectWide"
                 value={selectedMidiPath}
@@ -1876,6 +1949,32 @@ export default function MidiReader({
             </div>
           </div>
         </div>
+        {selectedSheetMusicImage ? (
+          <div className="sheetMusicPreviewPanel" aria-label="Displayed sheet music">
+            <div className="sheetMusicPreviewHeader">
+              <span className="songChipLabel">Sheet Image</span>
+              <strong>{selectedSheetMusicImage.name}</strong>
+              <span className="chip">{selectedSheetMusicImage.source === "sample" ? "Sample" : "Uploaded"}</span>
+              <button
+                type="button"
+                className="toolbarActionBtn sheetMusicConvertBtn"
+                onClick={() => void onConvertSelectedSheetMusic()}
+                disabled={isParsingSheetMusic}
+                aria-label="Convert previewed sheet music to MIDI"
+                title="Convert displayed sheet music to MIDI"
+              >
+                <i
+                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
+                  aria-hidden="true"
+                />
+                <span>{isParsingSheetMusic ? "Converting" : "Convert MIDI"}</span>
+              </button>
+            </div>
+            <div className="sheetMusicPreviewFrame">
+              <img src={selectedSheetMusicImage.previewUrl} alt={`${selectedSheetMusicImage.name} sheet music preview`} />
+            </div>
+          </div>
+        ) : null}
         {bachModuleOpen ? (
           <div className="bachComposerModule">
             <div className="bachComposerControls">
