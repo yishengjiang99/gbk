@@ -1779,7 +1779,7 @@ export default function MidiReader({
               </select>
               <button
                 type="button"
-                className="toolbarActionBtn"
+                className="toolbarActionBtn toolbarCompactBtn"
                 onClick={onRefreshMidiOutputs}
                 disabled={isSendingMidi}
                 aria-label="Refresh MIDI Outputs"
@@ -1837,7 +1837,7 @@ export default function MidiReader({
               </label>
               <button
                 type="button"
-                className="toolbarActionBtn"
+                className="toolbarActionBtn toolbarCompactBtn"
                 onClick={onLoadSwedenSheetMusic}
                 disabled={isParsingSheetMusic}
                 aria-label="Display Sweden sheet music"
@@ -1848,7 +1848,7 @@ export default function MidiReader({
               </button>
               <button
                 type="button"
-                className={`toolbarActionBtn ${isParsingSheetMusic ? "active" : ""}`}
+                className={`toolbarActionBtn toolbarCompactBtn ${isParsingSheetMusic ? "active" : ""}`}
                 onClick={() => void onConvertSelectedSheetMusic()}
                 disabled={!selectedSheetMusicImage || isParsingSheetMusic}
                 aria-label="Convert selected sheet music to MIDI"
@@ -1877,7 +1877,7 @@ export default function MidiReader({
               </select>
               <button
                 type="button"
-                className="toolbarActionBtn"
+                className="toolbarActionBtn toolbarCompactBtn"
                 onClick={onLoadSelectedMidi}
                 disabled={!selectedMidiPath}
                 aria-label="Reload MIDI"
@@ -1918,7 +1918,7 @@ export default function MidiReader({
             </div>
           </div>
 
-          <div className="toolbarGroup" aria-label="Tools">
+          <div className="toolbarGroup toolbarGroupTools" aria-label="Tools">
             <span className="toolbarGroupLabel">Tools</span>
             <div className="toolbarButtonRow">
               <button
