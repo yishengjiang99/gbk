@@ -198,6 +198,15 @@ function basenameWithoutExtension(name: string): string {
   return (name || "sheet-music").replace(/\.[^.]*$/, "") || "sheet-music";
 }
 
+export function isSupportedSheetMusicImageFile(file: File): boolean {
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+  const hasSupportedExtension = /\.(?:jpe?g|png)$/.test(name);
+
+  if (type) return type === "image/jpeg" || type === "image/png";
+  return hasSupportedExtension;
+}
+
 function canUseBrowserImagePipeline(): boolean {
   return typeof createImageBitmap === "function" && typeof document !== "undefined";
 }
@@ -827,8 +836,8 @@ export function buildSwedenSheetMusicMidi(): ArrayBuffer {
 }
 
 export async function parseSheetMusicToMidi(file: File): Promise<ParsedSheetMusicMidi> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Choose a camera photo or image file of sheet music.");
+  if (!isSupportedSheetMusicImageFile(file)) {
+    throw new Error("Choose a JPG or PNG image file of sheet music.");
   }
 
   const fallback = (): ParsedSheetMusicMidi => ({

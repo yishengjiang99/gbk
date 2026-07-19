@@ -15,7 +15,7 @@ import {
   type BachLength,
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
-import { parseSheetMusicToMidi } from "./sheet-music-reader.ts";
+import { isSupportedSheetMusicImageFile, parseSheetMusicToMidi } from "./sheet-music-reader.ts";
 
 // ---------------------------------------------------------------------------
 // Local type definitions
@@ -1454,7 +1454,7 @@ export default function MidiReader({
   }
 
   function selectSheetMusicImage(file: File, source: SheetMusicImageSource) {
-    if (!file.type.startsWith("image/")) {
+    if (!isSupportedSheetMusicImageFile(file)) {
       setSongError("Choose a JPG or PNG image of sheet music.");
       return;
     }
