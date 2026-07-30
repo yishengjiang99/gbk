@@ -62,10 +62,13 @@ type TrackCc = { cc7Volume: number; cc10Pan: number; cc11Expression: number };
 type TrackMix = { mute: boolean; solo: boolean };
 type PresetOption = { index: number; bank: number; program: number; name: string };
 type MidiOption = { name: string; path: string };
+type MidiOutputOption = { id: string; name: string };
 type TrackNode = { node: AudioWorkletNode; panner: StereoPannerNode; gain: GainNode };
 type PlaybackDebugEvent = { type: "playbackDebug"; order: number; [key: string]: unknown };
 type MidiSourceKind = "bundled" | "uploaded" | "generated";
 type CurrentMidiSource = { kind: MidiSourceKind; name: string; path?: string };
+type MidiSendEvent = { sec: number; order: number; bytes: number[] };
+type ClearableMidiOutput = MIDIOutput & { clear?: () => void };
 type PersistedMidiState = CurrentMidiSource & {
   version: 1;
   dataUrl?: string;
@@ -105,6 +108,10 @@ function clampCc(value: number): number {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function outputName(output: MIDIOutput): string {
+  return output.name || output.manufacturer || output.id;
 }
 
 function readPersistedMidiState(): PersistedMidiState | null {
@@ -422,6 +429,11 @@ export default function MidiReader({
   const [songTime, setSongTime] = useState<number>(0);
   const [midiOptions, setMidiOptions] = useState<MidiOption[]>([]);
   const [selectedMidiPath, setSelectedMidiPath] = useState<string>("");
+  const [midiOutputEnabled, setMidiOutputEnabled] = useState<boolean>(false);
+  const [midiOutputs, setMidiOutputs] = useState<MidiOutputOption[]>([]);
+  const [selectedMidiOutput, setSelectedMidiOutput] = useState<string>("");
+  const [midiOutputStatus, setMidiOutputStatus] = useState<string>("Output disabled");
+  const [isSendingMidi, setIsSendingMidi] = useState<boolean>(false);
   const [trackPresetOverrides, setTrackPresetOverrides] = useState<Record<number, number | null>>({});
   const [trackCcControls, setTrackCcControls] = useState<Record<number, TrackCc>>({});
   const [trackMixState, setTrackMixState] = useState<Record<number, TrackMix>>({});
@@ -439,6 +451,9 @@ export default function MidiReader({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const midiAccessRef = useRef<MIDIAccess | null>(null);
+  const midiSendTimerRef = useRef<number | null>(null);
+  const midiSendOutputRef = useRef<MIDIOutput | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const trackNodesRef = useRef<TrackNode[]>([]);
   const portsAttachedRef = useRef<boolean>(false);
@@ -576,6 +591,84 @@ export default function MidiReader({
     return seekToSec(sec, { scrollTimeline: false });
   };
 
+  const refreshMidiOutputs = (access: MIDIAccess | null = midiAccessRef.current): MidiOutputOption[] => {
+    const outputs = access ? [...access.outputs.values()].map((output) => ({ id: output.id, name: outputName(output) })) : [];
+    setMidiOutputs(outputs);
+    setSelectedMidiOutput((current) => (current && outputs.some((output) => output.id === current) ? current : outputs[0]?.id ?? ""));
+    setMidiOutputStatus(outputs.length ? `Outputs: ${outputs.map((output) => output.name).join(", ")}` : "No MIDI outputs");
+    return outputs;
+  };
+
+  const findMidiOutput = (outputId: string = selectedMidiOutput): MIDIOutput | null => {
+    const access = midiAccessRef.current;
+    if (!access || !outputId) return null;
+    return access.outputs.get(outputId) ?? null;
+  };
+
+  const sendAllNotesOff = (output: MIDIOutput | null = midiSendOutputRef.current) => {
+    if (!output) return;
+    for (let channel = 0; channel < 16; channel += 1) {
+      output.send([0xb0 | channel, 64, 0]);
+      output.send([0xb0 | channel, 120, 0]);
+      output.send([0xb0 | channel, 123, 0]);
+    }
+  };
+
+  const stopMidiSend = (status = "Send stopped") => {
+    if (midiSendTimerRef.current != null) {
+      window.clearTimeout(midiSendTimerRef.current);
+      midiSendTimerRef.current = null;
+    }
+    const output = midiSendOutputRef.current;
+    (output as ClearableMidiOutput | null)?.clear?.();
+    sendAllNotesOff(output);
+    midiSendOutputRef.current = null;
+    setIsSendingMidi(false);
+    setMidiOutputStatus(status);
+  };
+
+  const buildMidiSendEvents = (songData: Song, startSec: number): MidiSendEvent[] => {
+    const events: MidiSendEvent[] = [];
+    const latestProgramByChannel = new Map<number, { program: number; bank: number }>();
+
+    for (const track of songData.tracks) {
+      for (const event of track.playEvents) {
+        if (event.type === "program" && event.sec <= startSec) {
+          latestProgramByChannel.set(event.channel ?? 0, {
+            program: event.program ?? 0,
+            bank: event.bank ?? 0,
+          });
+        }
+      }
+    }
+
+    for (const [channel, programEvent] of latestProgramByChannel) {
+      const bank = programEvent.bank ?? 0;
+      events.push({ sec: startSec, order: -3, bytes: [0xb0 | channel, 0, (bank >> 7) & 0x7f] });
+      events.push({ sec: startSec, order: -2, bytes: [0xb0 | channel, 32, bank & 0x7f] });
+      events.push({ sec: startSec, order: -1, bytes: [0xc0 | channel, programEvent.program & 0x7f] });
+    }
+
+    for (const track of songData.tracks) {
+      for (const event of track.playEvents) {
+        if (event.sec < startSec) continue;
+        const channel = (event.channel ?? 0) & 0x0f;
+        if (event.type === "program") {
+          const bank = event.bank ?? 0;
+          events.push({ sec: event.sec, order: 0, bytes: [0xb0 | channel, 0, (bank >> 7) & 0x7f] });
+          events.push({ sec: event.sec, order: 1, bytes: [0xb0 | channel, 32, bank & 0x7f] });
+          events.push({ sec: event.sec, order: 2, bytes: [0xc0 | channel, (event.program ?? 0) & 0x7f] });
+        } else if (event.type === "noteOff") {
+          events.push({ sec: event.sec, order: 3, bytes: [0x80 | channel, (event.note ?? 0) & 0x7f, 64] });
+        } else if (event.type === "noteOn") {
+          events.push({ sec: event.sec, order: 4, bytes: [0x90 | channel, (event.note ?? 0) & 0x7f, (event.velocity ?? 0) & 0x7f] });
+        }
+      }
+    }
+
+    return events.sort((a, b) => a.sec - b.sec || a.order - b.order);
+  };
+
   const disconnectTrackNodes = () => {
     for (const rec of trackNodesRef.current) {
       try {
@@ -656,6 +749,90 @@ export default function MidiReader({
       );
       rec.panner.pan.setValueAtTime(pan ?? 0, rec.panner.context.currentTime);
     }
+  };
+
+  const enableMidiOutput = async () => {
+    if (!navigator.requestMIDIAccess) {
+      const msg = "Web MIDI output is not supported in this browser.";
+      setMidiOutputStatus(msg);
+      setSongError(msg);
+      onErrorRef.current?.(msg);
+      return;
+    }
+    try {
+      const access = await navigator.requestMIDIAccess({ sysex: false });
+      midiAccessRef.current = access;
+      access.onstatechange = () => refreshMidiOutputs(access);
+      const outputs = refreshMidiOutputs(access);
+      setMidiOutputEnabled(true);
+      setMidiOutputStatus(outputs.length ? "MIDI output ready" : "MIDI output ready (no outputs)");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setMidiOutputStatus("MIDI output failed");
+      setSongError(msg);
+      onErrorRef.current?.(msg);
+    }
+  };
+
+  const disableMidiOutput = () => {
+    stopMidiSend("Output disabled");
+    if (midiAccessRef.current) midiAccessRef.current.onstatechange = null;
+    midiAccessRef.current = null;
+    setMidiOutputEnabled(false);
+    setMidiOutputs([]);
+    setSelectedMidiOutput("");
+    setMidiOutputStatus("Output disabled");
+  };
+
+  const toggleMidiOutput = () => {
+    if (midiOutputEnabled) {
+      disableMidiOutput();
+    } else {
+      void enableMidiOutput();
+    }
+  };
+
+  const onRefreshMidiOutputs = () => {
+    if (!midiAccessRef.current) {
+      void enableMidiOutput();
+      return;
+    }
+    refreshMidiOutputs();
+  };
+
+  const onSendMidiToOutput = () => {
+    if (!song) return;
+    const output = findMidiOutput();
+    if (!output) {
+      setMidiOutputStatus("Choose a MIDI output");
+      return;
+    }
+    stopMidiSend("Preparing send");
+
+    const startSec = clampNumber(songTime, 0, duration);
+    const events = buildMidiSendEvents(song, startSec);
+    if (!events.length) {
+      setMidiOutputStatus("No MIDI events to send");
+      return;
+    }
+
+    const startAt = performance.now() + 80;
+    sendAllNotesOff(output);
+    for (const event of events) {
+      output.send(event.bytes, startAt + Math.max(0, event.sec - startSec) * 1000);
+    }
+
+    midiSendOutputRef.current = output;
+    setIsSendingMidi(true);
+    setMidiOutputStatus(`Sending to ${outputName(output)}`);
+    const remainingMs = Math.max(100, (duration - startSec) * 1000 + 120);
+    midiSendTimerRef.current = window.setTimeout(() => {
+      midiSendTimerRef.current = null;
+      sendAllNotesOff(output);
+      midiSendOutputRef.current = null;
+      setIsSendingMidi(false);
+      setMidiOutputStatus(`Sent ${events.length} MIDI messages`);
+    }, remainingMs);
   };
 
   useEffect(() => {
@@ -753,6 +930,17 @@ export default function MidiReader({
     if (viewportRef.current) viewportRef.current.scrollLeft = 0;
     setTimelineZoom(MIN_TIMELINE_ZOOM);
     updatePlayhead(0);
+  }, [songName]);
+
+  useEffect(() => {
+    return () => {
+      stopMidiSend("Output disabled");
+      if (midiAccessRef.current) midiAccessRef.current.onstatechange = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isSendingMidi) stopMidiSend("Send stopped");
   }, [songName]);
 
   useEffect(() => {
@@ -1273,6 +1461,15 @@ export default function MidiReader({
       if (parsed.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
         dataUrl = await arrayBufferToDataUrl(parsed.midiData.slice(0));
       }
+      window.dispatchEvent(
+        new CustomEvent("sheetmusicreader:generated-midi", {
+          detail: {
+            fileName: parsed.fileName,
+            midiData: parsed.midiData.slice(0),
+            warnings: parsed.warnings,
+          },
+        })
+      );
       loadMidiIntoTracks(parsed.midiData, parsed.fileName, {
         sourceKind: "generated",
         dataUrl,
@@ -1503,6 +1700,62 @@ export default function MidiReader({
             </div>
           </div>
 
+          <div className="toolbarGroup toolbarGroupMidiSend" aria-label="MIDI Send">
+            <span className="toolbarGroupLabel">MIDI Send</span>
+            <div className="toolbarButtonRow">
+              <button
+                type="button"
+                className={`toolbarActionBtn ${midiOutputEnabled ? "active" : ""}`}
+                onClick={toggleMidiOutput}
+                aria-pressed={midiOutputEnabled}
+                aria-label={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
+                title={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
+              >
+                <i className="fa-solid fa-share-nodes" aria-hidden="true" />
+                <span>{midiOutputEnabled ? "Output On" : "Output Off"}</span>
+              </button>
+              <select
+                className="toolbarSelect"
+                value={selectedMidiOutput}
+                onChange={(e) => setSelectedMidiOutput(e.target.value)}
+                disabled={!midiOutputEnabled || !midiOutputs.length || isSendingMidi}
+                aria-label="MIDI output destination"
+                title="MIDI output destination"
+              >
+                <option value="">Select Output</option>
+                {midiOutputs.map((output) => (
+                  <option key={output.id} value={output.id}>
+                    {output.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="toolbarActionBtn"
+                onClick={onRefreshMidiOutputs}
+                disabled={isSendingMidi}
+                aria-label="Refresh MIDI Outputs"
+                title="Refresh MIDI Outputs"
+              >
+                <i className="fa-solid fa-arrows-rotate" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`toolbarActionBtn ${isSendingMidi ? "active" : ""}`}
+                onClick={isSendingMidi ? () => stopMidiSend("Send stopped") : onSendMidiToOutput}
+                disabled={!song || !midiOutputEnabled || !selectedMidiOutput}
+                aria-label={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
+                title={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
+              >
+                <i className={`fa-solid ${isSendingMidi ? "fa-stop" : "fa-paper-plane"}`} aria-hidden="true" />
+                <span>{isSendingMidi ? "Stop" : "Send"}</span>
+              </button>
+              <span className="toolbarHoverText midiOutputStatus" title={midiOutputStatus}>
+                {midiOutputStatus}
+              </span>
+            </div>
+          </div>
+
           <div className="toolbarGroup toolbarGroupSong" aria-label="MIDI file">
             <span className="toolbarGroupLabel">MIDI File</span>
             <div className="toolbarButtonRow">
@@ -1518,7 +1771,7 @@ export default function MidiReader({
               </label>
               <label
                 className={`fileInput toolbarActionBtn toolbarFileBtn ${isParsingSheetMusic ? "disabled" : ""}`}
-                title="Scan or upload a sheet music photo"
+                aria-label="Scan or upload a sheet music photo"
               >
                 <i
                   className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-camera"}`}
@@ -1834,8 +2087,8 @@ export default function MidiReader({
           </div>
         ) : null}
       </div>
-      {sheetMusicStage ? <p className="status">{sheetMusicStage}</p> : null}
-      {sheetMusicNotice ? <p className="status">{sheetMusicNotice}</p> : null}
+      {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
+      {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
       {songError ? <p className="status error">{songError}</p> : null}
       {song && (
         <div className="midiTimelineWrap">

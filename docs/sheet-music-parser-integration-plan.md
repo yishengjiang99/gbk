@@ -2,9 +2,22 @@
 
 ## Current Status
 
-The app now has a `Scan Sheet` camera/photo input in the MIDI toolbar. It accepts image files and routes the resulting MIDI into the existing MIDI playback path through `loadMidiIntoTracks(...)`.
+The app has a `Scan Sheet` camera/photo input in the MIDI toolbar. It accepts image files and routes the resulting MIDI into the existing MIDI playback path through `loadMidiIntoTracks(...)`.
 
-The current parser adapter is an MVP bridge, not full optical music recognition. It vendors the dependency-free Sweden transcription MIDI generator from `~/sheet_music_reader` into `src/sheet-music-reader.ts` and returns a parseable MIDI `ArrayBuffer`.
+The parser now runs a first-pass browser image pipeline before falling back to the dependency-free Sweden transcription demo from `~/sheet_music_reader`.
+
+Implemented parser stages:
+
+- Decode uploaded image files with browser image APIs.
+- Scale large images before pixel inspection.
+- Threshold the image with Otsu-style luminance analysis.
+- Detect likely five-line staff groups from horizontal dark-pixel density.
+- Detect simple notehead-like connected components after suppressing staff-line pixels.
+- Map detected noteheads to treble-clef pitches.
+- Encode detected notes as a format-1 MIDI file.
+- Fall back to the Sweden transcription demo when image decoding, staff detection, or note detection fails.
+
+This is still a conservative first-pass recognizer. It assumes treble clef and quarter-note timing for detected notes. It does not yet detect clefs, key signatures, accidentals, rests, stems, beams, dots, ties, multiple voices, or piano grand-staff relationships.
 
 Implemented files:
 
@@ -39,21 +52,19 @@ The synth app already has robust MIDI ingestion. Sheet music recognition should 
 
 ## Next Milestones
 
-1. Replace the demo transcription with real image preprocessing.
+1. Improve image preprocessing.
 
-   - Decode the uploaded image with `createImageBitmap`.
-   - Normalize scale, contrast, and orientation.
-   - Convert to grayscale or thresholded canvas data.
-   - Return actionable warnings for low resolution, blur, or skew.
+   - Add blur and low-resolution warnings.
+   - Estimate and correct skew.
+   - Improve contrast normalization for uneven lighting.
 
-2. Add staff and system detection.
+2. Improve staff and system detection.
 
-   - Detect staff-line groups.
-   - Estimate staff spacing.
-   - Deskew the page when needed.
    - Segment systems and measures.
+   - Detect grand-staff pairs.
+   - Handle partial/cropped staves.
 
-3. Add symbol recognition.
+3. Expand symbol recognition.
 
    - Detect noteheads, stems, beams, rests, clefs, accidentals, key signatures, and time signatures.
    - Start with monophonic or simple piano scores before trying dense polyphony.
@@ -65,7 +76,7 @@ The synth app already has robust MIDI ingestion. Sheet music recognition should 
    - Resolve duration from notehead, stem, beam, flag, dot, tie, and measure context.
    - Preserve voices where possible.
 
-5. Encode MIDI from the notation model.
+5. Improve MIDI encoding from the notation model.
 
    - Reuse the app's existing MIDI parser expectations.
    - Generate format-1 MIDI with a conductor track and one or more instrument tracks.
