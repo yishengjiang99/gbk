@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseSF2, SF2Data, SF2Region } from "../sf2-parser.ts";
+import { ToolbarMenu } from "./toolbar-menu.tsx";
 import { createExternalMidiBridge, ExternalMidiBridge } from "./external-midi-bridge";
 import {
   createMidiDriver,
@@ -1298,7 +1299,7 @@ export default function App() {
       {activeTab === "sf2" && (
         <>
           <header className="topToolbar card">
-            <div className="appHeaderToolbar" aria-label="Main controls">
+            <div className="appHeaderToolbar toolbarUnified" aria-label="Main controls">
               <div className="toolbarGroup" aria-label="View">
                 <span className="toolbarGroupLabel">View</span>
                 <div className="toolbarButtonRow toolbarSegmented">
@@ -1344,8 +1345,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="toolbarGroup toolbarGroupInput" aria-label="MIDI Input">
-                <span className="toolbarGroupLabel">MIDI Input</span>
+              <ToolbarMenu label="MIDI Input" icon="fa-plug">
                 <div className="toolbarButtonRow">
                   <button
                     type="button"
@@ -1377,10 +1377,34 @@ export default function App() {
                     ))}
                   </select>
                 </div>
-              </div>
+              </ToolbarMenu>
 
-              <div className="toolbarGroup toolbarGroupTools" aria-label="Tools">
-                <span className="toolbarGroupLabel">Tools</span>
+              <ToolbarMenu label="SoundFont" icon="fa-database">
+                <div className="toolbarButtonRow">
+                  <label className="fileInput toolbarActionBtn toolbarFileBtn">
+                    <i className="fa-solid fa-folder-open" aria-hidden="true" />
+                    <span>Upload SF2</span>
+                    <input type="file" accept=".sf2" onChange={onUploadFile} aria-label="Upload SF2 file" />
+                  </label>
+                  <button
+                    type="button"
+                    className="toolbarActionBtn"
+                    onClick={() => onSelectSample(DEFAULT_SF2.path, DEFAULT_SF2.label)}
+                    disabled={loading}
+                    aria-label={loading ? "Loading default SF2" : "Load Default SF2"}
+                    title={loading ? "Loading default SF2" : "Load Default SF2"}
+                  >
+                    <i className={`fa-solid ${loading ? "fa-spinner fa-spin" : "fa-database"}`} aria-hidden="true" />
+                    <span>{loading ? "Loading" : "Default SF2"}</span>
+                  </button>
+                  <span className="toolbarStatusPill">
+                    <span className="toolbarStatusLabel">Loaded</span>
+                    <span className="toolbarStatusValue">{sourceName || "No SoundFont"}</span>
+                  </span>
+                </div>
+              </ToolbarMenu>
+
+              <ToolbarMenu label="Tools" icon="fa-wand-magic-sparkles">
                 <div className="toolbarButtonRow">
                   <button
                     type="button"
@@ -1393,30 +1417,21 @@ export default function App() {
                     <i className="fa-solid fa-chart-column" aria-hidden="true" />
                     <span>Analyzer</span>
                   </button>
+                  <button
+                    type="button"
+                    className="toolbarActionBtn"
+                    onClick={() => setShowSummaryModal((v) => !v)}
+                    disabled={!sf2}
+                    aria-label={showSummaryModal ? "Hide File Summary" : "Show File Summary"}
+                    title={showSummaryModal ? "Hide File Summary" : "Show File Summary"}
+                  >
+                    <i className="fa-solid fa-circle-info" aria-hidden="true" />
+                    <span>{showSummaryModal ? "Hide Summary" : "File Summary"}</span>
+                  </button>
                 </div>
-              </div>
+              </ToolbarMenu>
             </div>
           </header>
-          <section className="card controls">
-            <label className="fileInput">
-              <span>Open SF2 File</span>
-              <input type="file" accept=".sf2" onChange={onUploadFile} />
-            </label>
-            <button type="button" onClick={() => setShowSummaryModal((v) => !v)} disabled={!sf2}>
-              {showSummaryModal ? "Hide File Summary" : "Show File Summary"}
-            </button>
-            <div className="sampleButtons">
-              {SAMPLE_FILES.map((sample) => (
-                <button
-                  key={sample.path}
-                  onClick={() => onSelectSample(sample.path, sample.label)}
-                  disabled={loading}
-                >
-                  Load {sample.label}
-                </button>
-              ))}
-            </div>
-          </section>
           {sf2 && showSummaryModal && (
             <div className="modalBackdrop" onClick={() => setShowSummaryModal(false)}>
               <section className="card summaryModal" onClick={(e) => e.stopPropagation()}>
