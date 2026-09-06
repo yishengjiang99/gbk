@@ -6,18 +6,19 @@ The app has a sheet-music image workflow in the MIDI toolbar. It accepts JPG and
 
 The toolbar also includes a `Sweden` button. It loads the bundled `sweden.jpg` baseline image into the same preview panel so the sample sheet can be displayed and converted without selecting a local file.
 
-The parser now runs a first-pass browser image pipeline before falling back to the dependency-free Sweden transcription demo from `~/sheet_music_reader`.
+The parser runs a first-pass browser image pipeline. Failed conversion reports an error and preserves the loaded song; it never substitutes the Sweden demo for an unreadable image.
 
 Implemented parser stages:
 
 - Decode uploaded image files with browser image APIs.
 - Scale large images before pixel inspection.
 - Threshold the image with Otsu-style luminance analysis.
+- Composite alpha over white paper and apply the selected foreground threshold without subtracting a fixed offset or capping its brightness. Regression tests cover gray ink, transparent backgrounds, semitransparent ink, and uniform images.
 - Detect likely five-line staff groups from horizontal dark-pixel density.
 - Detect simple notehead-like connected components after suppressing staff-line pixels.
 - Map detected noteheads to treble-clef pitches.
 - Encode detected notes as a format-1 MIDI file.
-- Fall back to the Sweden transcription demo when image decoding, staff detection, or note detection fails.
+- Reject unavailable recognition, failed image decoding, and images with no readable notes. Blank and corrupt image browser tests verify that the current song and its saved MIDI remain intact and no generated-MIDI event is emitted.
 
 Recent scanning changes:
 
@@ -28,10 +29,13 @@ Recent scanning changes:
 - The `Sweden` button fetches the bundled `sweden.jpg`, wraps it in a `File`, displays it, and lets the normal convert flow process it.
 - E2E tests assert both paths: bundled Sweden display/convert and general JPG upload/display/convert.
 - Detected grand-staff pages now pair adjacent staves into shared systems so right-hand and left-hand notes align in time instead of playing as separate sequential lines.
+- Staff detection also scans overlapping horizontal windows, rejects nested pseudo-staffs, and scores compatible upper/lower pairs. This recovers curved or unevenly lit systems without treating text and dense symbols as extra staves.
+- Paired upper and lower staves are interpreted as treble and bass clefs, and the notehead scan includes ledger-line positions above and below each staff.
 - Detected note timing is mapped from horizontal position across each visual system, with each system spanning four bars. This prevents held notes, rests, and sparse notation from collapsing the scan into only the first few bars.
+- Cross-staff onset clustering tolerates camera perspective, page-edge components are excluded from timing bounds, and duplicate pitch/onset events are removed before MIDI encoding.
 - Generated detected-sheet MIDI uses 46 BPM and writes a harmless end marker at the next four-bar boundary so trailing rests contribute to MIDI duration without adding fake audible notes.
 
-This is still a conservative first-pass recognizer. It assumes treble clef and quarter-note timing for detected notes. It does not yet detect clefs, key signatures, accidentals, rests, stems, beams, dots, ties, multiple voices, or piano grand-staff relationships.
+This is still a conservative first-pass recognizer. It assumes a treble/bass clef pair for detected grand staffs and quarter-note timing for detected notes. It does not yet recognize printed clef symbols, key signatures, accidentals, rests, stems, beams, dots, ties, or multiple voices.
 
 Implemented files:
 
@@ -49,6 +53,8 @@ Verified with:
 - `npm run build`
 
 The current Sweden baseline test uses `sweden.jpg` as the displayed source image and compares the generated MIDI against `sweden.midi` with tolerance-based checks for note recovery and pitch-class overlap. This avoids requiring byte-for-byte parity with the richer baseline MIDI arrangement.
+
+Accuracy remains unverified. Staff counts and pitch-class overlap do not prove correct staff locations, clefs, individual pitches, or rhythm. After correcting image thresholding, the Sweden scan produces 66 notes and fails the existing minimum-count assertion (68); the other uploaded-photo integration test passes. Do not lower that assertion to hide the discrepancy. The next recognition work needs annotated staff coordinates and note-level ground truth, including verification that the reference MIDI matches the printed arrangement.
 
 ## Integration Boundary
 

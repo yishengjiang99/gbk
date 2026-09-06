@@ -16,6 +16,7 @@ import {
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
 import { isSupportedSheetMusicImageFile, parseSheetMusicToMidi } from "./sheet-music-reader.ts";
+import { buildMidiSendEvents } from "./midi-output.ts";
 
 // ---------------------------------------------------------------------------
 // Local type definitions
@@ -69,7 +70,6 @@ type MidiSourceKind = "bundled" | "uploaded" | "generated";
 type CurrentMidiSource = { kind: MidiSourceKind; name: string; path?: string };
 type SheetMusicImageSource = "uploaded" | "sample";
 type SelectedSheetMusicImage = { file: File; name: string; previewUrl: string; source: SheetMusicImageSource };
-type MidiSendEvent = { sec: number; order: number; bytes: number[] };
 type ClearableMidiOutput = MIDIOutput & { clear?: () => void };
 type PersistedMidiState = CurrentMidiSource & {
   version: 1;
@@ -634,48 +634,6 @@ export default function MidiReader({
     midiSendOutputRef.current = null;
     setIsSendingMidi(false);
     setMidiOutputStatus(status);
-  };
-
-  const buildMidiSendEvents = (songData: Song, startSec: number): MidiSendEvent[] => {
-    const events: MidiSendEvent[] = [];
-    const latestProgramByChannel = new Map<number, { program: number; bank: number }>();
-
-    for (const track of songData.tracks) {
-      for (const event of track.playEvents) {
-        if (event.type === "program" && event.sec <= startSec) {
-          latestProgramByChannel.set(event.channel ?? 0, {
-            program: event.program ?? 0,
-            bank: event.bank ?? 0,
-          });
-        }
-      }
-    }
-
-    for (const [channel, programEvent] of latestProgramByChannel) {
-      const bank = programEvent.bank ?? 0;
-      events.push({ sec: startSec, order: -3, bytes: [0xb0 | channel, 0, (bank >> 7) & 0x7f] });
-      events.push({ sec: startSec, order: -2, bytes: [0xb0 | channel, 32, bank & 0x7f] });
-      events.push({ sec: startSec, order: -1, bytes: [0xc0 | channel, programEvent.program & 0x7f] });
-    }
-
-    for (const track of songData.tracks) {
-      for (const event of track.playEvents) {
-        if (event.sec < startSec) continue;
-        const channel = (event.channel ?? 0) & 0x0f;
-        if (event.type === "program") {
-          const bank = event.bank ?? 0;
-          events.push({ sec: event.sec, order: 0, bytes: [0xb0 | channel, 0, (bank >> 7) & 0x7f] });
-          events.push({ sec: event.sec, order: 1, bytes: [0xb0 | channel, 32, bank & 0x7f] });
-          events.push({ sec: event.sec, order: 2, bytes: [0xc0 | channel, (event.program ?? 0) & 0x7f] });
-        } else if (event.type === "noteOff") {
-          events.push({ sec: event.sec, order: 3, bytes: [0x80 | channel, (event.note ?? 0) & 0x7f, 64] });
-        } else if (event.type === "noteOn") {
-          events.push({ sec: event.sec, order: 4, bytes: [0x90 | channel, (event.note ?? 0) & 0x7f, (event.velocity ?? 0) & 0x7f] });
-        }
-      }
-    }
-
-    return events.sort((a, b) => a.sec - b.sec || a.order - b.order);
   };
 
   const disconnectTrackNodes = () => {
@@ -1527,7 +1485,6 @@ export default function MidiReader({
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
       onError?.(msg);
-      setSong(null);
     } finally {
       setSheetMusicStage("");
       setIsParsingSheetMusic(false);
@@ -1840,8 +1797,8 @@ export default function MidiReader({
                 className="toolbarActionBtn toolbarCompactBtn"
                 onClick={onLoadSwedenSheetMusic}
                 disabled={isParsingSheetMusic}
-                aria-label="Display Sweden sheet music"
-                title="Display Sweden sheet music"
+                aria-label="Show Sweden sheet music"
+                title="Show Sweden sheet music"
               >
                 <i className="fa-solid fa-music" aria-hidden="true" />
                 <span>Sweden</span>

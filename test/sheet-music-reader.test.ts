@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildDetectedSheetMusicMidi,
   buildSwedenSheetMusicMidi,
+  isSupportedSheetMusicImageFile,
   parseSheetMusicToMidi,
 } from "../src/sheet-music-reader.ts";
 import { parseMidiBuffer } from "../src/midi-timer.worker.ts";
@@ -23,31 +24,20 @@ test("buildSwedenSheetMusicMidi returns MIDI that the app parser can load", () =
   assert.ok(song.tracks.some((track) => track.notes.length > 0));
 });
 
-test("parseSheetMusicToMidi accepts image files and returns demo MIDI with warning", async () => {
+test("parseSheetMusicToMidi rejects unavailable recognition instead of returning unrelated music", async () => {
   const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], "sheet.jpg", { type: "image/jpeg" });
-  const parsed = await parseSheetMusicToMidi(file);
-
-  assert.equal(parsed.fileName, "scanned-sheet-demo-sweden.mid");
-  assert.match(parsed.warnings.join(" "), /bundled Sweden transcription demo/i);
-  assert.doesNotThrow(() => parseMidiBuffer(parsed.midiData));
+  assert.equal(isSupportedSheetMusicImageFile(file), true);
+  await assert.rejects(() => parseSheetMusicToMidi(file), /recognition is unavailable/);
 });
 
 test("parseSheetMusicToMidi accepts JPG/PNG images when the browser omits the MIME type", async () => {
   const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "scan.PNG");
-  const parsed = await parseSheetMusicToMidi(file);
-
-  assert.equal(parsed.fileName, "scanned-sheet-demo-sweden.mid");
-  assert.match(parsed.warnings.join(" "), /bundled Sweden transcription demo/i);
-  assert.doesNotThrow(() => parseMidiBuffer(parsed.midiData));
+  assert.equal(isSupportedSheetMusicImageFile(file), true);
 });
 
 test("parseSheetMusicToMidi accepts JPG/PNG images when the file name has no extension", async () => {
   const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], "captured-image", { type: "image/jpeg" });
-  const parsed = await parseSheetMusicToMidi(file);
-
-  assert.equal(parsed.fileName, "scanned-sheet-demo-sweden.mid");
-  assert.match(parsed.warnings.join(" "), /bundled Sweden transcription demo/i);
-  assert.doesNotThrow(() => parseMidiBuffer(parsed.midiData));
+  assert.equal(isSupportedSheetMusicImageFile(file), true);
 });
 
 test("buildDetectedSheetMusicMidi encodes detected notes into a parseable MIDI file", () => {

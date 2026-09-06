@@ -38,12 +38,14 @@ interface BinarySheetImage {
 }
 
 interface DetectedStaff {
+  support?: number;
   lines: number[];
   spacing: number;
   top: number;
   bottom: number;
   slope: number;
   systemIndex: number;
+  clef: "treble" | "bass";
 }
 
 export interface DetectedSheetNote {
@@ -211,14 +213,17 @@ function canUseBrowserImagePipeline(): boolean {
   return typeof createImageBitmap === "function" && typeof document !== "undefined";
 }
 
+function paperLuminance(values: Uint8ClampedArray, offset: number): number {
+  const alpha = values[offset + 3] / 255;
+  const ink = 0.2126 * values[offset] + 0.7152 * values[offset + 1] + 0.0722 * values[offset + 2];
+  return Math.round(alpha * ink + (1 - alpha) * 255);
+}
+
 function otsuThreshold(values: Uint8ClampedArray): number {
   const histogram = new Uint32Array(256);
   let total = 0;
   for (let i = 0; i < values.length; i += 4) {
-    const r = values[i];
-    const g = values[i + 1];
-    const b = values[i + 2];
-    const luminance = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+    const luminance = paperLuminance(values, i);
     histogram[luminance] += 1;
     total += 1;
   }
@@ -228,7 +233,7 @@ function otsuThreshold(values: Uint8ClampedArray): number {
 
   let sumBackground = 0;
   let weightBackground = 0;
-  let bestThreshold = 150;
+  let bestThreshold = -1;
   let bestVariance = 0;
 
   for (let i = 0; i < 256; i += 1) {
@@ -249,7 +254,9 @@ function otsuThreshold(values: Uint8ClampedArray): number {
     }
   }
 
-  return Math.max(80, Math.min(190, bestThreshold - 12));
+  // The selected bin belongs to the foreground. Lowering it can erase all ink
+  // in a low-contrast scan. A uniform image has no separable foreground.
+  return bestThreshold;
 }
 
 async function decodeSheetImage(file: File): Promise<BinarySheetImage | null> {
@@ -271,6 +278,10 @@ async function decodeSheetImage(file: File): Promise<BinarySheetImage | null> {
   bitmap.close();
 
   const pixels = ctx.getImageData(0, 0, width, height).data;
+  return binarizeSheetPixels(pixels, width, height);
+}
+
+export function binarizeSheetPixels(pixels: Uint8ClampedArray, width: number, height: number): BinarySheetImage {
   const threshold = otsuThreshold(pixels);
   const dark = new Uint8Array(width * height);
   const rowCounts = new Uint16Array(height);
@@ -279,7 +290,7 @@ async function decodeSheetImage(file: File): Promise<BinarySheetImage | null> {
     let count = 0;
     for (let x = 0; x < width; x += 1) {
       const i = (y * width + x) * 4;
-      const luminance = 0.2126 * pixels[i] + 0.7152 * pixels[i + 1] + 0.0722 * pixels[i + 2];
+      const luminance = paperLuminance(pixels, i);
       if (luminance <= threshold) {
         dark[y * width + x] = 1;
         count += 1;
@@ -324,14 +335,21 @@ function projectRowsForSlope(image: BinarySheetImage, slope: number): Uint16Arra
   return bins;
 }
 
-function projectBandRowsForSlope(image: BinarySheetImage, slope: number, minY: number, maxY: number): Uint16Array {
+function projectBandRowsForSlope(
+  image: BinarySheetImage,
+  slope: number,
+  minY: number,
+  maxY: number,
+  minX = 0,
+  maxX = image.width - 1
+): Uint16Array {
   const bandHeight = Math.max(1, maxY - minY + 1);
   const extra = Math.ceil(Math.abs(slope) * image.width) + 12;
   const bins = new Uint16Array(bandHeight + extra * 2);
   const offset = extra;
 
   for (let y = minY; y <= maxY; y += 1) {
-    for (let x = 0; x < image.width; x += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
       if (!image.dark[y * image.width + x]) continue;
       const projectedY = Math.round(y - minY - slope * (x - image.width / 2)) + offset;
       if (projectedY >= 0 && projectedY < bins.length) bins[projectedY] += 1;
@@ -391,6 +409,69 @@ function lineCentersFromRows(rowCounts: Uint16Array, width: number): Array<{ cen
     .filter((center, index, all) => index === 0 || center.center - all[index - 1].center > 2);
 }
 
+function stavesOverlap(a: DetectedStaff, b: DetectedStaff): boolean {
+  const overlapHeight = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  const smallerHeight = Math.min(a.bottom - a.top, b.bottom - b.top);
+  if (overlapHeight > smallerHeight * 0.45) return true;
+
+  const lineTolerance = Math.max(2, Math.min(a.spacing, b.spacing) * 0.35);
+  const sharedLines = a.lines.filter((line) => b.lines.some((otherLine) => Math.abs(line - otherLine) <= lineTolerance));
+  return sharedLines.length >= 2;
+}
+
+function selectGrandStaffPairs(staves: DetectedStaff[], imageHeight: number): DetectedStaff[] {
+  if (staves.length < 6) return staves;
+
+  const sorted = [...staves].sort((a, b) => a.top - b.top);
+  const pairCandidates: Array<{ upper: DetectedStaff; lower: DetectedStaff; score: number }> = [];
+  for (let upperIndex = 0; upperIndex < sorted.length - 1; upperIndex += 1) {
+    const upper = sorted[upperIndex];
+    for (let lowerIndex = upperIndex + 1; lowerIndex < sorted.length; lowerIndex += 1) {
+      const lower = sorted[lowerIndex];
+      const averageSpacing = (upper.spacing + lower.spacing) / 2;
+      const separationInSpaces = (lower.top - upper.top) / Math.max(1, averageSpacing);
+      if (separationInSpaces < 4 || separationInSpaces > 12) continue;
+      if (lower.top < upper.bottom - averageSpacing * 0.25) continue;
+
+      const spacingRatio = Math.max(upper.spacing, lower.spacing) / Math.max(1, Math.min(upper.spacing, lower.spacing));
+      if (spacingRatio > 1.75) continue;
+      const slopePenalty = Math.abs(upper.slope - lower.slope) * averageSpacing;
+      pairCandidates.push({
+        upper,
+        lower,
+        score: upper.spacing + lower.spacing - slopePenalty,
+      });
+    }
+  }
+
+  const selected = new Set<DetectedStaff>();
+  const selectedPairs: Array<{ upper: DetectedStaff; lower: DetectedStaff; score: number }> = [];
+  for (const pair of pairCandidates.sort((a, b) => b.score - a.score)) {
+    if (selected.has(pair.upper) || selected.has(pair.lower)) continue;
+    selected.add(pair.upper);
+    selected.add(pair.lower);
+    selectedPairs.push(pair);
+  }
+
+  selectedPairs.sort((a, b) => (a.upper.top + a.lower.top) / 2 - (b.upper.top + b.lower.top) / 2);
+  for (let index = 1; index < selectedPairs.length; ) {
+    const previous = selectedPairs[index - 1];
+    const current = selectedPairs[index];
+    const previousCenter = (previous.upper.top + previous.lower.top) / 2;
+    const currentCenter = (current.upper.top + current.lower.top) / 2;
+    if (currentCenter - previousCenter < imageHeight * 0.12) {
+      const removeIndex = previous.score < current.score ? index - 1 : index;
+      selectedPairs.splice(removeIndex, 1);
+      index = Math.max(1, removeIndex);
+    } else {
+      index += 1;
+    }
+  }
+
+  const pairedStaves = new Set(selectedPairs.flatMap((pair) => [pair.upper, pair.lower]));
+  return pairedStaves.size >= 4 ? sorted.filter((staff) => pairedStaves.has(staff)) : staves;
+}
+
 function findStaffSequences(
   centers: Array<{ center: number; strength: number }>,
   slope: number,
@@ -439,9 +520,29 @@ function findStaffSequences(
         bottom: lines[4],
         slope,
         systemIndex: 0,
+        clef: "treble" as const,
       };
-      const overlaps = staves.some((existing) => Math.abs(existing.top - staff.top) < actualSpacing * 3);
-      if (!overlaps) staves.push(staff);
+      // Projection peaks can form a plausible five-line sequence even when
+      // the proposed slope crosses the real staff. Require ink along each
+      // proposed line, not merely at its projected intercept.
+      const lineSupports = staff.lines.map((line) => {
+        let hits = 0;
+        for (let x = 0; x < image.width; x += 1) {
+          const y = Math.round(lineYAtX(staff, line, x, image.width));
+          for (let dy = -1; dy <= 1; dy += 1) {
+            const offset = (y + dy) * image.width + x;
+            if (y + dy >= 0 && offset < image.dark.length && image.dark[offset]) {
+              hits += 1;
+              break;
+            }
+          }
+        }
+        return hits / image.width;
+      });
+      if (lineSupports.some((support) => support < 0.25)) continue;
+      const supportedStaff: DetectedStaff = { ...staff, support: Math.min(...lineSupports) };
+      const overlaps = staves.some((existing) => stavesOverlap(existing, staff));
+      if (!overlaps) staves.push(supportedStaff);
       break;
     }
   }
@@ -449,9 +550,9 @@ function findStaffSequences(
   return staves;
 }
 
-function detectStaves(image: BinarySheetImage): DetectedStaff[] {
+export function detectStaves(image: BinarySheetImage): DetectedStaff[] {
   let best: DetectedStaff[] = [];
-  for (let slope = -0.14; slope <= 0.141; slope += 0.02) {
+  for (let slope = -0.14; slope <= 0.141; slope += 0.01) {
     const bins = projectRowsForSlope(image, slope);
     const offset = Math.ceil(Math.abs(slope) * image.width) + 12;
     const centers = lineCentersFromProjection(bins, image.width).map((center) => ({
@@ -461,13 +562,13 @@ function detectStaves(image: BinarySheetImage): DetectedStaff[] {
     const staves = findStaffSequences(centers, slope, image);
     if (staves.length > best.length) {
       best = staves;
-    } else if (staves.length === best.length && staves.reduce((sum, staff) => sum + staff.spacing, 0) > best.reduce((sum, staff) => sum + staff.spacing, 0)) {
+    } else if (staves.length === best.length && staves.reduce((sum, staff) => sum + (staff.support ?? 0), 0) > best.reduce((sum, staff) => sum + (staff.support ?? 0), 0)) {
       best = staves;
     }
   }
   const horizontalStaves = findStaffSequences(lineCentersFromRows(image.rowCounts, image.width), 0, image);
   for (const staff of horizontalStaves) {
-    const overlaps = best.some((existing) => Math.abs(existing.top - staff.top) < Math.max(existing.spacing, staff.spacing) * 3);
+    const overlaps = best.some((existing) => stavesOverlap(existing, staff));
     if (!overlaps) best.push(staff);
   }
 
@@ -476,24 +577,39 @@ function detectStaves(image: BinarySheetImage): DetectedStaff[] {
   for (let minY = 0; minY < image.height; minY += bandStep) {
     const maxY = Math.min(image.height - 1, minY + bandHeight - 1);
     const bandImage = { ...image, height: maxY - minY + 1 };
-    let bandBest: DetectedStaff[] = [];
-    for (let slope = -0.2; slope <= 0.201; slope += 0.03) {
-      const bins = projectBandRowsForSlope(image, slope, minY, maxY);
-      const offset = Math.ceil(Math.abs(slope) * image.width) + 12;
-      const centers = lineCentersFromProjection(bins, image.width).map((center) => ({
-        ...center,
-        center: center.center - offset + minY,
-      }));
-      const staves = findStaffSequences(centers, slope, bandImage);
-      if (staves.length > bandBest.length) bandBest = staves;
+    const bandBest: DetectedStaff[] = [];
+    const xWindows = [
+      [0, image.width - 1],
+      [Math.round(image.width * 0.08), Math.round(image.width * 0.58)],
+      [Math.round(image.width * 0.25), Math.round(image.width * 0.75)],
+      [Math.round(image.width * 0.42), Math.round(image.width * 0.92)],
+    ];
+    for (const [minX, maxX] of xWindows) {
+      let windowBest: DetectedStaff[] = [];
+      for (let slope = -0.2; slope <= 0.201; slope += 0.03) {
+        const bins = projectBandRowsForSlope(image, slope, minY, maxY, minX, maxX);
+        const offset = Math.ceil(Math.abs(slope) * image.width) + 12;
+        const centers = lineCentersFromProjection(bins, maxX - minX + 1).map((center) => ({
+          ...center,
+          center: center.center - offset + minY,
+        }));
+        const staves = findStaffSequences(centers, slope, bandImage);
+        if (staves.length > windowBest.length ||
+          (staves.length === windowBest.length &&
+            staves.reduce((sum, staff) => sum + (staff.support ?? 0), 0) >
+            windowBest.reduce((sum, staff) => sum + (staff.support ?? 0), 0))) windowBest = staves;
+      }
+      for (const staff of windowBest) {
+        if (!bandBest.some((existing) => stavesOverlap(existing, staff))) bandBest.push(staff);
+      }
     }
     for (const staff of bandBest) {
-      const overlaps = best.some((existing) => Math.abs(existing.top - staff.top) < Math.max(existing.spacing, staff.spacing) * 3);
+      const overlaps = best.some((existing) => stavesOverlap(existing, staff));
       if (!overlaps) best.push(staff);
     }
   }
 
-  return assignStaffSystems(best
+  return assignStaffSystems(selectGrandStaffPairs(best, image.height)
     .sort((a, b) => a.top - b.top)
     .map((staff, index) => ({ ...staff, systemIndex: index })));
 }
@@ -506,27 +622,43 @@ function median(values: number[]): number {
 }
 
 function assignStaffSystems(staves: DetectedStaff[]): DetectedStaff[] {
-  if (staves.length < 4) return staves.map((staff, index) => ({ ...staff, systemIndex: index }));
-  if (staves.length >= 6) {
-    return staves.map((staff, index) => ({
+  let assigned: DetectedStaff[];
+  if (staves.length < 4) {
+    assigned = staves.map((staff, index) => ({ ...staff, systemIndex: index }));
+  } else if (staves.length >= 6) {
+    assigned = staves.map((staff, index) => ({
       ...staff,
       systemIndex: Math.floor(index / 2),
     }));
+  } else {
+    const gaps = staves.slice(1).map((staff, index) => staff.top - staves[index].bottom);
+    const likelyPairGaps = gaps.filter((_, index) => index % 2 === 0);
+    const likelySystemGaps = gaps.filter((_, index) => index % 2 === 1);
+    const pairGap = median(likelyPairGaps);
+    const systemGap = median(likelySystemGaps);
+    const looksLikeGrandStaff = pairGap > 0 && systemGap > 0 && pairGap < systemGap * 0.78;
+
+    assigned = staves.map((staff, index) => ({
+      ...staff,
+      systemIndex: looksLikeGrandStaff ? Math.floor(index / 2) : index,
+    }));
   }
 
-  const gaps = staves.slice(1).map((staff, index) => staff.top - staves[index].bottom);
-  const likelyPairGaps = gaps.filter((_, index) => index % 2 === 0);
-  const likelySystemGaps = gaps.filter((_, index) => index % 2 === 1);
-  const pairGap = median(likelyPairGaps);
-  const systemGap = median(likelySystemGaps);
-  const looksLikeGrandStaff = pairGap > 0 && systemGap > 0 && pairGap < systemGap * 0.78;
+  const stavesPerSystem = new Map<number, DetectedStaff[]>();
+  for (const staff of assigned) {
+    const system = stavesPerSystem.get(staff.systemIndex) ?? [];
+    system.push(staff);
+    stavesPerSystem.set(staff.systemIndex, system);
+  }
 
-  if (!looksLikeGrandStaff) return staves.map((staff, index) => ({ ...staff, systemIndex: index }));
-
-  return staves.map((staff, index) => ({
-    ...staff,
-    systemIndex: Math.floor(index / 2),
-  }));
+  return assigned.map((staff) => {
+    const system = stavesPerSystem.get(staff.systemIndex) ?? [staff];
+    const ordered = [...system].sort((a, b) => a.top - b.top);
+    return {
+      ...staff,
+      clef: ordered.length === 2 && ordered[1] === staff ? "bass" : "treble",
+    };
+  });
 }
 
 function isNearStaffLine(x: number, y: number, staff: DetectedStaff, width: number): boolean {
@@ -540,17 +672,17 @@ function diatonicIndexToMidi(index: number): number {
   return 12 + octave * 12 + majorSteps[degree];
 }
 
-function pitchFromTrebleStaff(y: number, staff: DetectedStaff): number {
-  const topLineF5Index = 5 * 7 + 3;
+function pitchFromStaff(y: number, staff: DetectedStaff): number {
+  const topLineIndex = staff.clef === "bass" ? 3 * 7 + 5 : 5 * 7 + 3;
   const halfStep = staff.spacing / 2;
   const diatonicOffsetDown = Math.round((y - staff.top) / halfStep);
-  return diatonicIndexToMidi(topLineF5Index - diatonicOffsetDown);
+  return diatonicIndexToMidi(topLineIndex - diatonicOffsetDown);
 }
 
 function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedStaff): NoteCandidate[] {
   const slopeMargin = Math.abs(staff.slope) * image.width;
-  const minY = Math.max(0, Math.floor(staff.top - staff.spacing * 1.45 - slopeMargin));
-  const maxY = Math.min(image.height - 1, Math.ceil(staff.bottom + staff.spacing * 1.05 + slopeMargin));
+  const minY = Math.max(0, Math.floor(staff.top - staff.spacing * 2.25 - slopeMargin));
+  const maxY = Math.min(image.height - 1, Math.ceil(staff.bottom + staff.spacing * 2.25 + slopeMargin));
   const visited = new Uint8Array(image.width * image.height);
   const notes: NoteCandidate[] = [];
   const stack: number[] = [];
@@ -619,10 +751,10 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
         const centerY = sumY / area;
         const staffRelativeY = centerY - staff.slope * (centerX - image.width / 2);
         const inMusicalBand =
-          staffRelativeY >= staff.top - staff.spacing * 1.35 &&
-          staffRelativeY <= staff.bottom + staff.spacing * 0.95;
+          staffRelativeY >= staff.top - staff.spacing * 2.15 &&
+          staffRelativeY <= staff.bottom + staff.spacing * 2.15;
         if (!inMusicalBand) continue;
-        const midi = Math.max(36, Math.min(96, pitchFromTrebleStaff(staffRelativeY, staff)));
+        const midi = Math.max(24, Math.min(96, pitchFromStaff(staffRelativeY, staff)));
         notes.push({
           x: centerX,
           y: centerY,
@@ -653,11 +785,27 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
   const systems = [...new Set(candidates.map((candidate) => candidate.systemIndex))].sort((a, b) => a - b);
   const events: DetectedSheetNote[] = [];
   const systemTicks = WHOLE * 4;
+  const systemTops = systems.map((systemIndex) =>
+    Math.min(...candidates.filter((candidate) => candidate.systemIndex === systemIndex).map((candidate) => candidate.staffTop))
+  );
+  const systemGaps = systemTops.slice(1).map((top, index) => top - systemTops[index]).filter((gap) => gap > 0);
+  const typicalSystemGap = median(systemGaps);
+  const visualSystemOrders: number[] = [0];
+  for (let index = 1; index < systems.length; index += 1) {
+    const gap = systemTops[index] - systemTops[index - 1];
+    const visualGap = typicalSystemGap > 0 ? Math.max(1, Math.round(gap / typicalSystemGap)) : 1;
+    visualSystemOrders.push(visualSystemOrders[index - 1] + visualGap);
+  }
 
   for (let systemOrder = 0; systemOrder < systems.length; systemOrder += 1) {
     const systemIndex = systems[systemOrder];
     const systemCandidates = candidates
-      .filter((candidate) => candidate.systemIndex === systemIndex)
+      .filter(
+        (candidate) =>
+          candidate.systemIndex === systemIndex &&
+          candidate.x >= image.width * 0.08 &&
+          candidate.x <= image.width * 0.96
+      )
       .sort((a, b) => a.x - b.x || b.y - a.y);
     if (!systemCandidates.length) continue;
 
@@ -675,7 +823,13 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
     for (const candidate of musicalCandidates) {
       const current = clusters[clusters.length - 1];
       const last = current?.[current.length - 1];
-      const maxSameBeatDistance = Math.max(5, (candidate.staffBottom - candidate.staffTop) * 0.08);
+      const currentStaffHeight = candidate.staffBottom - candidate.staffTop;
+      const lastStaffHeight = last ? last.staffBottom - last.staffTop : currentStaffHeight;
+      const sameStaff = last ? Math.abs(last.staffTop - candidate.staffTop) < 1 : true;
+      const maxSameBeatDistance = Math.max(
+        5,
+        Math.max(currentStaffHeight, lastStaffHeight) * (sameStaff ? 0.08 : 0.65)
+      );
       if (current && last && candidate.x - last.x <= maxSameBeatDistance) {
         current.push(candidate);
       } else {
@@ -691,7 +845,7 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
         .sort((a, b) => a.midi - b.midi);
       const clusterX = cluster.reduce((sum, candidate) => sum + candidate.x, 0) / cluster.length;
       const position = Math.max(0, Math.min(1, (clusterX - leftX) / usableWidth));
-      const startTick = systemOrder * systemTicks + Math.round((position * (systemTicks - QUARTER)) / QUARTER) * QUARTER;
+      const startTick = visualSystemOrders[systemOrder] * systemTicks + Math.round((position * (systemTicks - QUARTER)) / QUARTER) * QUARTER;
 
       for (const candidate of limited) {
         events.push({
@@ -704,7 +858,8 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
     }
   }
 
-  return events.slice(0, Math.max(1, Math.floor(image.width * 0.35)));
+  const uniqueEvents = [...new Map(events.map((event) => [`${event.startTick}:${event.midi}`, event])).values()];
+  return uniqueEvents.slice(0, Math.max(1, Math.floor(image.width * 0.35)));
 }
 
 function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
@@ -724,7 +879,7 @@ function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNo
   warnings.push(
     `Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"}, ${candidates.length} notehead candidate${
       candidates.length === 1 ? "" : "s"
-    }, and imported ${notes.length} MIDI note${notes.length === 1 ? "" : "s"}. Treble clef and quarter-note timing were assumed.`
+    }, and imported ${notes.length} MIDI note${notes.length === 1 ? "" : "s"}. Treble/bass grand-staff clefs and quarter-note timing were assumed.`
   );
   return { notes, warnings };
 }
@@ -840,31 +995,19 @@ export async function parseSheetMusicToMidi(file: File): Promise<ParsedSheetMusi
     throw new Error("Choose a JPG or PNG image file of sheet music.");
   }
 
-  const fallback = (): ParsedSheetMusicMidi => ({
-    midiData: buildSwedenSheetMusicMidi(),
-    fileName: "scanned-sheet-demo-sweden.mid",
-    warnings: ["Could not run image recognition for this file; loaded the bundled Sweden transcription demo."],
-  });
-
   let image: BinarySheetImage | null = null;
   try {
     image = await decodeSheetImage(file);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return {
-      ...fallback(),
-      warnings: [`Image decoding failed (${message}); loaded the bundled Sweden transcription demo.`],
-    };
+    throw new Error(`Image decoding failed (${message}). Choose a readable JPG or PNG image.`);
   }
 
-  if (!image) return fallback();
+  if (!image) throw new Error("Image recognition is unavailable in this browser.");
 
   const result = transcribeSheetImage(image);
   if (!result.notes.length) {
-    return {
-      ...fallback(),
-      warnings: [...result.warnings, "Loaded the bundled Sweden transcription demo instead."],
-    };
+    throw new Error(`${result.warnings.join(" ")} Try a clearer image showing the complete staff.`);
   }
 
   return {
