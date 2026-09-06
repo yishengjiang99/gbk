@@ -17,9 +17,7 @@ body {
 .app {
   width: 100%;
   margin: 0;
-  padding: 1rem;
-  padding-right: 1rem;
-  padding-bottom: 4.8rem;
+  padding: 0.5rem 1rem 4.8rem;
 }
 
 .app.analyzerOpen {
@@ -31,8 +29,8 @@ body {
 }
 
 .topToolbar {
-  margin-bottom: 0.65rem;
-  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.5rem;
+  padding: 0.45rem 0.55rem;
 }
 
 .toolbar {
@@ -43,8 +41,11 @@ body {
 }
 
 .toolbarUnified {
-  gap: 0.45rem;
+  gap: 0.35rem;
   justify-content: flex-start;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
 }
 
 .toolbarIconBtn {
@@ -145,6 +146,16 @@ button[aria-label]:disabled::after {
   flex-wrap: wrap;
 }
 
+.toolbarUnified .toolbarGroup,
+.toolbarUnified .toolbarMenu {
+  flex: 0 0 auto;
+}
+
+.toolbarUnified .toolbarGroup {
+  padding: 0.18rem;
+  gap: 0.12rem;
+}
+
 .appHeaderToolbar button[aria-label]::after {
   display: none;
 }
@@ -188,6 +199,10 @@ button[aria-label]:disabled::after {
   color: #597387;
 }
 
+.toolbarUnified .toolbarGroupLabel {
+  display: none;
+}
+
 .toolbarButtonRow {
   min-width: 0;
   display: flex;
@@ -210,17 +225,17 @@ button[aria-label]:disabled::after {
 
 .toolbarActionBtn {
   min-width: 0;
-  min-height: 32px;
-  padding: 0.3rem 0.46rem;
+  min-height: 30px;
+  padding: 0.24rem 0.42rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.3rem;
+  gap: 0.28rem;
   border: 1px solid #7895a9;
-  border-radius: 8px;
+  border-radius: 7px;
   background: linear-gradient(180deg, #ffffff 0%, #eaf2f7 100%);
   color: #1e3d53;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   line-height: 1;
   white-space: nowrap;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
@@ -261,10 +276,10 @@ button[aria-label]:disabled::after {
 }
 
 .toolbarSegmented {
-  gap: 0.12rem;
-  padding: 0.12rem;
+  gap: 0.1rem;
+  padding: 0.1rem;
   border: 1px solid #c0d0dc;
-  border-radius: 8px;
+  border-radius: 7px;
   background: #e8f0f6;
 }
 
@@ -272,6 +287,7 @@ button[aria-label]:disabled::after {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+  min-height: 26px;
 }
 
 .toolbarSegmented .toolbarActionBtn.active {
@@ -288,8 +304,8 @@ button[aria-label]:disabled::after {
 }
 
 .toolbarCompactBtn {
-  width: 32px;
-  min-width: 32px;
+  width: 30px;
+  min-width: 30px;
   padding-inline: 0;
 }
 
@@ -387,9 +403,9 @@ button[aria-label]:disabled::after {
 }
 
 .midiReader {
-  margin-top: 0.8rem;
+  margin-top: 0.55rem;
   width: 100%;
-  min-height: calc(100vh - 6.6rem);
+  min-height: calc(100vh - 5.8rem);
   display: flex;
   flex-direction: column;
   overflow: visible;
@@ -398,7 +414,7 @@ button[aria-label]:disabled::after {
 .midiTop {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.45rem;
   align-items: stretch;
 }
 
@@ -410,7 +426,7 @@ button[aria-label]:disabled::after {
 }
 
 .midiUnifiedToolbar {
-  padding: 0.1rem 0;
+  padding: 0;
 }
 
 .midiTopLoad select {
@@ -421,8 +437,8 @@ button[aria-label]:disabled::after {
 .midiTopTransport {
   justify-content: center;
   flex-direction: row;
-  gap: 0.6rem;
-  padding: 0.45rem 0.6rem;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
   border: 1px solid #cad9e6;
   border-radius: 10px;
   background: linear-gradient(180deg, #f7fbff 0%, #edf5fb 100%);
@@ -1443,7 +1459,12 @@ tbody tr.selected {
 .midiUnifiedToolbar {
   position: relative;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
+}
+
+.toolbarUnified.midiUnifiedToolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .midiUnifiedToolbar > .toolbarGroup {
@@ -1465,7 +1486,7 @@ tbody tr.selected {
 .toolbarMenu > summary {
   list-style: none;
   cursor: pointer;
-  min-height: 36px;
+  min-height: 30px;
 }
 
 .toolbarMenu > summary::-webkit-details-marker {
@@ -1478,8 +1499,8 @@ tbody tr.selected {
 }
 
 .toolbarMenuChevron {
-  margin-left: 0.4rem;
-  font-size: 0.65rem;
+  margin-left: 0.3rem;
+  font-size: 0.62rem;
 }
 
 .toolbarMenu[open] .toolbarMenuChevron {
@@ -1488,11 +1509,11 @@ tbody tr.selected {
 
 .toolbarMenuPanel {
   position: absolute;
-  top: calc(100% + 0.45rem);
+  top: calc(100% + 0.35rem);
   left: 0;
   z-index: 30;
   width: 280px;
-  padding: 0.65rem;
+  padding: 0.55rem;
   border: 1px solid #b9cedd;
   border-radius: 10px;
   background: #f8fcff;

@@ -1634,7 +1634,7 @@ export default function MidiReader({
   return (
     <section className="card midiReader">
       <div className="midiTop">
-        <div className="appHeaderToolbar midiUnifiedToolbar" aria-label="Main controls">
+        <div className="appHeaderToolbar toolbarUnified" aria-label="Main controls">
           <div className="toolbarGroup" aria-label="View">
             <span className="toolbarGroupLabel">View</span>
             <div className="toolbarButtonRow toolbarSegmented">
@@ -1663,12 +1663,11 @@ export default function MidiReader({
             </div>
           </div>
 
-          <div className="toolbarGroup" aria-label="Audio">
-            <span className="toolbarGroupLabel">Audio</span>
+          <ToolbarMenu label="Audio" icon="fa-volume-high">
             <div className="toolbarButtonRow">
               <button
                 type="button"
-                className={`toolbarActionBtn toolbarCompactBtn ${audioCtxState === "running" ? "active" : ""}`}
+                className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
                 onClick={onTogglePower}
                 aria-pressed={audioCtxState === "running"}
                 aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
@@ -1678,7 +1677,7 @@ export default function MidiReader({
                 <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
               </button>
             </div>
-          </div>
+          </ToolbarMenu>
 
           <ToolbarMenu label="MIDI Input" icon="fa-plug">
             <div className="toolbarButtonRow">
