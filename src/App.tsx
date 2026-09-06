@@ -1379,7 +1379,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="toolbarGroup" aria-label="Tools">
+              <div className="toolbarGroup toolbarGroupTools" aria-label="Tools">
                 <span className="toolbarGroupLabel">Tools</span>
                 <div className="toolbarButtonRow">
                   <button

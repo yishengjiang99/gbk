@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "node --import tsx/esm --test test/*.test.ts",
     "test:e2e": "playwright test",
+    "test:e2e:sweden:chrome": "PW_VISUAL_CHROME=1 PW_KEEP_CHROME_OPEN=1 playwright test test/e2e/sheet-music-scan.spec.ts --project=chrome-headed --grep \"sweden sheet photo transcribes close to the baseline MIDI\"",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.test.json"
   },
   "dependencies": {
