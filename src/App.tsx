@@ -1332,7 +1332,7 @@ export default function App() {
                 <div className="toolbarButtonRow">
                   <button
                     type="button"
-                    className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
+                    className={`toolbarActionBtn toolbarCompactBtn ${audioCtxState === "running" ? "active" : ""}`}
                     onClick={onTogglePower}
                     aria-pressed={audioCtxState === "running"}
                     aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
