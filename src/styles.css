@@ -1438,3 +1438,111 @@ tbody tr.selected {
     flex-basis: 100%;
   }
 }
+
+/* Keep navigation compact; secondary controls live in disclosure panels. */
+.midiUnifiedToolbar {
+  position: relative;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.midiUnifiedToolbar > .toolbarGroup {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.midiUnifiedToolbar > .toolbarGroup > .toolbarGroupLabel {
+  display: none;
+}
+
+.toolbarMenu {
+  position: relative;
+}
+
+.toolbarMenu > summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 36px;
+}
+
+.toolbarMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.toolbarMenu[open] > summary {
+  background: #e2f0f3;
+  border-color: #568797;
+}
+
+.toolbarMenuChevron {
+  margin-left: 0.4rem;
+  font-size: 0.65rem;
+}
+
+.toolbarMenu[open] .toolbarMenuChevron {
+  transform: rotate(180deg);
+}
+
+.toolbarMenuPanel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 30;
+  width: 280px;
+  padding: 0.65rem;
+  border: 1px solid #b9cedd;
+  border-radius: 10px;
+  background: #f8fcff;
+  box-shadow: 0 10px 28px #17354c26;
+}
+
+.toolbarMenuPanel .toolbarButtonRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.45rem;
+}
+
+.toolbarMenuPanel .toolbarActionBtn,
+.toolbarMenuPanel .toolbarSelect,
+.toolbarMenuPanel .toolbarStatusPill {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.toolbarMenuPanel .toolbarCompactBtn {
+  padding-inline: 0.46rem;
+}
+
+.toolbarMenuPanel .toolbarCompactBtn span {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  clip: auto;
+  overflow: visible;
+}
+
+.toolbarMenuPanel .toolbarHoverText {
+  white-space: normal;
+  max-width: none;
+}
+
+@media (max-width: 720px) {
+  .toolbarMenu {
+    position: static;
+  }
+
+  .toolbarMenuPanel {
+    top: calc(100% + 0.45rem);
+    left: 0;
+    width: min(320px, 100%);
+    box-sizing: border-box;
+    max-height: 65vh;
+    overflow-y: auto;
+  }
+}

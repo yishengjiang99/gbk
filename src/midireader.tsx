@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ToolbarMenu } from "./toolbar-menu.tsx";
 import type { SF2Region } from "../sf2-parser.ts";
 import {
   BACH_CHARACTER_OPTIONS,
@@ -15,7 +16,7 @@ import {
   type BachLength,
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
-import { isSupportedSheetMusicImageFile, parseSheetMusicToMidi } from "./sheet-music-reader.ts";
+import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 
 // ---------------------------------------------------------------------------
@@ -1452,8 +1453,9 @@ export default function MidiReader({
     }
   }
 
-  async function onConvertSelectedSheetMusic() {
+  async function onConvertSelectedSheetMusic(useOriginalTranscription = false) {
     if (!selectedSheetMusicImage || !workerRef.current || isParsingSheetMusic) return;
+    if (useOriginalTranscription && selectedSheetMusicImage.source !== "sample") return;
 
     setIsParsingSheetMusic(true);
     setSheetMusicStage("Reading sheet music image...");
@@ -1462,7 +1464,13 @@ export default function MidiReader({
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       setSheetMusicStage("Building MIDI from sheet music...");
-      const parsed = await parseSheetMusicToMidi(selectedSheetMusicImage.file);
+      const parsed = useOriginalTranscription
+        ? {
+            midiData: buildSwedenSheetMusicMidi(),
+            fileName: "sweden.midi",
+            warnings: ["Original visual transcription from the Python version: D major, 4/4, 46 BPM, 16 measures. Some passages were simplified from the photo."],
+          }
+        : await parseSheetMusicToMidi(selectedSheetMusicImage.file);
       let dataUrl: string | undefined;
       if (parsed.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
         dataUrl = await arrayBufferToDataUrl(parsed.midiData.slice(0));
@@ -1660,7 +1668,7 @@ export default function MidiReader({
             <div className="toolbarButtonRow">
               <button
                 type="button"
-                className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
+                className={`toolbarActionBtn toolbarCompactBtn ${audioCtxState === "running" ? "active" : ""}`}
                 onClick={onTogglePower}
                 aria-pressed={audioCtxState === "running"}
                 aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
@@ -1672,8 +1680,7 @@ export default function MidiReader({
             </div>
           </div>
 
-          <div className="toolbarGroup toolbarGroupInput" aria-label="MIDI Input">
-            <span className="toolbarGroupLabel">MIDI Input</span>
+          <ToolbarMenu label="MIDI Input" icon="fa-plug">
             <div className="toolbarButtonRow">
               <button
                 type="button"
@@ -1703,10 +1710,9 @@ export default function MidiReader({
                 ))}
               </select>
             </div>
-          </div>
+          </ToolbarMenu>
 
-          <div className="toolbarGroup toolbarGroupMidiSend" aria-label="MIDI Send">
-            <span className="toolbarGroupLabel">MIDI Send</span>
+          <ToolbarMenu label="MIDI Output" icon="fa-share-nodes">
             <div className="toolbarButtonRow">
               <button
                 type="button"
@@ -1743,6 +1749,7 @@ export default function MidiReader({
                 title="Refresh MIDI Outputs"
               >
                 <i className="fa-solid fa-arrows-rotate" aria-hidden="true" />
+                <span>Refresh Outputs</span>
               </button>
               <button
                 type="button"
@@ -1759,10 +1766,9 @@ export default function MidiReader({
                 {midiOutputStatus}
               </span>
             </div>
-          </div>
+          </ToolbarMenu>
 
-          <div className="toolbarGroup toolbarGroupSong" aria-label="MIDI file">
-            <span className="toolbarGroupLabel">MIDI File</span>
+          <ToolbarMenu label="Files" icon="fa-folder-open">
             <div className="toolbarButtonRow">
               <label className="fileInput toolbarActionBtn toolbarFileBtn">
                 <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
@@ -1844,10 +1850,9 @@ export default function MidiReader({
                 <span>Reload</span>
               </button>
             </div>
-          </div>
+          </ToolbarMenu>
 
-          <div className="toolbarGroup toolbarGroupSoundfont" aria-label="SoundFont">
-            <span className="toolbarGroupLabel">SoundFont</span>
+          <ToolbarMenu label="SoundFont" icon="fa-database">
             <div className="toolbarButtonRow">
               <label className="fileInput toolbarActionBtn toolbarFileBtn">
                 <i className="fa-solid fa-folder-open" aria-hidden="true" />
@@ -1873,10 +1878,9 @@ export default function MidiReader({
                 <span className="toolbarStatusValue">{sf2Name || "No SoundFont"}</span>
               </span>
             </div>
-          </div>
+          </ToolbarMenu>
 
-          <div className="toolbarGroup toolbarGroupTools" aria-label="Tools">
-            <span className="toolbarGroupLabel">Tools</span>
+          <ToolbarMenu label="Tools" icon="fa-wand-magic-sparkles">
             <div className="toolbarButtonRow">
               <button
                 type="button"
@@ -1904,7 +1908,7 @@ export default function MidiReader({
                 <span>Bach Composer</span>
               </button>
             </div>
-          </div>
+          </ToolbarMenu>
         </div>
         {selectedSheetMusicImage ? (
           <div className="sheetMusicPreviewPanel" aria-label="Displayed sheet music">
@@ -1912,6 +1916,18 @@ export default function MidiReader({
               <span className="songChipLabel">Sheet Image</span>
               <strong>{selectedSheetMusicImage.name}</strong>
               <span className="chip">{selectedSheetMusicImage.source === "sample" ? "Sample" : "Uploaded"}</span>
+              {selectedSheetMusicImage.source === "sample" ? (
+                <button
+                  type="button"
+                  className="toolbarActionBtn sheetMusicConvertBtn"
+                  onClick={() => void onConvertSelectedSheetMusic(true)}
+                  disabled={isParsingSheetMusic}
+                  aria-label="Load original Sweden transcription"
+                  title="Load the original transcription ported from Python"
+                >
+                  <span>Load Original MIDI</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="toolbarActionBtn sheetMusicConvertBtn"
