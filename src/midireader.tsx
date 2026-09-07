@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ToolbarMenu } from "./toolbar-menu.tsx";
+import { NavMenuSection, ToolbarMenu } from "./toolbar-menu.tsx";
 import type { SF2Region } from "../sf2-parser.ts";
 import {
   BACH_CHARACTER_OPTIONS,
@@ -1663,8 +1663,8 @@ export default function MidiReader({
             </div>
           </div>
 
-          <ToolbarMenu label="Audio" icon="fa-volume-high">
-            <div className="toolbarButtonRow">
+          <ToolbarMenu label="Menu" icon="fa-bars" variant="nav">
+            <NavMenuSection label="Audio">
               <button
                 type="button"
                 className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
@@ -1676,11 +1676,9 @@ export default function MidiReader({
                 <i className="fa-solid fa-power-off" aria-hidden="true" />
                 <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
               </button>
-            </div>
-          </ToolbarMenu>
+            </NavMenuSection>
 
-          <ToolbarMenu label="MIDI Input" icon="fa-plug">
-            <div className="toolbarButtonRow">
+            <NavMenuSection label="MIDI Input">
               <button
                 type="button"
                 className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
@@ -1708,11 +1706,9 @@ export default function MidiReader({
                   </option>
                 ))}
               </select>
-            </div>
-          </ToolbarMenu>
+            </NavMenuSection>
 
-          <ToolbarMenu label="MIDI Output" icon="fa-share-nodes">
-            <div className="toolbarButtonRow">
+            <NavMenuSection label="MIDI Output">
               <button
                 type="button"
                 className={`toolbarActionBtn ${midiOutputEnabled ? "active" : ""}`}
@@ -1764,11 +1760,9 @@ export default function MidiReader({
               <span className="toolbarHoverText midiOutputStatus" title={midiOutputStatus}>
                 {midiOutputStatus}
               </span>
-            </div>
-          </ToolbarMenu>
+            </NavMenuSection>
 
-          <ToolbarMenu label="Files" icon="fa-folder-open">
-            <div className="toolbarButtonRow">
+            <NavMenuSection label="Files">
               <label className="fileInput toolbarActionBtn toolbarFileBtn">
                 <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
                 <span>Upload MIDI</span>
@@ -1848,11 +1842,9 @@ export default function MidiReader({
                 <i className="fa-solid fa-rotate-right" aria-hidden="true" />
                 <span>Reload</span>
               </button>
-            </div>
-          </ToolbarMenu>
+            </NavMenuSection>
 
-          <ToolbarMenu label="SoundFont" icon="fa-database">
-            <div className="toolbarButtonRow">
+            <NavMenuSection label="SoundFont">
               <label className="fileInput toolbarActionBtn toolbarFileBtn">
                 <i className="fa-solid fa-folder-open" aria-hidden="true" />
                 <span>Upload SF2</span>
@@ -1876,11 +1868,9 @@ export default function MidiReader({
                 <span className="toolbarStatusLabel">Loaded</span>
                 <span className="toolbarStatusValue">{sf2Name || "No SoundFont"}</span>
               </span>
-            </div>
-          </ToolbarMenu>
+            </NavMenuSection>
 
-          <ToolbarMenu label="Tools" icon="fa-wand-magic-sparkles">
-            <div className="toolbarButtonRow">
+            <NavMenuSection label="Tools">
               <button
                 type="button"
                 className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
@@ -1906,7 +1896,7 @@ export default function MidiReader({
                 />
                 <span>Bach Composer</span>
               </button>
-            </div>
+            </NavMenuSection>
           </ToolbarMenu>
         </div>
         {selectedSheetMusicImage ? (
@@ -2054,48 +2044,50 @@ export default function MidiReader({
         ) : null}
         <div className="midiTopGroup midiTopTransport midiTopTransportFull">
           <div className="transportHero">
-            <button
-              type="button"
-              className="transportBtn"
-              onClick={() => seekBy(-10)}
-              disabled={!song}
-              aria-label="Rewind 10 seconds"
-              title="Rewind 10 seconds"
-            >
-              <i className="fa-solid fa-backward" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="transportBtn transportBtnPrimary"
-              onClick={onPlayPause}
-              disabled={!song || !sf2Ready}
-              aria-label={isPlaying ? "Pause" : "Play"}
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="transportBtn"
-              onClick={() => seekBy(10)}
-              disabled={!song}
-              aria-label="Forward 10 seconds"
-              title="Forward 10 seconds"
-            >
-              <i className="fa-solid fa-forward" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="transportBtn"
-              onClick={onExportWav}
-              disabled={!song || !sf2Ready || isExporting}
-              aria-label="Export WAV"
-              title="Generate offline WAV export"
-            >
-              {isExporting
-                ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
-                : <i className="fa-solid fa-download" aria-hidden="true" />}
-            </button>
+            <div className="transportControls">
+              <button
+                type="button"
+                className="transportBtn"
+                onClick={() => seekBy(-10)}
+                disabled={!song}
+                aria-label="Rewind 10 seconds"
+                title="Rewind 10 seconds"
+              >
+                <i className="fa-solid fa-backward" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="transportBtn transportBtnPrimary"
+                onClick={onPlayPause}
+                disabled={!song || !sf2Ready}
+                aria-label={isPlaying ? "Pause" : "Play"}
+                title={isPlaying ? "Pause" : "Play"}
+              >
+                <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="transportBtn"
+                onClick={() => seekBy(10)}
+                disabled={!song}
+                aria-label="Forward 10 seconds"
+                title="Forward 10 seconds"
+              >
+                <i className="fa-solid fa-forward" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="transportBtn"
+                onClick={onExportWav}
+                disabled={!song || !sf2Ready || isExporting}
+                aria-label="Export WAV"
+                title="Generate offline WAV export"
+              >
+                {isExporting
+                  ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
+                  : <i className="fa-solid fa-download" aria-hidden="true" />}
+              </button>
+            </div>
             <span className="transportState">
               {transportStateLabel}
             </span>
@@ -2124,9 +2116,11 @@ export default function MidiReader({
                 </span>
               </div>
             ) : null}
-            <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-            <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
-            <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+            <div className="transportMeta">
+              <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+              <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
+              <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+            </div>
           </div>
         </div>
         {song ? (

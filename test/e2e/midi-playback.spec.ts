@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openAppMenu, waitForSf2Ready } from "./app-menu.ts";
 
 // ---------------------------------------------------------------------------
 // Timing constants
@@ -18,11 +19,6 @@ const AUDIO_START_WAIT_MS = 500;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Wait for the SF2 to finish loading so tests can proceed. */
-async function waitForSf2Ready(page: import("@playwright/test").Page) {
-  await expect(page.getByText("GeneralUser-GS.sf2")).toBeVisible({ timeout: 30_000 });
-}
 
 /** Poll the analyzer-time canvas for a signal peak above the given threshold. */
 async function waitForAudioSignal(
@@ -189,7 +185,7 @@ test("selecting a different MIDI file from the dropdown loads a new song", async
   // Wait for the default MIDI file to load
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
 
-  // Find the bundled MIDI dropdown
+  await openAppMenu(page);
   const midiSelect = page.getByRole("combobox", { name: "Select bundled MIDI file" });
   await expect(midiSelect).toBeEnabled({ timeout: 10_000 });
 
