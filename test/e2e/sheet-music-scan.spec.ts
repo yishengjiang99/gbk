@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openAppMenu, waitForSf2Ready } from "./app-menu.ts";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -32,6 +33,7 @@ test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page 
         );
       })
   );
+  await openAppMenu(page);
   await page.getByRole("button", { name: "Show Sweden sheet music" }).click();
   await expect(page.getByLabel("Displayed sheet music")).toContainText("sweden.jpg");
   await expect(page.getByRole("img", { name: "sweden.jpg sheet music preview" })).toBeVisible();
@@ -112,7 +114,7 @@ test("scan sheet music image imports generated MIDI", async ({ page }) => {
   await page.goto("/");
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await expect(page.getByText("GeneralUser-GS.sf2")).toBeVisible({ timeout: 30_000 });
+  await waitForSf2Ready(page);
 
   await page.getByLabel("Scan or upload sheet music").setInputFiles(fixturePath);
   await expect(page.getByLabel("Displayed sheet music")).toContainText("dieLetzteKompanie.jpg");

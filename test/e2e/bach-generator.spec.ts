@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openAppMenu, waitForSf2Ready } from "./app-menu.ts";
 
 declare global {
   interface Window {
@@ -15,8 +16,8 @@ test("generated Bach playback primes presets before opening note-ons", async ({ 
   await page.goto("/");
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await expect(page.getByText("GeneralUser-GS.sf2")).toBeVisible({ timeout: 30_000 });
-
+  await waitForSf2Ready(page);
+  await openAppMenu(page);
   await page.getByRole("button", { name: /Bach Composer/i }).click();
   await page.getByRole("button", { name: "Generate Bach Music" }).click();
   await expect(page.getByText("Generated Bach Soprano", { exact: true })).toBeVisible({ timeout: 30_000 });

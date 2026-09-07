@@ -1,11 +1,18 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
-export function ToolbarMenu({ label, icon, children }: {
+export function ToolbarMenu({
+  label,
+  icon,
+  children,
+  variant = "menu",
+}: {
   label: string;
   icon: string;
   children: ReactNode;
+  variant?: "menu" | "nav";
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
+  const isNav = variant === "nav";
 
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
@@ -28,19 +35,25 @@ export function ToolbarMenu({ label, icon, children }: {
   }, []);
 
   return (
-    <details className="toolbarMenu" name="main-toolbar" ref={ref}
+    <details
+      className={`toolbarMenu${isNav ? " navMenu" : ""}`}
+      name="main-toolbar"
+      ref={ref}
       onBlur={(event) => {
         if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) {
           event.currentTarget.open = false;
         }
-      }}>
-      <summary className="toolbarActionBtn">
+      }}
+    >
+      <summary className={`toolbarActionBtn${isNav ? " navMenuToggle" : ""}`}>
         <i className={`fa-solid ${icon}`} aria-hidden="true" />
         <span>{label}</span>
-        <i className="fa-solid fa-chevron-down toolbarMenuChevron" aria-hidden="true" />
+        {isNav ? null : (
+          <i className="fa-solid fa-chevron-down toolbarMenuChevron" aria-hidden="true" />
+        )}
       </summary>
       <div
-        className="toolbarMenuPanel"
+        className={`toolbarMenuPanel${isNav ? " navMenuPanel" : ""}`}
         aria-label={`${label} controls`}
         onClick={(event) => {
           const target = event.target as HTMLElement | null;
@@ -52,5 +65,14 @@ export function ToolbarMenu({ label, icon, children }: {
         {children}
       </div>
     </details>
+  );
+}
+
+export function NavMenuSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="navMenuSection">
+      <h3 className="navMenuSectionLabel">{label}</h3>
+      <div className="toolbarButtonRow">{children}</div>
+    </section>
   );
 }

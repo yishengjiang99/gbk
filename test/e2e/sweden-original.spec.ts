@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { openAppMenu } from "./app-menu.ts";
 
 test("original Sweden transcription matches the Python MIDI and survives reload", async ({ page }) => {
   await page.goto("/");
-  await page.locator("summary").filter({ hasText: "Files" }).click();
+  await openAppMenu(page);
   await page.getByRole("button", { name: "Show Sweden sheet music" }).click();
   await page.keyboard.press("Escape");
   await page.evaluate(() => {

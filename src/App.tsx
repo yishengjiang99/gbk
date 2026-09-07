@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseSF2, SF2Data, SF2Region } from "../sf2-parser.ts";
-import { ToolbarMenu } from "./toolbar-menu.tsx";
+import { NavMenuSection, ToolbarMenu } from "./toolbar-menu.tsx";
 import { createExternalMidiBridge, ExternalMidiBridge } from "./external-midi-bridge";
 import {
   createMidiDriver,
@@ -1330,12 +1330,11 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="toolbarGroup" aria-label="Audio">
-                <span className="toolbarGroupLabel">Audio</span>
-                <div className="toolbarButtonRow">
+              <ToolbarMenu label="Menu" icon="fa-bars" variant="nav">
+                <NavMenuSection label="Audio">
                   <button
                     type="button"
-                    className={`toolbarActionBtn toolbarCompactBtn ${audioCtxState === "running" ? "active" : ""}`}
+                    className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
                     onClick={onTogglePower}
                     aria-pressed={audioCtxState === "running"}
                     aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
@@ -1344,11 +1343,9 @@ export default function App() {
                     <i className="fa-solid fa-power-off" aria-hidden="true" />
                     <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
                   </button>
-                </div>
-              </div>
+                </NavMenuSection>
 
-              <ToolbarMenu label="MIDI Input" icon="fa-plug">
-                <div className="toolbarButtonRow">
+                <NavMenuSection label="MIDI Input">
                   <button
                     type="button"
                     className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
@@ -1378,11 +1375,9 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                </div>
-              </ToolbarMenu>
+                </NavMenuSection>
 
-              <ToolbarMenu label="SoundFont" icon="fa-database">
-                <div className="toolbarButtonRow">
+                <NavMenuSection label="SoundFont">
                   <label className="fileInput toolbarActionBtn toolbarFileBtn">
                     <i className="fa-solid fa-folder-open" aria-hidden="true" />
                     <span>Upload SF2</span>
@@ -1403,11 +1398,9 @@ export default function App() {
                     <span className="toolbarStatusLabel">Loaded</span>
                     <span className="toolbarStatusValue">{sourceName || "No SoundFont"}</span>
                   </span>
-                </div>
-              </ToolbarMenu>
+                </NavMenuSection>
 
-              <ToolbarMenu label="Tools" icon="fa-wand-magic-sparkles">
-                <div className="toolbarButtonRow">
+                <NavMenuSection label="Tools">
                   <button
                     type="button"
                     className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
@@ -1430,7 +1423,7 @@ export default function App() {
                     <i className="fa-solid fa-circle-info" aria-hidden="true" />
                     <span>{showSummaryModal ? "Hide Summary" : "File Summary"}</span>
                   </button>
-                </div>
+                </NavMenuSection>
               </ToolbarMenu>
             </div>
           </header>

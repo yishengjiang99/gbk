@@ -55,7 +55,7 @@ body {
   gap: 0.35rem;
   justify-content: flex-start;
   flex-wrap: nowrap;
-  overflow-x: auto;
+  overflow: visible;
   padding-bottom: 0.1rem;
 }
 
@@ -1650,7 +1650,7 @@ tbody tr.selected {
 
 .toolbarUnified.midiUnifiedToolbar {
   flex-wrap: nowrap;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .midiUnifiedToolbar > .toolbarGroup {
@@ -1741,21 +1741,68 @@ tbody tr.selected {
   max-width: none;
 }
 
+.navMenu {
+  margin-left: auto;
+}
+
+.navMenuToggle {
+  min-width: 2.4rem;
+  gap: 0.4rem;
+}
+
+.navMenuToggle .fa-bars {
+  font-size: 0.95rem;
+}
+
+.navMenu[open] > .navMenuToggle {
+  background: #e2f0f3;
+  border-color: #568797;
+}
+
+.navMenuPanel {
+  right: 0;
+  left: auto;
+  z-index: 40;
+  width: min(360px, calc(100vw - 1.2rem));
+  max-height: min(72vh, 560px);
+  overflow-y: auto;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.navMenuSection {
+  min-width: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.navMenuSection + .navMenuSection {
+  padding-top: 0.55rem;
+  border-top: 1px solid #d5e2eb;
+}
+
+.navMenuSectionLabel {
+  margin: 0;
+  font-size: 0.62rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #597387;
+}
+
 @media (max-width: 960px) {
   .appHeaderToolbar,
   .midiUnifiedToolbar {
     flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
+    overflow: visible;
   }
 
   .midiUnifiedToolbar > * {
     flex: 0 0 auto;
   }
 
-  .toolbarMenuPanel {
+  .toolbarMenuPanel,
+  .navMenuPanel {
     position: fixed;
     inset: auto;
     top: unset;
@@ -1765,7 +1812,7 @@ tbody tr.selected {
     width: auto;
     height: max-content;
     max-width: none;
-    max-height: min(50dvh, 340px);
+    max-height: min(72dvh, 520px);
     overflow-y: auto;
     box-sizing: border-box;
   }
@@ -1893,8 +1940,9 @@ tbody tr.selected {
     height: 56px;
   }
 
-  .toolbarMenuPanel {
-    max-height: min(58dvh, 260px);
+  .toolbarMenuPanel,
+  .navMenuPanel {
+    max-height: min(70dvh, 320px);
   }
 
   .controls {
