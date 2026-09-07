@@ -675,7 +675,9 @@ export default function App() {
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<string>("midi");
   const [audioCtxState, setAudioCtxState] = useState<string>("off");
-  const [analyzerCollapsed, setAnalyzerCollapsed] = useState<boolean>(false);
+  const [analyzerCollapsed, setAnalyzerCollapsed] = useState<boolean>(
+    () => window.matchMedia("(max-width: 960px)").matches
+  );
   const [didAutoLoadDefault, setDidAutoLoadDefault] = useState<boolean>(false);
   const [didAutoEnableMidi, setDidAutoEnableMidi] = useState<boolean>(false);
 
@@ -1878,7 +1880,7 @@ export default function App() {
       <div className="statusDock">
         <span className="midiStatus">{midiStatus}</span>
         <span className="midiStatus">Audio: {audioCtxState}</span>
-        <span className="midiStatus">Keyboard: a w s e d f t g y h</span>
+        <span className="midiStatus statusDockHint">Keyboard: a w s e d f t g y h</span>
       </div>
 
       <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>

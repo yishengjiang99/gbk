@@ -39,7 +39,16 @@ export function ToolbarMenu({ label, icon, children }: {
         <span>{label}</span>
         <i className="fa-solid fa-chevron-down toolbarMenuChevron" aria-hidden="true" />
       </summary>
-      <div className="toolbarMenuPanel" aria-label={`${label} controls`}>
+      <div
+        className="toolbarMenuPanel"
+        aria-label={`${label} controls`}
+        onClick={(event) => {
+          const target = event.target as HTMLElement | null;
+          if (target?.closest("button, label.toolbarFileBtn")) {
+            ref.current && (ref.current.open = false);
+          }
+        }}
+      >
         {children}
       </div>
     </details>

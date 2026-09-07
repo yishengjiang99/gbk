@@ -2054,48 +2054,50 @@ export default function MidiReader({
         ) : null}
         <div className="midiTopGroup midiTopTransport midiTopTransportFull">
           <div className="transportHero">
-            <button
-              type="button"
-              className="transportBtn"
-              onClick={() => seekBy(-10)}
-              disabled={!song}
-              aria-label="Rewind 10 seconds"
-              title="Rewind 10 seconds"
-            >
-              <i className="fa-solid fa-backward" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="transportBtn transportBtnPrimary"
-              onClick={onPlayPause}
-              disabled={!song || !sf2Ready}
-              aria-label={isPlaying ? "Pause" : "Play"}
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="transportBtn"
-              onClick={() => seekBy(10)}
-              disabled={!song}
-              aria-label="Forward 10 seconds"
-              title="Forward 10 seconds"
-            >
-              <i className="fa-solid fa-forward" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="transportBtn"
-              onClick={onExportWav}
-              disabled={!song || !sf2Ready || isExporting}
-              aria-label="Export WAV"
-              title="Generate offline WAV export"
-            >
-              {isExporting
-                ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
-                : <i className="fa-solid fa-download" aria-hidden="true" />}
-            </button>
+            <div className="transportControls">
+              <button
+                type="button"
+                className="transportBtn"
+                onClick={() => seekBy(-10)}
+                disabled={!song}
+                aria-label="Rewind 10 seconds"
+                title="Rewind 10 seconds"
+              >
+                <i className="fa-solid fa-backward" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="transportBtn transportBtnPrimary"
+                onClick={onPlayPause}
+                disabled={!song || !sf2Ready}
+                aria-label={isPlaying ? "Pause" : "Play"}
+                title={isPlaying ? "Pause" : "Play"}
+              >
+                <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="transportBtn"
+                onClick={() => seekBy(10)}
+                disabled={!song}
+                aria-label="Forward 10 seconds"
+                title="Forward 10 seconds"
+              >
+                <i className="fa-solid fa-forward" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="transportBtn"
+                onClick={onExportWav}
+                disabled={!song || !sf2Ready || isExporting}
+                aria-label="Export WAV"
+                title="Generate offline WAV export"
+              >
+                {isExporting
+                  ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
+                  : <i className="fa-solid fa-download" aria-hidden="true" />}
+              </button>
+            </div>
             <span className="transportState">
               {transportStateLabel}
             </span>
@@ -2124,9 +2126,11 @@ export default function MidiReader({
                 </span>
               </div>
             ) : null}
-            <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-            <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
-            <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+            <div className="transportMeta">
+              <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+              <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
+              <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+            </div>
           </div>
         </div>
         {song ? (
