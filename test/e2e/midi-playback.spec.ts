@@ -262,11 +262,18 @@ test("Export WAV button triggers export progress indicator", async ({ page }) =>
 
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
 
+  // Use a shorter bundled MIDI so the export completes before the test timeout.
+  await openAppMenu(page);
+  const midiSelect = page.getByRole("combobox", { name: "Select bundled MIDI file" });
+  await expect(midiSelect).toBeEnabled({ timeout: 10_000 });
+  await midiSelect.selectOption({ label: "Dr Dre - Still Dre.mid" });
+  await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });
+
   const exportBtn = page.getByRole("button", { name: "Export WAV" });
   await expect(exportBtn).toBeEnabled({ timeout: 10_000 });
 
   // Intercept the download so the test doesn't actually save a file
-  const downloadPromise = page.waitForEvent("download", { timeout: 120_000 });
+  const downloadPromise = page.waitForEvent("download", { timeout: 90_000 });
   await exportBtn.click();
 
   // Progress bar should appear (export is in progress)
