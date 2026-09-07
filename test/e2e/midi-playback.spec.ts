@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { openAppMenu, waitForSf2Ready } from "./app-menu.ts";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Timing constants
@@ -15,6 +18,110 @@ const TIMER_TICK_WAIT_MS = 800;
 const PAUSE_VERIFICATION_WAIT_MS = 600;
 /** Wait for AudioContext and first notes to start producing signal (ms). */
 const AUDIO_START_WAIT_MS = 500;
+
+// ---------------------------------------------------------------------------
+// WAV file validation helpers
+// ---------------------------------------------------------------------------
+
+interface WavInfo {
+  riff: string;
+  wave: string;
+  audioFormat: number;
+  numChannels: number;
+  sampleRate: number;
+  byteRate: number;
+  blockAlign: number;
+  bitsPerSample: number;
+  dataOffset: number;
+  dataBytes: number;
+}
+
+function findChunk(buffer: Buffer, start: number, chunkId: string): { offset: number; size: number } | null {
+  let offset = start;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString("ascii", offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    if (id === chunkId) {
+      return { offset, size };
+    }
+    offset += 8 + size + (size % 2);
+  }
+  return null;
+}
+
+function parseWavHeader(buffer: ArrayBufferLike): WavInfo {
+  const buf = Buffer.from(buffer);
+  if (buf.length < 44) {
+    throw new Error(`WAV file too small: ${buf.length} bytes`);
+  }
+  const riff = buf.toString("ascii", 0, 4);
+  const wave = buf.toString("ascii", 8, 12);
+  if (riff !== "RIFF" || wave !== "WAVE") {
+    throw new Error(`Invalid WAV header: ${riff}/${wave}`);
+  }
+
+  const fmt = findChunk(buf, 12, "fmt ");
+  if (!fmt) {
+    throw new Error("Missing fmt chunk in WAV");
+  }
+  const fmtOffset = fmt.offset + 8;
+  if (fmtOffset + 16 > buf.length) {
+    throw new Error("fmt chunk truncated");
+  }
+  const audioFormat = buf.readUInt16LE(fmtOffset);
+  const numChannels = buf.readUInt16LE(fmtOffset + 2);
+  const sampleRate = buf.readUInt32LE(fmtOffset + 4);
+  const byteRate = buf.readUInt32LE(fmtOffset + 8);
+  const blockAlign = buf.readUInt16LE(fmtOffset + 12);
+  const bitsPerSample = buf.readUInt16LE(fmtOffset + 14);
+
+  const data = findChunk(buf, 12, "data");
+  if (!data) {
+    throw new Error("Missing data chunk in WAV");
+  }
+
+  return {
+    riff,
+    wave,
+    audioFormat,
+    numChannels,
+    sampleRate,
+    byteRate,
+    blockAlign,
+    bitsPerSample,
+    dataOffset: data.offset + 8,
+    dataBytes: data.size,
+  };
+}
+
+function maxPcmSample(buffer: ArrayBufferLike, info: WavInfo): number {
+  const buf = Buffer.from(buffer);
+  let max = 0;
+  if (info.bitsPerSample === 16) {
+    const samples = info.dataBytes / 2;
+    for (let i = 0; i < samples; i++) {
+      const v = Math.abs(buf.readInt16LE(info.dataOffset + i * 2));
+      if (v > max) max = v;
+    }
+  } else if (info.bitsPerSample === 24) {
+    const samples = info.dataBytes / 3;
+    for (let i = 0; i < samples; i++) {
+      const off = info.dataOffset + i * 3;
+      const raw = buf[off] | (buf[off + 1] << 8) | (buf[off + 2] << 16);
+      const v = Math.abs(raw >= 0x800000 ? raw - 0x1000000 : raw);
+      if (v > max) max = v;
+    }
+  } else if (info.bitsPerSample === 32) {
+    const samples = info.dataBytes / 4;
+    for (let i = 0; i < samples; i++) {
+      const v = Math.abs(buf.readInt32LE(info.dataOffset + i * 4));
+      if (v > max) max = v;
+    }
+  } else {
+    throw new Error(`Unsupported bits per sample: ${info.bitsPerSample}`);
+  }
+  return max;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -171,6 +278,59 @@ test("Export WAV button triggers export progress indicator", async ({ page }) =>
 
   // After completion, progress bar should be gone
   await expect(page.locator(".exportProgressBar")).not.toBeVisible({ timeout: 10_000 });
+});
+
+// ---------------------------------------------------------------------------
+// Test: Play, export WAV, and validate the downloaded audio file
+// ---------------------------------------------------------------------------
+
+test("playing and exporting produces a valid, non-silent WAV file", async ({ page }) => {
+  await page.goto("/");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await waitForSf2Ready(page);
+
+  await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
+
+  const playBtn = page.getByRole("button", { name: "Play" });
+  await expect(playBtn).toBeEnabled({ timeout: 10_000 });
+  await playBtn.click();
+
+  // Wait briefly so playback is active; Export WAV remains enabled while playing.
+  await page.waitForTimeout(TIMER_TICK_WAIT_MS);
+
+  const exportBtn = page.getByRole("button", { name: "Export WAV" });
+  await expect(exportBtn).toBeEnabled({ timeout: 10_000 });
+
+  // Intercept the download and save it to a temp path for inspection.
+  const downloadPromise = page.waitForEvent("download", { timeout: 120_000 });
+  await exportBtn.click();
+
+  await expect(page.locator(".exportProgressBar")).toBeVisible({ timeout: 10_000 });
+
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.wav$/i);
+
+  const tmpDir = mkdtempSync(join(tmpdir(), "gbk-wav-export-"));
+  const wavPath = join(tmpDir, download.suggestedFilename());
+  await download.saveAs(wavPath);
+
+  await expect(page.locator(".exportProgressBar")).not.toBeVisible({ timeout: 10_000 });
+
+  // Validate the saved WAV file.
+  const wavBuffer = readFileSync(wavPath);
+  const info = parseWavHeader(wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength));
+
+  expect(info.audioFormat).toBe(1); // PCM
+  expect(info.numChannels).toBe(2);
+  expect(info.sampleRate).toBe(44100);
+  expect(info.bitsPerSample).toBe(16);
+  expect(info.blockAlign).toBe(info.numChannels * (info.bitsPerSample / 8));
+  expect(info.byteRate).toBe(info.sampleRate * info.blockAlign);
+  expect(info.dataBytes).toBeGreaterThan(0);
+  expect(info.dataBytes % info.blockAlign).toBe(0);
+
+  const maxSample = maxPcmSample(wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength), info);
+  expect(maxSample).toBeGreaterThan(256); // well above digital silence for 16-bit PCM
 });
 
 // ---------------------------------------------------------------------------
