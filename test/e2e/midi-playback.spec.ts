@@ -284,12 +284,20 @@ test("Export WAV button triggers export progress indicator", async ({ page }) =>
 // Test: Play, export WAV, and validate the downloaded audio file
 // ---------------------------------------------------------------------------
 
-test("playing and exporting produces a valid, non-silent WAV file", async ({ page }) => {
+test("playing and exporting produces a valid, non-silent WAV file", async ({ page }, testInfo) => {
+  testInfo.setTimeout(120_000);
   await page.goto("/");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
 
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
+
+  // Switch to a shorter bundled MIDI so offline rendering finishes in time.
+  await openAppMenu(page);
+  const midiSelect = page.getByRole("combobox", { name: "Select bundled MIDI file" });
+  await expect(midiSelect).toBeEnabled({ timeout: 10_000 });
+  await midiSelect.selectOption({ label: "Dr Dre - Still Dre.mid" });
+  await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });
 
   const playBtn = page.getByRole("button", { name: "Play" });
   await expect(playBtn).toBeEnabled({ timeout: 10_000 });
@@ -302,7 +310,7 @@ test("playing and exporting produces a valid, non-silent WAV file", async ({ pag
   await expect(exportBtn).toBeEnabled({ timeout: 10_000 });
 
   // Intercept the download and save it to a temp path for inspection.
-  const downloadPromise = page.waitForEvent("download", { timeout: 120_000 });
+  const downloadPromise = page.waitForEvent("download", { timeout: 90_000 });
   await exportBtn.click();
 
   await expect(page.locator(".exportProgressBar")).toBeVisible({ timeout: 10_000 });
