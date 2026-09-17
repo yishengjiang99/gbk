@@ -4,23 +4,13 @@ const WHOLE = TICKS_PER_QUARTER * 4;
 const VELOCITY_RH = 62;
 const VELOCITY_LH = 50;
 
-const NOTE_BASE: Record<string, number> = {
+const LETTER_BASE: Record<string, number> = {
   C: 0,
-  "C#": 1,
-  Db: 1,
   D: 2,
-  "D#": 3,
-  Eb: 3,
   E: 4,
   F: 5,
-  "F#": 6,
-  Gb: 6,
   G: 7,
-  "G#": 8,
-  Ab: 8,
   A: 9,
-  "A#": 10,
-  Bb: 10,
   B: 11,
 };
 
@@ -30,7 +20,7 @@ export interface ParsedSheetMusicMidi {
   warnings: string[];
 }
 
-interface BinarySheetImage {
+export interface BinarySheetImage {
   width: number;
   height: number;
   dark: Uint8Array;
@@ -53,6 +43,7 @@ export interface DetectedSheetNote {
   startTick: number;
   durationTicks: number;
   velocity: number;
+  channel?: number;
 }
 
 interface NoteCandidate {
@@ -63,14 +54,18 @@ interface NoteCandidate {
   staffTop: number;
   staffBottom: number;
   systemIndex: number;
+  clef: "treble" | "bass";
 }
 
 function note(name: string): number {
-  const match = /^([A-G](?:#|b)?)(-?\d+)$/.exec(name);
+  const match = /^([A-G])([#b]?)(-?\d+)$/.exec(name);
   if (!match) throw new Error(`Invalid note name: ${name}`);
 
-  const [, pitch, octaveText] = match;
-  return 12 * (Number(octaveText) + 1) + NOTE_BASE[pitch];
+  const [, letter, accidental, octaveText] = match;
+  const base = LETTER_BASE[letter];
+  if (base === undefined) throw new Error(`Invalid note name: ${name}`);
+  const shift = accidental === "#" ? 1 : accidental === "b" ? -1 : 0;
+  return 12 * (Number(octaveText) + 1) + base + shift;
 }
 
 function vlq(value: number): number[] {
@@ -178,14 +173,15 @@ export function buildDetectedSheetMusicMidi(notes: DetectedSheetNote[], title = 
   conductor.meta(0, 0x58, [4, 2, 24, 8]);
 
   melody.push(0, [0xc0, 0]);
+  melody.push(0, [0xc1, 0]);
   for (const noteEvent of notes) {
-    melody.addNote(
-      Math.max(0, Math.trunc(noteEvent.startTick)),
-      0,
-      Math.max(0, Math.min(127, Math.trunc(noteEvent.midi))),
-      Math.max(QUARTER / 4, Math.trunc(noteEvent.durationTicks)),
-      Math.max(1, Math.min(127, Math.trunc(noteEvent.velocity)))
-    );
+    const startTick = Math.max(0, Math.trunc(noteEvent.startTick));
+    const midi = Math.max(0, Math.min(127, Math.trunc(noteEvent.midi)));
+    const duration = Math.max(QUARTER / 4, Math.trunc(noteEvent.durationTicks));
+    const velocity = Math.max(1, Math.min(127, Math.trunc(noteEvent.velocity)));
+    const channel = Math.max(0, Math.min(15, Math.trunc(noteEvent.channel ?? 0)));
+    if (![startTick, midi, duration, velocity, channel].every(Number.isFinite)) continue;
+    melody.addNote(startTick, channel, midi, duration, velocity);
   }
   if (notes.length) {
     const maxNoteEnd = Math.max(...notes.map((noteEvent) => noteEvent.startTick + noteEvent.durationTicks));
@@ -201,11 +197,21 @@ function basenameWithoutExtension(name: string): string {
 }
 
 export function isSupportedSheetMusicImageFile(file: File): boolean {
-  const type = file.type.toLowerCase();
+  const type = (file.type || "").toLowerCase().trim();
   const name = file.name.toLowerCase();
   const hasSupportedExtension = /\.(?:jpe?g|png)$/.test(name);
+  const hasSupportedType =
+    type === "image/jpeg" ||
+    type === "image/jpg" ||
+    type === "image/pjpeg" ||
+    type === "image/png" ||
+    type === "image/x-png";
 
-  if (type) return type === "image/jpeg" || type === "image/png";
+  if (hasSupportedType) return true;
+  // A declared but unsupported image type (SVG, WebP, GIF, HEIC) wins over the
+  // file name. Generic or missing types fall through to the extension, which is
+  // what iOS and some desktop pickers send for camera JPEGs.
+  if (type.startsWith("image/")) return false;
   return hasSupportedExtension;
 }
 
@@ -325,6 +331,7 @@ function projectRowsForSlope(image: BinarySheetImage, slope: number): Uint16Arra
   const offset = extra;
 
   for (let y = 0; y < image.height; y += 1) {
+    if (image.rowCounts[y] === 0) continue;
     for (let x = 0; x < image.width; x += 1) {
       if (!image.dark[y * image.width + x]) continue;
       const projectedY = Math.round(y - slope * (x - image.width / 2)) + offset;
@@ -428,13 +435,8 @@ function selectGrandStaffPairs(staves: DetectedStaff[], imageHeight: number): De
     const upper = sorted[upperIndex];
     for (let lowerIndex = upperIndex + 1; lowerIndex < sorted.length; lowerIndex += 1) {
       const lower = sorted[lowerIndex];
+      if (!looksLikeGrandStaffPair(upper, lower)) continue;
       const averageSpacing = (upper.spacing + lower.spacing) / 2;
-      const separationInSpaces = (lower.top - upper.top) / Math.max(1, averageSpacing);
-      if (separationInSpaces < 4 || separationInSpaces > 12) continue;
-      if (lower.top < upper.bottom - averageSpacing * 0.25) continue;
-
-      const spacingRatio = Math.max(upper.spacing, lower.spacing) / Math.max(1, Math.min(upper.spacing, lower.spacing));
-      if (spacingRatio > 1.75) continue;
       const slopePenalty = Math.abs(upper.slope - lower.slope) * averageSpacing;
       pairCandidates.push({
         upper,
@@ -576,7 +578,6 @@ export function detectStaves(image: BinarySheetImage): DetectedStaff[] {
   const bandStep = Math.max(120, Math.round(bandHeight * 0.55));
   for (let minY = 0; minY < image.height; minY += bandStep) {
     const maxY = Math.min(image.height - 1, minY + bandHeight - 1);
-    const bandImage = { ...image, height: maxY - minY + 1 };
     const bandBest: DetectedStaff[] = [];
     const xWindows = [
       [0, image.width - 1],
@@ -593,7 +594,9 @@ export function detectStaves(image: BinarySheetImage): DetectedStaff[] {
           ...center,
           center: center.center - offset + minY,
         }));
-        const staves = findStaffSequences(centers, slope, bandImage);
+        // Centers are in full-image coordinates; keep the original height so
+        // max staff spacing is not clamped by the band window.
+        const staves = findStaffSequences(centers, slope, image);
         if (staves.length > windowBest.length ||
           (staves.length === windowBest.length &&
             staves.reduce((sum, staff) => sum + (staff.support ?? 0), 0) >
@@ -621,9 +624,21 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+function looksLikeGrandStaffPair(upper: DetectedStaff, lower: DetectedStaff): boolean {
+  const averageSpacing = (upper.spacing + lower.spacing) / 2;
+  const separationInSpaces = (lower.top - upper.top) / Math.max(1, averageSpacing);
+  if (separationInSpaces < 4 || separationInSpaces > 12) return false;
+  if (lower.top < upper.bottom - averageSpacing * 0.25) return false;
+  const spacingRatio =
+    Math.max(upper.spacing, lower.spacing) / Math.max(1, Math.min(upper.spacing, lower.spacing));
+  return spacingRatio <= 1.75;
+}
+
 function assignStaffSystems(staves: DetectedStaff[]): DetectedStaff[] {
   let assigned: DetectedStaff[];
-  if (staves.length < 4) {
+  if (staves.length === 2 && looksLikeGrandStaffPair(staves[0], staves[1])) {
+    assigned = staves.map((staff) => ({ ...staff, systemIndex: 0 }));
+  } else if (staves.length < 4) {
     assigned = staves.map((staff, index) => ({ ...staff, systemIndex: index }));
   } else if (staves.length >= 6) {
     assigned = staves.map((staff, index) => ({
@@ -661,8 +676,27 @@ function assignStaffSystems(staves: DetectedStaff[]): DetectedStaff[] {
   });
 }
 
-function isNearStaffLine(x: number, y: number, staff: DetectedStaff, width: number): boolean {
-  return staff.lines.some((line) => Math.abs(y - lineYAtX(staff, line, x, width)) <= Math.max(1, staff.spacing * 0.22));
+function suppressThinStaffLinePixels(image: BinarySheetImage, staff: DetectedStaff): Uint8Array {
+  const cleaned = image.dark.slice();
+  const maxThickness = Math.max(1, Math.round(staff.spacing * 0.28));
+
+  for (let x = 0; x < image.width; x += 1) {
+    for (const line of staff.lines) {
+      const yMid = Math.round(lineYAtX(staff, line, x, image.width));
+      if (yMid < 0 || yMid >= image.height) continue;
+      if (!image.dark[yMid * image.width + x]) continue;
+
+      let y0 = yMid;
+      let y1 = yMid;
+      while (y0 > 0 && image.dark[(y0 - 1) * image.width + x]) y0 -= 1;
+      while (y1 < image.height - 1 && image.dark[(y1 + 1) * image.width + x]) y1 += 1;
+      if (y1 - y0 + 1 > maxThickness) continue;
+
+      for (let y = y0; y <= y1; y += 1) cleaned[y * image.width + x] = 0;
+    }
+  }
+
+  return cleaned;
 }
 
 function diatonicIndexToMidi(index: number): number {
@@ -683,6 +717,7 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
   const slopeMargin = Math.abs(staff.slope) * image.width;
   const minY = Math.max(0, Math.floor(staff.top - staff.spacing * 2.25 - slopeMargin));
   const maxY = Math.min(image.height - 1, Math.ceil(staff.bottom + staff.spacing * 2.25 + slopeMargin));
+  const dark = suppressThinStaffLinePixels(image, staff);
   const visited = new Uint8Array(image.width * image.height);
   const notes: NoteCandidate[] = [];
   const stack: number[] = [];
@@ -690,7 +725,7 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = 0; x < image.width; x += 1) {
       const startIdx = y * image.width + x;
-      if (visited[startIdx] || !image.dark[startIdx] || isNearStaffLine(x, y, staff, image.width)) continue;
+      if (visited[startIdx] || !dark[startIdx]) continue;
 
       let minX = x;
       let maxX = x;
@@ -717,11 +752,11 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
 
         const neighbors = [idx - 1, idx + 1, idx - image.width, idx + image.width];
         for (const next of neighbors) {
-          if (next < 0 || next >= image.dark.length || visited[next] || !image.dark[next]) continue;
+          if (next < 0 || next >= dark.length || visited[next] || !dark[next]) continue;
           const nx = next % image.width;
           const ny = Math.floor(next / image.width);
           if (Math.abs(nx - cx) + Math.abs(ny - cy) !== 1) continue;
-          if (ny < minY || ny > maxY || isNearStaffLine(nx, ny, staff, image.width)) continue;
+          if (ny < minY || ny > maxY) continue;
           visited[next] = 1;
           stack.push(next);
         }
@@ -732,8 +767,8 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
       const density = area / Math.max(1, compW * compH);
       const minWidth = Math.max(3, staff.spacing * 0.35);
       const minHeight = Math.max(3, staff.spacing * 0.28);
-      const maxWidth = staff.spacing * 1.15;
-      const maxHeight = staff.spacing * 0.95;
+      const maxWidth = staff.spacing * 1.4;
+      const maxHeight = staff.spacing * 1.35;
       const aspect = compW / Math.max(1, compH);
       const looksLikeNotehead =
         compW >= minWidth &&
@@ -741,10 +776,10 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
         compW <= maxWidth &&
         compH <= maxHeight &&
         aspect >= 0.68 &&
-        aspect <= 2.05 &&
+        aspect <= 2.2 &&
         density >= 0.32 &&
         area >= staff.spacing * staff.spacing * 0.1 &&
-        area <= staff.spacing * staff.spacing * 0.85;
+        area <= staff.spacing * staff.spacing * 0.95;
 
       if (looksLikeNotehead) {
         const centerX = sumX / area;
@@ -763,6 +798,7 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
           staffTop: staff.top,
           staffBottom: staff.bottom,
           systemIndex: staff.systemIndex,
+          clef: staff.clef,
         });
       }
     }
@@ -852,7 +888,8 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
           midi: candidate.midi,
           startTick,
           durationTicks: QUARTER,
-          velocity: 78,
+          velocity: candidate.clef === "bass" ? VELOCITY_LH : VELOCITY_RH,
+          channel: candidate.clef === "bass" ? 1 : 0,
         });
       }
     }
@@ -862,7 +899,7 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
   return uniqueEvents.slice(0, Math.max(1, Math.floor(image.width * 0.35)));
 }
 
-function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
+export function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
   const warnings: string[] = [];
   const staves = detectStaves(image);
   if (!staves.length) return { notes: [], warnings: ["No five-line staff was detected in the image."] };
