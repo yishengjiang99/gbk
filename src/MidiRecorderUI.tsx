@@ -3,6 +3,7 @@ import { NavMenuSection, ToolbarMenu } from "./toolbar-menu.tsx";
 import { createMidiRecorder, MidiRecorderExports, RecorderState } from "./midi-recorder.ts";
 import RecorderWorker from "./midi-recorder.worker.ts?worker";
 import { createMidiDriver, MidiDriver } from "./midi-driver.ts";
+import { runBatchBenchmark, BenchmarkResult, recommendBatchSize } from "./midi-recorder-benchmark.ts";
 
 interface MidiRecorderUIProps {
   audioCtxState: string;
@@ -25,6 +26,7 @@ export default function MidiRecorderUI({
   const [stats, setStats] = useState<{ batches: number; events: number; latencyMs: number } | null>(
     null
   );
+  const [benchmark, setBenchmark] = useState<BenchmarkResult[] | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const recorderRef = useRef<MidiRecorderExports | null>(null);
@@ -115,22 +117,8 @@ export default function MidiRecorderUI({
   }, [selectedInput]);
 
   const onBenchmark = useCallback(() => {
-    const worker = workerRef.current;
-    const recorder = recorderRef.current;
-    if (!worker || !recorder) return;
-
-    recorder.reset();
-    recorder.start();
-    const start = performance.now();
-    for (let i = 0; i < 5000; i++) {
-      const channel = i % 16;
-      const note = 60 + (i % 24);
-      const status = i % 2 === 0 ? 0x90 | channel : 0x80 | channel;
-      const velocity = i % 2 === 0 ? Math.max(1, i % 127) : 0;
-      recorder.recordMessage(start + i * 0.1, [status, note, velocity]);
-    }
-    recorder.stop();
-    worker.postMessage({ type: "stats" });
+    const results = runBatchBenchmark(5000);
+    setBenchmark(results);
   }, []);
 
   return (
@@ -260,6 +248,40 @@ export default function MidiRecorderUI({
                 </p>
                 <p>
                   <strong>Latency:</strong> {stats.latencyMs.toFixed(2)} ms
+                </p>
+              </div>
+            )}
+            {benchmark && (
+              <div className="detailBlock">
+                <h3>Batch Benchmark</h3>
+                <table className="sf2Table">
+                  <thead>
+                    <tr>
+                      <th>Batch</th>
+                      <th>Messages</th>
+                      <th>Reduction</th>
+                      <th>P99 (ms)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {benchmark.map((r) => (
+                      <tr key={r.batchSize}>
+                        <td>{r.batchSize}</td>
+                        <td>{r.messageCount}</td>
+                        <td>
+                          {(
+                            (1 - r.messageCount / benchmark[0].messageCount) *
+                            100
+                          ).toFixed(1)}
+                          %
+                        </td>
+                        <td>{r.p99LatencyMs.toFixed(3)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p>
+                  <strong>Recommended:</strong> {recommendBatchSize(benchmark)}
                 </p>
               </div>
             )}
