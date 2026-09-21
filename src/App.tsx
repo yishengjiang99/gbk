@@ -10,6 +10,7 @@ import {
   MidiMessageHandler,
 } from "./midi-driver";
 import MidiReader from "./midireader";
+import MidiRecorderUI from "./MidiRecorderUI";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 
 // ---------------------------------------------------------------------------
@@ -1298,6 +1299,15 @@ export default function App() {
         />
       )}
 
+      {activeTab === "recorder" && (
+        <MidiRecorderUI
+          audioCtxState={audioCtxState}
+          onTogglePower={onTogglePower}
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+        />
+      )}
+
       {activeTab === "sf2" && (
         <>
           <header className="topToolbar card">
@@ -1318,14 +1328,25 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    className={`toolbarActionBtn ${activeTab === "sf2" ? "active" : ""}`}
+                    className={`toolbarActionBtn ${(activeTab as string) === "sf2" ? "active" : ""}`}
                     onClick={() => setActiveTab("sf2")}
-                    aria-pressed={activeTab === "sf2"}
+                    aria-pressed={(activeTab as string) === "sf2"}
                     aria-label="SF2 Explorer"
                     title="SF2 Explorer"
                   >
                     <i className="fa-solid fa-wave-square" aria-hidden="true" />
                     <span>SF2</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`toolbarActionBtn ${(activeTab as string) === "recorder" ? "active" : ""}`}
+                    onClick={() => setActiveTab("recorder")}
+                    aria-pressed={(activeTab as string) === "recorder"}
+                    aria-label="MIDI Recorder"
+                    title="MIDI Recorder"
+                  >
+                    <i className="fa-solid fa-record-vinyl" aria-hidden="true" />
+                    <span>Recorder</span>
                   </button>
                 </div>
               </div>
