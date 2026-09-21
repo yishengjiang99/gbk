@@ -26,8 +26,7 @@ function runBenchmarkForBatchSize(batchSize: number, totalEvents: number): Bench
 
   const recorder = createMidiRecorder({
     batchSize,
-    onBatch: (batch: MidiRecorderBatch, _typed: Float64Array) => {
-      // Simulate worker decode/processing cost proportional to batch length.
+    onBatch: (batch: MidiRecorderBatch) => {
       const processedAt = performance.now();
       timedBatches.push({
         events: batch.events.length,
@@ -48,7 +47,6 @@ function runBenchmarkForBatchSize(batchSize: number, totalEvents: number): Bench
   }
   recorder.stop();
 
-  // Any remaining partial batch is considered delivered immediately at stop.
   const finalMs = performance.now();
   for (const pending of recorder.pendingBatch) {
     timedBatches.push({
@@ -77,7 +75,7 @@ export function recommendBatchSize(results: BenchmarkResult[]): number {
   const eligible = results
     .filter((r) => r.batchSize > 1)
     .filter((r) => r.p99LatencyMs < 10)
-    .filter((r) => (1 - r.messageCount / baseline.messageCount) >= 0.75)
+    .filter((r) => 1 - r.messageCount / baseline.messageCount >= 0.75)
     .sort((a, b) => a.batchSize - b.batchSize);
   return eligible[0]?.batchSize ?? 32;
 }

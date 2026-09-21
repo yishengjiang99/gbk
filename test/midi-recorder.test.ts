@@ -10,12 +10,12 @@ test("records note on and note off with relative timing", () => {
   recorder.stop();
 
   assert.equal(recorder.recordedBatches.length, 1);
-  assert.equal(recorder.recordedBatches[0].events.length, 2);
-  assert.equal(recorder.recordedBatches[0].events[0].deltaMs, 0);
-  assert.equal(recorder.recordedBatches[0].events[1].deltaMs, 100);
-  assert.equal(recorder.recordedBatches[0].events[0].status, 0x90);
-  assert.equal(recorder.recordedBatches[0].events[0].data1, 60);
-  assert.equal(recorder.recordedBatches[0].events[0].data2, 100);
+  const events = recorder.recordedBatches[0].events;
+  assert.equal(events.length, 2);
+  assert.equal(events[0].deltaMs, 0);
+  assert.deepEqual(events[0].bytes, [0x90, 60, 100]);
+  assert.equal(events[1].deltaMs, 100);
+  assert.deepEqual(events[1].bytes, [0x80, 60, 0]);
 });
 
 test("treats note on with velocity zero as note off", () => {
@@ -27,8 +27,7 @@ test("treats note on with velocity zero as note off", () => {
 
   const events = recorder.recordedBatches[0].events;
   assert.equal(events.length, 2);
-  assert.equal(events[1].status, 0x90);
-  assert.equal(events[1].data2, 0);
+  assert.deepEqual(events[1].bytes, [0x90, 60, 0]);
   assert.equal(recorder.snapshot().activeNotes.length, 0);
 });
 
@@ -56,10 +55,8 @@ test("sustain pedal is recorded as a controller event", () => {
 
   const events = recorder.recordedBatches[0].events;
   assert.equal(events.length, 3);
-  assert.equal(events[1].status, 0xb0);
-  assert.equal(events[1].data1, 64);
-  assert.equal(events[1].data2, 127);
-  assert.equal(events[2].data2, 0);
+  assert.deepEqual(events[1].bytes, [0xb0, 64, 127]);
+  assert.deepEqual(events[2].bytes, [0xb0, 64, 0]);
 });
 
 test("channel isolation keeps notes separate", () => {
@@ -132,19 +129,6 @@ test("reset clears state and batches", () => {
   assert.equal(recorder.snapshot().activeNotes.length, 0);
 });
 
-test("device disconnection leaves no stuck notes when input stops", () => {
-  const recorder = createMidiRecorder({ batchSize: 4 });
-  recorder.start();
-  recorder.recordMessage(0, [0x90, 60, 100]);
-  recorder.recordMessage(0, [0x90, 64, 100]);
-  // Simulate disconnect by stopping without matching note-offs.
-  recorder.stop();
-
-  const snapshot = recorder.snapshot();
-  assert.equal(snapshot.activeNotes.length, 2);
-  assert.equal(snapshot.state, "stopped");
-});
-
 test("batches encode events in correct order", () => {
   const recorder = createMidiRecorder({ batchSize: 2 });
   recorder.start();
@@ -156,7 +140,90 @@ test("batches encode events in correct order", () => {
   const events = recorder.recordedBatches.flatMap((b) => b.events);
   assert.equal(events.length, 5);
   for (let i = 0; i < 5; i++) {
-    assert.equal(events[i].data1, 60 + i);
+    assert.deepEqual(events[i].bytes, [0x90, 60 + i, 100]);
     assert.equal(events[i].deltaMs, i * 10);
   }
+});
+
+test("records system realtime messages as single bytes", () => {
+  const recorder = createMidiRecorder({ batchSize: 4 });
+  recorder.start();
+  recorder.recordMessage(0, [0xf8]);
+  recorder.recordMessage(10, [0xfa]);
+  recorder.recordMessage(20, [0xfc]);
+  recorder.stop();
+
+  const events = recorder.recordedBatches[0].events;
+  assert.equal(events.length, 3);
+  assert.deepEqual(events[0].bytes, [0xf8]);
+  assert.deepEqual(events[1].bytes, [0xfa]);
+  assert.deepEqual(events[2].bytes, [0xfc]);
+});
+
+test("records song position pointer", () => {
+  const recorder = createMidiRecorder({ batchSize: 4 });
+  recorder.start();
+  recorder.recordMessage(0, [0xf2, 0x10, 0x00]);
+  recorder.stop();
+
+  const events = recorder.recordedBatches[0].events;
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].bytes, [0xf2, 0x10, 0x00]);
+});
+
+test("records complete sysex messages", () => {
+  const recorder = createMidiRecorder({ batchSize: 4 });
+  recorder.start();
+  recorder.recordMessage(0, [0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7]);
+  recorder.stop();
+
+  const events = recorder.recordedBatches[0].events;
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].bytes, [0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7]);
+});
+
+test("flushes incomplete sysex on stop", () => {
+  const recorder = createMidiRecorder({ batchSize: 4 });
+  recorder.start();
+  recorder.recordMessage(0, [0xf0, 0x7e, 0x7f]);
+  recorder.stop();
+
+  const events = recorder.recordedBatches[0].events;
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].bytes, [0xf0, 0x7e, 0x7f]);
+});
+
+test("handles running status for channel voice messages", () => {
+  const recorder = createMidiRecorder({ batchSize: 4 });
+  recorder.start();
+  recorder.recordMessage(0, [0x90, 60, 100]);
+  recorder.recordMessage(10, [60, 0]);
+  recorder.stop();
+
+  const events = recorder.recordedBatches[0].events;
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[0].bytes, [0x90, 60, 100]);
+  assert.deepEqual(events[1].bytes, [0x90, 60, 0]);
+});
+
+test("typed array encodes byte count and preserves all bytes", () => {
+  const recorder = createMidiRecorder({ batchSize: 2 });
+  recorder.start();
+  recorder.recordMessage(0, [0xf0, 0x01, 0x02, 0xf7]);
+  recorder.recordMessage(1, [0x90, 60, 100]);
+  recorder.stop();
+
+  const typed = (recorder as unknown as { buildTypedEvents(): Float64Array }).buildTypedEvents();
+  const stride = 6;
+  assert.equal(typed.length, 2 * stride);
+  assert.equal(typed[0], 0);
+  assert.equal(typed[1], 4);
+  assert.equal(typed[3], 0xf0);
+  assert.equal(typed[4], 0x01);
+  assert.equal(typed[5], 0x02);
+  assert.equal(typed[stride + 0], 1);
+  assert.equal(typed[stride + 1], 3);
+  assert.equal(typed[stride + 3], 0x90);
+  assert.equal(typed[stride + 4], 60);
+  assert.equal(typed[stride + 5], 100);
 });

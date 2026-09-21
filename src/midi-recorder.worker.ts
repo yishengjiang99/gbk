@@ -1,8 +1,6 @@
 interface RecorderEvent {
   deltaMs: number;
-  status: number;
-  data1: number;
-  data2: number;
+  bytes: number[];
 }
 
 interface WorkerBatchMessage {
@@ -10,10 +8,6 @@ interface WorkerBatchMessage {
   events: Float64Array;
   startMs: number;
   endMs: number;
-}
-
-interface WorkerFlushMessage {
-  type: "flush";
 }
 
 interface WorkerStatsMessage {
@@ -35,17 +29,21 @@ interface StoredBatch {
   receivedAt: number;
 }
 
+const HEADER_FIELDS = 3;
+const MAX_MIDI_MESSAGE_BYTES = 3;
+
 const batches: StoredBatch[] = [];
 
 function decodeBatch(events: Float64Array): RecorderEvent[] {
   const out: RecorderEvent[] = [];
-  for (let i = 0; i < events.length; i += 8) {
-    out.push({
-      deltaMs: events[i],
-      status: events[i + 1],
-      data1: events[i + 2],
-      data2: events[i + 3],
-    });
+  for (let i = 0; i < events.length; i += HEADER_FIELDS + MAX_MIDI_MESSAGE_BYTES) {
+    const deltaMs = events[i];
+    const byteCount = Math.max(0, Math.min(MAX_MIDI_MESSAGE_BYTES, events[i + 1]));
+    const bytes: number[] = [];
+    for (let j = 0; j < byteCount; j++) {
+      bytes.push(events[i + HEADER_FIELDS + j]);
+    }
+    out.push({ deltaMs, bytes });
   }
   return out;
 }
