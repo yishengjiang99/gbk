@@ -1,298 +1,245 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { NavMenuSection, ToolbarMenu } from "./toolbar-menu.tsx";
-import { createMidiRecorder, MidiRecorderExports, RecorderState } from "./midi-recorder.ts";
-import RecorderWorker from "./midi-recorder.worker.ts?worker";
-import { createMidiDriver, MidiDriver } from "./midi-driver.ts";
-import { runBatchBenchmark, BenchmarkResult, recommendBatchSize } from "./midi-recorder-benchmark.ts";
+import { type JSX, useEffect, useMemo, useRef, useState } from "react";
+import { createMidiDriver, type MidiDriver, type MidiStateChange } from "./midi-driver";
+import { createMidiRecorder, type MidiRecorderSnapshot } from "./midi-recorder";
+import { runBatchBenchmark, type BenchmarkResult } from "./midi-recorder-benchmark";
+import type { WorkerStats } from "./midi-recorder.worker";
+import MidiRecorderWorker from "./midi-recorder.worker.ts?worker";
 
-interface MidiRecorderUIProps {
-  audioCtxState: string;
-  onTogglePower: () => void;
-  activeTab: string;
-  onSelectTab: (tab: string) => void;
-}
-
-export default function MidiRecorderUI({
-  audioCtxState,
-  onTogglePower,
-  activeTab,
-  onSelectTab,
-}: MidiRecorderUIProps) {
-  const [state, setState] = useState<RecorderState>("idle");
-  const [midiEnabled, setMidiEnabled] = useState(false);
-  const [midiStatus, setMidiStatus] = useState("MIDI disabled");
-  const [midiInputs, setMidiInputs] = useState<{ id: string; name: string }[]>([]);
-  const [selectedInput, setSelectedInput] = useState("all");
-  const [stats, setStats] = useState<{ batches: number; events: number; latencyMs: number } | null>(
-    null
-  );
-  const [benchmark, setBenchmark] = useState<BenchmarkResult[] | null>(null);
-
+export function MidiRecorderUI(): JSX.Element {
   const workerRef = useRef<Worker | null>(null);
-  const recorderRef = useRef<MidiRecorderExports | null>(null);
   const driverRef = useRef<MidiDriver | null>(null);
+  const permissionRef = useRef<Promise<MidiDriver> | null>(null);
+  const recorderRef = useRef<ReturnType<typeof createMidiRecorder> | null>(null);
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [snapshot, setSnapshot] = useState<MidiRecorderSnapshot | null>(null);
+  const [inputs, setInputs] = useState<MidiStateChange["inputs"]>([]);
+  const [selectedInput, setSelectedInput] = useState<string>("all");
+  const [error, setError] = useState<string | null>(null);
+  const [benchmark, setBenchmark] = useState<BenchmarkResult[] | null>(null);
+  const [workerStats, setWorkerStats] = useState<WorkerStats | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const unmountedRef = useRef(false);
+
+  const worker = useMemo(() => {
+    const w = new MidiRecorderWorker();
+    workerRef.current = w;
+    return w;
+  }, []);
 
   useEffect(() => {
-    const worker = new RecorderWorker();
-    workerRef.current = worker;
-    recorderRef.current = createMidiRecorder({ worker, batchSize: 32 });
-    worker.onmessage = (event: MessageEvent) => {
-      const msg = event.data;
-      if (msg?.type === "stats") {
-        setStats({ batches: msg.batches, events: msg.events, latencyMs: msg.latencyMs });
+    unmountedRef.current = false;
+    const w = worker;
+    const handleMessage = (event: MessageEvent<{ type: string; stats?: WorkerStats }>) => {
+      if (event.data.type === "stats" && event.data.stats) {
+        setWorkerStats(event.data.stats);
       }
     };
+    w.addEventListener("message", handleMessage);
     return () => {
-      worker.terminate();
+      unmountedRef.current = true;
+      w.removeEventListener("message", handleMessage);
+      if (recorderRef.current) {
+        recorderRef.current.stop();
+        recorderRef.current = null;
+      }
+      if (driverRef.current) {
+        driverRef.current.disconnect();
+        driverRef.current = null;
+      }
+      permissionRef.current = null;
+      w.terminate();
       workerRef.current = null;
-      recorderRef.current = null;
     };
-  }, []);
+  }, [worker]);
 
-  const refreshState = useCallback(() => {
-    setState(recorderRef.current?.state ?? "idle");
-    setStats((prev) =>
-      prev
-        ? {
-            ...prev,
-            events: recorderRef.current?.snapshot().recordedCount ?? prev.events,
-          }
-        : prev
-    );
-  }, []);
+  const createRecorder = (): ReturnType<typeof createMidiRecorder> => {
+    worker.postMessage({ type: "reset" });
+    return createMidiRecorder({ worker, batchSize: 32 });
+  };
 
-  const onRecord = useCallback(() => {
-    recorderRef.current?.start();
-    refreshState();
-  }, [refreshState]);
+  const requestStats = (): void => {
+    worker.postMessage({ type: "stats" });
+  };
 
-  const onStop = useCallback(() => {
-    recorderRef.current?.stop();
-    refreshState();
-  }, [refreshState]);
+  const onToggleMidi = async (): Promise<void> => {
+    if (isLoading) return;
+    setError(null);
 
-  const onDownload = useCallback(() => {
-    recorderRef.current?.download(`recording-${Date.now()}.json`);
-  }, []);
-
-  const onToggleMidi = useCallback(async () => {
     if (driverRef.current) {
       driverRef.current.disconnect();
       driverRef.current = null;
-      setMidiEnabled(false);
-      setMidiStatus("MIDI disabled");
-      setMidiInputs([]);
+      permissionRef.current = null;
+      setInputs([]);
       return;
     }
+
+    setIsLoading(true);
     try {
-      const driver = await createMidiDriver({
+      const permissionPromise = createMidiDriver({
+        onStateChange: (state) => {
+          if (unmountedRef.current) return;
+          setInputs(state.inputs);
+        },
+        onRawMessage: (timestampMs, data) => {
+          if (unmountedRef.current) return;
+          recorderRef.current?.recordMessage(timestampMs, data);
+        },
         selectedInputId: selectedInput,
-        onNoteOn: (note, velocity, channel) => {
-          recorderRef.current?.recordMessage(performance.now(), [
-            0x90 | channel,
-            note,
-            velocity,
-          ]);
-        },
-        onNoteOff: (note, channel) => {
-          recorderRef.current?.recordMessage(performance.now(), [0x80 | channel, note, 0]);
-        },
-        onStateChange: ({ connected, names, inputs }) => {
-          setMidiInputs(inputs ?? []);
-          setMidiStatus(
-            connected === 0 ? "MIDI enabled (no inputs)" : `MIDI inputs: ${names.join(", ")}`
-          );
-        },
       });
+      permissionRef.current = permissionPromise;
+      const driver = await permissionPromise;
+      if (unmountedRef.current) {
+        driver.disconnect();
+        return;
+      }
       driverRef.current = driver;
-      setMidiEnabled(true);
-      setMidiStatus("MIDI enabled");
     } catch (err) {
-      setMidiStatus(err instanceof Error ? err.message : String(err));
+      if (!unmountedRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (!unmountedRef.current) {
+        setIsLoading(false);
+      }
     }
+  };
+
+  const onStart = (): void => {
+    if (recorderRef.current) {
+      recorderRef.current.stop();
+    }
+    const recorder = createRecorder();
+    recorderRef.current = recorder;
+    recorder.start();
+    setIsRecording(true);
+    setSnapshot(recorder.snapshot());
+    setBenchmark(null);
+    setWorkerStats(null);
+  };
+
+  const onStop = (): void => {
+    recorderRef.current?.stop();
+    setIsRecording(false);
+    if (recorderRef.current) {
+      setSnapshot(recorderRef.current.snapshot());
+    }
+    requestStats();
+  };
+
+  const onDownload = (): void => {
+    recorderRef.current?.download();
+  };
+
+  const onBenchmark = async (): Promise<void> => {
+    setBenchmark(null);
+    setError(null);
+    try {
+      const results = await runBatchBenchmark();
+      if (unmountedRef.current) return;
+      setBenchmark(results);
+      requestStats();
+    } catch (err) {
+      if (!unmountedRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!driverRef.current) return;
+    driverRef.current.setSelectedInput(selectedInput);
   }, [selectedInput]);
 
   useEffect(() => {
-    driverRef.current?.setSelectedInput(selectedInput);
-  }, [selectedInput]);
+    const id = setInterval(() => {
+      if (recorderRef.current && isRecording) {
+        setSnapshot(recorderRef.current.snapshot());
+      }
+    }, 200);
+    return () => clearInterval(id);
+  }, [isRecording]);
 
-  const onBenchmark = useCallback(() => {
-    const results = runBatchBenchmark(5000);
-    setBenchmark(results);
-  }, []);
+  const handleInputChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
+    setSelectedInput(e.target.value);
+  };
 
   return (
-    <div className="app">
-      <header className="topToolbar card">
-        <div className="appHeaderToolbar toolbarUnified" aria-label="Recorder controls">
-          <div className="toolbarGroup" aria-label="View">
-            <span className="toolbarGroupLabel">View</span>
-            <div className="toolbarButtonRow toolbarSegmented">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${activeTab === "midi" ? "active" : ""}`}
-                onClick={() => onSelectTab("midi")}
-              >
-                <i className="fa-solid fa-music" aria-hidden="true" />
-                <span>MIDI</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbarActionBtn ${activeTab === "sf2" ? "active" : ""}`}
-                onClick={() => onSelectTab("sf2")}
-              >
-                <i className="fa-solid fa-wave-square" aria-hidden="true" />
-                <span>SF2</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbarActionBtn ${activeTab === "recorder" ? "active" : ""}`}
-                onClick={() => onSelectTab("recorder")}
-              >
-                <i className="fa-solid fa-record-vinyl" aria-hidden="true" />
-                <span>Recorder</span>
-              </button>
-            </div>
-          </div>
+    <div className="midi-recorder-ui">
+      <h2>MIDI Recorder</h2>
+      {error && <div className="recorder-error">{error}</div>}
 
-          <ToolbarMenu label="Menu" icon="fa-bars" variant="nav">
-            <NavMenuSection label="Audio">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
-                onClick={onTogglePower}
-              >
-                <i className="fa-solid fa-power-off" aria-hidden="true" />
-                <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
-              </button>
-            </NavMenuSection>
+      <div className="recorder-controls">
+        <button onClick={onToggleMidi} disabled={isLoading}>
+          {driverRef.current ? "Disconnect MIDI" : isLoading ? "Requesting…" : "Connect MIDI"}
+        </button>
 
-            <NavMenuSection label="MIDI Input">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
-                onClick={onToggleMidi}
-              >
-                <i className="fa-solid fa-plug" aria-hidden="true" />
-                <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
-              </button>
-              <select
-                className="toolbarSelect"
-                value={selectedInput}
-                onChange={(e) => setSelectedInput(e.target.value)}
-                disabled={!midiEnabled}
-              >
-                <option value="all">All MIDI Inputs</option>
-                {midiInputs.map((input) => (
-                  <option key={input.id} value={input.id}>
-                    {input.name}
-                  </option>
-                ))}
-              </select>
-            </NavMenuSection>
+        {inputs.length > 0 && (
+          <select value={selectedInput} onChange={handleInputChange}>
+            <option value="all">All inputs</option>
+            {inputs.map((input) => (
+              <option key={input.id} value={input.id}>
+                {input.name}
+              </option>
+            ))}
+          </select>
+        )}
 
-            <NavMenuSection label="Recorder">
-              <button
-                type="button"
-                className="toolbarActionBtn"
-                onClick={onRecord}
-                disabled={state === "recording"}
-              >
-                <i className="fa-solid fa-circle" aria-hidden="true" />
-                <span>Record</span>
-              </button>
-              <button
-                type="button"
-                className="toolbarActionBtn"
-                onClick={onStop}
-                disabled={state !== "recording"}
-              >
-                <i className="fa-solid fa-stop" aria-hidden="true" />
-                <span>Stop</span>
-              </button>
-              <button
-                type="button"
-                className="toolbarActionBtn"
-                onClick={onDownload}
-                disabled={state === "recording"}
-              >
-                <i className="fa-solid fa-download" aria-hidden="true" />
-                <span>Download JSON</span>
-              </button>
-              <button type="button" className="toolbarActionBtn" onClick={onBenchmark}>
-                <i className="fa-solid fa-flask" aria-hidden="true" />
-                <span>Benchmark</span>
-              </button>
-            </NavMenuSection>
-          </ToolbarMenu>
-        </div>
-      </header>
-
-      <main className="layout sf2Layout">
-        <section className="card sf2Panel">
-          <div className="panelHead">
-            <h2>MIDI Recorder</h2>
-            <span className="panelBadge">{state}</span>
-          </div>
-          <div className="panelBody">
-            <p>Enable a MIDI input, then press Record to capture a performance.</p>
-            <p>Events are batched, transferred to a worker, and exported as JSON.</p>
-            {stats && (
-              <div className="detailBlock">
-                <h3>Worker Stats</h3>
-                <p>
-                  <strong>Batches:</strong> {stats.batches}
-                </p>
-                <p>
-                  <strong>Events:</strong> {stats.events}
-                </p>
-                <p>
-                  <strong>Latency:</strong> {stats.latencyMs.toFixed(2)} ms
-                </p>
-              </div>
-            )}
-            {benchmark && (
-              <div className="detailBlock">
-                <h3>Batch Benchmark</h3>
-                <table className="sf2Table">
-                  <thead>
-                    <tr>
-                      <th>Batch</th>
-                      <th>Messages</th>
-                      <th>Reduction</th>
-                      <th>P99 (ms)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {benchmark.map((r) => (
-                      <tr key={r.batchSize}>
-                        <td>{r.batchSize}</td>
-                        <td>{r.messageCount}</td>
-                        <td>
-                          {(
-                            (1 - r.messageCount / benchmark[0].messageCount) *
-                            100
-                          ).toFixed(1)}
-                          %
-                        </td>
-                        <td>{r.p99LatencyMs.toFixed(3)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p>
-                  <strong>Recommended:</strong> {recommendBatchSize(benchmark)}
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
-      </main>
-
-      <div className="statusDock">
-        <span className="midiStatus">{midiStatus}</span>
-        <span className="midiStatus">Audio: {audioCtxState}</span>
+        <button onClick={isRecording ? onStop : onStart}>{isRecording ? "Stop" : "Record"}</button>
+        <button onClick={onDownload} disabled={!recorderRef.current || isRecording}>
+          Download JSON
+        </button>
+        <button onClick={onBenchmark}>Benchmark</button>
       </div>
+
+      {snapshot && (
+        <div className="recorder-stats">
+          <div>State: {snapshot.state}</div>
+          <div>Active notes: {snapshot.activeNotes.length}</div>
+          <div>Recorded events: {snapshot.recordedCount}</div>
+          {snapshot.sentCount != null && <div>Sent to worker: {snapshot.sentCount}</div>}
+        </div>
+      )}
+
+      {workerStats && (
+        <div className="worker-stats">
+          <h3>Worker stats</h3>
+          <div>Received events: {workerStats.receivedEvents}</div>
+          <div>Received bytes: {workerStats.receivedBytes}</div>
+          <div>Received batches: {workerStats.receivedBatches}</div>
+          <div>Duration: {workerStats.durationMs.toFixed(2)} ms</div>
+          <div>p50 latency: {workerStats.p50LatencyMs.toFixed(3)} ms</div>
+          <div>p99 latency: {workerStats.p99LatencyMs.toFixed(3)} ms</div>
+        </div>
+      )}
+
+      {benchmark && (
+        <div className="benchmark-results">
+          <h3>Batch benchmark</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Batch size</th>
+                <th>Messages</th>
+                <th>Total ms</th>
+                <th>p99 latency ms</th>
+                <th>Recommended</th>
+              </tr>
+            </thead>
+            <tbody>
+              {benchmark.map((r) => (
+                <tr key={r.batchSize}>
+                  <td>{r.batchSize}</td>
+                  <td>{r.messageCount}</td>
+                  <td>{r.totalTimeMs.toFixed(2)}</td>
+                  <td>{r.p99LatencyMs.toFixed(3)}</td>
+                  <td>{r.recommended ? "✓" : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

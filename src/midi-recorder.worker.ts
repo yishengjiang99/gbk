@@ -1,94 +1,111 @@
-interface RecorderEvent {
-  deltaMs: number;
-  bytes: number[];
+export interface WorkerStats {
+  receivedEvents: number;
+  receivedBytes: number;
+  receivedBatches: number;
+  durationMs: number;
+  p50LatencyMs: number;
+  p99LatencyMs: number;
 }
 
-interface WorkerBatchMessage {
+interface BatchMessage {
   type: "batch";
   events: Float64Array;
   startMs: number;
   endMs: number;
+  enqueueStart?: number;
 }
 
-interface WorkerStatsMessage {
+interface StatsMessage {
   type: "stats";
-  batches: number;
-  events: number;
-  latencyMs: number;
 }
 
-type IncomingMessage =
-  | { type: "batch"; events: Float64Array; startMs: number; endMs: number }
-  | { type: "flush" }
-  | { type: "stats" };
-
-interface StoredBatch {
-  events: RecorderEvent[];
-  startMs: number;
-  endMs: number;
-  receivedAt: number;
+interface ResetMessage {
+  type: "reset";
 }
 
-const HEADER_FIELDS = 3;
-const MAX_MIDI_MESSAGE_BYTES = 3;
+type IncomingMessage = BatchMessage | StatsMessage | ResetMessage;
 
-const batches: StoredBatch[] = [];
+const HEADER_FIELDS = 3; // deltaMs, byteCount, channelCommandHint
 
-function decodeBatch(events: Float64Array): RecorderEvent[] {
-  const out: RecorderEvent[] = [];
-  for (let i = 0; i < events.length; i += HEADER_FIELDS + MAX_MIDI_MESSAGE_BYTES) {
-    const deltaMs = events[i];
-    const byteCount = Math.max(0, Math.min(MAX_MIDI_MESSAGE_BYTES, events[i + 1]));
+let receivedEvents = 0;
+let receivedBytes = 0;
+let receivedBatches = 0;
+let durationMs = 0;
+let firstStartMs: number | null = null;
+let lastEndMs = 0;
+const latencySamples: number[] = [];
+
+function decodeBatch(typed: Float64Array): Array<{ deltaMs: number; bytes: number[] }> {
+  const out: Array<{ deltaMs: number; bytes: number[] }> = [];
+  let i = 0;
+  while (i < typed.length) {
+    const deltaMs = typed[i];
+    const byteCount = typed[i + 1];
     const bytes: number[] = [];
     for (let j = 0; j < byteCount; j++) {
-      bytes.push(events[i + HEADER_FIELDS + j]);
+      bytes.push(typed[i + HEADER_FIELDS + j]);
     }
     out.push({ deltaMs, bytes });
+    i += HEADER_FIELDS + byteCount;
   }
   return out;
 }
 
-function handleBatch(msg: WorkerBatchMessage, receivedAt: number): void {
-  const decoded = decodeBatch(msg.events);
-  batches.push({
-    events: decoded,
-    startMs: msg.startMs,
-    endMs: msg.endMs,
-    receivedAt,
-  });
-}
-
-function handleFlush(): void {
-  const eventCount = batches.reduce((sum, b) => sum + b.events.length, 0);
-  self.postMessage({ type: "flushed", batches: batches.length, events: eventCount });
+function updateStats(batch: BatchMessage): void {
+  const events = decodeBatch(batch.events);
+  receivedEvents += events.length;
+  for (const ev of events) {
+    receivedBytes += ev.bytes.length;
+  }
+  receivedBatches += 1;
+  if (firstStartMs == null) {
+    firstStartMs = batch.startMs;
+  }
+  lastEndMs = Math.max(lastEndMs, batch.endMs);
+  durationMs = Math.max(0, lastEndMs - firstStartMs);
+  if (typeof batch.enqueueStart === "number") {
+    latencySamples.push(performance.now() - batch.enqueueStart);
+  }
 }
 
 function handleStats(): void {
-  const eventCount = batches.reduce((sum, b) => sum + b.events.length, 0);
-  const latencyMs = batches.length
-    ? batches[batches.length - 1].receivedAt - batches[0].receivedAt
-    : 0;
-  const msg: WorkerStatsMessage = {
-    type: "stats",
-    batches: batches.length,
-    events: eventCount,
-    latencyMs,
+  latencySamples.sort((a, b) => a - b);
+  const stats: WorkerStats = {
+    receivedEvents,
+    receivedBytes,
+    receivedBatches,
+    durationMs,
+    p50LatencyMs: latencySamples[Math.floor(latencySamples.length * 0.5)] ?? 0,
+    p99LatencyMs: latencySamples[Math.floor(latencySamples.length * 0.99)] ?? 0,
   };
-  self.postMessage(msg);
+  self.postMessage({ type: "stats", stats });
+}
+
+function handleReset(): void {
+  receivedEvents = 0;
+  receivedBytes = 0;
+  receivedBatches = 0;
+  durationMs = 0;
+  firstStartMs = null;
+  lastEndMs = 0;
+  latencySamples.length = 0;
 }
 
 self.onmessage = (event: MessageEvent<IncomingMessage>) => {
   const msg = event.data;
-  const receivedAt = performance.now();
+  if (!msg || typeof msg !== "object") return;
   switch (msg.type) {
     case "batch":
-      handleBatch(msg, receivedAt);
-      break;
-    case "flush":
-      handleFlush();
+      updateStats(msg);
       break;
     case "stats":
       handleStats();
+      break;
+    case "reset":
+      handleReset();
+      break;
+    default:
+      // ignore unknown messages
       break;
   }
 };

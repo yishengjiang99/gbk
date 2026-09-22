@@ -41,8 +41,6 @@ export interface MidiRecorderExports {
 }
 
 const HEADER_FIELDS = 3; // deltaMs, byteCount, channelCommandHint
-const MAX_MIDI_MESSAGE_BYTES = 3;
-const EVENT_BYTE_LENGTH = HEADER_FIELDS + MAX_MIDI_MESSAGE_BYTES;
 
 function noteKey(channel: number, note: number): string {
   return `${channel}:${note}`;
@@ -83,12 +81,6 @@ function getMessageLength(status: number): number {
     default:
       return 0;
   }
-}
-
-function normalizeEventBytes(bytes: number[]): number[] {
-  // Keep the full message as decoded; do not drop trailing zero data bytes
-  // because 0 is a valid MIDI value (e.g., velocity 0, bank LSB 0).
-  return bytes.slice();
 }
 
 export function createMidiRecorder(options?: {
@@ -196,14 +188,19 @@ export function createMidiRecorder(options?: {
       if (status & 0x80) {
         runningStatus = isChannelMessage(status) ? status : null;
       } else if (runningStatus != null && isChannelMessage(runningStatus)) {
-        messages.push([runningStatus, status, ...raw.slice(i + 1)]);
-        i += getMessageLength(runningStatus) - 1;
+        const len = getMessageLength(runningStatus);
+        const msg: number[] = [runningStatus];
+        for (let j = 1; j < len && i + j - 1 < raw.length; j++) {
+          msg.push(raw[i + j - 1]);
+        }
+        messages.push(msg);
+        i += len - 1;
         continue;
       }
 
       const len = getMessageLength(status);
       if (len > 0) {
-        messages.push(raw.slice(i, i + len));
+        messages.push(raw.slice(i, Math.min(i + len, raw.length)));
         i += len;
       } else {
         messages.push([status]);
@@ -222,7 +219,7 @@ export function createMidiRecorder(options?: {
       if (batchStartMs == null) {
         batchStartMs = deltaMs;
       }
-      pendingBatch.push({ deltaMs, bytes: normalizeEventBytes(msg) });
+      pendingBatch.push({ deltaMs, bytes: msg.slice() });
 
       if (pendingBatch.length >= BATCH_SIZE) {
         pushBatch();
@@ -231,15 +228,19 @@ export function createMidiRecorder(options?: {
   }
 
   function encodeEvents(events: MidiRecorderEvent[]): Float64Array {
-    const out = new Float64Array(events.length * EVENT_BYTE_LENGTH);
+    let payloadBytes = 0;
+    for (const ev of events) {
+      payloadBytes += ev.bytes.length;
+    }
+    const out = new Float64Array(events.length * HEADER_FIELDS + payloadBytes);
     let offset = 0;
     for (const ev of events) {
       out[offset++] = ev.deltaMs;
       out[offset++] = ev.bytes.length;
       const hint = ev.bytes.length > 0 && isChannelMessage(ev.bytes[0]) ? ev.bytes[0] : 0;
       out[offset++] = hint;
-      for (let i = 0; i < MAX_MIDI_MESSAGE_BYTES; i++) {
-        out[offset++] = ev.bytes[i] ?? 0;
+      for (const b of ev.bytes) {
+        out[offset++] = b;
       }
     }
     return out;
@@ -315,19 +316,24 @@ export function createMidiRecorder(options?: {
   }
 
   function buildTypedEvents(): Float64Array {
-    let total = 0;
-    for (const batch of recordedBatches) total += batch.events.length;
-    total += pendingBatch.length;
+    let totalPayload = 0;
+    let totalEvents = 0;
+    for (const batch of recordedBatches) {
+      totalEvents += batch.events.length;
+      for (const ev of batch.events) totalPayload += ev.bytes.length;
+    }
+    totalEvents += pendingBatch.length;
+    for (const ev of pendingBatch) totalPayload += ev.bytes.length;
 
-    const out = new Float64Array(total * EVENT_BYTE_LENGTH);
+    const out = new Float64Array(totalEvents * HEADER_FIELDS + totalPayload);
     let offset = 0;
     function writeEvent(ev: MidiRecorderEvent): void {
       out[offset++] = ev.deltaMs;
       out[offset++] = ev.bytes.length;
       const hint = ev.bytes.length > 0 && isChannelMessage(ev.bytes[0]) ? ev.bytes[0] : 0;
       out[offset++] = hint;
-      for (let i = 0; i < MAX_MIDI_MESSAGE_BYTES; i++) {
-        out[offset++] = ev.bytes[i] ?? 0;
+      for (const b of ev.bytes) {
+        out[offset++] = b;
       }
     }
     for (const batch of recordedBatches) {

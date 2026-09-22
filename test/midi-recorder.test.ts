@@ -214,16 +214,42 @@ test("typed array encodes byte count and preserves all bytes", () => {
   recorder.stop();
 
   const typed = (recorder as unknown as { buildTypedEvents(): Float64Array }).buildTypedEvents();
-  const stride = 6;
-  assert.equal(typed.length, 2 * stride);
   assert.equal(typed[0], 0);
   assert.equal(typed[1], 4);
   assert.equal(typed[3], 0xf0);
   assert.equal(typed[4], 0x01);
   assert.equal(typed[5], 0x02);
-  assert.equal(typed[stride + 0], 1);
-  assert.equal(typed[stride + 1], 3);
-  assert.equal(typed[stride + 3], 0x90);
-  assert.equal(typed[stride + 4], 60);
-  assert.equal(typed[stride + 5], 100);
+  assert.equal(typed[6], 0xf7);
+
+  const secondOffset = 3 + 4;
+  assert.equal(typed[secondOffset + 0], 1);
+  assert.equal(typed[secondOffset + 1], 3);
+  assert.equal(typed[secondOffset + 3], 0x90);
+  assert.equal(typed[secondOffset + 4], 60);
+  assert.equal(typed[secondOffset + 5], 100);
+});
+
+test("typed array preserves complete sysex", () => {
+  const recorder = createMidiRecorder({ batchSize: 1 });
+  recorder.start();
+  recorder.recordMessage(0, [0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7]);
+  recorder.stop();
+
+  const typed = (recorder as unknown as { buildTypedEvents(): Float64Array }).buildTypedEvents();
+  assert.equal(typed[1], 6);
+  for (let i = 0; i < 6; i++) {
+    assert.equal(typed[3 + i], [0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7][i]);
+  }
+});
+
+test("running status slices only current message bytes", () => {
+  const recorder = createMidiRecorder({ batchSize: 4 });
+  recorder.start();
+  recorder.recordMessage(0, [0x90, 61, 100, 62, 100]);
+  recorder.stop();
+
+  const events = recorder.recordedBatches[0].events;
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[0].bytes, [0x90, 61, 100]);
+  assert.deepEqual(events[1].bytes, [0x90, 62, 100]);
 });

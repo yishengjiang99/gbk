@@ -10,7 +10,7 @@ import {
   MidiMessageHandler,
 } from "./midi-driver";
 import MidiReader from "./midireader";
-import MidiRecorderUI from "./MidiRecorderUI";
+import { MidiRecorderUI } from "./MidiRecorderUI";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 
 // ---------------------------------------------------------------------------
@@ -1299,14 +1299,7 @@ export default function App() {
         />
       )}
 
-      {activeTab === "recorder" && (
-        <MidiRecorderUI
-          audioCtxState={audioCtxState}
-          onTogglePower={onTogglePower}
-          activeTab={activeTab}
-          onSelectTab={setActiveTab}
-        />
-      )}
+      {activeTab === "recorder" && <MidiRecorderUI />}
 
       {activeTab === "sf2" && (
         <>
