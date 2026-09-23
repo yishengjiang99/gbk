@@ -969,11 +969,30 @@ button[aria-label]:disabled::after {
   margin-top: 0.5rem;
 }
 
+.dynamicsControls {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #b9cddd;
+  min-width: 0;
+}
+.dynamicsControls > label { font-size: .85rem; font-weight: 700; }
+.dynamicsControls select { width: 100%; min-width: 0; font: inherit; padding: 6px; }
+.dynamicsControls p { margin: 0; font-size: .75rem; line-height: 1.45; color: #496577; }
+.dynamicsMeterRow { display: flex; align-items: center; gap: 6px; font-size: .72rem; }
+.dynamicsMeterRow meter { flex: 1; min-width: 24px; width: 60px; height: 12px; }
+.dynamicsMeterRow output { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+.dynamicsHint { color: #496577; font-size: .65rem; line-height: 1.4; }
+
 .fixedAnalyzerPanel.collapsed {
   width: 62px;
   overflow: hidden;
   padding: 0.5rem;
 }
+
+.fixedAnalyzerPanel.collapsed .dynamicsControls { display: none; }
+.audioSidebar .fixedAnalyzerPanel.collapsed .dynamicsControls { display: grid; }
 
 .fixedAnalyzerPanel.collapsed .analyzerHead {
   display: grid;

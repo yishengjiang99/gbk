@@ -11,6 +11,8 @@ import {
 } from "./midi-driver";
 import MidiReader from "./midireader";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
+import masterDynamicsUrl from "./master-dynamics-processor.ts?worker&url";
+import { DEFAULT_DYNAMICS_MODE, DYNAMICS_MODES, isDynamicsMode, type DynamicsMode } from "./master-dynamics.ts";
 
 // ---------------------------------------------------------------------------
 // Local interface definitions for SF2 internal structures accessed at runtime
@@ -677,6 +679,15 @@ export default function App() {
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<string>("midi");
   const [audioCtxState, setAudioCtxState] = useState<string>("off");
+  const [dynamicsMode, setDynamicsMode] = useState<DynamicsMode>(() => {
+    try {
+      const saved = window.localStorage.getItem("sf2-master-dynamics");
+      return isDynamicsMode(saved) ? saved : DEFAULT_DYNAMICS_MODE;
+    } catch {
+      return DEFAULT_DYNAMICS_MODE;
+    }
+  });
+  const [dynamicsMeter, setDynamicsMeter] = useState({ compression: 0, limiting: 0 });
   const [analyzerCollapsed, setAnalyzerCollapsed] = useState<boolean>(
     () => window.matchMedia("(max-width: 960px)").matches
   );
@@ -687,7 +698,9 @@ export default function App() {
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
-  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const compressorRef = useRef<AudioWorkletNode | null>(null);
+  const dynamicsModeRef = useRef(dynamicsMode);
+  const dynamicsLoadPromiseRef = useRef<Promise<void> | null>(null);
   const timeDomainRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const freqDomainRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -705,6 +718,31 @@ export default function App() {
   const triggerNoteOnRef = useRef<((note: number, velocity: number) => Promise<void>) | null>(null);
   const triggerNoteOffRef = useRef<((note: number) => Promise<void>) | null>(null);
   const resolvePresetIndexRef = useRef<((program: number, bank: number) => number | null) | null>(null);
+
+  const releaseAudioInfrastructure = useCallback(() => {
+    // Fast Refresh retains refs while re-running effect cleanup. None of the
+    // nodes, module promises, or animation handles can survive a closed context.
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx) ctx.onstatechange = null;
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    lastVizUpdateRef.current = 0;
+    if (compressorRef.current) compressorRef.current.port.onmessage = null;
+    workletNodeRef.current?.disconnect();
+    compressorRef.current?.disconnect();
+    analyserRef.current?.disconnect();
+    masterGainRef.current?.disconnect();
+    workletNodeRef.current = null;
+    compressorRef.current = null;
+    analyserRef.current = null;
+    masterGainRef.current = null;
+    timeDomainRef.current = null;
+    freqDomainRef.current = null;
+    workletLoadPromiseRef.current = null;
+    dynamicsLoadPromiseRef.current = null;
+    if (ctx && ctx.state !== "closed") void ctx.close().catch(() => {});
+  }, []);
 
   const presets = useMemo(() => getPresetRows(sf2), [sf2]);
   const visiblePresets = useMemo<PresetRow[]>(() => {
@@ -740,6 +778,16 @@ export default function App() {
   }, [sf2, selectedPreset, presets.length]);
   selectedPresetRef.current = selectedPreset;
   livePresetIndexRef.current = effectivePresetIndex;
+  dynamicsModeRef.current = dynamicsMode;
+
+  useEffect(() => {
+    compressorRef.current?.port.postMessage({ type: "setMode", mode: dynamicsMode });
+    try {
+      window.localStorage.setItem("sf2-master-dynamics", dynamicsMode);
+    } catch {
+      // Audio controls still work when storage is unavailable.
+    }
+  }, [dynamicsMode]);
 
   useEffect(() => {
     if (!programDetails) {
@@ -756,16 +804,13 @@ export default function App() {
       activeKeyboardKeysRef.current.clear();
       for (const note of active) triggerNoteOff(note);
       if (noteOffTimerRef.current) clearTimeout(noteOffTimerRef.current);
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      if (audioCtxRef.current) {
-        audioCtxRef.current.close().catch(() => {});
-      }
+      releaseAudioInfrastructure();
       if (midiDriverRef.current) {
         midiDriverRef.current.disconnect();
       }
       externalMidiBridgeRef.current?.dispose();
     };
-  }, []);
+  }, [releaseAudioInfrastructure]);
 
   useEffect(() => {
     presetRegionsRef.current = { presetIndex: null, regions: [] };
@@ -912,21 +957,28 @@ export default function App() {
   const ensureAudioInfrastructure = useCallback(
     async ({ loadWorklet = true }: { loadWorklet?: boolean } = {}): Promise<{
       ctx: AudioContext;
-      analyser: AnalyserNode;
+      input: AudioNode;
     }> => {
       setAudioError("");
       let ctx = audioCtxRef.current;
-      if (!ctx) {
+      if (!ctx || ctx.state === "closed") {
+        releaseAudioInfrastructure();
         ctx = new AudioContext();
         audioCtxRef.current = ctx;
+        setAudioReady(false);
+        setDynamicsMeter({ compression: 0, limiting: 0 });
         setAudioCtxState(ctx.state);
-        ctx.onstatechange = () => setAudioCtxState((ctx as AudioContext).state);
+        const currentContext = ctx;
+        ctx.onstatechange = () => {
+          if (audioCtxRef.current !== currentContext) return;
+          setAudioCtxState(currentContext.state);
+          if (currentContext.state === "closed") setAudioReady(false);
+        };
       }
 
       const currentTime = ctx.currentTime;
       let analyser = analyserRef.current;
       let masterGain = masterGainRef.current;
-      let compressor = compressorRef.current;
 
       if (!analyser) {
         analyser = ctx.createAnalyser();
@@ -943,41 +995,58 @@ export default function App() {
         masterGainRef.current = masterGain;
       }
 
-      if (!compressor) {
-        compressor = ctx.createDynamicsCompressor();
-        // The point at which compression begins (in dB)
-        compressor.threshold.setValueAtTime(-24, currentTime);
-        // A range above the threshold where the curve smoothly transitions to the ratio (in dB)
-        compressor.knee.setValueAtTime(30, currentTime);
-        // The amount of change in dB input vs output (ratio)
-        compressor.ratio.setValueAtTime(2, currentTime);
-        // How quickly the compressor reduces the volume (in seconds)
-        compressor.attack.setValueAtTime(0.01, currentTime);
-        // How quickly the volume returns to normal (in seconds)
-        compressor.release.setValueAtTime(0.25, currentTime);
+      if (!dynamicsLoadPromiseRef.current) {
+        dynamicsLoadPromiseRef.current = ctx.audioWorklet.addModule(masterDynamicsUrl).catch((err) => {
+          if (audioCtxRef.current === ctx) dynamicsLoadPromiseRef.current = null;
+          throw err;
+        });
+      }
+      await dynamicsLoadPromiseRef.current;
+      if (audioCtxRef.current !== ctx || ctx.state === "closed") {
+        throw new Error("Audio was reset while loading. Press Play to reconnect.");
+      }
+      // Check again after awaiting: concurrent callers share exactly one bus.
+      if (!compressorRef.current) {
+        const compressor = new AudioWorkletNode(ctx, "master-dynamics", {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+          channelCount: 2,
+          channelCountMode: "explicit",
+          processorOptions: { mode: dynamicsModeRef.current },
+        });
+        compressor.port.onmessage = ({ data }: MessageEvent) => {
+          if (data?.type === "meter") setDynamicsMeter({ compression: data.compression, limiting: data.limiting });
+        };
         compressorRef.current = compressor;
-        // Connect the audio graph: analyser -> masterGain -> compressor -> destination
-        analyser.connect(masterGain);
+        // Every synth feeds one stereo bus; the analyzer shows the final output.
         masterGain.connect(compressor);
-        compressor.connect(ctx.destination);
+        compressor.connect(analyser);
+        analyser.connect(ctx.destination);
       }
 
       if (loadWorklet) {
         if (!workletLoadPromiseRef.current) {
-          workletLoadPromiseRef.current = ctx.audioWorklet.addModule(sf2ProcessorUrl);
+          workletLoadPromiseRef.current = ctx.audioWorklet.addModule(sf2ProcessorUrl).catch((err) => {
+            if (audioCtxRef.current === ctx) workletLoadPromiseRef.current = null;
+            throw err;
+          });
         }
         await workletLoadPromiseRef.current;
+        if (audioCtxRef.current !== ctx || (ctx.state as AudioContextState) === "closed") {
+          throw new Error("Audio was reset while loading. Press Play to reconnect.");
+        }
         setAudioReady(true);
       }
       startAnalyzerLoop();
-      return { ctx, analyser };
+      return { ctx, input: masterGain };
     },
-    []
+    [releaseAudioInfrastructure]
   );
 
   const ensureAudioGraph = useCallback(
     async (autoResume = false): Promise<AudioWorkletNode> => {
-      const { ctx, analyser } = await ensureAudioInfrastructure();
+      const { ctx, input } = await ensureAudioInfrastructure();
       if (autoResume && ctx.state !== "running") {
         await ctx.resume();
       }
@@ -992,7 +1061,7 @@ export default function App() {
           outputChannelCount: [2],
         });
         workletNodeRef.current = node;
-        node.connect(analyser);
+        node.connect(input);
       }
       return node;
     },
@@ -1181,8 +1250,10 @@ export default function App() {
 
   async function onTogglePower(): Promise<void> {
     try {
+      // A newly created context can start running during a user gesture. Decide
+      // the requested action before creating/loading the audio graph.
+      const targetState = audioCtxRef.current?.state === "running" ? "suspended" : "running";
       const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
-      const targetState = ctx.state === "running" ? "suspended" : "running";
       if (targetState === "running") await ctx.resume();
       else await ctx.suspend();
 
@@ -1297,7 +1368,8 @@ export default function App() {
           analyzerCollapsed={analyzerCollapsed}
           onToggleAnalyzer={() => setAnalyzerCollapsed((v) => !v)}
           ensureAudioInfrastructure={ensureAudioInfrastructure}
-          getRegionsForPreset={(presetIndex: number) => getRegionsForPresetIndex(presetIndex)}
+          dynamicsMode={dynamicsMode}
+          getRegionsForPreset={getRegionsForPresetIndex}
           resolvePresetIndex={resolvePresetIndex}
           fallbackPresetIndex={effectivePresetIndex ?? 0}
           presetOptions={presets.map((p, idx) => ({
@@ -1891,6 +1963,27 @@ export default function App() {
       <div className={activeTab === "midi" ? "audioSidebar" : undefined}>
       <div ref={setPlaylistHost} />
       <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
+        <div className="dynamicsControls" aria-label="Master dynamics">
+          <label htmlFor="master-dynamics-mode">Dynamic compression</label>
+          <select id="master-dynamics-mode" value={dynamicsMode}
+            onChange={(event) => {
+              if (isDynamicsMode(event.target.value)) setDynamicsMode(event.target.value);
+            }}>
+            {DYNAMICS_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+          </select>
+          <p>{DYNAMICS_MODES.find((mode) => mode.value === dynamicsMode)?.description}</p>
+          <div className="dynamicsMeterRow">
+            <label htmlFor="compression-reduction">Reduction</label>
+            <meter id="compression-reduction" min={0} max={12}
+              value={audioCtxState === "running" && dynamicsMode !== "off" ? dynamicsMeter.compression : 0} />
+            <output htmlFor="compression-reduction" aria-live="off">
+              {audioCtxState === "running" && dynamicsMode !== "off" ? dynamicsMeter.compression.toFixed(1) : "0.0"} dB
+            </output>
+          </div>
+          <span className="dynamicsHint">
+            {dynamicsMode === "off" ? "Playback + WAV export" : `Playback + WAV export · Peak ceiling −1 dBFS${audioCtxState === "running" && dynamicsMeter.limiting > 0.1 ? ` · Limiting ${dynamicsMeter.limiting.toFixed(1)} dB` : ""}`}
+          </span>
+        </div>
         <div className="analyzerHead">
           <h2>{analyzerCollapsed ? "Viz" : "Analyzer"}</h2>
           <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>

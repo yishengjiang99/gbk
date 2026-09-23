@@ -8,6 +8,28 @@ This project is a React + Vite web app for:
 
 ## High-Level Modules
 
+### Orchestral dynamics
+
+The analyzer sidebar has a **Dynamic compression** control with **Epic orchestra**
+(default), **Gentle orchestra**, and **Off**. The selection is saved locally and
+applies to MIDI file playback, live keyboard/MIDI notes, and WAV exports. Raw SF2
+sample previews remain unprocessed. External MIDI output is unaffected.
+
+`src/master-dynamics.ts` provides the shared stereo DSP: a soft-knee RMS compressor,
+a 70 Hz detector high-pass, adaptive release, and a stereo-linked lookahead limiter.
+Epic uses a −22 dB threshold, 2:1 ratio, 12 dB knee, 25 ms attack, up to 450 ms release,
+and 3 dB makeup gain. Gentle uses −18 dB, 1.5:1, 12 dB, 35 ms, up to 550 ms, and 1.5 dB.
+The limiter holds sample peaks below −1 dBFS; it is not an oversampled true-peak
+limiter. Off bypasses both stages. Mode changes are smoothed over 20 ms.
+
+`src/master-dynamics-processor.ts` runs once after all tracks are mixed, before
+the analyzer and output. Live audio has 5 ms of lookahead latency in every mode;
+offline mastering removes that delay and flushes the tail before WAV encoding.
+The reduction meter shows compression, with a separate indication when limiting
+is active. Export captures the mode selected when Export WAV is clicked.
+
+### Synth and MIDI modules
+
 - `src/App.jsx`
   - Main app shell, tab layout (`MIDI Explorer` / `SF2 Explorer`), toolbar.
   - Owns global audio infrastructure (`AudioContext`, `AnalyserNode`).
