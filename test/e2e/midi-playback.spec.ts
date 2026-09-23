@@ -263,10 +263,8 @@ test("Export WAV button triggers export progress indicator", async ({ page }) =>
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
 
   // Use a shorter bundled MIDI so the export completes before the test timeout.
-  await openAppMenu(page);
-  const midiSelect = page.getByRole("combobox", { name: "Select bundled MIDI file" });
-  await expect(midiSelect).toBeEnabled({ timeout: 10_000 });
-  await midiSelect.selectOption({ label: "Dr Dre - Still Dre.mid" });
+  await page.getByRole("region", { name: "MIDI playlist" }).getByRole("button", { name: "Dr Dre - Still Dre.mid" }).click();
+  await expect(page.locator(".midiMetadataTitle")).toContainText("Dr Dre - Still Dre.mid");
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });
 
   const exportBtn = page.getByRole("button", { name: "Export WAV" });
@@ -300,10 +298,8 @@ test("playing and exporting produces a valid, non-silent WAV file", async ({ pag
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
 
   // Switch to a shorter bundled MIDI so offline rendering finishes in time.
-  await openAppMenu(page);
-  const midiSelect = page.getByRole("combobox", { name: "Select bundled MIDI file" });
-  await expect(midiSelect).toBeEnabled({ timeout: 10_000 });
-  await midiSelect.selectOption({ label: "Dr Dre - Still Dre.mid" });
+  await page.getByRole("region", { name: "MIDI playlist" }).getByRole("button", { name: "Dr Dre - Still Dre.mid" }).click();
+  await expect(page.locator(".midiMetadataTitle")).toContainText("Dr Dre - Still Dre.mid");
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });
 
   const playBtn = page.getByRole("button", { name: "Play" });
@@ -352,7 +348,7 @@ test("playing and exporting produces a valid, non-silent WAV file", async ({ pag
 // Test: Switching MIDI file loads a new song
 // ---------------------------------------------------------------------------
 
-test("selecting a different MIDI file from the dropdown loads a new song", async ({ page }) => {
+test("selecting a different MIDI file from the playlist loads a new song", async ({ page }) => {
   await page.goto("/");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
@@ -360,21 +356,8 @@ test("selecting a different MIDI file from the dropdown loads a new song", async
   // Wait for the default MIDI file to load
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
 
-  await openAppMenu(page);
-  const midiSelect = page.getByRole("combobox", { name: "Select bundled MIDI file" });
-  await expect(midiSelect).toBeEnabled({ timeout: 10_000 });
-
-  // Collect all available options and pick any non-selected, non-default one
-  const options = await midiSelect.locator("option").allTextContents();
-  const nonDefault = options.find(
-    (opt) => opt !== "" && !opt.includes("Beethoven") && !opt.includes("Select MIDI")
-  );
-  if (!nonDefault) {
-    // Only one MIDI file available; skip the switch assertion but still pass
-    return;
-  }
-
-  await midiSelect.selectOption({ label: nonDefault });
+  await page.getByRole("region", { name: "MIDI playlist" }).getByRole("button", { name: "Dr Dre - Still Dre.mid" }).click();
+  await expect(page.locator(".midiMetadataTitle")).toContainText("Dr Dre - Still Dre.mid");
 
   // The transport timer should reset to 0:00 and a song should be shown
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });

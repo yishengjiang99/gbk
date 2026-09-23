@@ -1976,3 +1976,47 @@ tbody tr.selected {
     flex: 1 1 auto;
   }
 }
+
+/* Compact playlist above the analyzer in the audio sidebar. */
+.app.hasPlaylist { padding-right: 370px; }
+.audioSidebar {
+  position: fixed;
+  right: 1rem;
+  top: 1rem;
+  width: 330px;
+  max-height: calc(100dvh - 5rem);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.audioSidebar .fixedAnalyzerPanel {
+  position: static;
+  width: 100%;
+  max-height: none;
+  margin: 0;
+  flex-shrink: 0;
+}
+.audioSidebar .fixedAnalyzerPanel.collapsed .analyzerHead { display: flex; justify-content: space-between; }
+.audioSidebar .fixedAnalyzerPanel.collapsed .analyzerHead h2 { font-size: 1rem; }
+.audioSidebar .fixedAnalyzerPanel.collapsed .analyzerHead button { width: auto; padding: .3rem .6rem; }
+.midiPlaylist { min-width: 0; border: 1px solid #b9cddd; border-radius: 10px; background: #f6fbff; padding: 10px; }
+.midiPlaylistHeader { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.midiPlaylistHeader strong { flex: 1; }
+.midiPlaylistHeader .chip { font-size: .7rem; }
+.midiPlaylistHeader input[type="search"] { width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid #b7ccdc; border-radius: 5px; font: inherit; font-size: .8rem; }
+.midiPlaylistHeader .toolbarFileBtn { font-size: .7rem; padding: 5px 8px; }
+.midiPlaylistTracks { max-height: 280px; min-height: 160px; overflow-y: auto; background: #112330; border: 1px solid #071722; border-radius: 4px; padding: 4px; }
+.midiPlaylistTrack { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px 6px; border: 0; border-radius: 2px; background: transparent; color: #b9d9e8; font: inherit; font-size: .75rem; cursor: pointer; }
+.midiPlaylistTrack .playlistTrackNumber { flex: 0 0 20px; color: #7d9daf; font-variant-numeric: tabular-nums; }
+.midiPlaylistTrack .playlistTrackName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.midiPlaylistTrack:hover { background: #203d4f; }
+.midiPlaylistTrack.active { background: #315d76; color: #fff; }
+.midiPlaylistTrack.active .playlistTrackNumber { color: #c9eafa; }
+.midiPlaylistTracks .muted { color: #b9d9e8; padding: 8px; }
+@media (max-width: 960px) {
+  .app.hasPlaylist { padding-right: max(.55rem, env(safe-area-inset-right, 0px)); }
+  .audioSidebar { position: static; width: 100%; max-height: 36dvh; flex: 0 0 auto; margin-top: 8px; }
+  .midiPlaylistTracks { min-height: 0; max-height: 145px; }
+  .audioSidebar .fixedAnalyzerPanel.collapsed { display: block; }
+}

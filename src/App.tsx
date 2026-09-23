@@ -652,10 +652,12 @@ function AnalyzerCanvas({ data, mode, testId }: AnalyzerCanvasProps) {
 // ---------------------------------------------------------------------------
 
 export default function App() {
+  const [playlistHost, setPlaylistHost] = useState<HTMLDivElement | null>(null);
   const [sf2, setSf2] = useState<SF2Data | null>(null);
   const [sourceName, setSourceName] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
+  const [loadingStage, setLoadingStage] = useState("");
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
   const [presetSearch, setPresetSearch] = useState<string>("");
@@ -840,6 +842,7 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
+      setLoadingStage(`Parsing SoundFont: ${name}…`);
       const parsed = parseSF2(u8);
       setSf2(parsed);
       setSourceName(name);
@@ -857,15 +860,22 @@ export default function App() {
   async function onSelectSample(path: string, label: string): Promise<void> {
     setLoading(true);
     setError("");
+    setLoadingStage(`Downloading SoundFont: ${label} (31 MB)…`);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 30_000);
     try {
-      const res = await fetch(path);
+      const res = await fetch(path, { signal: controller.signal });
       if (!res.ok) throw new Error(`Failed to fetch ${label}`);
       const buffer = await res.arrayBuffer();
       await parseFromU8(new Uint8Array(buffer), label);
     } catch (e) {
       setLoading(false);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(controller.signal.aborted
+        ? "SoundFont download timed out. Press Play to retry, or upload an SF2 from the menu."
+        : `SoundFont loading failed: ${e instanceof Error ? e.message : String(e)}. Press Play to retry.`);
       setSf2(null);
+    } finally {
+      window.clearTimeout(timeout);
     }
   }
 
@@ -1261,16 +1271,18 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
-      {loading && <p className="status">Parsing...</p>}
+    <div className={`app ${activeTab === "midi" ? "hasPlaylist" : ""} ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
+      {loading && <p className="status" role="status">{loadingStage}</p>}
       {error && <p className="status error">{error}</p>}
       {midiError && <p className="status error">{midiError}</p>}
 
       {activeTab === "midi" && (
         <MidiReader
+          playlistHost={playlistHost}
           sf2Ready={!!sf2}
           sf2Name={sourceName}
           sf2Loading={loading}
+          sf2Error={error}
           onUploadSf2={onUploadFile}
           onLoadDefaultSf2={() => onSelectSample(DEFAULT_SF2.path, DEFAULT_SF2.label)}
           activeTab={activeTab}
@@ -1876,6 +1888,8 @@ export default function App() {
         <span className="midiStatus statusDockHint">Keyboard: a w s e d f t g y h</span>
       </div>
 
+      <div className={activeTab === "midi" ? "audioSidebar" : undefined}>
+      <div ref={setPlaylistHost} />
       <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
         <div className="analyzerHead">
           <h2>{analyzerCollapsed ? "Viz" : "Analyzer"}</h2>
@@ -1892,6 +1906,7 @@ export default function App() {
           </div>
         )}
       </aside>
+      </div>
     </div>
   );
 }

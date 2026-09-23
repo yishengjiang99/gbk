@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavMenuSection, ToolbarMenu } from "./toolbar-menu.tsx";
 import type { SF2Region } from "../sf2-parser.ts";
@@ -368,9 +369,11 @@ function resolveOrchestraPan(...labels: (string | undefined)[]): number | null {
 // ---------------------------------------------------------------------------
 
 interface MidiReaderProps {
+  playlistHost: HTMLDivElement | null;
   sf2Ready: boolean;
   sf2Name: string;
   sf2Loading: boolean;
+  sf2Error: string;
   onUploadSf2: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onLoadDefaultSf2: () => void;
   activeTab: string;
@@ -399,9 +402,11 @@ interface MidiReaderProps {
 // ---------------------------------------------------------------------------
 
 export default function MidiReader({
+  playlistHost,
   sf2Ready,
   sf2Name,
   sf2Loading,
+  sf2Error,
   onUploadSf2,
   onLoadDefaultSf2,
   activeTab,
@@ -422,6 +427,11 @@ export default function MidiReader({
   presetOptions = [],
   onError,
 }: MidiReaderProps) {
+  const [playRequested, setPlayRequested] = useState(false);
+  const [playlistSearch, setPlaylistSearch] = useState("");
+  const midiSelectionRequestRef = useRef(0);
+  const autoplayLoadedSongRef = useRef(false);
+  const playlistEndedRef = useRef<() => void>(() => {});
   const [song, setSong] = useState<Song | null>(null);
   const [songName, setSongName] = useState<string>("");
   const [songError, setSongError] = useState<string>("");
@@ -820,6 +830,8 @@ export default function MidiReader({
       }
       if (msg.type === "songLoaded") {
         setSong(msg.song as Song);
+        setPlayRequested(autoplayLoadedSongRef.current);
+        autoplayLoadedSongRef.current = false;
         const restoreSec = pendingRestoreSecRef.current;
         pendingRestoreSecRef.current = null;
         const nextSec = restoreSec == null ? 0 : Math.max(0, Math.min((msg.song as Song).durationSec, restoreSec));
@@ -863,6 +875,7 @@ export default function MidiReader({
         updatePlayhead(sec);
         updatePersistedMidiTime(sec);
         setIsPlaying(false);
+        playlistEndedRef.current();
         return;
       }
       if (msg.type === "programChangeRequest") {
@@ -1178,11 +1191,32 @@ export default function MidiReader({
   }
 
   async function onPlayPause() {
-    if (!song || !sf2Ready || !workerRef.current) return;
+    if (!song || !workerRef.current) return;
+    if (playRequested) {
+      setPlayRequested(false);
+      return;
+    }
+    if (!sf2Ready) {
+      try {
+        // Unlock audio during the click, before waiting for the SoundFont download.
+        const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
+        await ctx.resume();
+        setPlayRequested(true);
+        if (!sf2Loading) onLoadDefaultSf2();
+      } catch (err) {
+        setSongError(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
     if (isPlaying) {
       workerRef.current.postMessage({ type: "pause" });
       return;
     }
+    await startPlayback();
+  }
+
+  async function startPlayback() {
+    if (!song || !workerRef.current) return;
     try {
       await ensureTrackInfrastructure();
       const { ctx } = await ensureAudioInfrastructure();
@@ -1203,6 +1237,16 @@ export default function MidiReader({
       onError?.(msg);
     }
   }
+
+  useEffect(() => {
+    if (!playRequested) return;
+    if (sf2Ready) {
+      setPlayRequested(false);
+      void startPlayback();
+    } else if (sf2Error && !sf2Loading) {
+      setPlayRequested(false);
+    }
+  }, [playRequested, sf2Ready, sf2Error, sf2Loading]);
 
   function onSeekSliderChange(event: React.ChangeEvent<HTMLInputElement>) {
     seekToSec(Number(event.target.value));
@@ -1365,9 +1409,13 @@ export default function MidiReader({
       dataUrl?: string;
       persist?: boolean;
       restoreSec?: number;
+      autoplay?: boolean;
     } = {}
   ) {
     if (!workerRef.current) return;
+    ++midiSelectionRequestRef.current;
+    autoplayLoadedSongRef.current = opts.autoplay ?? false;
+    setPlayRequested(false);
     const selectedPath = opts.selectedPath ?? "";
     const sourceKind = opts.sourceKind ?? (selectedPath ? "bundled" : "uploaded");
     const source: CurrentMidiSource = { kind: sourceKind, name, path: selectedPath || undefined };
@@ -1499,42 +1547,34 @@ export default function MidiReader({
     }
   }
 
-  async function onLoadSelectedMidi() {
-    if (!selectedMidiPath || !workerRef.current) return;
+  async function onSelectMidiPath(nextPath: string, autoplay = false) {
+    if (!nextPath) return;
+    const request = ++midiSelectionRequestRef.current;
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}${selectedMidiPath}`);
-      if (!res.ok) throw new Error(`Failed to fetch ${selectedMidiPath}`);
+      const res = await fetch(`${import.meta.env.BASE_URL}${nextPath}`);
+      if (!res.ok) throw new Error(`Failed to fetch ${nextPath}`);
       const buf = await res.arrayBuffer();
-      const selected = midiOptions.find((m) => m.path === selectedMidiPath);
-      loadMidiIntoTracks(buf, selected?.name || selectedMidiPath, {
-        selectedPath: selectedMidiPath,
+      if (request !== midiSelectionRequestRef.current) return;
+      const selected = midiOptions.find((m) => m.path === nextPath);
+      loadMidiIntoTracks(buf, selected?.name || nextPath, {
+        selectedPath: nextPath,
         sourceKind: "bundled",
+        autoplay,
       });
     } catch (err) {
+      if (request !== midiSelectionRequestRef.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
       onError?.(msg);
     }
   }
 
-  async function onSelectMidiPath(nextPath: string) {
-    setSelectedMidiPath(nextPath);
-    if (!nextPath) return;
-    try {
-      const res = await fetch(`${import.meta.env.BASE_URL}${nextPath}`);
-      if (!res.ok) throw new Error(`Failed to fetch ${nextPath}`);
-      const buf = await res.arrayBuffer();
-      const selected = midiOptions.find((m) => m.path === nextPath);
-      loadMidiIntoTracks(buf, selected?.name || nextPath, {
-        selectedPath: nextPath,
-        sourceKind: "bundled",
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSongError(msg);
-      onError?.(msg);
-    }
-  }
+  playlistEndedRef.current = () => {
+    if (currentMidiSource?.kind !== "bundled") return;
+    const index = midiOptions.findIndex((midi) => midi.path === selectedMidiPath);
+    const next = index >= 0 ? midiOptions[index + 1] : undefined;
+    if (next) void onSelectMidiPath(next.path, true);
+  };
 
   function onBachConfigChange<K extends keyof BachFugueConfig>(key: K, value: BachFugueConfig[K]) {
     setBachConfig((prev) => ({ ...prev, [key]: value }));
@@ -1621,7 +1661,9 @@ export default function MidiReader({
     return generic ? "" : (track?.name || "");
   }
 
-  const transportStateLabel = !sf2Ready
+  const transportStateLabel = playRequested
+    ? "Waiting for SoundFont — playback queued"
+    : !sf2Ready
     ? sf2Loading
       ? "Loading SoundFont..."
       : "Load SoundFont to enable playback/export"
@@ -1815,32 +1857,6 @@ export default function MidiReader({
                   aria-hidden="true"
                 />
                 <span>{isParsingSheetMusic ? "Converting" : "Convert"}</span>
-              </button>
-              <select
-                className="toolbarSelect toolbarSelectWide"
-                value={selectedMidiPath}
-                onChange={(e) => onSelectMidiPath(e.target.value)}
-                disabled={!midiOptions.length}
-                aria-label="Select bundled MIDI file"
-                title="MIDI files from public/static"
-              >
-                <option value="">Select MIDI</option>
-                {midiOptions.map((midi) => (
-                  <option key={midi.path} value={midi.path}>
-                    {midi.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="toolbarActionBtn toolbarCompactBtn"
-                onClick={onLoadSelectedMidi}
-                disabled={!selectedMidiPath}
-                aria-label="Reload MIDI"
-                title="Reload MIDI"
-              >
-                <i className="fa-solid fa-rotate-right" aria-hidden="true" />
-                <span>Reload</span>
               </button>
             </NavMenuSection>
 
@@ -2059,11 +2075,11 @@ export default function MidiReader({
                 type="button"
                 className="transportBtn transportBtnPrimary"
                 onClick={onPlayPause}
-                disabled={!song || !sf2Ready}
-                aria-label={isPlaying ? "Pause" : "Play"}
-                title={isPlaying ? "Pause" : "Play"}
+                disabled={!song}
+                aria-label={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
+                title={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
               >
-                <i className={`fa-solid ${isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
+                <i className={`fa-solid ${playRequested ? "fa-spinner fa-spin" : isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -2123,6 +2139,30 @@ export default function MidiReader({
             </div>
           </div>
         </div>
+        {playlistHost && createPortal(<section className="midiPlaylist" aria-label="MIDI playlist">
+          <div className="midiPlaylistHeader">
+            <strong><i className="fa-solid fa-list" aria-hidden="true" /> Playlist</strong>
+            <span className="chip">{midiOptions.length} MIDI files</span>
+            <input type="search" value={playlistSearch} onChange={(e) => setPlaylistSearch(e.target.value)}
+              placeholder="Search MIDI files…" aria-label="Search playlist" />
+            <label className="fileInput toolbarActionBtn toolbarFileBtn">
+              <i className="fa-solid fa-file-arrow-up" aria-hidden="true" /><span>Upload MIDI</span>
+              <input type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Import MIDI file" />
+            </label>
+          </div>
+          <div className="midiPlaylistTracks">
+            {midiOptions.filter((midi) => midi.name.toLowerCase().includes(playlistSearch.toLowerCase())).map((midi) => (
+              <button type="button" key={midi.path} className={`midiPlaylistTrack ${selectedMidiPath === midi.path ? "active" : ""}`}
+                aria-label={midi.name} aria-pressed={selectedMidiPath === midi.path} onClick={() => void onSelectMidiPath(midi.path)}>
+                <span className="playlistTrackNumber">{String(midiOptions.indexOf(midi) + 1).padStart(2, "0")}</span>
+                <span className="playlistTrackName" title={midi.name}>{midi.name.replace(/\.midi?$/i, "").replace(/_/g, " ")}</span>
+                {selectedMidiPath === midi.path && <i className="fa-solid fa-caret-right" aria-label="Selected" />}
+              </button>
+            ))}
+            {!midiOptions.some((midi) => midi.name.toLowerCase().includes(playlistSearch.toLowerCase())) &&
+              <p className="muted">{midiOptions.length ? "No matching MIDI files." : "No bundled MIDI files available."}</p>}
+          </div>
+        </section>, playlistHost)}
         {song ? (
           <div className="midiMetadataPanel" aria-label="MIDI metadata">
             <div className="midiMetadataTitle">
