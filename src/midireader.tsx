@@ -17,6 +17,7 @@ import {
   type BachLength,
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
+import { applyMasterDynamicsToBuffer, type DynamicsMode } from "./master-dynamics.ts";
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 
@@ -389,7 +390,8 @@ interface MidiReaderProps {
   onToggleAnalyzer: () => void;
   ensureAudioInfrastructure: (
     opts?: { loadWorklet?: boolean }
-  ) => Promise<{ ctx: AudioContext; analyser: AnalyserNode }>;
+  ) => Promise<{ ctx: AudioContext; input: AudioNode }>;
+  dynamicsMode: DynamicsMode;
   getRegionsForPreset: (presetIndex: number) => SF2Region[];
   resolvePresetIndex: (program: number, bank: number) => number | null;
   fallbackPresetIndex: number;
@@ -421,6 +423,7 @@ export default function MidiReader({
   analyzerCollapsed,
   onToggleAnalyzer,
   ensureAudioInfrastructure,
+  dynamicsMode,
   getRegionsForPreset,
   resolvePresetIndex,
   fallbackPresetIndex,
@@ -1148,9 +1151,12 @@ export default function MidiReader({
 
   async function ensureTrackInfrastructure() {
     if (!song || !workerRef.current) return;
-    if (portsAttachedRef.current) return;
-
-    const { ctx, analyser } = await ensureAudioInfrastructure();
+    const { ctx, input } = await ensureAudioInfrastructure();
+    if (portsAttachedRef.current && trackNodesRef.current.length === song.tracks.length &&
+        trackNodesRef.current.every((rec) => rec.node.context === ctx)) return;
+    // The master context may have been replaced after closure or Fast Refresh.
+    // Reattach fresh track ports instead of sending notes to the old graph.
+    disconnectTrackNodes();
     const trackNodes: TrackNode[] = [];
     for (let i = 0; i < song.tracks.length; i += 1) {
       const node = new AudioWorkletNode(ctx, "sf2-processor", {
@@ -1163,7 +1169,7 @@ export default function MidiReader({
       gain.gain.setValueAtTime(1, ctx.currentTime);
       node.connect(panner);
       panner.connect(gain);
-      gain.connect(analyser);
+      gain.connect(input);
       trackNodes.push({ node, panner, gain });
     }
     trackNodesRef.current = trackNodes;
@@ -1372,8 +1378,14 @@ export default function MidiReader({
         events,
         maxVoices: Math.max(96, song.tracks.length * 24),
         onProgress: (progress: number) => {
-          setExportProgress(Math.max(0, Math.min(0.85, progress * 0.85)));
+          setExportProgress(Math.max(0, Math.min(0.75, progress * 0.75)));
         },
+      });
+      // The click-time mode is captured for the entire export, even if the user
+      // changes the live control while rendering. Apply once to the summed mix.
+      setExportStage("Mastering dynamics");
+      await applyMasterDynamicsToBuffer(audioBuffer, dynamicsMode, (progress) => {
+        setExportProgress(0.75 + progress * 0.1);
       });
       setExportStage("Encoding WAV");
       const wavBuffer = await encodeWavIncremental(audioBuffer, 16384, (progress) => {
