@@ -4,6 +4,7 @@ export interface MidiDriverCallbacks {
   onNoteOn?: (note: number, velocity: number, channel: number) => void;
   onNoteOff?: (note: number, channel: number) => void;
   onProgramChange?: (program: number, bank: number, channel: number) => void;
+  onRawMessage?: (timestampMs: number, data: ArrayLike<number>) => void;
 }
 
 export interface MidiStateChange {
@@ -95,6 +96,7 @@ export async function createMidiDriver({
   onNoteOn,
   onNoteOff,
   onProgramChange,
+  onRawMessage,
   onStateChange,
   selectedInputId = "all",
 }: MidiDriverOptions): Promise<MidiDriver> {
@@ -102,7 +104,7 @@ export async function createMidiDriver({
     throw new Error("Web MIDI is not supported in this browser.");
   }
 
-  const midi = await navigator.requestMIDIAccess({ sysex: false });
+  const midi = await navigator.requestMIDIAccess({ sysex: true });
 
   type InputRecord = { input: MIDIInput; handler: (event: MIDIMessageEvent) => void };
   const inputHandlers = new Map<string, InputRecord>();
@@ -117,6 +119,12 @@ export async function createMidiDriver({
     if (!input || inputHandlers.has(input.id)) return;
     const handler = (event: MIDIMessageEvent): void => {
       if (!shouldHandle(input.id)) return;
+      if (onRawMessage) {
+        const normalized = normalizeMidiData(event.data);
+        if (normalized) {
+          onRawMessage(event.timeStamp, normalized);
+        }
+      }
       messageHandler.handleMidiMessage(event.data);
     };
     input.addEventListener("midimessage", handler);
