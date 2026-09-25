@@ -676,6 +676,11 @@ export default function App() {
   const [midiEnabled, setMidiEnabled] = useState<boolean>(false);
   const [midiStatus, setMidiStatus] = useState<string>("MIDI disabled");
   const [midiError, setMidiError] = useState<string>("");
+  const [midiBannerDismissed, setMidiBannerDismissed] = useState<boolean>(false);
+  // Re-show the banner whenever a new error arrives.
+  useEffect(() => {
+    if (midiError) setMidiBannerDismissed(false);
+  }, [midiError]);
   const [midiInputs, setMidiInputs] = useState<{ id: string; name: string }[]>([]);
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<string>("midi");
@@ -1346,7 +1351,21 @@ export default function App() {
     <div className={`app ${activeTab === "midi" ? "hasPlaylist" : ""} ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
       {loading && <p className="status" role="status">{loadingStage}</p>}
       {error && <p className="status error">{error}</p>}
-      {midiError && <p className="status error">{midiError}</p>}
+      {midiError && !midiBannerDismissed && (
+        <div className="noticeBanner" role="alert">
+          <i className="fa-solid fa-triangle-exclamation" aria-hidden="true" />
+          <span className="noticeBannerText">{midiError}</span>
+          <button
+            type="button"
+            className="noticeBannerClose"
+            onClick={() => setMidiBannerDismissed(true)}
+            aria-label="Dismiss notification"
+            title="Dismiss"
+          >
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {activeTab === "midi" && (
         <MidiReader
@@ -1978,12 +1997,6 @@ export default function App() {
         </>
       )}
 
-      <div className="statusDock">
-        <span className="midiStatus">{midiStatus}</span>
-        <span className="midiStatus">Audio: {audioCtxState}</span>
-        <span className="midiStatus statusDockHint">Keyboard: a w s e d f t g y h</span>
-      </div>
-
       <div className={activeTab === "midi" ? "audioSidebar" : undefined}>
       <div ref={setPlaylistHost} />
       <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
@@ -2023,6 +2036,12 @@ export default function App() {
           </div>
         )}
       </aside>
+      </div>
+
+      <div className="statusDock">
+        <span className="midiStatus">{midiStatus}</span>
+        <span className="midiStatus">Audio: {audioCtxState}</span>
+        <span className="midiStatus statusDockHint">Keyboard: a w s e d f t g y h</span>
       </div>
     </div>
   );

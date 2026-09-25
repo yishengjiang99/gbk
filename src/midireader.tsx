@@ -458,6 +458,11 @@ export default function MidiReader({
   const [isGeneratingBach, setIsGeneratingBach] = useState<boolean>(false);
   const [isParsingSheetMusic, setIsParsingSheetMusic] = useState<boolean>(false);
   const [selectedSheetMusicImage, setSelectedSheetMusicImage] = useState<SelectedSheetMusicImage | null>(null);
+  const [sheetPreviewCollapsed, setSheetPreviewCollapsed] = useState<boolean>(() =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 720px)").matches
+  );
   const [sheetMusicStage, setSheetMusicStage] = useState<string>("");
   const [sheetMusicNotice, setSheetMusicNotice] = useState<string>("");
   const [timelineZoom, setTimelineZoom] = useState<number>(MIN_TIMELINE_ZOOM);
@@ -1930,39 +1935,56 @@ export default function MidiReader({
         {selectedSheetMusicImage ? (
           <div className="sheetMusicPreviewPanel" aria-label="Displayed sheet music">
             <div className="sheetMusicPreviewHeader">
+              <button
+                type="button"
+                className="sheetPreviewToggle"
+                onClick={() => setSheetPreviewCollapsed((v) => !v)}
+                aria-expanded={!sheetPreviewCollapsed}
+                aria-label={sheetPreviewCollapsed ? "Show sheet image preview" : "Hide sheet image preview"}
+                title={sheetPreviewCollapsed ? "Show preview" : "Hide preview"}
+              >
+                <i
+                  className={`fa-solid ${sheetPreviewCollapsed ? "fa-chevron-right" : "fa-chevron-down"}`}
+                  aria-hidden="true"
+                />
+              </button>
               <span className="songChipLabel">Sheet Image</span>
               <strong>{selectedSheetMusicImage.name}</strong>
               <span className="chip">{selectedSheetMusicImage.source === "sample" ? "Sample" : "Uploaded"}</span>
-              {selectedSheetMusicImage.source === "sample" ? (
+              <div className="sheetMusicPreviewActions">
                 <button
                   type="button"
-                  className="toolbarActionBtn sheetMusicConvertBtn"
-                  onClick={() => void onConvertSelectedSheetMusic(true)}
+                  className="toolbarActionBtn sheetMusicConvertBtn sheetMusicConvertPrimary"
+                  onClick={() => void onConvertSelectedSheetMusic()}
                   disabled={isParsingSheetMusic}
-                  aria-label="Load original Sweden transcription"
-                  title="Load the original transcription ported from Python"
+                  aria-label="Convert previewed sheet music to MIDI"
+                  title="Convert displayed sheet music to MIDI"
                 >
-                  <span>Load Original MIDI</span>
+                  <i
+                    className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
+                    aria-hidden="true"
+                  />
+                  <span>{isParsingSheetMusic ? "Converting" : "Convert MIDI"}</span>
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="toolbarActionBtn sheetMusicConvertBtn"
-                onClick={() => void onConvertSelectedSheetMusic()}
-                disabled={isParsingSheetMusic}
-                aria-label="Convert previewed sheet music to MIDI"
-                title="Convert displayed sheet music to MIDI"
-              >
-                <i
-                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
-                  aria-hidden="true"
-                />
-                <span>{isParsingSheetMusic ? "Converting" : "Convert MIDI"}</span>
-              </button>
+                {selectedSheetMusicImage.source === "sample" ? (
+                  <button
+                    type="button"
+                    className="toolbarActionBtn sheetMusicConvertBtn"
+                    onClick={() => void onConvertSelectedSheetMusic(true)}
+                    disabled={isParsingSheetMusic}
+                    aria-label="Load original Sweden transcription"
+                    title="Load the original transcription ported from Python"
+                  >
+                    <span>Load Original MIDI</span>
+                  </button>
+                ) : null}
+              </div>
             </div>
-            <div className="sheetMusicPreviewFrame">
-              <img src={selectedSheetMusicImage.previewUrl} alt={`${selectedSheetMusicImage.name} sheet music preview`} />
-            </div>
+            {!sheetPreviewCollapsed ? (
+              <div className="sheetMusicPreviewFrame">
+                <img src={selectedSheetMusicImage.previewUrl} alt={`${selectedSheetMusicImage.name} sheet music preview`} />
+              </div>
+            ) : null}
           </div>
         ) : null}
         {bachModuleOpen ? (
@@ -2105,7 +2127,7 @@ export default function MidiReader({
               </button>
               <button
                 type="button"
-                className="transportBtn"
+                className="transportBtn transportExportBtn"
                 onClick={onExportWav}
                 disabled={!song || !sf2Ready || isExporting}
                 aria-label="Export WAV"
