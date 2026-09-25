@@ -3,6 +3,8 @@ const QUARTER = TICKS_PER_QUARTER;
 const WHOLE = TICKS_PER_QUARTER * 4;
 const VELOCITY_RH = 62;
 const VELOCITY_LH = 50;
+// Playback tempo of generated transcriptions; must match the MIDI tempo meta event.
+const TRANSCRIPTION_BPM = 46;
 
 const LETTER_BASE: Record<string, number> = {
   C: 0,
@@ -18,6 +20,32 @@ export interface ParsedSheetMusicMidi {
   midiData: ArrayBuffer;
   fileName: string;
   warnings: string[];
+}
+
+export interface SheetMusicNoteBox {
+  /** Notehead bounding box, in pixels of the decoded source image (see imageWidth/imageHeight). */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface SheetMusicNoteLayout {
+  /** MIDI note number. */
+  pitch: number;
+  /** Note onset in seconds, matching the generated MIDI timeline. */
+  startSec: number;
+  /** Note end in seconds, matching the generated MIDI timeline. */
+  endSec: number;
+  bbox: SheetMusicNoteBox;
+}
+
+export interface ParsedSheetMusicWithLayout extends ParsedSheetMusicMidi {
+  /** Dimensions of the decoded image the OCR analyzed. */
+  imageWidth: number;
+  imageHeight: number;
+  /** One entry per imported MIDI note, aligned with the generated MIDI. */
+  noteLayout: SheetMusicNoteLayout[];
 }
 
 export interface BinarySheetImage {
@@ -55,6 +83,17 @@ interface NoteCandidate {
   staffBottom: number;
   systemIndex: number;
   clef: "treble" | "bass";
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+interface DetectedSheetNoteLayout {
+  midi: number;
+  startTick: number;
+  durationTicks: number;
+  bbox: SheetMusicNoteBox;
 }
 
 function note(name: string): number {
@@ -169,7 +208,7 @@ export function buildDetectedSheetMusicMidi(notes: DetectedSheetNote[], title = 
   const melody = new MidiTrackBuilder();
 
   conductor.meta(0, 0x03, ascii(title));
-  conductor.meta(0, 0x51, tempoPayload(46));
+  conductor.meta(0, 0x51, tempoPayload(TRANSCRIPTION_BPM));
   conductor.meta(0, 0x58, [4, 2, 24, 8]);
 
   melody.push(0, [0xc0, 0]);
@@ -225,54 +264,97 @@ function paperLuminance(values: Uint8ClampedArray, offset: number): number {
   return Math.round(alpha * ink + (1 - alpha) * 255);
 }
 
-function otsuThreshold(values: Uint8ClampedArray): number {
-  const histogram = new Uint32Array(256);
-  let total = 0;
-  for (let i = 0; i < values.length; i += 4) {
-    const luminance = paperLuminance(values, i);
-    histogram[luminance] += 1;
-    total += 1;
+function extractLuminance(pixels: Uint8ClampedArray, width: number, height: number): Uint8ClampedArray {
+  const luminance = new Uint8ClampedArray(width * height);
+  for (let i = 0; i < width * height; i += 1) {
+    luminance[i] = paperLuminance(pixels, i * 4);
   }
-
-  let sum = 0;
-  for (let i = 0; i < 256; i += 1) sum += i * histogram[i];
-
-  let sumBackground = 0;
-  let weightBackground = 0;
-  let bestThreshold = -1;
-  let bestVariance = 0;
-
-  for (let i = 0; i < 256; i += 1) {
-    weightBackground += histogram[i];
-    if (!weightBackground) continue;
-
-    const weightForeground = total - weightBackground;
-    if (!weightForeground) break;
-
-    sumBackground += i * histogram[i];
-    const meanBackground = sumBackground / weightBackground;
-    const meanForeground = (sum - sumBackground) / weightForeground;
-    const betweenVariance = weightBackground * weightForeground * (meanBackground - meanForeground) ** 2;
-
-    if (betweenVariance > bestVariance) {
-      bestVariance = betweenVariance;
-      bestThreshold = i;
-    }
-  }
-
-  // The selected bin belongs to the foreground. Lowering it can erase all ink
-  // in a low-contrast scan. A uniform image has no separable foreground.
-  return bestThreshold;
+  return luminance;
 }
 
-async function decodeSheetImage(file: File): Promise<BinarySheetImage | null> {
+// Local background estimate: the mean luminance in a window much wider than
+// a staff line but narrower than typical illumination gradients (shadows,
+// vignetting) and paper-texture mottling.
+function backgroundMean(
+  luminance: Uint8ClampedArray,
+  width: number,
+  height: number,
+  radius: number
+): Float64Array {
+  const stride = width + 1;
+  const integral = new Float64Array(stride * (height + 1));
+  for (let y = 0; y < height; y += 1) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x += 1) {
+      rowSum += luminance[y * width + x];
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum;
+    }
+  }
+  const background = new Float64Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(height - 1, y + radius);
+    for (let x = 0; x < width; x += 1) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width - 1, x + radius);
+      const sum =
+        integral[(y1 + 1) * stride + x1 + 1] -
+        integral[y0 * stride + x1 + 1] -
+        integral[(y1 + 1) * stride + x0] +
+        integral[y0 * stride + x0];
+      background[y * width + x] = sum / ((x1 - x0 + 1) * (y1 - y0 + 1));
+    }
+  }
+  return background;
+}
+
+// Local-adaptive binarization: a pixel is ink when it is significantly darker
+// than its local background. Unlike a single global threshold, this suppresses
+// paper texture and uneven lighting, which otherwise binarize as solid dark
+// regions that merge adjacent staff lines into unresolvable blobs.
+export function binarizeLuminance(
+  luminance: Uint8ClampedArray,
+  width: number,
+  height: number
+): BinarySheetImage {
+  const radius = Math.max(8, Math.min(40, Math.round(Math.min(width, height) / 60)));
+  const background = backgroundMean(luminance, width, height, radius);
+  const contrast = 20;
+  const dark = new Uint8Array(width * height);
+  const rowCounts = new Uint16Array(height);
+
+  for (let y = 0; y < height; y += 1) {
+    let count = 0;
+    for (let x = 0; x < width; x += 1) {
+      const i = y * width + x;
+      if (luminance[i] < background[i] - contrast) {
+        dark[i] = 1;
+        count += 1;
+      }
+    }
+    rowCounts[y] = count;
+  }
+
+  return { width, height, dark, rowCounts };
+}
+
+interface DecodedSheetImage {
+  image: BinarySheetImage;
+  luminance: Uint8ClampedArray;
+  sourceWidth: number;
+  sourceHeight: number;
+}
+
+async function decodeSheetImage(file: File): Promise<DecodedSheetImage | null> {
   if (!canUseBrowserImagePipeline()) return null;
 
   const bitmap = await createImageBitmap(file);
+  const sourceWidth = bitmap.width;
+  const sourceHeight = bitmap.height;
   const maxSide = 1800;
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -284,28 +366,55 @@ async function decodeSheetImage(file: File): Promise<BinarySheetImage | null> {
   bitmap.close();
 
   const pixels = ctx.getImageData(0, 0, width, height).data;
-  return binarizeSheetPixels(pixels, width, height);
+  const luminance = extractLuminance(pixels, width, height);
+  return { image: binarizeLuminance(luminance, width, height), luminance, sourceWidth, sourceHeight };
+}
+
+// Variance of the Laplacian: a sharp image has strong second-derivative
+// responses at ink edges, while blur suppresses them. Calibrated on camera
+// photos of sheet music: a sharp photo scores ~290, light blur (sigma 1)
+// ~44, heavy blur (sigma 2) ~12. Pure function for unit tests.
+export function laplacianVariance(luminance: Uint8ClampedArray, width: number, height: number): number {
+  let sum = 0;
+  let sumSquares = 0;
+  let count = 0;
+  for (let y = 1; y < height - 1; y += 2) {
+    for (let x = 1; x < width - 1; x += 2) {
+      const i = y * width + x;
+      const laplacian = -4 * luminance[i] + luminance[i - 1] + luminance[i + 1] + luminance[i - width] + luminance[i + width];
+      sum += laplacian;
+      sumSquares += laplacian * laplacian;
+      count += 1;
+    }
+  }
+  if (!count) return 0;
+  const mean = sum / count;
+  return sumSquares / count - mean * mean;
+}
+
+// Advisory quality warnings. These never throw: a blurry or small image can
+// still transcribe, but the user should know recognition may be degraded.
+export function analyzeSheetImageQuality(
+  luminance: Uint8ClampedArray,
+  width: number,
+  height: number,
+  sourceWidth: number,
+  sourceHeight: number
+): string[] {
+  const warnings: string[] = [];
+  if (Math.max(sourceWidth, sourceHeight) < 1280) {
+    warnings.push(
+      `The image is low resolution (${sourceWidth}x${sourceHeight}); small details may be missed. Use a higher-resolution photo for better results.`
+    );
+  }
+  if (laplacianVariance(luminance, width, height) < 30) {
+    warnings.push("The image looks blurry; sharper focus would improve recognition.");
+  }
+  return warnings;
 }
 
 export function binarizeSheetPixels(pixels: Uint8ClampedArray, width: number, height: number): BinarySheetImage {
-  const threshold = otsuThreshold(pixels);
-  const dark = new Uint8Array(width * height);
-  const rowCounts = new Uint16Array(height);
-
-  for (let y = 0; y < height; y += 1) {
-    let count = 0;
-    for (let x = 0; x < width; x += 1) {
-      const i = (y * width + x) * 4;
-      const luminance = paperLuminance(pixels, i);
-      if (luminance <= threshold) {
-        dark[y * width + x] = 1;
-        count += 1;
-      }
-    }
-    rowCounts[y] = count;
-  }
-
-  return { width, height, dark, rowCounts };
+  return binarizeLuminance(extractLuminance(pixels, width, height), width, height);
 }
 
 function groupConsecutiveRows(rows: number[]): number[][] {
@@ -319,6 +428,43 @@ function groupConsecutiveRows(rows: number[]): number[][] {
     }
   }
   return groups;
+}
+
+// Paper texture can keep the projection valleys between adjacent staff lines
+// above the peak threshold, merging several lines into one wide group. Split
+// such groups at deep local minima so each staff line becomes its own peak.
+// A valley only splits when it dips below 60% of both neighboring maxima, so
+// clean single lines (which have no internal valley) are never split.
+function splitGroupAtValleys(group: number[], bins: ArrayLike<number>): number[][] {
+  if (group.length < 3) return [group];
+  let bestIndex = -1;
+  let bestDepth = 0;
+  let leftPeak = 0;
+  for (let i = 1; i < group.length - 1; i += 1) {
+    const y = group[i];
+    if (bins[y] > leftPeak) leftPeak = bins[y];
+    const isValley =
+      (bins[y] < bins[y - 1] && bins[y] <= bins[y + 1]) || (bins[y] <= bins[y - 1] && bins[y] < bins[y + 1]);
+    if (!isValley) continue;
+    let rightPeak = 0;
+    for (let j = i + 1; j < group.length; j += 1) {
+      if (bins[group[j]] > rightPeak) rightPeak = bins[group[j]];
+    }
+    const neighborPeak = Math.min(leftPeak, rightPeak);
+    if (neighborPeak <= 0) continue;
+    if (bins[y] < neighborPeak * 0.6) {
+      const depth = neighborPeak - bins[y];
+      if (depth > bestDepth) {
+        bestDepth = depth;
+        bestIndex = i;
+      }
+    }
+  }
+  if (bestIndex < 0) return [group];
+  return [
+    ...splitGroupAtValleys(group.slice(0, bestIndex), bins),
+    ...splitGroupAtValleys(group.slice(bestIndex + 1), bins),
+  ];
 }
 
 function lineYAtX(staff: DetectedStaff, line: number, x: number, width: number): number {
@@ -374,6 +520,7 @@ function lineCentersFromProjection(bins: Uint16Array, width: number): Array<{ ce
   }
 
   return groupConsecutiveRows(candidateRows)
+    .flatMap((group) => splitGroupAtValleys(group, bins))
     .map((group) => {
       let weighted = 0;
       let strength = 0;
@@ -401,6 +548,7 @@ function lineCentersFromRows(rowCounts: Uint16Array, width: number): Array<{ cen
   }
 
   return groupConsecutiveRows(candidateRows)
+    .flatMap((group) => splitGroupAtValleys(group, rowCounts))
     .map((group) => {
       let weighted = 0;
       let strength = 0;
@@ -414,6 +562,75 @@ function lineCentersFromRows(rowCounts: Uint16Array, width: number): Array<{ cen
       };
     })
     .filter((center, index, all) => index === 0 || center.center - all[index - 1].center > 2);
+}
+
+// Projection concentration: staff lines concentrate their ink into a few
+// row bins at the true slope and smear across many bins elsewhere, so the
+// sum of squared bin counts peaks at the dominant staff slope.
+function projectionConcentration(image: BinarySheetImage, slope: number): number {
+  const bins = projectRowsForSlope(image, slope);
+  let score = 0;
+  for (let y = 0; y < bins.length; y += 1) score += bins[y] * bins[y];
+  return score;
+}
+
+export interface StaffSkewEstimate {
+  /** Dominant staff-line slope (rise over run). */
+  slope: number;
+  /** Concentration score at the estimated slope. */
+  score: number;
+  /** Concentration score at slope 0, for deciding whether to deskew. */
+  horizontalScore: number;
+}
+
+// Estimate the dominant staff-line slope of a scanned page. Pure function so
+// synthetic tilted images can verify it in unit tests.
+export function estimateStaffSkew(image: BinarySheetImage): StaffSkewEstimate {
+  const horizontalScore = projectionConcentration(image, 0);
+  let bestSlope = 0;
+  let bestScore = horizontalScore;
+  for (let slope = -0.2; slope <= 0.2001; slope += 0.01) {
+    if (Math.abs(slope) < 0.005) continue;
+    const score = projectionConcentration(image, slope);
+    if (score > bestScore) {
+      bestScore = score;
+      bestSlope = slope;
+    }
+  }
+  return { slope: bestSlope, score: bestScore, horizontalScore };
+}
+
+export interface DeskewedSheetImage {
+  image: BinarySheetImage;
+  /** Slope that was removed; 0 when the image was already horizontal. */
+  slope: number;
+  /** Vertical padding added during the shear; maps coordinates back. */
+  yOffset: number;
+}
+
+// Shear the binary image so staff lines become horizontal. The image grows
+// vertically to avoid clipping; map coordinates back with deskewInverseY.
+export function deskewBinaryImage(image: BinarySheetImage, slope: number): DeskewedSheetImage {
+  if (Math.abs(slope) < 1e-9) return { image, slope: 0, yOffset: 0 };
+  const yOffset = Math.ceil((Math.abs(slope) * image.width) / 2);
+  const height = image.height + yOffset * 2;
+  const dark = new Uint8Array(image.width * height);
+  const rowCounts = new Uint16Array(height);
+  for (let x = 0; x < image.width; x += 1) {
+    const shift = Math.round(slope * (x - image.width / 2));
+    for (let y = 0; y < image.height; y += 1) {
+      if (!image.dark[y * image.width + x]) continue;
+      const dy = y - shift + yOffset;
+      dark[dy * image.width + x] = 1;
+      rowCounts[dy] += 1;
+    }
+  }
+  return { image: { width: image.width, height, dark, rowCounts }, slope, yOffset };
+}
+
+// Map a y-coordinate from deskewed analysis space back to the original image.
+export function deskewInverseY(deskewed: DeskewedSheetImage, x: number, y: number): number {
+  return y - deskewed.yOffset + deskewed.slope * (x - deskewed.image.width / 2);
 }
 
 function stavesOverlap(a: DetectedStaff, b: DetectedStaff): boolean {
@@ -799,6 +1016,10 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
           staffBottom: staff.bottom,
           systemIndex: staff.systemIndex,
           clef: staff.clef,
+          minX,
+          minY: compMinY,
+          maxX,
+          maxY: compMaxY,
         });
       }
     }
@@ -815,11 +1036,14 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
   return merged.sort((a, b) => a.x - b.x || b.y - a.y);
 }
 
-function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: BinarySheetImage): DetectedSheetNote[] {
-  if (!candidates.length) return [];
+function groupNoteCandidatesIntoEventsWithLayout(
+  candidates: NoteCandidate[],
+  image: BinarySheetImage
+): { events: DetectedSheetNote[]; layout: DetectedSheetNoteLayout[] } {
+  if (!candidates.length) return { events: [], layout: [] };
 
   const systems = [...new Set(candidates.map((candidate) => candidate.systemIndex))].sort((a, b) => a - b);
-  const events: DetectedSheetNote[] = [];
+  const entries: Array<{ event: DetectedSheetNote; layout: DetectedSheetNoteLayout }> = [];
   const systemTicks = WHOLE * 4;
   const systemTops = systems.map((systemIndex) =>
     Math.min(...candidates.filter((candidate) => candidate.systemIndex === systemIndex).map((candidate) => candidate.staffTop))
@@ -845,13 +1069,28 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
       .sort((a, b) => a.x - b.x || b.y - a.y);
     if (!systemCandidates.length) continue;
 
-    const systemTop = Math.min(...systemCandidates.map((candidate) => candidate.staffTop));
-    const systemBottom = Math.max(...systemCandidates.map((candidate) => candidate.staffBottom));
+    // Align staves within the system: clefs and key signatures offset each
+    // staff's first notehead by a different amount. Normalize x so every
+    // staff's first notehead maps to the system start; otherwise the hand
+    // with the narrower clef gets an earlier downbeat than the other.
+    const staffLeftX = new Map<number, number>();
+    for (const candidate of systemCandidates) {
+      const prev = staffLeftX.get(candidate.staffTop);
+      if (prev === undefined || candidate.x < prev) staffLeftX.set(candidate.staffTop, candidate.x);
+    }
+    const systemLeftX = Math.min(...staffLeftX.values());
+    const alignedCandidates = systemCandidates.map((candidate) => ({
+      ...candidate,
+      x: candidate.x - (staffLeftX.get(candidate.staffTop) ?? systemLeftX) + systemLeftX,
+    }));
+
+    const systemTop = Math.min(...alignedCandidates.map((candidate) => candidate.staffTop));
+    const systemBottom = Math.max(...alignedCandidates.map((candidate) => candidate.staffBottom));
     const systemSpacing = Math.max(4, (systemBottom - systemTop) / 4);
-    const leftX = Math.min(...systemCandidates.map((candidate) => candidate.x));
-    const rightX = Math.max(...systemCandidates.map((candidate) => candidate.x));
+    const leftX = Math.min(...alignedCandidates.map((candidate) => candidate.x));
+    const rightX = Math.max(...alignedCandidates.map((candidate) => candidate.x));
     const usableWidth = Math.max(1, rightX - leftX);
-    const musicalCandidates = systemCandidates.filter(
+    const musicalCandidates = alignedCandidates.filter(
       (candidate) => candidate.y >= systemTop - systemSpacing * 2.2 && candidate.y <= systemBottom + systemSpacing * 2.6
     );
 
@@ -884,40 +1123,96 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
       const startTick = visualSystemOrders[systemOrder] * systemTicks + Math.round((position * (systemTicks - QUARTER)) / QUARTER) * QUARTER;
 
       for (const candidate of limited) {
-        events.push({
-          midi: candidate.midi,
-          startTick,
-          durationTicks: QUARTER,
-          velocity: candidate.clef === "bass" ? VELOCITY_LH : VELOCITY_RH,
-          channel: candidate.clef === "bass" ? 1 : 0,
+        entries.push({
+          event: {
+            midi: candidate.midi,
+            startTick,
+            durationTicks: QUARTER,
+            velocity: candidate.clef === "bass" ? VELOCITY_LH : VELOCITY_RH,
+            channel: candidate.clef === "bass" ? 1 : 0,
+          },
+          layout: {
+            midi: candidate.midi,
+            startTick,
+            durationTicks: QUARTER,
+            bbox: {
+              x: candidate.minX,
+              y: candidate.minY,
+              w: candidate.maxX - candidate.minX + 1,
+              h: candidate.maxY - candidate.minY + 1,
+            },
+          },
         });
       }
     }
   }
 
-  const uniqueEvents = [...new Map(events.map((event) => [`${event.startTick}:${event.midi}`, event])).values()];
-  return uniqueEvents.slice(0, Math.max(1, Math.floor(image.width * 0.35)));
+  // Deduplicate notes and layout in lockstep so layout[i] always describes events[i].
+  const uniqueEntries = [
+    ...new Map(entries.map((entry) => [`${entry.event.startTick}:${entry.event.midi}`, entry])).values(),
+  ];
+  const sliced = uniqueEntries.slice(0, Math.max(1, Math.floor(image.width * 0.35)));
+  return { events: sliced.map((entry) => entry.event), layout: sliced.map((entry) => entry.layout) };
 }
 
-export function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
-  const warnings: string[] = [];
-  const staves = detectStaves(image);
-  if (!staves.length) return { notes: [], warnings: ["No five-line staff was detected in the image."] };
+function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: BinarySheetImage): DetectedSheetNote[] {
+  return groupNoteCandidatesIntoEventsWithLayout(candidates, image).events;
+}
 
-  const candidates = staves.flatMap((staff) => detectNoteCandidatesInStaff(image, staff));
-  const notes = groupNoteCandidatesIntoEvents(candidates, image);
-  if (!notes.length) {
+export interface TranscribedSheetMusicLayout {
+  notes: DetectedSheetNote[];
+  /** Bounding boxes in the input image's coordinates; layout[i] describes notes[i]. */
+  layout: DetectedSheetNoteLayout[];
+  warnings: string[];
+}
+
+export function transcribeSheetImageWithLayout(image: BinarySheetImage): TranscribedSheetMusicLayout {
+  const warnings: string[] = [];
+
+  // Estimate page skew and shear it away so staff detection runs on
+  // horizontal staves. Layout boxes are mapped back below. Only significant
+  // skew is corrected: the detector natively handles mild tilt, and a global
+  // shear can hurt pages with varying (perspective) skew.
+  const skew = estimateStaffSkew(image);
+  const deskewed =
+    Math.abs(skew.slope) >= 0.08
+      ? deskewBinaryImage(image, skew.slope)
+      : { image, slope: 0, yOffset: 0 };
+
+  const staves = detectStaves(deskewed.image);
+  if (!staves.length) return { notes: [], layout: [], warnings: ["No five-line staff was detected in the image."] };
+
+  const candidates = staves.flatMap((staff) => detectNoteCandidatesInStaff(deskewed.image, staff));
+  const { events, layout } = groupNoteCandidatesIntoEventsWithLayout(candidates, deskewed.image);
+  if (!events.length) {
     return {
       notes: [],
+      layout: [],
       warnings: [`Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"}, but no noteheads were clear enough to import.`],
     };
   }
 
+  // Map boxes back through the deskew shear into the caller's coordinates.
+  // The shear only shifts rows vertically, so x/w are unchanged.
+  const mappedLayout =
+    deskewed.slope === 0
+      ? layout
+      : layout.map((entry) => {
+          const centerX = entry.bbox.x + entry.bbox.w / 2;
+          const y = deskewInverseY(deskewed, centerX, entry.bbox.y);
+          return { ...entry, bbox: { ...entry.bbox, y } };
+        });
+
   warnings.push(
     `Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"}, ${candidates.length} notehead candidate${
       candidates.length === 1 ? "" : "s"
-    }, and imported ${notes.length} MIDI note${notes.length === 1 ? "" : "s"}. Treble/bass grand-staff clefs and quarter-note timing were assumed.`
+    }, and imported ${events.length} MIDI note${events.length === 1 ? "" : "s"}. Treble/bass grand-staff clefs and quarter-note timing were assumed.`
   );
+  return { notes: events, layout: mappedLayout, warnings };
+}
+
+export function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
+  const { notes, warnings } = transcribeSheetImageWithLayout(image);
   return { notes, warnings };
 }
 
@@ -1027,29 +1322,63 @@ export function buildSwedenSheetMusicMidi(): ArrayBuffer {
   return makeMidiArrayBuffer(tracks);
 }
 
-export async function parseSheetMusicToMidi(file: File): Promise<ParsedSheetMusicMidi> {
+export async function parseSheetMusicWithLayout(file: File): Promise<ParsedSheetMusicWithLayout> {
   if (!isSupportedSheetMusicImageFile(file)) {
     throw new Error("Choose a JPG or PNG image file of sheet music.");
   }
 
-  let image: BinarySheetImage | null = null;
+  let decoded: DecodedSheetImage | null = null;
   try {
-    image = await decodeSheetImage(file);
+    decoded = await decodeSheetImage(file);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`Image decoding failed (${message}). Choose a readable JPG or PNG image.`);
   }
 
-  if (!image) throw new Error("Image recognition is unavailable in this browser.");
+  if (!decoded) throw new Error("Image recognition is unavailable in this browser.");
 
-  const result = transcribeSheetImage(image);
+  const warnings = analyzeSheetImageQuality(
+    decoded.luminance,
+    decoded.image.width,
+    decoded.image.height,
+    decoded.sourceWidth,
+    decoded.sourceHeight
+  );
+  const result = transcribeSheetImageWithLayout(decoded.image);
+  warnings.push(...result.warnings);
+
   if (!result.notes.length) {
-    throw new Error(`${result.warnings.join(" ")} Try a clearer image showing the complete staff.`);
+    throw new Error(`${warnings.join(" ")} Try a clearer image showing the complete staff.`);
   }
 
+  const midiData = buildDetectedSheetMusicMidi(result.notes, basenameWithoutExtension(file.name));
+  // The analysis ran on a downscaled working image; map boxes back to source pixels.
+  const scaleX = decoded.image.width / decoded.sourceWidth;
+  const scaleY = decoded.image.height / decoded.sourceHeight;
+  const secondsPerTick = 60 / (TRANSCRIPTION_BPM * QUARTER);
+  const noteLayout: SheetMusicNoteLayout[] = result.layout.map((entry) => ({
+    pitch: entry.midi,
+    startSec: entry.startTick * secondsPerTick,
+    endSec: (entry.startTick + entry.durationTicks) * secondsPerTick,
+    bbox: {
+      x: entry.bbox.x / scaleX,
+      y: entry.bbox.y / scaleY,
+      w: entry.bbox.w / scaleX,
+      h: entry.bbox.h / scaleY,
+    },
+  }));
+
   return {
-    midiData: buildDetectedSheetMusicMidi(result.notes, basenameWithoutExtension(file.name)),
+    midiData,
     fileName: `${basenameWithoutExtension(file.name)}-scan.mid`,
-    warnings: result.warnings,
+    warnings,
+    imageWidth: decoded.sourceWidth,
+    imageHeight: decoded.sourceHeight,
+    noteLayout,
   };
+}
+
+export async function parseSheetMusicToMidi(file: File): Promise<ParsedSheetMusicMidi> {
+  const { midiData, fileName, warnings } = await parseSheetMusicWithLayout(file);
+  return { midiData, fileName, warnings };
 }
