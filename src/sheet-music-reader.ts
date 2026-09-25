@@ -55,6 +55,16 @@ interface NoteCandidate {
   staffBottom: number;
   systemIndex: number;
   clef: "treble" | "bass";
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+interface DetectedSheetNoteLayout {
+  midi: number;
+  startTick: number;
+  bbox: SheetMusicNoteBox;
 }
 
 function note(name: string): number {
@@ -799,6 +809,10 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
           staffBottom: staff.bottom,
           systemIndex: staff.systemIndex,
           clef: staff.clef,
+          minX,
+          minY: compMinY,
+          maxX,
+          maxY: compMaxY,
         });
       }
     }
@@ -815,11 +829,15 @@ function detectNoteCandidatesInStaff(image: BinarySheetImage, staff: DetectedSta
   return merged.sort((a, b) => a.x - b.x || b.y - a.y);
 }
 
-function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: BinarySheetImage): DetectedSheetNote[] {
-  if (!candidates.length) return [];
+function groupNoteCandidatesIntoEventsWithLayout(
+  candidates: NoteCandidate[],
+  image: BinarySheetImage
+): { notes: DetectedSheetNote[]; layout: DetectedSheetNoteLayout[] } {
+  if (!candidates.length) return { notes: [], layout: [] };
 
   const systems = [...new Set(candidates.map((candidate) => candidate.systemIndex))].sort((a, b) => a - b);
   const events: DetectedSheetNote[] = [];
+  const eventLayouts: DetectedSheetNoteLayout[] = [];
   const systemTicks = WHOLE * 4;
   const systemTops = systems.map((systemIndex) =>
     Math.min(...candidates.filter((candidate) => candidate.systemIndex === systemIndex).map((candidate) => candidate.staffTop))
@@ -891,24 +909,54 @@ function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: Binar
           velocity: candidate.clef === "bass" ? VELOCITY_LH : VELOCITY_RH,
           channel: candidate.clef === "bass" ? 1 : 0,
         });
+        eventLayouts.push({
+          midi: candidate.midi,
+          startTick,
+          bbox: {
+            x: candidate.minX,
+            y: candidate.minY,
+            w: candidate.maxX - candidate.minX + 1,
+            h: candidate.maxY - candidate.minY + 1,
+          },
+        });
       }
     }
   }
 
-  const uniqueEvents = [...new Map(events.map((event) => [`${event.startTick}:${event.midi}`, event])).values()];
-  return uniqueEvents.slice(0, Math.max(1, Math.floor(image.width * 0.35)));
+  const seenEventKeys = new Set<string>();
+  const uniqueNotes: DetectedSheetNote[] = [];
+  const uniqueLayouts: DetectedSheetNoteLayout[] = [];
+  events.forEach((event, index) => {
+    const key = `${event.startTick}:${event.midi}`;
+    if (seenEventKeys.has(key)) return;
+    seenEventKeys.add(key);
+    uniqueNotes.push(event);
+    uniqueLayouts.push(eventLayouts[index]);
+  });
+  const noteCap = Math.max(1, Math.floor(image.width * 0.35));
+  return { notes: uniqueNotes.slice(0, noteCap), layout: uniqueLayouts.slice(0, noteCap) };
 }
 
-export function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
+function groupNoteCandidatesIntoEvents(candidates: NoteCandidate[], image: BinarySheetImage): DetectedSheetNote[] {
+  return groupNoteCandidatesIntoEventsWithLayout(candidates, image).notes;
+}
+
+export function transcribeSheetImageWithLayout(image: BinarySheetImage): {
+  notes: DetectedSheetNote[];
+  layout: DetectedSheetNoteLayout[];
+  warnings: string[];
+} {
   const warnings: string[] = [];
   const staves = detectStaves(image);
-  if (!staves.length) return { notes: [], warnings: ["No five-line staff was detected in the image."] };
+  if (!staves.length) return { notes: [], layout: [], warnings: ["No five-line staff was detected in the image."] };
 
   const candidates = staves.flatMap((staff) => detectNoteCandidatesInStaff(image, staff));
-  const notes = groupNoteCandidatesIntoEvents(candidates, image);
+  const grouped = groupNoteCandidatesIntoEventsWithLayout(candidates, image);
+  const notes = grouped.notes;
   if (!notes.length) {
     return {
       notes: [],
+      layout: [],
       warnings: [`Detected ${staves.length} staff group${staves.length === 1 ? "" : "s"}, but no noteheads were clear enough to import.`],
     };
   }
@@ -918,6 +966,11 @@ export function transcribeSheetImage(image: BinarySheetImage): { notes: Detected
       candidates.length === 1 ? "" : "s"
     }, and imported ${notes.length} MIDI note${notes.length === 1 ? "" : "s"}. Treble/bass grand-staff clefs and quarter-note timing were assumed.`
   );
+  return { notes, layout: grouped.layout, warnings };
+}
+
+export function transcribeSheetImage(image: BinarySheetImage): { notes: DetectedSheetNote[]; warnings: string[] } {
+  const { notes, warnings } = transcribeSheetImageWithLayout(image);
   return { notes, warnings };
 }
 
@@ -1051,5 +1104,78 @@ export async function parseSheetMusicToMidi(file: File): Promise<ParsedSheetMusi
     midiData: buildDetectedSheetMusicMidi(result.notes, basenameWithoutExtension(file.name)),
     fileName: `${basenameWithoutExtension(file.name)}-scan.mid`,
     warnings: result.warnings,
+  };
+}
+
+export interface SheetMusicNoteBox {
+  /** Notehead bounding box, in analysis-image pixels (see imageWidth/imageHeight). */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface SheetMusicNoteLayout {
+  /** MIDI note number. */
+  pitch: number;
+  /** Note onset in seconds, matching the generated MIDI timeline. */
+  startSec: number;
+  /** Note end in seconds, matching the generated MIDI timeline. */
+  endSec: number;
+  bbox: SheetMusicNoteBox;
+}
+
+export interface ParsedSheetMusicWithLayout extends ParsedSheetMusicMidi {
+  /** Dimensions of the (possibly downscaled) image the OCR analyzed. */
+  imageWidth: number;
+  imageHeight: number;
+  /** One entry per imported MIDI note, aligned with the generated MIDI. */
+  noteLayout: SheetMusicNoteLayout[];
+}
+
+// Scanned sheet music is encoded at 46 BPM (see buildDetectedSheetMusicMidi).
+const SHEET_MUSIC_SCAN_BPM = 46;
+const SHEET_MUSIC_SEC_PER_TICK = 60 / (SHEET_MUSIC_SCAN_BPM * TICKS_PER_QUARTER);
+
+export async function parseSheetMusicWithLayout(file: File): Promise<ParsedSheetMusicWithLayout> {
+  if (!isSupportedSheetMusicImageFile(file)) {
+    throw new Error("Choose a JPG or PNG image file of sheet music.");
+  }
+
+  let image: BinarySheetImage | null = null;
+  try {
+    image = await decodeSheetImage(file);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Image decoding failed (${message}). Choose a readable JPG or PNG image.`);
+  }
+
+  if (!image) throw new Error("Image recognition is unavailable in this browser.");
+
+  const result = transcribeSheetImageWithLayout(image);
+  if (!result.notes.length) {
+    throw new Error(`${result.warnings.join(" ")} Try a clearer image showing the complete staff.`);
+  }
+
+  const noteLayout: SheetMusicNoteLayout[] = result.layout.map((entry) => {
+    // Mirror the clamping in buildDetectedSheetMusicMidi so the seconds line up
+    // exactly with the note events written to the MIDI buffer.
+    const startTick = Math.max(0, Math.trunc(entry.startTick));
+    const durationTicks = Math.max(QUARTER / 4, QUARTER);
+    return {
+      pitch: entry.midi,
+      startSec: startTick * SHEET_MUSIC_SEC_PER_TICK,
+      endSec: (startTick + durationTicks) * SHEET_MUSIC_SEC_PER_TICK,
+      bbox: entry.bbox,
+    };
+  });
+
+  return {
+    midiData: buildDetectedSheetMusicMidi(result.notes, basenameWithoutExtension(file.name)),
+    fileName: `${basenameWithoutExtension(file.name)}-scan.mid`,
+    warnings: result.warnings,
+    imageWidth: image.width,
+    imageHeight: image.height,
+    noteLayout,
   };
 }
