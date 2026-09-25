@@ -675,12 +675,6 @@ export default function App() {
   const [recentFreqData, setRecentFreqData] = useState<number[]>([]);
   const [midiEnabled, setMidiEnabled] = useState<boolean>(false);
   const [midiStatus, setMidiStatus] = useState<string>("MIDI disabled");
-  const [midiError, setMidiError] = useState<string>("");
-  const [midiBannerDismissed, setMidiBannerDismissed] = useState<boolean>(false);
-  // Re-show the banner whenever a new error arrives.
-  useEffect(() => {
-    if (midiError) setMidiBannerDismissed(false);
-  }, [midiError]);
   const [midiInputs, setMidiInputs] = useState<{ id: string; name: string }[]>([]);
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<string>("midi");
@@ -1292,7 +1286,6 @@ export default function App() {
       return;
     }
     try {
-      setMidiError("");
       const driver = await createMidiDriver({
         selectedInputId: selectedMidiInput,
         onNoteOn: (note, velocity, channel) => handleMidiNoteOn(note, velocity, channel, "MIDI"),
@@ -1313,13 +1306,11 @@ export default function App() {
       setMidiStatus("MIDI enabled");
     } catch (err) {
       if (isMidiPermissionDeniedError(err)) {
-        setMidiError("");
         setMidiEnabled(false);
         setMidiInputs([]);
         setMidiStatus("MIDI disabled");
         return;
       }
-      setMidiError(err instanceof Error ? err.message : String(err));
       setMidiEnabled(false);
       setMidiStatus("MIDI failed");
     }
@@ -1331,7 +1322,6 @@ export default function App() {
       midiDriverRef.current = null;
       setMidiEnabled(false);
       setMidiStatus("MIDI disabled");
-      setMidiError("");
       setMidiInputs([]);
       return;
     }
@@ -1351,21 +1341,6 @@ export default function App() {
     <div className={`app ${activeTab === "midi" ? "hasPlaylist" : ""} ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
       {loading && <p className="status" role="status">{loadingStage}</p>}
       {error && <p className="status error">{error}</p>}
-      {midiError && !midiBannerDismissed && (
-        <div className="noticeBanner" role="alert">
-          <i className="fa-solid fa-triangle-exclamation" aria-hidden="true" />
-          <span className="noticeBannerText">{midiError}</span>
-          <button
-            type="button"
-            className="noticeBannerClose"
-            onClick={() => setMidiBannerDismissed(true)}
-            aria-label="Dismiss notification"
-            title="Dismiss"
-          >
-            <i className="fa-solid fa-xmark" aria-hidden="true" />
-          </button>
-        </div>
-      )}
 
       {activeTab === "midi" && (
         <MidiReader
