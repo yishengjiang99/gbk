@@ -14,7 +14,10 @@ const chromePath = process.env.OCR_FIXTURE_CHROME;
 
 export default defineConfig({
   testDir: "./",
-  testMatch: "ocr-ground-truth.spec.ts",
+  // Both scoring-loop specs run under one command. The c-scale spec is the
+  // exact ground-truth fixture; the Sweden spec is a differential gauge
+  // against a user-supplied third-party arrangement (report-only).
+  testMatch: ["ocr-ground-truth.spec.ts", "ocr-sweden-ground-truth.spec.ts"],
   timeout: 120_000,
   expect: {
     timeout: 15_000,
