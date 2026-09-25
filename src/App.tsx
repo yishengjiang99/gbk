@@ -1521,6 +1521,16 @@ export default function App() {
                     <i className="fa-solid fa-circle-info" aria-hidden="true" />
                     <span>{showSummaryModal ? "Hide Summary" : "File Summary"}</span>
                   </button>
+                  <a
+                    className="toolbarActionBtn"
+                    href="sheet-cam.html"
+                    style={{ textDecoration: "none" }}
+                    aria-label="Open Sheet Cam"
+                    title="Open Sheet Cam"
+                  >
+                    <i className="fa-solid fa-camera" aria-hidden="true" />
+                    <span>Sheet Cam</span>
+                  </a>
                 </NavMenuSection>
               </ToolbarMenu>
             </div>
