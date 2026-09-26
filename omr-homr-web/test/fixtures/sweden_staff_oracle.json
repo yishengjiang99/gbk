@@ -1,0 +1,86 @@
+{
+  "name": "sweden",
+  "preprocessed_shape": [
+    2560,
+    1920
+  ],
+  "staff_count": 8,
+  "multi_staff_rows": [
+    4
+  ],
+  "staffs": [
+    {
+      "min_x": 210,
+      "max_x": 1820,
+      "min_y": 404.07999391964313,
+      "max_y": 576.9762543368487,
+      "average_unit_size": 15.944802731946979,
+      "is_grandstaff": false,
+      "note_count": 22
+    },
+    {
+      "min_x": 210,
+      "max_x": 1810,
+      "min_y": 618.5,
+      "max_y": 768.6136360993122,
+      "average_unit_size": 15.347614896211681,
+      "is_grandstaff": false,
+      "note_count": 14
+    },
+    {
+      "min_x": 220,
+      "max_x": 1870,
+      "min_y": 962.5715144242411,
+      "max_y": 1081.2866131316864,
+      "average_unit_size": 14.928358887056248,
+      "is_grandstaff": false,
+      "note_count": 31
+    },
+    {
+      "min_x": 220,
+      "max_x": 1780,
+      "min_y": 1160.249933430669,
+      "max_y": 1259.5,
+      "average_unit_size": 14.276782105342932,
+      "is_grandstaff": false,
+      "note_count": 14
+    },
+    {
+      "min_x": 230,
+      "max_x": 1770,
+      "min_y": 1474.0,
+      "max_y": 1564.24049887556,
+      "average_unit_size": 14.401365052560493,
+      "is_grandstaff": false,
+      "note_count": 38
+    },
+    {
+      "min_x": 230,
+      "max_x": 1780,
+      "min_y": 1654.5,
+      "max_y": 1751.759985206391,
+      "average_unit_size": 14.768487577519693,
+      "is_grandstaff": false,
+      "note_count": 19
+    },
+    {
+      "min_x": 190,
+      "max_x": 1760,
+      "min_y": 1977.8333181699275,
+      "max_y": 2066.0,
+      "average_unit_size": 15.251495488852015,
+      "is_grandstaff": false,
+      "note_count": 36
+    },
+    {
+      "min_x": 180,
+      "max_x": 1780,
+      "min_y": 2181.850368498668,
+      "max_y": 2262.6687486959113,
+      "average_unit_size": 15.956548082520612,
+      "is_grandstaff": false,
+      "note_count": 15
+    }
+  ],
+  "notehead_count": 138
+}

@@ -1,0 +1,23 @@
+{
+  "name": "c-scale",
+  "preprocessed_shape": [
+    799,
+    1920
+  ],
+  "staff_count": 1,
+  "multi_staff_rows": [
+    1
+  ],
+  "staffs": [
+    {
+      "min_x": 240,
+      "max_x": 1570,
+      "min_y": 310.01058261466693,
+      "max_y": 413.63640103229267,
+      "average_unit_size": 23.625,
+      "is_grandstaff": false,
+      "note_count": 16
+    }
+  ],
+  "notehead_count": 16
+}

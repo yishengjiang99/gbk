@@ -1,0 +1,28 @@
+{
+  "dependencies": {
+    "onnxruntime-web": "^1.22.0"
+  },
+  "description": "AGPL-3.0 worker that runs homr's ONNX OMR models in the browser (WebGPU SegNet+encoder, WASM decoder) and emits MIDI for the gbk audio engine.",
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/pngjs": "^6.0.5",
+    "esbuild": "^0.28.2",
+    "pngjs": "^7.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "license": "AGPL-3.0-only",
+  "name": "omr-homr-web",
+  "private": true,
+  "scripts": {
+    "fetch:models": "node scripts/fetch-models.mjs",
+    "test": "node --import tsx/esm --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "omr-test": "node --import tsx/esm scripts/omr-test.mts",
+    "demo:build": "node demo/build.mjs",
+    "demo:serve": "node demo/serve.mjs",
+    "demo:run": "node demo/run-demo.mjs"
+  },
+  "type": "module",
+  "version": "0.1.0"
+}

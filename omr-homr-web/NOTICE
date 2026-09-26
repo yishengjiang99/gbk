@@ -1,0 +1,25 @@
+omr-homr-web — in-browser OMR worker for the gbk sheet-cam flow.
+Copyright (C) 2026. Licensed under the GNU Affero General Public License v3.0
+(see LICENSE).
+
+This package ports the inference pipeline of homr (https://github.com/liebharc/homr,
+AGPL-3.0, Copyright the homr authors) to run homr's published ONNX weights in the
+browser via onnxruntime-web (WebGPU for SegNet and the encoder, WASM for the
+decoder). Python homr is used only as the model exporter and correctness oracle;
+no Python runs in the browser.
+
+homr builds on prior work by its authors and the community. In particular this
+package acknowledges:
+
+- homr — https://github.com/liebharc/homr (AGPL-3.0)
+- oemer — https://github.com/Britness/oemer (the end-to-end OMR approach homr's
+  segmentation pipeline follows)
+- Polyphonic-TrOMR — https://github.com/bernardosda/Polyphonic-TrOMR (the
+  transformer architecture homr's encoder/decoder derive from)
+
+The pre-trained ONNX weights are downloaded from homr's public release
+(https://github.com/liebharc/homr/releases/tag/onnx_checkpoints) and are used
+under the terms published there by the homr authors.
+
+The gbk audio engine that consumes this package's MIDI output is a separate
+work and is not covered by this license.

@@ -2,3 +2,6 @@ node_modules
 dist
 test-results
 playwright-report
+
+# homr ONNX weights (fetched, not committed)
+public/models/
