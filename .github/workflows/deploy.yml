@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: omr-homr-web/models
-          key: omr-models-onnx_checkpoints-v1
+          key: omr-models-homr-308-465-v1
       - name: Build
         run: npm run build
       - name: Setup Pages
