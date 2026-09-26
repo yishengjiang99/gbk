@@ -37,6 +37,11 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+      - name: Cache OMR models
+        uses: actions/cache@v4
+        with:
+          path: omr-homr-web/models
+          key: omr-models-onnx_checkpoints-v1
       - name: Build
         run: npm run build
       - name: Setup Pages
