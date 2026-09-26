@@ -655,7 +655,6 @@ function AnalyzerCanvas({ data, mode, testId }: AnalyzerCanvasProps) {
 // ---------------------------------------------------------------------------
 
 export default function App() {
-  const [playlistHost, setPlaylistHost] = useState<HTMLDivElement | null>(null);
   const [sf2, setSf2] = useState<SF2Data | null>(null);
   const [sourceName, setSourceName] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -698,6 +697,8 @@ export default function App() {
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
+  const [masterVolume, setMasterVolume] = useState(1);
+  const masterVolumeRef = useRef(1);
   const compressorRef = useRef<AudioWorkletNode | null>(null);
   const dynamicsModeRef = useRef(dynamicsMode);
   const dynamicsLoadPromiseRef = useRef<Promise<void> | null>(null);
@@ -991,7 +992,7 @@ export default function App() {
 
       if (!masterGain) {
         masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(1.0, currentTime);
+        masterGain.gain.setValueAtTime(masterVolumeRef.current, currentTime);
         masterGainRef.current = masterGain;
       }
 
@@ -1248,6 +1249,19 @@ export default function App() {
     }
   }
 
+  // Winamp volume knob: drives the app-owned master gain node only.
+  // The SF2 synth, worker scheduling, and offline render paths are untouched.
+  const applyMasterVolume = useCallback((value: number): void => {
+    const next = Math.max(0, Math.min(1, value));
+    masterVolumeRef.current = next;
+    setMasterVolume(next);
+    const ctx = audioCtxRef.current;
+    const gain = masterGainRef.current;
+    if (ctx && gain && ctx.state !== "closed") {
+      gain.gain.setTargetAtTime(next, ctx.currentTime, 0.02);
+    }
+  }, []);
+
   async function onTogglePower(): Promise<void> {
     try {
       // A newly created context can start running during a user gesture. Decide
@@ -1342,9 +1356,13 @@ export default function App() {
       {loading && <p className="status" role="status">{loadingStage}</p>}
       {error && <p className="status error">{error}</p>}
 
-      {activeTab === "midi" && (
-        <MidiReader
-          playlistHost={playlistHost}
+      {/* The Winamp player stays mounted on every tab so switching to the SF2
+          explorer or recorder never destroys playback or the transport. The
+          MIDI explorer panels below the chrome render only on the midi tab. */}
+      <MidiReader
+          vizTimeData={recentTimeData}
+          masterVolume={masterVolume}
+          onMasterVolumeChange={applyMasterVolume}
           sf2Ready={!!sf2}
           sf2Name={sourceName}
           sf2Loading={loading}
@@ -1375,7 +1393,6 @@ export default function App() {
           }))}
           onError={(msg: string) => setAudioError(msg)}
         />
-      )}
 
       {activeTab === "recorder" && <MidiRecorderUI />}
 
@@ -1973,7 +1990,6 @@ export default function App() {
       )}
 
       <div className={activeTab === "midi" ? "audioSidebar" : undefined}>
-      <div ref={setPlaylistHost} />
       <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
         <div className="dynamicsControls" aria-label="Master dynamics">
           <label htmlFor="master-dynamics-mode">Dynamic compression</label>

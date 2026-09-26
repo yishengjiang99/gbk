@@ -1,7 +1,12 @@
-import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { NavMenuSection, ToolbarMenu } from "./toolbar-menu.tsx";
+import { NavMenuSection } from "./toolbar-menu.tsx";
 import type { SF2Region } from "../sf2-parser.ts";
+import "./winamp/winamp.css";
+import WinampMain from "./winamp/WinampMain.tsx";
+import WinampPlaylist, { type WinampPlaylistTrack } from "./winamp/WinampPlaylist.tsx";
+import PianoRoll from "./winamp/PianoRoll.tsx";
+import WinampPanel from "./winamp/WinampPanel.tsx";
+import { SheetCam, type SheetCamScanResult } from "./sheet-cam.tsx";
 import {
   BACH_CHARACTER_OPTIONS,
   BACH_COMPLEXITY_OPTIONS,
@@ -18,7 +23,7 @@ import {
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
 import { applyMasterDynamicsToBuffer, type DynamicsMode } from "./master-dynamics.ts";
-import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi } from "./sheet-music-reader.ts";
+import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 
 // ---------------------------------------------------------------------------
@@ -73,6 +78,19 @@ type MidiSourceKind = "bundled" | "uploaded" | "generated";
 type CurrentMidiSource = { kind: MidiSourceKind; name: string; path?: string };
 type SheetMusicImageSource = "uploaded" | "sample";
 type SelectedSheetMusicImage = { file: File; name: string; previewUrl: string; source: SheetMusicImageSource };
+/** A camera-scanned sheet: playable MIDI plus the OCR note layout for highlighting. */
+type ScannedEntry = {
+  id: string;
+  name: string;
+  midiData: ArrayBuffer;
+  noteLayout: ParsedSheetMusicWithLayout["noteLayout"];
+  warnings: string[];
+  dataUrl?: string;
+  /** Parent-owned object URL for the scanned photo; revoked on unmount. */
+  photoUrl: string | null;
+  imageWidth: number;
+  imageHeight: number;
+};
 type ClearableMidiOutput = MIDIOutput & { clear?: () => void };
 type PersistedMidiState = CurrentMidiSource & {
   version: 1;
@@ -370,7 +388,6 @@ function resolveOrchestraPan(...labels: (string | undefined)[]): number | null {
 // ---------------------------------------------------------------------------
 
 interface MidiReaderProps {
-  playlistHost: HTMLDivElement | null;
   sf2Ready: boolean;
   sf2Name: string;
   sf2Loading: boolean;
@@ -397,6 +414,11 @@ interface MidiReaderProps {
   fallbackPresetIndex: number;
   presetOptions?: PresetOption[];
   onError?: (msg: string) => void;
+  /** Live analyzer time-domain samples for the Winamp visualizer. */
+  vizTimeData: number[];
+  /** App-owned master volume (0..1); wired to the master gain node. */
+  masterVolume: number;
+  onMasterVolumeChange: (v: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -404,7 +426,6 @@ interface MidiReaderProps {
 // ---------------------------------------------------------------------------
 
 export default function MidiReader({
-  playlistHost,
   sf2Ready,
   sf2Name,
   sf2Loading,
@@ -429,6 +450,9 @@ export default function MidiReader({
   fallbackPresetIndex,
   presetOptions = [],
   onError,
+  vizTimeData,
+  masterVolume,
+  onMasterVolumeChange,
 }: MidiReaderProps) {
   const [playRequested, setPlayRequested] = useState(false);
   const [playlistSearch, setPlaylistSearch] = useState("");
@@ -444,6 +468,23 @@ export default function MidiReader({
   const [exportProgress, setExportProgress] = useState<number>(0);
   const [exportStage, setExportStage] = useState<string>("");
   const [songTime, setSongTime] = useState<number>(0);
+  // ---- Winamp chrome state (presentation only; engine untouched) ----
+  const [shuffleOn, setShuffleOn] = useState(false);
+  const [repeatOn, setRepeatOn] = useState(false);
+  const [playlistOpen, setPlaylistOpen] = useState(true);
+  const [pianoRollOpen, setPianoRollOpen] = useState(false);
+  const [camSheetOpen, setCamSheetOpen] = useState(false);
+  const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [scannedEntries, setScannedEntries] = useState<ScannedEntry[]>([]);
+  /** Parent-owned scanned-photo URLs, revoked when the explorer unmounts. */
+  const scanPhotoUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const owned = scanPhotoUrlsRef.current;
+    return () => {
+      owned.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+  const ejectInputRef = useRef<HTMLInputElement | null>(null);
   const [midiOptions, setMidiOptions] = useState<MidiOption[]>([]);
   const [selectedMidiPath, setSelectedMidiPath] = useState<string>("");
   const [midiOutputEnabled, setMidiOutputEnabled] = useState<boolean>(false);
@@ -1259,26 +1300,6 @@ export default function MidiReader({
     }
   }, [playRequested, sf2Ready, sf2Error, sf2Loading]);
 
-  function onSeekSliderChange(event: React.ChangeEvent<HTMLInputElement>) {
-    seekToSec(Number(event.target.value));
-  }
-
-  function onSeekSliderPointerDown(event: React.PointerEvent<HTMLInputElement>) {
-    isSeekingRef.current = true;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }
-
-  function onSeekSliderPointerUp(event: React.PointerEvent<HTMLInputElement>) {
-    isSeekingRef.current = false;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    seekToSec(Number(event.currentTarget.value));
-  }
-
-  function seekBy(deltaSec: number) {
-    if (!song) return;
-    seekToSec(songTime + deltaSec);
-  }
-
   async function onExportWav() {
     if (!song || !sf2Ready || isExporting) return;
     setIsExporting(true);
@@ -1433,6 +1454,9 @@ export default function MidiReader({
     ++midiSelectionRequestRef.current;
     autoplayLoadedSongRef.current = opts.autoplay ?? false;
     setPlayRequested(false);
+    // A non-scan load clears the scan selection; scan loads set it again after
+    // this call, so the scanned-sheet panel tracks the actually loaded song.
+    setSelectedScanId(null);
     const selectedPath = opts.selectedPath ?? "";
     const sourceKind = opts.sourceKind ?? (selectedPath ? "bundled" : "uploaded");
     const source: CurrentMidiSource = { kind: sourceKind, name, path: selectedPath || undefined };
@@ -1586,7 +1610,129 @@ export default function MidiReader({
     }
   }
 
+  function buildPlaylistRows(filter: string): WinampPlaylistTrack[] {
+    const q = filter.trim().toLowerCase();
+    const rows: WinampPlaylistTrack[] = [];
+    for (const midi of midiOptions) {
+      if (q && !midi.name.toLowerCase().includes(q)) continue;
+      rows.push({
+        id: `bundled:${midi.path}`,
+        name: midi.name,
+        selected: selectedMidiPath === midi.path && selectedScanId == null,
+      });
+    }
+    for (const entry of scannedEntries) {
+      if (q && !entry.name.toLowerCase().includes(q)) continue;
+      rows.push({ id: `scan:${entry.id}`, name: entry.name, selected: selectedScanId === entry.id });
+    }
+    return rows;
+  }
+
+  const playlistRows = useMemo(
+    () => buildPlaylistRows(playlistSearch),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [midiOptions, scannedEntries, playlistSearch, selectedMidiPath, selectedScanId]
+  );
+
+  function selectPlaylistEntry(id: string, autoplay = false) {
+    if (id.startsWith("scan:")) {
+      const entry = scannedEntries.find((e) => `scan:${e.id}` === id);
+      if (!entry || !workerRef.current) return;
+      loadMidiIntoTracks(entry.midiData.slice(0), entry.name, {
+        sourceKind: "generated",
+        dataUrl: entry.dataUrl,
+        autoplay,
+      });
+      setSelectedScanId(entry.id);
+      return;
+    }
+    const path = id.replace(/^bundled:/, "");
+    setSelectedScanId(null);
+    void onSelectMidiPath(path, autoplay);
+  }
+
+  function stepPlaylistEntry(delta: 1 | -1) {
+    const rows = buildPlaylistRows("");
+    if (!rows.length) return;
+    const currentId = selectedScanId
+      ? `scan:${selectedScanId}`
+      : selectedMidiPath
+        ? `bundled:${selectedMidiPath}`
+        : null;
+    const currentIdx = currentId ? rows.findIndex((r) => r.id === currentId) : -1;
+    if (shuffleOn && rows.length > 1) {
+      let next = currentIdx;
+      while (next === currentIdx || next < 0) next = Math.floor(Math.random() * rows.length);
+      selectPlaylistEntry(rows[next].id, true);
+      return;
+    }
+    const base = currentIdx < 0 ? (delta === 1 ? -1 : 0) : currentIdx;
+    const next = (base + delta + rows.length) % rows.length;
+    selectPlaylistEntry(rows[next].id, true);
+  }
+
+  function onStopPlayback() {
+    if (!song || !workerRef.current) return;
+    setPlayRequested(false);
+    workerRef.current.postMessage({ type: "pause" });
+    seekToSec(0);
+  }
+
+  async function handleScanComplete({ scan, photoFile }: SheetCamScanResult) {
+    const stamp = new Date().toLocaleString();
+    const name = `Scanned sheet — ${stamp}`;
+    const id = `scan-${Date.now()}`;
+    const midiData = scan.midiData.slice(0);
+    let dataUrl: string | undefined;
+    try {
+      if (midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
+        dataUrl = await arrayBufferToDataUrl(midiData.slice(0));
+      }
+    } catch {
+      // Playback works without persistence.
+    }
+    // The parent owns the photo URL so highlighting survives Sheet Cam unmounting.
+    let photoUrl: string | null = null;
+    if (photoFile) {
+      photoUrl = URL.createObjectURL(photoFile);
+      scanPhotoUrlsRef.current.push(photoUrl);
+    }
+    setScannedEntries((prev) => [
+      ...prev,
+      {
+        id,
+        name,
+        midiData,
+        noteLayout: scan.noteLayout,
+        warnings: scan.warnings ?? [],
+        dataUrl,
+        photoUrl,
+        imageWidth: scan.imageWidth,
+        imageHeight: scan.imageHeight,
+      },
+    ]);
+    setCamSheetOpen(false);
+    setPlaylistOpen(true);
+    loadMidiIntoTracks(midiData.slice(0), name, { sourceKind: "generated", dataUrl, autoplay: true });
+    // Set after the load: loadMidiIntoTracks clears the scan selection first.
+    setSelectedScanId(id);
+    if (scan.warnings?.length) setSheetMusicNotice(scan.warnings.join(" "));
+  }
+
   playlistEndedRef.current = () => {
+    const currentId = selectedScanId
+      ? `scan:${selectedScanId}`
+      : selectedMidiPath
+        ? `bundled:${selectedMidiPath}`
+        : null;
+    if (repeatOn && currentId) {
+      selectPlaylistEntry(currentId, true);
+      return;
+    }
+    if (shuffleOn) {
+      stepPlaylistEntry(1);
+      return;
+    }
     if (currentMidiSource?.kind !== "bundled") return;
     const index = midiOptions.findIndex((midi) => midi.path === selectedMidiPath);
     const next = index >= 0 ? midiOptions[index + 1] : undefined;
@@ -1678,261 +1824,319 @@ export default function MidiReader({
     return generic ? "" : (track?.name || "");
   }
 
-  const transportStateLabel = playRequested
-    ? "Waiting for SoundFont — playback queued"
-    : !sf2Ready
-    ? sf2Loading
-      ? "Loading SoundFont..."
-      : "Load SoundFont to enable playback/export"
-    : !song
-      ? "No song loaded"
-      : isPlaying
-        ? "Playing"
-        : "Paused";
+  // The scanned-sheet panel follows the scan that actually produced the loaded song.
+  const activeScanEntry = selectedScanId
+    ? (scannedEntries.find((e) => e.id === selectedScanId) ?? null)
+    : null;
 
+  // Winamp title-bar menu: the app's existing nav sections, minus the actions
+  // promoted to the always-visible quick-tools strip (power, Sweden, Bach).
+  const winampMenuSections = (
+    <>
+
+      <NavMenuSection label="MIDI Input">
+        <button
+          type="button"
+          className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
+          onClick={onToggleMidi}
+          disabled={!sf2Ready}
+          aria-pressed={midiEnabled}
+          aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+          title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+        >
+          <i className="fa-solid fa-plug" aria-hidden="true" />
+          <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
+        </button>
+        <select
+          className="toolbarSelect"
+          value={selectedMidiInput}
+          onChange={(e) => onSelectMidiInput(e.target.value)}
+          disabled={!midiEnabled}
+          aria-label="MIDI input source"
+          title="MIDI input source"
+        >
+          <option value="all">All MIDI Inputs</option>
+          {midiInputs.map((input) => (
+            <option key={input.id} value={input.id}>
+              {input.name}
+            </option>
+          ))}
+        </select>
+      </NavMenuSection>
+
+      <NavMenuSection label="MIDI Output">
+        <button
+          type="button"
+          className={`toolbarActionBtn ${midiOutputEnabled ? "active" : ""}`}
+          onClick={toggleMidiOutput}
+          aria-pressed={midiOutputEnabled}
+          aria-label={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
+          title={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
+        >
+          <i className="fa-solid fa-share-nodes" aria-hidden="true" />
+          <span>{midiOutputEnabled ? "Output On" : "Output Off"}</span>
+        </button>
+        <select
+          className="toolbarSelect"
+          value={selectedMidiOutput}
+          onChange={(e) => setSelectedMidiOutput(e.target.value)}
+          disabled={!midiOutputEnabled || !midiOutputs.length || isSendingMidi}
+          aria-label="MIDI output destination"
+          title="MIDI output destination"
+        >
+          <option value="">Select Output</option>
+          {midiOutputs.map((output) => (
+            <option key={output.id} value={output.id}>
+              {output.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="toolbarActionBtn toolbarCompactBtn"
+          onClick={onRefreshMidiOutputs}
+          disabled={isSendingMidi}
+          aria-label="Refresh MIDI Outputs"
+          title="Refresh MIDI Outputs"
+        >
+          <i className="fa-solid fa-arrows-rotate" aria-hidden="true" />
+          <span>Refresh Outputs</span>
+        </button>
+        <button
+          type="button"
+          className={`toolbarActionBtn ${isSendingMidi ? "active" : ""}`}
+          onClick={isSendingMidi ? () => stopMidiSend("Send stopped") : onSendMidiToOutput}
+          disabled={!song || !midiOutputEnabled || !selectedMidiOutput}
+          aria-label={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
+          title={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
+        >
+          <i className={`fa-solid ${isSendingMidi ? "fa-stop" : "fa-paper-plane"}`} aria-hidden="true" />
+          <span>{isSendingMidi ? "Stop" : "Send"}</span>
+        </button>
+        <span className="toolbarHoverText midiOutputStatus" title={midiOutputStatus}>
+          {midiOutputStatus}
+        </span>
+      </NavMenuSection>
+
+      <NavMenuSection label="Files">
+        <label className="fileInput toolbarActionBtn toolbarFileBtn">
+          <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
+          <span>Upload MIDI</span>
+          <input
+            type="file"
+            accept=".mid,.midi"
+            onChange={onUploadMidi}
+            aria-label="Upload MIDI file"
+          />
+        </label>
+        <label
+          className={`fileInput toolbarActionBtn toolbarFileBtn ${isParsingSheetMusic ? "disabled" : ""}`}
+          aria-label="Upload a sheet music JPG or PNG"
+        >
+          <i
+            className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-image"}`}
+            aria-hidden="true"
+          />
+          <span>Upload Sheet</span>
+          <input
+            type="file"
+            accept="image/jpeg,image/png"
+            capture="environment"
+            onChange={onUploadSheetMusic}
+            disabled={isParsingSheetMusic}
+            aria-label="Scan or upload sheet music"
+          />
+        </label>
+        <button
+          type="button"
+          className={`toolbarActionBtn toolbarCompactBtn ${isParsingSheetMusic ? "active" : ""}`}
+          onClick={() => void onConvertSelectedSheetMusic()}
+          disabled={!selectedSheetMusicImage || isParsingSheetMusic}
+          aria-label="Convert selected sheet music to MIDI"
+          title="Convert displayed sheet music to MIDI"
+        >
+          <i
+            className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
+            aria-hidden="true"
+          />
+          <span>{isParsingSheetMusic ? "Converting" : "Convert"}</span>
+        </button>
+      </NavMenuSection>
+
+      <NavMenuSection label="SoundFont">
+        <label className="fileInput toolbarActionBtn toolbarFileBtn">
+          <i className="fa-solid fa-folder-open" aria-hidden="true" />
+          <span>Upload SF2</span>
+          <input type="file" accept=".sf2" onChange={onUploadSf2} aria-label="Upload SF2 file" />
+        </label>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          onClick={onLoadDefaultSf2}
+          disabled={sf2Loading}
+          aria-label={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+          title={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+        >
+          <i
+            className={`fa-solid ${sf2Loading ? "fa-spinner fa-spin" : "fa-database"}`}
+            aria-hidden="true"
+          />
+          <span>{sf2Loading ? "Loading" : "Default SF2"}</span>
+        </button>
+        <span className="toolbarStatusPill">
+          <span className="toolbarStatusLabel">Loaded</span>
+          <span className="toolbarStatusValue">{sf2Name || "No SoundFont"}</span>
+        </span>
+      </NavMenuSection>
+
+      <NavMenuSection label="Tools">
+        <button
+          type="button"
+          className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
+          onClick={onToggleAnalyzer}
+          aria-pressed={!analyzerCollapsed}
+          aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+          title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+        >
+          <i className="fa-solid fa-chart-column" aria-hidden="true" />
+          <span>Analyzer</span>
+        </button>
+      </NavMenuSection>
+    </>
+  );
   return (
     <section className="card midiReader">
-      <div className="midiTop">
-        <div className="appHeaderToolbar toolbarUnified" aria-label="Main controls">
-          <div className="toolbarGroup" aria-label="View">
-            <span className="toolbarGroupLabel">View</span>
-            <div className="toolbarButtonRow toolbarSegmented">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${activeTab === "midi" ? "active" : ""}`}
-                onClick={() => onSelectTab("midi")}
-                aria-pressed={activeTab === "midi"}
-                aria-label="MIDI Explorer"
-                title="MIDI Explorer"
-              >
-                <i className="fa-solid fa-music" aria-hidden="true" />
-                <span>MIDI</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbarActionBtn ${activeTab === "sf2" ? "active" : ""}`}
-                onClick={() => onSelectTab("sf2")}
-                aria-pressed={activeTab === "sf2"}
-                aria-label="SF2 Explorer"
-                title="SF2 Explorer"
-              >
-                <i className="fa-solid fa-wave-square" aria-hidden="true" />
-                <span>SF2</span>
-              </button>
+      <div id="webamp">
+        <div className="gbk-main-sticky">
+          <WinampMain
+            marqueeText={song ? `${songName || "Untitled MIDI"} *** ${song.bpm} BPM ***` : "GBK Winamp - no MIDI loaded"}
+            status={isPlaying ? "play" : song ? "pause" : "stop"}
+            working={playRequested || sf2Loading || isExporting || isParsingSheetMusic || isGeneratingBach}
+            songTime={songTime}
+            duration={song?.durationSec ?? 0}
+            onSeek={(sec) => { seekToSec(sec); }}
+            onPlayPause={() => void onPlayPause()}
+            playButtonLabel={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
+            playButtonTitle={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
+            onStop={onStopPlayback}
+            onPrev={() => stepPlaylistEntry(-1)}
+            onNext={() => stepPlaylistEntry(1)}
+            onEject={() => ejectInputRef.current?.click()}
+            transportDisabled={!song}
+            volume={masterVolume}
+            onVolumeChange={onMasterVolumeChange}
+            shuffle={shuffleOn}
+            onToggleShuffle={() => setShuffleOn((v) => !v)}
+            repeat={repeatOn}
+            onToggleRepeat={() => setRepeatOn((v) => !v)}
+            playlistOpen={playlistOpen}
+            onTogglePlaylist={() => setPlaylistOpen((v) => !v)}
+            timeData={vizTimeData}
+            menu={winampMenuSections}
+          />
+          <div className="gbk-extras" role="group" aria-label="Views and tools">
+            <div className="gbk-xseg" role="group" aria-label="View">
+              <button type="button" className="gbk-xbtn" onClick={() => onSelectTab("midi")} aria-pressed={activeTab === "midi"} aria-label="MIDI Explorer" title="MIDI Explorer">MIDI</button>
+              <button type="button" className="gbk-xbtn" onClick={() => onSelectTab("sf2")} aria-pressed={activeTab === "sf2"} aria-label="SF2 Explorer" title="SF2 Explorer">SF2</button>
+              <button type="button" className="gbk-xbtn" onClick={() => onSelectTab("recorder")} aria-pressed={activeTab === "recorder"} aria-label="MIDI Recorder" title="MIDI Recorder">REC</button>
+            </div>
+            <button type="button" className="gbk-xbtn" onClick={() => setPianoRollOpen((v) => !v)} aria-pressed={pianoRollOpen} aria-label={pianoRollOpen ? "Hide piano roll" : "Show piano roll"} title="Toggle piano roll">PIANO</button>
+            <button type="button" className="gbk-xbtn" onClick={() => setCamSheetOpen(true)} aria-label="Scan sheet music with camera" title="Scan sheet music with camera">CAM SHEET</button>
+          </div>
+          <div className="gbk-quicktools" role="group" aria-label="Quick tools">
+            <button type="button" className="gbk-xbtn" onClick={onTogglePower} aria-pressed={audioCtxState === "running"} aria-label={audioCtxState === "running" ? "Power Off" : "Power On"} title="Toggle audio power">
+              <i className="fa-solid fa-power-off" aria-hidden="true" /><span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
+            </button>
+            <button type="button" className="gbk-xbtn" onClick={onLoadSwedenSheetMusic} disabled={isParsingSheetMusic} aria-label="Show Sweden sheet music" title="Show Sweden sheet music">
+              <i className="fa-solid fa-music" aria-hidden="true" /><span>Sweden</span>
+            </button>
+            <button type="button" className="gbk-xbtn" onClick={() => setBachModuleOpen((open) => !open)} aria-pressed={bachModuleOpen} aria-label={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"} title="Toggle Bach composer">
+              <i className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`} aria-hidden="true" /><span>Bach</span>
+            </button>
+            <button type="button" className="gbk-xbtn" onClick={onExportWav} disabled={!song || !sf2Ready || isExporting} aria-label="Export WAV" title="Generate offline WAV export">
+              <i className={`fa-solid ${isExporting ? "fa-spinner fa-spin" : "fa-download"}`} aria-hidden="true" /><span>Export WAV</span>
+            </button>
+          </div>
+          <div className="gbk-songmeta">
+            <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+            <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
+            <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+          </div>
+          {isExporting ? (
+            <div className="exportProgress" aria-live="polite">
+              <div className="exportProgressBar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportProgress * 100)}>
+                <span className="exportProgressFill" style={{ width: `${Math.round(exportProgress * 100)}%` }} />
+              </div>
+              <span className="exportProgressLabel">
+                {exportStage} {Math.round(exportProgress * 100)}%
+              </span>
+            </div>
+          ) : null}
+        </div>
+        {playlistOpen ? (
+          <WinampPlaylist
+            tracks={playlistRows}
+            search={playlistSearch}
+            onSearchChange={setPlaylistSearch}
+            onSelectTrack={(id) => selectPlaylistEntry(id)}
+            onUploadClick={() => ejectInputRef.current?.click()}
+            headerExtra={<span className="winamp-playlist-count">{playlistRows.length} files</span>}
+          />
+        ) : null}
+        {pianoRollOpen && song ? (
+          <PianoRoll
+            tracks={song.tracks.map((track) => ({
+              name: formatTrackInlineName(track) || track.instrumentName || `Track ${track.index + 1}`,
+              notes: track.notes.map((n) => ({ note: n.note, velocity: n.velocity, startSec: n.startSec, durationSec: n.durationSec })),
+            }))}
+            songTime={songTime}
+            duration={song.durationSec}
+            onSeek={(sec) => { seekToSec(sec); }}
+            onClose={() => setPianoRollOpen(false)}
+          />
+        ) : null}
+        <input ref={ejectInputRef} type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Upload MIDI file" style={{ display: "none" }} />
+        {camSheetOpen ? (
+          <div className="winamp-modal-backdrop" onClick={() => setCamSheetOpen(false)}>
+            <div className="winamp-modal" role="dialog" aria-modal="true" aria-label="Scan sheet music" onClick={(event) => event.stopPropagation()}>
+              <div className="winamp-modal-titlebar">
+                <span>Sheet Cam</span>
+                <button type="button" className="winamp-modal-close" onClick={() => setCamSheetOpen(false)} aria-label="Close sheet camera">&#215;</button>
+              </div>
+              <SheetCam embedded onScanComplete={(result) => void handleScanComplete(result)} />
             </div>
           </div>
-
-          <ToolbarMenu label="Menu" icon="fa-bars" variant="nav">
-            <NavMenuSection label="Audio">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
-                onClick={onTogglePower}
-                aria-pressed={audioCtxState === "running"}
-                aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
-                title={audioCtxState === "running" ? "Power Off" : "Power On"}
-              >
-                <i className="fa-solid fa-power-off" aria-hidden="true" />
-                <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
-              </button>
-            </NavMenuSection>
-
-            <NavMenuSection label="MIDI Input">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
-                onClick={onToggleMidi}
-                disabled={!sf2Ready}
-                aria-pressed={midiEnabled}
-                aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-                title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-              >
-                <i className="fa-solid fa-plug" aria-hidden="true" />
-                <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
-              </button>
-              <select
-                className="toolbarSelect"
-                value={selectedMidiInput}
-                onChange={(e) => onSelectMidiInput(e.target.value)}
-                disabled={!midiEnabled}
-                aria-label="MIDI input source"
-                title="MIDI input source"
-              >
-                <option value="all">All MIDI Inputs</option>
-                {midiInputs.map((input) => (
-                  <option key={input.id} value={input.id}>
-                    {input.name}
-                  </option>
-                ))}
-              </select>
-            </NavMenuSection>
-
-            <NavMenuSection label="MIDI Output">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${midiOutputEnabled ? "active" : ""}`}
-                onClick={toggleMidiOutput}
-                aria-pressed={midiOutputEnabled}
-                aria-label={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
-                title={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
-              >
-                <i className="fa-solid fa-share-nodes" aria-hidden="true" />
-                <span>{midiOutputEnabled ? "Output On" : "Output Off"}</span>
-              </button>
-              <select
-                className="toolbarSelect"
-                value={selectedMidiOutput}
-                onChange={(e) => setSelectedMidiOutput(e.target.value)}
-                disabled={!midiOutputEnabled || !midiOutputs.length || isSendingMidi}
-                aria-label="MIDI output destination"
-                title="MIDI output destination"
-              >
-                <option value="">Select Output</option>
-                {midiOutputs.map((output) => (
-                  <option key={output.id} value={output.id}>
-                    {output.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="toolbarActionBtn toolbarCompactBtn"
-                onClick={onRefreshMidiOutputs}
-                disabled={isSendingMidi}
-                aria-label="Refresh MIDI Outputs"
-                title="Refresh MIDI Outputs"
-              >
-                <i className="fa-solid fa-arrows-rotate" aria-hidden="true" />
-                <span>Refresh Outputs</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbarActionBtn ${isSendingMidi ? "active" : ""}`}
-                onClick={isSendingMidi ? () => stopMidiSend("Send stopped") : onSendMidiToOutput}
-                disabled={!song || !midiOutputEnabled || !selectedMidiOutput}
-                aria-label={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
-                title={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
-              >
-                <i className={`fa-solid ${isSendingMidi ? "fa-stop" : "fa-paper-plane"}`} aria-hidden="true" />
-                <span>{isSendingMidi ? "Stop" : "Send"}</span>
-              </button>
-              <span className="toolbarHoverText midiOutputStatus" title={midiOutputStatus}>
-                {midiOutputStatus}
-              </span>
-            </NavMenuSection>
-
-            <NavMenuSection label="Files">
-              <label className="fileInput toolbarActionBtn toolbarFileBtn">
-                <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
-                <span>Upload MIDI</span>
-                <input
-                  type="file"
-                  accept=".mid,.midi"
-                  onChange={onUploadMidi}
-                  aria-label="Upload MIDI file"
-                />
-              </label>
-              <label
-                className={`fileInput toolbarActionBtn toolbarFileBtn ${isParsingSheetMusic ? "disabled" : ""}`}
-                aria-label="Upload a sheet music JPG or PNG"
-              >
-                <i
-                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-image"}`}
-                  aria-hidden="true"
-                />
-                <span>Upload Sheet</span>
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png"
-                  capture="environment"
-                  onChange={onUploadSheetMusic}
-                  disabled={isParsingSheetMusic}
-                  aria-label="Scan or upload sheet music"
-                />
-              </label>
-              <button
-                type="button"
-                className="toolbarActionBtn toolbarCompactBtn"
-                onClick={onLoadSwedenSheetMusic}
-                disabled={isParsingSheetMusic}
-                aria-label="Show Sweden sheet music"
-                title="Show Sweden sheet music"
-              >
-                <i className="fa-solid fa-music" aria-hidden="true" />
-                <span>Sweden</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbarActionBtn toolbarCompactBtn ${isParsingSheetMusic ? "active" : ""}`}
-                onClick={() => void onConvertSelectedSheetMusic()}
-                disabled={!selectedSheetMusicImage || isParsingSheetMusic}
-                aria-label="Convert selected sheet music to MIDI"
-                title="Convert displayed sheet music to MIDI"
-              >
-                <i
-                  className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
-                  aria-hidden="true"
-                />
-                <span>{isParsingSheetMusic ? "Converting" : "Convert"}</span>
-              </button>
-            </NavMenuSection>
-
-            <NavMenuSection label="SoundFont">
-              <label className="fileInput toolbarActionBtn toolbarFileBtn">
-                <i className="fa-solid fa-folder-open" aria-hidden="true" />
-                <span>Upload SF2</span>
-                <input type="file" accept=".sf2" onChange={onUploadSf2} aria-label="Upload SF2 file" />
-              </label>
-              <button
-                type="button"
-                className="toolbarActionBtn"
-                onClick={onLoadDefaultSf2}
-                disabled={sf2Loading}
-                aria-label={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
-                title={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
-              >
-                <i
-                  className={`fa-solid ${sf2Loading ? "fa-spinner fa-spin" : "fa-database"}`}
-                  aria-hidden="true"
-                />
-                <span>{sf2Loading ? "Loading" : "Default SF2"}</span>
-              </button>
-              <span className="toolbarStatusPill">
-                <span className="toolbarStatusLabel">Loaded</span>
-                <span className="toolbarStatusValue">{sf2Name || "No SoundFont"}</span>
-              </span>
-            </NavMenuSection>
-
-            <NavMenuSection label="Tools">
-              <button
-                type="button"
-                className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
-                onClick={onToggleAnalyzer}
-                aria-pressed={!analyzerCollapsed}
-                aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-                title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-              >
-                <i className="fa-solid fa-chart-column" aria-hidden="true" />
-                <span>Analyzer</span>
-              </button>
-              <button
-                type="button"
-                className={`toolbarActionBtn ${bachModuleOpen ? "active" : ""}`}
-                onClick={() => setBachModuleOpen((open) => !open)}
-                aria-pressed={bachModuleOpen}
-                aria-label={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
-                title={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"}
-              >
-                <i
-                  className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`}
-                  aria-hidden="true"
-                />
-                <span>Bach Composer</span>
-              </button>
-            </NavMenuSection>
-          </ToolbarMenu>
-        </div>
+        ) : null}
+      </div>
+      {activeTab === "midi" ? (
+        <>
+        {activeScanEntry && activeScanEntry.photoUrl && song ? (
+          <WinampPanel title="Scanned Sheet">
+            <div className="sc-sheet-wrap gbk-scan-sheet">
+              <img src={activeScanEntry.photoUrl} alt={`${activeScanEntry.name} scanned sheet music`} />
+              {activeScanEntry.noteLayout.map((note, index) => {
+                const active = songTime >= note.startSec && songTime < note.endSec;
+                return (
+                  <div
+                    key={index}
+                    className={active ? "sc-note-box active" : "sc-note-box"}
+                    style={{
+                      left: `${(note.bbox.x / activeScanEntry.imageWidth) * 100}%`,
+                      top: `${(note.bbox.y / activeScanEntry.imageHeight) * 100}%`,
+                      width: `${(note.bbox.w / activeScanEntry.imageWidth) * 100}%`,
+                      height: `${(note.bbox.h / activeScanEntry.imageHeight) * 100}%`,
+                    }}
+                  />
+                );
+              })}
+            </div>
+            {activeScanEntry.warnings.length > 0 ? (
+              <p className="status">{activeScanEntry.warnings.join(" ")}</p>
+            ) : null}
+          </WinampPanel>
+        ) : null}
         {selectedSheetMusicImage ? (
+          <WinampPanel title="Sheet Music">
           <div className="sheetMusicPreviewPanel" aria-label="Displayed sheet music">
             <div className="sheetMusicPreviewHeader">
               <button
@@ -1986,8 +2190,10 @@ export default function MidiReader({
               </div>
             ) : null}
           </div>
+          </WinampPanel>
         ) : null}
         {bachModuleOpen ? (
+          <WinampPanel title="Bach Composer">
           <div className="bachComposerModule">
             <div className="bachComposerControls">
               <label>
@@ -2091,112 +2297,8 @@ export default function MidiReader({
               <span className="chip bachSeedChip">Seed {bachConfig.seed}</span>
             </div>
           </div>
+          </WinampPanel>
         ) : null}
-        <div className="midiTopGroup midiTopTransport midiTopTransportFull">
-          <div className="transportHero">
-            <div className="transportControls">
-              <button
-                type="button"
-                className="transportBtn"
-                onClick={() => seekBy(-10)}
-                disabled={!song}
-                aria-label="Rewind 10 seconds"
-                title="Rewind 10 seconds"
-              >
-                <i className="fa-solid fa-backward" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="transportBtn transportBtnPrimary"
-                onClick={onPlayPause}
-                disabled={!song}
-                aria-label={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
-                title={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
-              >
-                <i className={`fa-solid ${playRequested ? "fa-spinner fa-spin" : isPlaying ? "fa-pause" : "fa-play"}`} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="transportBtn"
-                onClick={() => seekBy(10)}
-                disabled={!song}
-                aria-label="Forward 10 seconds"
-                title="Forward 10 seconds"
-              >
-                <i className="fa-solid fa-forward" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="transportBtn transportExportBtn"
-                onClick={onExportWav}
-                disabled={!song || !sf2Ready || isExporting}
-                aria-label="Export WAV"
-                title="Generate offline WAV export"
-              >
-                {isExporting
-                  ? <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" />
-                  : <i className="fa-solid fa-download" aria-hidden="true" />}
-              </button>
-            </div>
-            <span className="transportState">
-              {transportStateLabel}
-            </span>
-            <input
-              className="transportSeekSlider"
-              type="range"
-              min={0}
-              max={duration}
-              step={0.01}
-              value={Math.max(0, Math.min(duration, songTime))}
-              onChange={onSeekSliderChange}
-              onPointerDown={onSeekSliderPointerDown}
-              onPointerUp={onSeekSliderPointerUp}
-              onPointerCancel={onSeekSliderPointerUp}
-              disabled={!song}
-              aria-label="Playback position"
-              title="Playback position"
-            />
-            {isExporting ? (
-              <div className="exportProgress" aria-live="polite">
-                <div className="exportProgressBar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportProgress * 100)}>
-                  <span className="exportProgressFill" style={{ width: `${Math.round(exportProgress * 100)}%` }} />
-                </div>
-                <span className="exportProgressLabel">
-                  {exportStage} {Math.round(exportProgress * 100)}%
-                </span>
-              </div>
-            ) : null}
-            <div className="transportMeta">
-              <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-              <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
-              <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
-            </div>
-          </div>
-        </div>
-        {playlistHost && createPortal(<section className="midiPlaylist" aria-label="MIDI playlist">
-          <div className="midiPlaylistHeader">
-            <strong><i className="fa-solid fa-list" aria-hidden="true" /> Playlist</strong>
-            <span className="chip">{midiOptions.length} MIDI files</span>
-            <input type="search" value={playlistSearch} onChange={(e) => setPlaylistSearch(e.target.value)}
-              placeholder="Search MIDI files…" aria-label="Search playlist" />
-            <label className="fileInput toolbarActionBtn toolbarFileBtn">
-              <i className="fa-solid fa-file-arrow-up" aria-hidden="true" /><span>Upload MIDI</span>
-              <input type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Import MIDI file" />
-            </label>
-          </div>
-          <div className="midiPlaylistTracks">
-            {midiOptions.filter((midi) => midi.name.toLowerCase().includes(playlistSearch.toLowerCase())).map((midi) => (
-              <button type="button" key={midi.path} className={`midiPlaylistTrack ${selectedMidiPath === midi.path ? "active" : ""}`}
-                aria-label={midi.name} aria-pressed={selectedMidiPath === midi.path} onClick={() => void onSelectMidiPath(midi.path)}>
-                <span className="playlistTrackNumber">{String(midiOptions.indexOf(midi) + 1).padStart(2, "0")}</span>
-                <span className="playlistTrackName" title={midi.name}>{midi.name.replace(/\.midi?$/i, "").replace(/_/g, " ")}</span>
-                {selectedMidiPath === midi.path && <i className="fa-solid fa-caret-right" aria-label="Selected" />}
-              </button>
-            ))}
-            {!midiOptions.some((midi) => midi.name.toLowerCase().includes(playlistSearch.toLowerCase())) &&
-              <p className="muted">{midiOptions.length ? "No matching MIDI files." : "No bundled MIDI files available."}</p>}
-          </div>
-        </section>, playlistHost)}
         {song ? (
           <div className="midiMetadataPanel" aria-label="MIDI metadata">
             <div className="midiMetadataTitle">
@@ -2225,11 +2327,11 @@ export default function MidiReader({
             ) : null}
           </div>
         ) : null}
-      </div>
       {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
       {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
       {songError ? <p className="status error">{songError}</p> : null}
       {song && (
+        <WinampPanel title="Track Mixer">
         <div className="midiTimelineWrap">
           <div className="midiTracksSplit">
             <div className="midiTracksLeft">
@@ -2325,7 +2427,10 @@ export default function MidiReader({
             </div>
           </div>
         </div>
+        </WinampPanel>
       )}
+        </>
+      ) : null}
     </section>
   );
 }

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactDOM from "react-dom/client";
 import { parseSF2, type SF2Data, type SF2Region } from "../sf2-parser.ts";
 import {
   isSupportedSheetMusicImageFile,
@@ -51,7 +50,29 @@ function PauseIcon() {
   );
 }
 
-function SheetCam() {
+export interface SheetCamScanResult {
+  scan: ParsedSheetMusicWithLayout;
+  photoUrl: string | null;
+  /** Original photo file so the parent can own a long-lived preview URL. */
+  photoFile: File | null;
+}
+
+interface SheetCamProps {
+  /**
+   * Called when a scan finishes. In embedded mode the parent (main Winamp UI)
+   * takes the result and plays it; SheetCam itself skips its own playback.
+   */
+  onScanComplete?: (result: SheetCamScanResult) => void;
+  /**
+   * When true, SheetCam runs as an embedded scanner: camera/OCR are the same,
+   * but the standalone playback transport is hidden.
+   */
+  embedded?: boolean;
+}
+
+export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
+  const onScanCompleteRef = useRef(onScanComplete);
+  onScanCompleteRef.current = onScanComplete;
   const [phase, setPhase] = useState<Phase>("camera");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
   const [cameraError, setCameraError] = useState("");
@@ -141,9 +162,10 @@ function SheetCam() {
         return;
       }
       stopCamera();
+      const objectUrl = URL.createObjectURL(file);
       setPhotoUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(file);
+        return objectUrl;
       });
       setScanError("");
       setScan(null);
@@ -160,6 +182,7 @@ function SheetCam() {
         scanRef.current = result;
         setScan(result);
         setPhase("ready");
+        onScanCompleteRef.current?.({ scan: result, photoUrl: objectUrl, photoFile: file });
       } catch (err) {
         setScanError(err instanceof Error ? err.message : String(err));
         setPhase("camera");
@@ -499,29 +522,35 @@ function SheetCam() {
             </div>
           </div>
           <div className="sc-transport">
-            <div className="sc-transport-row">
-              <button
-                type="button"
-                className="sc-play"
-                aria-label={isPlaying ? "Pause" : "Play"}
-                onClick={() => void handlePlayPause()}
-              >
-                {isPlaying ? <PauseIcon /> : <PlayIcon />}
-              </button>
-              <span className="sc-time">
-                {fmtTime(songTime)} / {fmtTime(duration)}
-              </span>
-              <input
-                type="range"
-                className="sc-seek"
-                min={0}
-                max={Math.max(0.1, duration)}
-                step={0.1}
-                value={Math.min(songTime, duration)}
-                onChange={(e) => handleSeek(Number(e.target.value))}
-                aria-label="Seek"
-              />
-            </div>
+            {embedded ? (
+              <div className="sc-status" role="status">
+                Added to the playlist — playing through the main player.
+              </div>
+            ) : (
+              <div className="sc-transport-row">
+                <button
+                  type="button"
+                  className="sc-play"
+                  aria-label={isPlaying ? "Pause" : "Play"}
+                  onClick={() => void handlePlayPause()}
+                >
+                  {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                </button>
+                <span className="sc-time">
+                  {fmtTime(songTime)} / {fmtTime(duration)}
+                </span>
+                <input
+                  type="range"
+                  className="sc-seek"
+                  min={0}
+                  max={Math.max(0.1, duration)}
+                  step={0.1}
+                  value={Math.min(songTime, duration)}
+                  onChange={(e) => handleSeek(Number(e.target.value))}
+                  aria-label="Seek"
+                />
+              </div>
+            )}
             {(status || audioError) && (
               <div className={`sc-status${audioError ? " sc-error" : ""}`}>{audioError || status}</div>
             )}
@@ -535,8 +564,6 @@ function SheetCam() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <SheetCam />
-  </React.StrictMode>
-);
+// Standalone bootstrap lives in src/sheet-cam-standalone.tsx (entry for
+// sheet-cam.html). This module exports the <SheetCam> component so the main
+// app can embed it in the Winamp UI without creating a second root.

@@ -1,0 +1,563 @@
+@import "./skin/base-skin.css";
+@import "./skin/main-window.css";
+@import "./skin/playlist-window.css";
+
+/* ---------------------------------------------------------------------------
+ * Our Winamp-chrome companion styles. The vendored skin above is scoped under
+ * #webamp; everything here lives under the same scope.
+ * ------------------------------------------------------------------------- */
+
+#webamp {
+  position: relative;
+  font-family: Arial, sans-serif;
+}
+
+#webamp * {
+  box-sizing: content-box;
+  -webkit-box-sizing: content-box;
+}
+
+#webamp *:focus {
+  outline: 0;
+}
+
+#webamp canvas {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+
+@keyframes winamp-blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Marquee character glyphs (base rule copied from webamp's webamp.css) */
+#webamp .character {
+  display: inline-block;
+  vertical-align: top;
+  width: 5px;
+  height: 6px;
+  text-indent: -9999px;
+}
+
+/* ---- layout: windows stack in normal flow -------------------------------- */
+#webamp #main-window {
+  position: relative;
+}
+
+#webamp .gbk-main-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
+
+/* ---- transport buttons are real <button>s, not divs ---------------------- */
+#webamp .actions button {
+  height: 18px;
+  width: 23px;
+  position: absolute;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 0;
+  color: transparent;
+}
+
+#webamp .actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#webamp .shade .actions button {
+  position: absolute;
+}
+
+#webamp .windows button {
+  position: absolute;
+  width: 23px;
+  height: 12px;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 0;
+  color: transparent;
+}
+
+#webamp #eject {
+  background-color: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 0;
+  color: transparent;
+}
+
+/* ---- title-bar option/shade hit areas ------------------------------------ */
+#webamp #title-bar #option,
+#webamp #title-bar #shade {
+  cursor: pointer;
+}
+
+/* ---- Winamp menu (title-bar option button) ------------------------------- */
+#webamp .winamp-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
+}
+
+#webamp .winamp-menu-panel {
+  position: absolute;
+  top: 14px;
+  left: 4px;
+  z-index: 91;
+  width: min(320px, 86vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #1c1c1c;
+  border: 2px outset #6a6a6a;
+  padding: 8px;
+  color: #e8e8e8;
+}
+
+#webamp .winamp-menu-panel .navMenuSection {
+  margin-bottom: 10px;
+}
+
+#webamp .winamp-menu-panel .navMenuSectionLabel {
+  color: #9a9a9a;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 4px;
+}
+
+/* ---- shade-mode readout + mini transport --------------------------------- */
+#webamp .winamp-shade-readout {
+  position: absolute;
+  top: 4px;
+  left: 20px;
+  height: 6px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#webamp .winamp-shade-controls {
+  position: absolute;
+  top: 1px;
+  left: 150px;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+#webamp .winamp-shade-controls button {
+  background: #2a2a2a;
+  color: #cfcfcf;
+  border: 1px outset #6a6a6a;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+#webamp .winamp-shade-time {
+  font-family: monospace;
+  font-size: 9px;
+  color: #7dff7d;
+  background: #000;
+  padding: 2px 4px;
+}
+
+#webamp .shade .winamp-time {
+  display: none;
+}
+
+/* ---- our extras strip: view toggle, piano roll, cam sheet ---------------- */
+#webamp .gbk-extras {
+  width: 275px;
+  background: #232323;
+  border-top: 1px solid #101010;
+  border-bottom: 2px solid #101010;
+  padding: 6px 8px;
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+#webamp .gbk-xbtn {
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  color: #f0f0f0;
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(#7a7a7a, #565656 45%, #464646);
+  border: 1px solid #1a1a1a;
+  border-top-color: #9a9a9a;
+  border-left-color: #9a9a9a;
+  padding: 9px 10px;
+  min-height: 36px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#webamp .gbk-xbtn:active {
+  border-top-color: #1a1a1a;
+  border-left-color: #1a1a1a;
+  border-bottom-color: #9a9a9a;
+  border-right-color: #9a9a9a;
+}
+
+#webamp .gbk-xbtn[aria-pressed="true"] {
+  background: linear-gradient(#3d3d3d, #565656);
+  border-top-color: #1a1a1a;
+  border-left-color: #1a1a1a;
+  border-bottom-color: #8a8a8a;
+  border-right-color: #8a8a8a;
+  color: #7dff7d;
+}
+
+#webamp .gbk-xseg {
+  display: flex;
+}
+
+#webamp .gbk-xseg .gbk-xbtn {
+  border-radius: 0;
+}
+
+#webamp .gbk-xseg .gbk-xbtn + .gbk-xbtn {
+  border-left: none;
+}
+
+/* ---- playlist window sizing + our rows ----------------------------------- */
+#webamp #playlist-window {
+  width: 275px;
+  height: 300px;
+  margin-top: 8px;
+}
+
+#webamp .playlist-middle-center {
+  background: #0d0d0d;
+}
+
+#webamp .playlist-track-titles {
+  overflow-y: auto;
+  height: 100%;
+}
+
+#webamp .playlist-tracks .track-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: #d6d6d6;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: Arial, sans-serif;
+}
+
+#webamp .playlist-tracks .track-cell:hover {
+  background: #1e3a5f;
+}
+
+#webamp .playlist-tracks .track-cell.selected {
+  background: #0a246a;
+  color: #ffffff;
+}
+
+#webamp .winamp-track-index {
+  color: #7a7a7a;
+  flex: 0 0 auto;
+}
+
+#webamp .winamp-track-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#webamp .winamp-track-empty {
+  color: #777;
+  cursor: default;
+}
+
+#webamp .winamp-playlist-controls {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+#webamp .winamp-playlist-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #0d0d0d;
+  border: 1px inset #5a5a5a;
+  color: #e8e8e8;
+  font-size: 11px;
+  padding: 5px 6px;
+}
+
+#webamp .winamp-playlist-add {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: bold;
+  color: #f0f0f0;
+  background: linear-gradient(#7a7a7a, #4a4a4a);
+  border: 1px outset #8a8a8a;
+  padding: 6px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#webamp .winamp-playlist-count {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: #9a9a9a;
+}
+
+/* ---- piano-roll window ---------------------------------------------------- */
+#webamp .winamp-piano-window {
+  width: 275px;
+  margin-top: 8px;
+  background: #1b1b1b;
+  border: 2px outset #6a6a6a;
+}
+
+#webamp .winamp-piano-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(90deg, #0f2a5c, #123a7d);
+  color: #fff;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 3px 6px;
+}
+
+#webamp .winamp-piano-close {
+  background: #5a5a5a;
+  color: #fff;
+  border: 1px outset #8a8a8a;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+
+#webamp .winamp-piano-body {
+  padding: 4px;
+}
+
+#webamp .winamp-piano-body canvas {
+  display: block;
+  width: 100%;
+  cursor: crosshair;
+}
+
+#webamp .winamp-piano-hint {
+  font-size: 9px;
+  color: #8a8a8a;
+  padding: 2px 6px 5px;
+}
+
+/* ---- transport timer / metadata keepouts (e2e hooks, visually quiet) ------ */
+#webamp .transportTimer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+#webamp .midiMetadataTitle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- mobile: roomier touch targets --------------------------------------- */
+@media (pointer: coarse) {
+  #webamp .playlist-tracks .track-cell {
+    min-height: 30px;
+    font-size: 11px;
+  }
+  #webamp #playlist-window {
+    height: 340px;
+  }
+}
+
+@media (max-width: 480px) {
+  #webamp {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+}
+
+/* ---- quick tools strip (always-visible actions the old toolbar exposed) --- */
+#webamp .gbk-quicktools {
+  width: 275px;
+  background: #1b1b1b;
+  border-bottom: 2px solid #101010;
+  padding: 6px 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#webamp .gbk-quicktools .gbk-xbtn {
+  min-height: 32px;
+  padding: 7px 8px;
+  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+#webamp .gbk-quicktools .gbk-xbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- slim song meta line under the chrome -------------------------------- */
+#webamp .gbk-songmeta {
+  width: 275px;
+  background: #141414;
+  border-bottom: 2px solid #101010;
+  padding: 5px 8px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#webamp .gbk-songmeta .chip {
+  font-size: 9px;
+  color: #bdbdbd;
+  background: #262626;
+  border: 1px solid #3a3a3a;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+/* ---- balance is a visual stub: the engine has no master pan -------------- */
+#webamp #balance:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---- generic Winamp-styled window for rehoused panels -------------------- */
+.winamp-gen-window {
+  margin: 10px 0;
+  background: #1b1b1b;
+  border: 2px outset #6a6a6a;
+  max-width: 100%;
+}
+
+.winamp-gen-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(90deg, #0f2a5c, #123a7d);
+  color: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 4px 8px;
+}
+
+.winamp-gen-toggle {
+  background: #5a5a5a;
+  color: #fff;
+  border: 1px outset #8a8a8a;
+  font-size: 11px;
+  line-height: 1;
+  width: 20px;
+  height: 18px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.winamp-gen-body {
+  padding: 10px;
+}
+
+/* ---- scanned sheet panel (camera scan -> playlist entry) ---------------- */
+.gbk-scan-sheet {
+  margin: 0 auto;
+}
+
+/* ---- sheet cam modal ------------------------------------------------------ */
+.winamp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5vh 12px;
+  overflow-y: auto;
+}
+
+.winamp-modal {
+  width: min(560px, 94vw);
+  background: #1b1b1b;
+  border: 2px outset #8a8a8a;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.winamp-modal-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(90deg, #0f2a5c, #123a7d);
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 5px 10px;
+  position: sticky;
+  top: 0;
+}
+
+.winamp-modal-close {
+  background: #5a5a5a;
+  color: #fff;
+  border: 1px outset #8a8a8a;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+/* Embedded sheet cam should fill the modal nicely */
+.winamp-modal .sc-screen {
+  min-height: auto;
+}
