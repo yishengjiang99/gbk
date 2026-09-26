@@ -1,0 +1,11 @@
+id: piano.grand
+description: two staves, 8 quarters each, treble + bass
+clef: grand
+key: C major
+time: 4/4
+source: verovio 6.3.0 MEI (authored for this fixture)
+license: CC0
+match_tier: exact_midi
+input: input: full page PNG grayscale (needs Phase 3 geometry for staff crops)
+# NOTE: the C-scale decoder emits 21 symbols; homr's parse_staffs appends a
+# 22nd "newline" at the pipeline layer. Layer A compares raw decoder output.

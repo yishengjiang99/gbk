@@ -1,0 +1,11 @@
+id: mono.c_major_scale
+description: C major scale (E4-E5-E4), 15 quarters, treble
+clef: treble
+key: C major
+time: 4/4
+source: homr test oracle (c-scale-staff-0)
+license: homr research use (oracle); page derived from gbk test fixture
+match_tier: exact_tokens
+input: input: staff crop PNG 1280x256 grayscale (real homr dewarp output)
+# NOTE: the C-scale decoder emits 21 symbols; homr's parse_staffs appends a
+# 22nd "newline" at the pipeline layer. Layer A compares raw decoder output.

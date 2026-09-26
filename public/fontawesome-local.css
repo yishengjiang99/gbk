@@ -1,0 +1,87 @@
+/* Local replacement for the small subset of Font Awesome icons used by the app. */
+.fa-solid {
+  display: inline-block;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  width: 1em;
+  text-align: center;
+}
+
+.fa-music::before {
+  content: "\266B";
+}
+
+.fa-wave-square::before {
+  content: "\223F";
+}
+
+.fa-power-off::before {
+  content: "\23FB";
+}
+
+.fa-plug::before {
+  content: "\1F50C";
+}
+
+.fa-chart-column::before {
+  content: "\1F4CA";
+}
+
+.fa-wand-magic-sparkles::before {
+  content: "\2726";
+}
+
+.fa-file-arrow-up::before {
+  content: "\21E7";
+}
+
+.fa-rotate-right::before {
+  content: "\21BB";
+}
+
+.fa-folder-open::before {
+  content: "\1F4C2";
+}
+
+.fa-database::before {
+  content: "\25A6";
+}
+
+.fa-download::before {
+  content: "\2B73";
+}
+
+.fa-spinner::before {
+  content: "\25D4";
+}
+
+.fa-spin {
+  animation: fa-spin 1s linear infinite;
+}
+
+@keyframes fa-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fa-play::before {
+  content: "\25B6";
+}
+
+.fa-pause::before {
+  content: "\23F8";
+}
+
+.fa-volume-xmark::before {
+  content: "\1F507";
+}
+
+.fa-headphones::before {
+  content: "\1F3A7";
+}

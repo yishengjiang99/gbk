@@ -1,0 +1,20 @@
+{
+  "name": "sheet-music-reader",
+  "version": "0.1.0",
+  "description": "Dependency-free MIDI generator for the Sweden sheet-music photo transcription.",
+  "type": "module",
+  "bin": {
+    "generate-sweden-midi": "./cli.js"
+  },
+  "scripts": {
+    "generate": "node ./cli.js",
+    "serve": "python3 -m http.server 8765 --bind 127.0.0.1",
+    "check": "node ./scripts/check.js"
+  },
+  "keywords": [
+    "midi",
+    "sheet-music",
+    "sweden"
+  ],
+  "license": "UNLICENSED"
+}

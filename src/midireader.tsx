@@ -1,0 +1,2882 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { NavMenuSection } from "./toolbar-menu.tsx";
+import type { SF2Region } from "../sf2-parser.ts";
+import "./winamp/winamp.css";
+import WinampMain, { CAMERA_GLYPH } from "./winamp/WinampMain.tsx";
+import WinampPlaylist, { type WinampPlaylistTrack } from "./winamp/WinampPlaylist.tsx";
+import PianoRoll from "./winamp/PianoRoll.tsx";
+import WinampPanel from "./winamp/WinampPanel.tsx";
+import { SheetCam, type SheetCamScanResult } from "./sheet-cam.tsx";
+import {
+  BACH_CHARACTER_OPTIONS,
+  BACH_COMPLEXITY_OPTIONS,
+  BACH_KEY_OPTIONS,
+  BACH_LENGTH_OPTIONS,
+  BACH_TEMPO_OPTIONS,
+  BACH_VOICE_OPTIONS,
+  DEFAULT_BACH_CONFIG,
+  generateBachMidi,
+  type BachCharacter,
+  type BachFugueConfig,
+  type BachKey,
+  type BachLength,
+} from "./bach-generator.ts";
+import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
+import { applyMasterDynamicsToBuffer, DYNAMICS_MODES, isDynamicsMode, type DynamicsMode } from "./master-dynamics.ts";
+import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
+import { buildMidiSendEvents } from "./midi-output.ts";
+import { midiFileStore } from "./midi-file-store.ts";
+import { resolveViewportHeightPx } from "./viewport-height.ts";
+
+// ---------------------------------------------------------------------------
+// Local type definitions
+// ---------------------------------------------------------------------------
+
+interface NoteRecord {
+  note: number;
+  velocity: number;
+  channel: number;
+  startSec: number;
+  durationSec: number;
+}
+
+interface PlayEvent {
+  type: string;
+  sec: number;
+  seq?: number;
+  channel?: number;
+  note?: number;
+  velocity?: number;
+  program?: number;
+  bank?: number;
+}
+
+interface SongTrack {
+  index: number;
+  name: string;
+  instrumentName: string;
+  notes: NoteRecord[];
+  playEvents: PlayEvent[];
+}
+
+interface Song {
+  format: number;
+  division: number;
+  durationSec: number;
+  tracks: SongTrack[];
+  totalBars: number;
+  bpm: number;
+  timeSig: string;
+}
+
+type TrackCc = { cc7Volume: number; cc10Pan: number; cc11Expression: number };
+type TrackMix = { mute: boolean; solo: boolean };
+type PresetOption = { index: number; bank: number; program: number; name: string };
+type MidiOption = { name: string; path: string };
+type MidiOutputOption = { id: string; name: string };
+type TrackNode = { node: AudioWorkletNode; panner: StereoPannerNode; gain: GainNode };
+type PlaybackDebugEvent = { type: "playbackDebug"; order: number; [key: string]: unknown };
+type MidiSourceKind = "bundled" | "uploaded" | "generated";
+type CurrentMidiSource = { kind: MidiSourceKind; name: string; path?: string };
+type SheetMusicImageSource = "uploaded" | "sample";
+type SelectedSheetMusicImage = { file: File; name: string; previewUrl: string; source: SheetMusicImageSource };
+/** A camera-scanned sheet: playable MIDI plus the OCR note layout for highlighting. */
+type ScannedEntry = {
+  id: string;
+  name: string;
+  midiData: ArrayBuffer;
+  noteLayout: ParsedSheetMusicWithLayout["noteLayout"];
+  warnings: string[];
+  /** Parent-owned object URL for the scanned photo; revoked on unmount. */
+  photoUrl: string | null;
+  imageWidth: number;
+  imageHeight: number;
+};
+/** A user-uploaded MIDI file (added via the "+" transport button). */
+type UploadedEntry = {
+  id: string;
+  name: string;
+  midiData: ArrayBuffer;
+};
+type ClearableMidiOutput = MIDIOutput & { clear?: () => void };
+type PersistedMidiState = CurrentMidiSource & {
+  version: 1;
+  /** Legacy binary payload (pre-IndexedDB); kept readable for old saves. */
+  dataUrl?: string;
+  /** IndexedDB file id for uploads/scans; binary lives in the midi-file-store. */
+  fileId?: string;
+  currentSec?: number;
+  savedAt: number;
+};
+
+declare global {
+  interface Window {
+    __sf2E2e?: {
+      playbackEvents: PlaybackDebugEvent[];
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
+
+function fmtTime(sec: number): string {
+  const s = Math.max(0, sec | 0);
+  const m = (s / 60) | 0;
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+const DEFAULT_TRACK_CC: TrackCc = { cc7Volume: 100, cc10Pan: 64, cc11Expression: 127 };
+const CURRENT_MIDI_STORAGE_KEY = "sf2-current-midi";
+const MAX_PERSISTED_MIDI_BYTES = 4 * 1024 * 1024;
+const MIN_TIMELINE_ZOOM = 1;
+const MAX_TIMELINE_ZOOM = 18;
+const WHEEL_ZOOM_SENSITIVITY = 0.002;
+const SWEDEN_SHEET_IMAGE_URL = new URL("../sweden.jpg", import.meta.url).href;
+
+function clampCc(value: number): number {
+  return Math.max(0, Math.min(127, Number(value) | 0));
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function outputName(output: MIDIOutput): string {
+  return output.name || output.manufacturer || output.id;
+}
+
+function readPersistedMidiState(): PersistedMidiState | null {
+  try {
+    const raw = window.localStorage.getItem(CURRENT_MIDI_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedMidiState>;
+    if (parsed.version !== 1 || !parsed.name || !parsed.kind) return null;
+    if (parsed.kind === "bundled" && !parsed.path) return null;
+    if (parsed.kind !== "bundled" && !parsed.dataUrl && !parsed.fileId) return null;
+    return parsed as PersistedMidiState;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedMidiState(next: Omit<PersistedMidiState, "version" | "savedAt">): void {
+  try {
+    window.localStorage.setItem(
+      CURRENT_MIDI_STORAGE_KEY,
+      JSON.stringify({ ...next, version: 1, savedAt: Date.now() })
+    );
+  } catch {
+    // localStorage can reject larger uploaded MIDI files; playback should still work.
+  }
+}
+
+function updatePersistedMidiTime(sec: number): void {
+  try {
+    const current = readPersistedMidiState();
+    if (!current) return;
+    writePersistedMidiState({ ...current, currentSec: Math.max(0, sec) });
+  } catch {
+    // no-op
+  }
+}
+
+function arrayBufferToDataUrl(buffer: ArrayBuffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read MIDI data"));
+    reader.readAsDataURL(new Blob([buffer], { type: "audio/midi" }));
+  });
+}
+
+async function dataUrlToArrayBuffer(dataUrl: string): Promise<ArrayBuffer> {
+  const res = await fetch(dataUrl);
+  return res.arrayBuffer();
+}
+
+function encodeWav(audioBuffer: AudioBuffer): ArrayBuffer {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const numSamples = audioBuffer.length;
+  const bytesPerSample = 2;
+  const dataSize = numChannels * numSamples * bytesPerSample;
+  const channelData = Array.from({ length: numChannels }, (_, ch) => audioBuffer.getChannelData(ch));
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const s = Math.max(-1, Math.min(1, channelData[ch][i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return buffer;
+}
+
+async function encodeWavIncremental(
+  audioBuffer: AudioBuffer,
+  chunkSamples = 16384,
+  onProgress?: (progress: number) => void
+): Promise<ArrayBuffer> {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const numSamples = audioBuffer.length;
+  const bytesPerSample = 2;
+  const dataSize = numChannels * numSamples * bytesPerSample;
+  const channelData = Array.from({ length: numChannels }, (_, ch) => audioBuffer.getChannelData(ch));
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let start = 0; start < numSamples; start += chunkSamples) {
+    const end = Math.min(numSamples, start + chunkSamples);
+    for (let i = start; i < end; i += 1) {
+      for (let ch = 0; ch < numChannels; ch += 1) {
+        const s = Math.max(-1, Math.min(1, channelData[ch][i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        offset += 2;
+      }
+    }
+    onProgress?.(end / numSamples);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  return buffer;
+}
+
+// ---------------------------------------------------------------------------
+// CcKnob component
+// ---------------------------------------------------------------------------
+
+interface CcKnobProps {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+}
+
+function CcKnob({ label, value, onChange, disabled = false }: CcKnobProps) {
+  const startRef = useRef<{ active: boolean; startY: number; startValue: number }>({
+    active: false,
+    startY: 0,
+    startValue: value,
+  });
+
+  useEffect(() => {
+    if (!startRef.current.active) startRef.current.startValue = value;
+  }, [value]);
+
+  const angle = -135 + (Math.max(0, Math.min(127, value)) / 127) * 270;
+  const rad = (angle * Math.PI) / 180;
+  const x2 = 20 + Math.cos(rad) * 11;
+  const y2 = 20 + Math.sin(rad) * 11;
+
+  const onPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    startRef.current = { active: true, startY: event.clientY, startValue: value };
+  };
+
+  const onPointerMove = (event: PointerEvent) => {
+    if (!startRef.current.active || disabled) return;
+    event.preventDefault();
+    const delta = startRef.current.startY - event.clientY;
+    const next = clampCc(startRef.current.startValue + Math.round(delta * 0.8));
+    onChange(next);
+  };
+
+  const onPointerUp = () => {
+    if (!startRef.current.active) return;
+    startRef.current.active = false;
+  };
+
+  useEffect(() => {
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  });
+
+  return (
+    <button
+      type="button"
+      className="ccKnobBtn"
+      onPointerDown={onPointerDown}
+      disabled={disabled}
+      title={`${label} ${value}`}
+    >
+      <svg viewBox="0 0 40 40" className="ccKnobSvg" aria-hidden="true">
+        <circle cx="20" cy="20" r="15" className="ccKnobRing" />
+        <line x1="20" y1="20" x2={x2} y2={y2} className="ccKnobNeedle" />
+      </svg>
+      <span className="ccKnobLabel">{label}</span>
+      <span className="ccKnobValue">{value}</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Orchestra pan heuristics
+// ---------------------------------------------------------------------------
+
+interface PanRule {
+  test: RegExp;
+  pan: number;
+}
+
+const ORCHESTRA_PAN_RULES: PanRule[] = [
+  { test: /\bviolin\s*(?:ii|2)\b/i, pan: -0.35 },
+  { test: /\bviolin\b/i, pan: -0.75 },
+  { test: /\bviola\b/i, pan: 0.3 },
+  { test: /\bcello\b/i, pan: 0.65 },
+  { test: /\b(double\s*bass|contrabass|upright\s*bass)\b/i, pan: 0.8 },
+  { test: /\b(piccolo|flute)\b/i, pan: -0.15 },
+  { test: /\boboe\b/i, pan: -0.05 },
+  { test: /\bclarinet\b/i, pan: 0.05 },
+  { test: /\bbassoon\b/i, pan: 0.15 },
+  { test: /\b(french\s*horn|horn)\b/i, pan: -0.5 },
+  { test: /\btrumpet\b/i, pan: 0.25 },
+  { test: /\b(trombone|tuba)\b/i, pan: 0.5 },
+  { test: /\btimpani\b/i, pan: -0.1 },
+];
+
+function resolveOrchestraPan(...labels: (string | undefined)[]): number | null {
+  const merged = labels
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+  if (!merged) return null;
+  for (const rule of ORCHESTRA_PAN_RULES) {
+    if (rule.test.test(merged)) return rule.pan;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// MidiReader props
+// ---------------------------------------------------------------------------
+
+interface MidiReaderProps {
+  sf2Ready: boolean;
+  sf2Name: string;
+  sf2Loading: boolean;
+  sf2Error: string;
+  onUploadSf2: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onLoadDefaultSf2: () => void;
+  activeTab: string;
+  onSelectTab: (tab: string) => void;
+  audioCtxState: string;
+  onTogglePower: () => void;
+  midiEnabled: boolean;
+  onToggleMidi: () => void;
+  selectedMidiInput: string;
+  onSelectMidiInput: (id: string) => void;
+  midiInputs?: { id: string; name: string }[];
+  ensureAudioInfrastructure: (
+    opts?: { loadWorklet?: boolean }
+  ) => Promise<{ ctx: AudioContext; input: AudioNode }>;
+  dynamicsMode: DynamicsMode;
+  onDynamicsModeChange: (mode: DynamicsMode) => void;
+  /** Live compressor reduction in dB, for the dynamics meter in the menu. */
+  dynamicsCompression: number;
+  /** Live limiter reduction in dB, for the dynamics hint in the menu. */
+  dynamicsLimiting: number;
+  getRegionsForPreset: (presetIndex: number) => SF2Region[];
+  resolvePresetIndex: (program: number, bank: number) => number | null;
+  fallbackPresetIndex: number;
+  presetOptions?: PresetOption[];
+  onError?: (msg: string) => void;
+  /** Live analyzer time-domain samples for the Winamp visualizer. */
+  vizTimeData: number[];
+  /** App-owned master volume (0..1); wired to the master gain node. */
+  masterVolume: number;
+  onMasterVolumeChange: (v: number) => void;
+  /** SF2 explorer view (App-owned); shown in the content region on the sf2 tab. */
+  sf2View: ReactNode;
+  /** Recorder view (App-owned); shown in the content region on the recorder tab. */
+  recorderView: ReactNode;
+  /** Live MIDI-driver status line for the bottom dock. */
+  midiStatus: string;
+}
+
+// ---------------------------------------------------------------------------
+// PanelOverlay — Winamp-styled modal shell for panels evicted from the
+// default view (Current MIDI, Track Mixer, …). Portaled to document.body so
+// the page's `zoom` doesn't affect it; carries `gbk-winamp-page` so the dark
+// panel re-skin still applies to its contents.
+// ---------------------------------------------------------------------------
+function PanelOverlay({
+  label,
+  onClose,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return createPortal(
+    <div className="winamp-modal-backdrop" onClick={onClose}>
+      <div
+        className="winamp-modal gbk-winamp-page"
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="winamp-modal-titlebar">
+          <span>{label}</span>
+          <button type="button" className="winamp-modal-close" onClick={onClose} aria-label={`Close ${label}`}>
+            &#215;
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MidiReader component
+// ---------------------------------------------------------------------------
+
+export default function MidiReader({
+  sf2Ready,
+  sf2Name,
+  sf2Loading,
+  sf2Error,
+  onUploadSf2,
+  onLoadDefaultSf2,
+  activeTab,
+  onSelectTab,
+  audioCtxState,
+  onTogglePower,
+  midiEnabled,
+  onToggleMidi,
+  selectedMidiInput,
+  onSelectMidiInput,
+  midiInputs = [],
+  ensureAudioInfrastructure,
+  dynamicsMode,
+  onDynamicsModeChange,
+  dynamicsCompression,
+  dynamicsLimiting,
+  getRegionsForPreset,
+  resolvePresetIndex,
+  fallbackPresetIndex,
+  presetOptions = [],
+  onError,
+  vizTimeData,
+  masterVolume,
+  onMasterVolumeChange,
+  sf2View,
+  recorderView,
+  midiStatus,
+}: MidiReaderProps) {
+  const [playRequested, setPlayRequested] = useState(false);
+  const [playlistSearch, setPlaylistSearch] = useState("");
+  const midiSelectionRequestRef = useRef(0);
+  const autoplayLoadedSongRef = useRef(false);
+  const playlistEndedRef = useRef<() => void>(() => {});
+  const [song, setSong] = useState<Song | null>(null);
+  const [songName, setSongName] = useState<string>("");
+  const [songError, setSongError] = useState<string>("");
+  const [currentMidiSource, setCurrentMidiSource] = useState<CurrentMidiSource | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportProgress, setExportProgress] = useState<number>(0);
+  const [exportStage, setExportStage] = useState<string>("");
+  const [songTime, setSongTime] = useState<number>(0);
+  // ---- Winamp chrome state (presentation only; engine untouched) ----
+  const [shuffleOn, setShuffleOn] = useState(false);
+  const [repeatOn, setRepeatOn] = useState(false);
+  const playlistOpen = true;
+  const [pianoRollOpen, setPianoRollOpen] = useState(false);
+  const [camSheetOpen, setCamSheetOpen] = useState(false);
+  // Panels evicted from the default view live here; opened from the
+  // title-bar player menu and rendered as overlays.
+  const [panelOverlay, setPanelOverlay] = useState<
+    "currentMidi" | "trackMixer" | "scannedSheet" | "sheetMusic" | "bach" | null
+  >(null);
+  // Winamp chrome is authored at a fixed 275px width; scale it with `zoom`
+  // (layout-affecting, unlike transform) so it fills the available column
+  // width on phones. Measured from the parent's content box so app padding
+  // never causes overflow; capped at 2x so it stays sensible on desktop.
+  const pageRef = useRef<HTMLElement>(null);
+  const [waZoom, setWaZoom] = useState(1);
+  useLayoutEffect(() => {
+    const compute = () => {
+      let w = window.innerWidth || 390;
+      const parent = pageRef.current?.parentElement;
+      if (parent) {
+        const cs = getComputedStyle(parent);
+        w = parent.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0");
+      }
+      setWaZoom(Math.min(Math.max(w / 275, 1), 2));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+  // The footer dock lives OUTSIDE the zoomed #webamp chrome (it is laid out
+  // in real CSS pixels), so #webamp's height is measured in JS: whatever
+  // vertical space the shell has left after the dock, converted back into
+  // #webamp's pre-zoom coordinate space. This pins the dock to the bottom of
+  // the viewport with no gap and no reliance on dvh-inside-zoom.
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [viewportPx, setViewportPx] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const compute = () => {
+      // iOS Safari's 100dvh can get stuck at the value captured while the
+      // toolbar was in a different state, leaving a dead gap below the
+      // footer. Pin the app shell to the *measured* visible height instead;
+      // CSS falls back to 100dvh until the first measurement lands.
+      // (resolveViewportHeightPx is unit-tested in test/viewport-height.test.ts)
+      const appEl = pageRef.current?.closest(".app") as HTMLElement | null;
+      const measured = resolveViewportHeightPx(
+        typeof window.visualViewport !== "undefined" ? window.visualViewport?.height : null,
+        window.innerHeight
+      );
+      if (appEl && measured != null) {
+        const next = `${measured}px`;
+        if (appEl.style.getPropertyValue("--app-h") !== next) {
+          appEl.style.setProperty("--app-h", next);
+        }
+      }
+      const shell = pageRef.current;
+      const dock = dockRef.current;
+      if (!shell || !dock || !(waZoom > 0)) return;
+      const avail = shell.clientHeight - dock.offsetHeight;
+      if (avail > 0) setViewportPx(avail / waZoom);
+    };
+    compute();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(compute) : null;
+    if (ro) {
+      if (pageRef.current) ro.observe(pageRef.current);
+      if (dockRef.current) ro.observe(dockRef.current);
+    }
+    const vv = typeof window.visualViewport !== "undefined" ? window.visualViewport : null;
+    vv?.addEventListener("resize", compute);
+    window.addEventListener("resize", compute);
+    window.addEventListener("orientationchange", compute);
+    return () => {
+      ro?.disconnect();
+      vv?.removeEventListener("resize", compute);
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("orientationchange", compute);
+    };
+  }, [waZoom]);
+  const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [scannedEntries, setScannedEntries] = useState<ScannedEntry[]>([]);
+  /** User-uploaded MIDI files ("+" button); persisted to IndexedDB. */
+  const [uploadedEntries, setUploadedEntries] = useState<UploadedEntry[]>([]);
+  const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
+  /** Parent-owned scanned-photo URLs, revoked when the explorer unmounts. */
+  const scanPhotoUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const owned = scanPhotoUrlsRef.current;
+    return () => {
+      owned.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+  const ejectInputRef = useRef<HTMLInputElement | null>(null);
+  const [midiOptions, setMidiOptions] = useState<MidiOption[]>([]);
+  const [selectedMidiPath, setSelectedMidiPath] = useState<string>("");
+  const [midiOutputEnabled, setMidiOutputEnabled] = useState<boolean>(false);
+  const [midiOutputs, setMidiOutputs] = useState<MidiOutputOption[]>([]);
+  const [selectedMidiOutput, setSelectedMidiOutput] = useState<string>("");
+  const [midiOutputStatus, setMidiOutputStatus] = useState<string>("Output disabled");
+  const [isSendingMidi, setIsSendingMidi] = useState<boolean>(false);
+  const [trackPresetOverrides, setTrackPresetOverrides] = useState<Record<number, number | null>>({});
+  const [trackCcControls, setTrackCcControls] = useState<Record<number, TrackCc>>({});
+  const [trackMixState, setTrackMixState] = useState<Record<number, TrackMix>>({});
+  const [isGeneratingBach, setIsGeneratingBach] = useState<boolean>(false);
+  const [isParsingSheetMusic, setIsParsingSheetMusic] = useState<boolean>(false);
+  const [selectedSheetMusicImage, setSelectedSheetMusicImage] = useState<SelectedSheetMusicImage | null>(null);
+  const [sheetPreviewCollapsed, setSheetPreviewCollapsed] = useState<boolean>(() =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 720px)").matches
+  );
+  const [sheetMusicStage, setSheetMusicStage] = useState<string>("");
+  const [sheetMusicNotice, setSheetMusicNotice] = useState<string>("");
+  const [timelineZoom, setTimelineZoom] = useState<number>(MIN_TIMELINE_ZOOM);
+  const [bachConfig, setBachConfig] = useState<BachFugueConfig>(() => ({
+    ...DEFAULT_BACH_CONFIG,
+    seed: Math.floor(Math.random() * 1_000_000_000),
+  }));
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const playheadRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const midiAccessRef = useRef<MIDIAccess | null>(null);
+  const midiSendTimerRef = useRef<number | null>(null);
+  const midiSendOutputRef = useRef<MIDIOutput | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const trackNodesRef = useRef<TrackNode[]>([]);
+  const portsAttachedRef = useRef<boolean>(false);
+  const dragStateRef = useRef<{ active: boolean; startX: number; startLeft: number }>({
+    active: false,
+    startX: 0,
+    startLeft: 0,
+  });
+  const isSeekingRef = useRef<boolean>(false);
+  const onErrorRef = useRef<((msg: string) => void) | undefined>(onError);
+  const trackPresetOverridesRef = useRef<Record<number, number | null>>({});
+  const trackCcControlsRef = useRef<Record<number, TrackCc>>({});
+  const trackMixStateRef = useRef<Record<number, TrackMix>>({});
+  const resolvePresetRef = useRef<(program: number, bank: number) => number | null>(resolvePresetIndex);
+  const getRegionsRef = useRef<(presetIndex: number) => SF2Region[]>(getRegionsForPreset);
+  const fallbackPresetRef = useRef<number>(fallbackPresetIndex);
+  const durationRef = useRef<number>(0.01);
+  const contentWRef = useRef<number>(1000);
+  const timelineZoomRef = useRef<number>(MIN_TIMELINE_ZOOM);
+  const presetOptionMapRef = useRef<Map<number, PresetOption>>(new Map());
+  const pendingRestoreSecRef = useRef<number | null>(null);
+  const lastPersistedTimeRef = useRef<number>(0);
+
+  const timelineW = 1000;
+  const trackH = 108;
+  const duration = Math.max(0.01, song?.durationSec ?? 0.01);
+  const totalBars = Math.max(1, song?.totalBars ?? 1);
+  const visibleBars = 30;
+  const zoomFactor = (totalBars > visibleBars ? totalBars / visibleBars : 1) * timelineZoom;
+  const contentW = Math.round(timelineW * zoomFactor);
+
+  const visibleTracks = useMemo<SongTrack[]>(() => song?.tracks ?? [], [song]);
+  const presetOptionMap = useMemo<Map<number, PresetOption>>(
+    () => new Map((presetOptions ?? []).map((p) => [p.index, p])),
+    [presetOptions]
+  );
+  const trackDefaultPresetMap = useMemo<Record<number, number>>(() => {
+    const out: Record<number, number> = {};
+    if (!song?.tracks?.length) return out;
+    for (const track of song.tracks) {
+      const programEvent = track.playEvents.find((e) => e.type === "program");
+      if (!programEvent) continue;
+      const presetIndex = resolvePresetIndex(programEvent.program ?? 0, programEvent.bank ?? 0);
+      if (presetIndex != null && presetIndex >= 0) out[track.index] = presetIndex;
+    }
+    return out;
+  }, [song, resolvePresetIndex]);
+  const songMetadata = useMemo(() => {
+    if (!song) return null;
+    const noteCount = song.tracks.reduce((sum, track) => sum + track.notes.length, 0);
+    const eventCount = song.tracks.reduce((sum, track) => sum + track.playEvents.length, 0);
+    const namedTracks = song.tracks
+      .map((track) => formatTrackInlineName(track) || track.instrumentName)
+      .filter(Boolean);
+    return {
+      noteCount,
+      eventCount,
+      namedTrackPreview: namedTracks.slice(0, 3).join(", "),
+    };
+  }, [song]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
+  useEffect(() => {
+    trackPresetOverridesRef.current = trackPresetOverrides;
+  }, [trackPresetOverrides]);
+  useEffect(() => {
+    trackCcControlsRef.current = trackCcControls;
+  }, [trackCcControls]);
+  useEffect(() => {
+    trackMixStateRef.current = trackMixState;
+  }, [trackMixState]);
+  useEffect(() => {
+    resolvePresetRef.current = resolvePresetIndex;
+  }, [resolvePresetIndex]);
+  useEffect(() => {
+    getRegionsRef.current = getRegionsForPreset;
+  }, [getRegionsForPreset]);
+  useEffect(() => {
+    fallbackPresetRef.current = fallbackPresetIndex;
+  }, [fallbackPresetIndex]);
+  useEffect(() => {
+    durationRef.current = duration;
+    contentWRef.current = contentW;
+  }, [duration, contentW]);
+  useEffect(() => {
+    timelineZoomRef.current = timelineZoom;
+  }, [timelineZoom]);
+  useEffect(() => {
+    presetOptionMapRef.current = presetOptionMap;
+  }, [presetOptionMap]);
+  useEffect(() => {
+    return () => {
+      if (selectedSheetMusicImage?.previewUrl) URL.revokeObjectURL(selectedSheetMusicImage.previewUrl);
+    };
+  }, [selectedSheetMusicImage?.previewUrl]);
+
+  const updatePlayhead = (sec: number) => {
+    const line = playheadRef.current;
+    if (!line) return;
+    const safeDuration = Math.max(0.01, durationRef.current);
+    const width = getTimelineWidth();
+    const x = (Math.max(0, Math.min(safeDuration, sec)) / safeDuration) * width;
+    line.style.transform = `translateX(${x}px)`;
+  };
+
+  const getTimelineWidth = (): number => {
+    return Math.max(1, contentRef.current?.offsetWidth ?? contentWRef.current);
+  };
+
+  const scrollTimelineToSec = (sec: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const safeDuration = Math.max(0.01, durationRef.current);
+    const progress = clampNumber(sec / safeDuration, 0, 1);
+    const maxLeft = Math.max(0, getTimelineWidth() - viewport.clientWidth);
+    viewport.scrollLeft = progress * maxLeft;
+  };
+
+  const seekToSec = (rawSec: number, opts: { scrollTimeline?: boolean } = {}): number => {
+    const safeDuration = Math.max(0.01, durationRef.current);
+    const sec = Math.max(0, Math.min(safeDuration, Number.isFinite(rawSec) ? rawSec : 0));
+    updatePlayhead(sec);
+    if (opts.scrollTimeline !== false) scrollTimelineToSec(sec);
+    setSongTime(sec);
+    workerRef.current?.postMessage({ type: "seek", sec });
+    updatePersistedMidiTime(sec);
+    return sec;
+  };
+
+  const seekToClientX = (clientX: number): number => {
+    const content = contentRef.current;
+    if (!content) return 0;
+    const rect = content.getBoundingClientRect();
+    const width = getTimelineWidth();
+    const safeDuration = Math.max(0.01, durationRef.current);
+    const xInContent = Math.max(0, Math.min(width, clientX - rect.left));
+    const sec = (xInContent / width) * safeDuration;
+    return seekToSec(sec, { scrollTimeline: false });
+  };
+
+  const refreshMidiOutputs = (access: MIDIAccess | null = midiAccessRef.current): MidiOutputOption[] => {
+    const outputs = access ? [...access.outputs.values()].map((output) => ({ id: output.id, name: outputName(output) })) : [];
+    setMidiOutputs(outputs);
+    setSelectedMidiOutput((current) => (current && outputs.some((output) => output.id === current) ? current : outputs[0]?.id ?? ""));
+    setMidiOutputStatus(outputs.length ? `Outputs: ${outputs.map((output) => output.name).join(", ")}` : "No MIDI outputs");
+    return outputs;
+  };
+
+  const findMidiOutput = (outputId: string = selectedMidiOutput): MIDIOutput | null => {
+    const access = midiAccessRef.current;
+    if (!access || !outputId) return null;
+    return access.outputs.get(outputId) ?? null;
+  };
+
+  const sendAllNotesOff = (output: MIDIOutput | null = midiSendOutputRef.current) => {
+    if (!output) return;
+    for (let channel = 0; channel < 16; channel += 1) {
+      output.send([0xb0 | channel, 64, 0]);
+      output.send([0xb0 | channel, 120, 0]);
+      output.send([0xb0 | channel, 123, 0]);
+    }
+  };
+
+  const stopMidiSend = (status = "Send stopped") => {
+    if (midiSendTimerRef.current != null) {
+      window.clearTimeout(midiSendTimerRef.current);
+      midiSendTimerRef.current = null;
+    }
+    const output = midiSendOutputRef.current;
+    (output as ClearableMidiOutput | null)?.clear?.();
+    sendAllNotesOff(output);
+    midiSendOutputRef.current = null;
+    setIsSendingMidi(false);
+    setMidiOutputStatus(status);
+  };
+
+  const disconnectTrackNodes = () => {
+    for (const rec of trackNodesRef.current) {
+      try {
+        rec.node?.disconnect();
+      } catch {
+        // no-op
+      }
+      try {
+        rec.gain?.disconnect();
+      } catch {
+        // no-op
+      }
+      try {
+        rec.panner?.disconnect();
+      } catch {
+        // no-op
+      }
+    }
+    trackNodesRef.current = [];
+    portsAttachedRef.current = false;
+  };
+
+  const getTrackCc = (trackIndex: number, controls: Record<number, TrackCc> = trackCcControlsRef.current): TrackCc => {
+    const cc = controls?.[trackIndex];
+    return {
+      cc7Volume: clampCc(cc?.cc7Volume ?? DEFAULT_TRACK_CC.cc7Volume),
+      cc10Pan: clampCc(cc?.cc10Pan ?? DEFAULT_TRACK_CC.cc10Pan),
+      cc11Expression: clampCc(cc?.cc11Expression ?? DEFAULT_TRACK_CC.cc11Expression),
+    };
+  };
+
+  const applyTrackControllers = (songData: Song | null, controls: Record<number, TrackCc> = trackCcControlsRef.current) => {
+    if (!songData?.tracks?.length) return;
+    for (let i = 0; i < songData.tracks.length; i += 1) {
+      const track = songData.tracks[i];
+      const rec = trackNodesRef.current[i];
+      if (!rec?.node) continue;
+      const cc = getTrackCc(track.index, controls);
+      rec.node.port.postMessage({ type: "setControllers", ...cc });
+    }
+  };
+
+  const applyTrackMuteSolo = (songData: Song | null, mix: Record<number, TrackMix> = trackMixStateRef.current) => {
+    if (!songData?.tracks?.length) return;
+    const anySolo = songData.tracks.some((track) => !!mix?.[track.index]?.solo);
+    for (let i = 0; i < songData.tracks.length; i += 1) {
+      const track = songData.tracks[i];
+      const rec = trackNodesRef.current[i];
+      if (!rec?.gain) continue;
+      const muted = !!mix?.[track.index]?.mute;
+      const solo = !!mix?.[track.index]?.solo;
+      const cc = getTrackCc(track.index);
+      const ccSilent = cc.cc7Volume === 0 || cc.cc11Expression === 0;
+      const audible = (anySolo ? solo : !muted) && !ccSilent;
+      rec.gain.gain.setTargetAtTime(audible ? 1 : 0, rec.gain.context.currentTime, 0.01);
+    }
+  };
+
+  const applyTrackPanning = (songData: Song | null, overrides: Record<number, number | null> | undefined) => {
+    if (!songData?.tracks?.length) return;
+    for (let i = 0; i < songData.tracks.length; i += 1) {
+      const track = songData.tracks[i];
+      const rec = trackNodesRef.current[i];
+      if (!rec?.panner) continue;
+      const overridePreset = overrides?.[track.index];
+      const defaultPreset = trackDefaultPresetMap[track.index];
+      const effectivePreset =
+        overridePreset != null
+          ? overridePreset
+          : defaultPreset != null
+            ? defaultPreset
+            : fallbackPresetIndex;
+      const preset = presetOptionMapRef.current.get(effectivePreset);
+      const pan = resolveOrchestraPan(
+        track.instrumentName,
+        track.name,
+        preset?.name
+      );
+      rec.panner.pan.setValueAtTime(pan ?? 0, rec.panner.context.currentTime);
+    }
+  };
+
+  const enableMidiOutput = async () => {
+    if (!navigator.requestMIDIAccess) {
+      const msg = "Web MIDI output is not supported in this browser.";
+      setMidiOutputStatus(msg);
+      setSongError(msg);
+      onErrorRef.current?.(msg);
+      return;
+    }
+    try {
+      const access = await navigator.requestMIDIAccess({ sysex: false });
+      midiAccessRef.current = access;
+      access.onstatechange = () => refreshMidiOutputs(access);
+      const outputs = refreshMidiOutputs(access);
+      setMidiOutputEnabled(true);
+      setMidiOutputStatus(outputs.length ? "MIDI output ready" : "MIDI output ready (no outputs)");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setMidiOutputStatus("MIDI output failed");
+      setSongError(msg);
+      onErrorRef.current?.(msg);
+    }
+  };
+
+  const disableMidiOutput = () => {
+    stopMidiSend("Output disabled");
+    if (midiAccessRef.current) midiAccessRef.current.onstatechange = null;
+    midiAccessRef.current = null;
+    setMidiOutputEnabled(false);
+    setMidiOutputs([]);
+    setSelectedMidiOutput("");
+    setMidiOutputStatus("Output disabled");
+  };
+
+  const toggleMidiOutput = () => {
+    if (midiOutputEnabled) {
+      disableMidiOutput();
+    } else {
+      void enableMidiOutput();
+    }
+  };
+
+  const onRefreshMidiOutputs = () => {
+    if (!midiAccessRef.current) {
+      void enableMidiOutput();
+      return;
+    }
+    refreshMidiOutputs();
+  };
+
+  const onSendMidiToOutput = () => {
+    if (!song) return;
+    const output = findMidiOutput();
+    if (!output) {
+      setMidiOutputStatus("Choose a MIDI output");
+      return;
+    }
+    stopMidiSend("Preparing send");
+
+    const startSec = clampNumber(songTime, 0, duration);
+    const events = buildMidiSendEvents(song, startSec);
+    if (!events.length) {
+      setMidiOutputStatus("No MIDI events to send");
+      return;
+    }
+
+    const startAt = performance.now() + 80;
+    sendAllNotesOff(output);
+    for (const event of events) {
+      output.send(event.bytes, startAt + Math.max(0, event.sec - startSec) * 1000);
+    }
+
+    midiSendOutputRef.current = output;
+    setIsSendingMidi(true);
+    setMidiOutputStatus(`Sending to ${outputName(output)}`);
+    const remainingMs = Math.max(100, (duration - startSec) * 1000 + 120);
+    midiSendTimerRef.current = window.setTimeout(() => {
+      midiSendTimerRef.current = null;
+      sendAllNotesOff(output);
+      midiSendOutputRef.current = null;
+      setIsSendingMidi(false);
+      setMidiOutputStatus(`Sent ${events.length} MIDI messages`);
+    }, remainingMs);
+  };
+
+  useEffect(() => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./midi-timer.worker.ts", import.meta.url), { type: "module" });
+    } catch (err) {
+      // A dead worker used to leave every play tap silently failing; surface it.
+      setSongError(err instanceof Error ? err.message : `Playback worker failed to start: ${String(err)}`);
+      return;
+    }
+    workerRef.current = worker;
+    const debugPlayback = window.localStorage.getItem("sf2-e2e-debug") === "1";
+    if (debugPlayback) {
+      window.__sf2E2e = { playbackEvents: [] };
+      worker.postMessage({ type: "setDebugPlayback", enabled: true });
+    }
+
+    worker.onmessage = (event: MessageEvent) => {
+      const msg = event.data as { type: string; [key: string]: unknown };
+      if (msg.type === "playbackDebug") {
+        window.__sf2E2e?.playbackEvents.push(msg as PlaybackDebugEvent);
+        return;
+      }
+      if (msg.type === "songLoaded") {
+        setSong(msg.song as Song);
+        setPlayRequested(autoplayLoadedSongRef.current);
+        autoplayLoadedSongRef.current = false;
+        const restoreSec = pendingRestoreSecRef.current;
+        pendingRestoreSecRef.current = null;
+        const nextSec = restoreSec == null ? 0 : Math.max(0, Math.min((msg.song as Song).durationSec, restoreSec));
+        setSongTime(nextSec);
+        setIsPlaying(false);
+        setSongError("");
+        setTrackPresetOverrides({});
+        setTrackCcControls({});
+        setTrackMixState({});
+        updatePlayhead(nextSec);
+        if (nextSec > 0) worker.postMessage({ type: "seek", sec: nextSec });
+        return;
+      }
+      if (msg.type === "tick") {
+        if (!isSeekingRef.current) {
+          const sec = (msg.sec as number) ?? 0;
+          setSongTime(sec);
+          updatePlayhead(sec);
+          if (Math.abs(sec - lastPersistedTimeRef.current) >= 1) {
+            lastPersistedTimeRef.current = sec;
+            updatePersistedMidiTime(sec);
+          }
+        }
+        const viewport = viewportRef.current;
+        if (viewport && !isSeekingRef.current) {
+          scrollTimelineToSec((msg.sec as number) ?? 0);
+        }
+        return;
+      }
+      if (msg.type === "paused") {
+        const sec = (msg.sec as number) ?? 0;
+        setSongTime(sec);
+        updatePlayhead(sec);
+        updatePersistedMidiTime(sec);
+        setIsPlaying(false);
+        return;
+      }
+      if (msg.type === "ended") {
+        const sec = (msg.sec as number) ?? 0;
+        setSongTime(sec);
+        updatePlayhead(sec);
+        updatePersistedMidiTime(sec);
+        setIsPlaying(false);
+        playlistEndedRef.current();
+        return;
+      }
+      if (msg.type === "programChangeRequest") {
+        const trackIndex = msg.trackIndex as number;
+        const presetIndex =
+          trackPresetOverridesRef.current[trackIndex] != null
+            ? (trackPresetOverridesRef.current[trackIndex] as number)
+            : resolvePresetRef.current(msg.program as number, msg.bank as number) ?? fallbackPresetRef.current;
+        const regions = getRegionsRef.current(presetIndex);
+        worker.postMessage({
+          type: "setTrackPreset",
+          trackIndex,
+          presetIndex,
+          override: trackPresetOverridesRef.current[trackIndex] != null,
+          regions,
+        });
+        return;
+      }
+      if (msg.type === "error") {
+        setSongError((msg.message as string) || "Worker error");
+        onErrorRef.current?.((msg.message as string) || "Worker error");
+      }
+    };
+
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+      disconnectTrackNodes();
+    };
+  }, []);
+
+  // A tap-while-loading race (or any other missed await) used to die as a
+  // silent unhandled rejection; surface it in the status line instead so a
+  // startup failure is diagnosable instead of looking like a crash.
+  useEffect(() => {
+    const onUnhandled = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      setSongError(`Unexpected error: ${msg}`);
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    return () => window.removeEventListener("unhandledrejection", onUnhandled);
+  }, []);
+
+  useEffect(() => {
+    if (viewportRef.current) viewportRef.current.scrollLeft = 0;
+    setTimelineZoom(MIN_TIMELINE_ZOOM);
+    updatePlayhead(0);
+  }, [songName]);
+
+  useEffect(() => {
+    return () => {
+      stopMidiSend("Output disabled");
+      if (midiAccessRef.current) midiAccessRef.current.onstatechange = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isSendingMidi) stopMidiSend("Send stopped");
+  }, [songName]);
+
+  useEffect(() => {
+    updatePlayhead(songTime);
+  }, [contentW, songTime]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    viewport.classList.add("dragScroll");
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      if (event.target instanceof HTMLElement && event.target.closest("button, select, input, label")) return;
+      dragStateRef.current.active = true;
+      dragStateRef.current.startX = event.clientX;
+      dragStateRef.current.startLeft = viewport.scrollLeft;
+      viewport.classList.add("dragging");
+      viewport.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (!dragStateRef.current.active) return;
+      const dx = event.clientX - dragStateRef.current.startX;
+      viewport.scrollLeft = dragStateRef.current.startLeft - dx;
+    };
+
+    const endDrag = (event: PointerEvent) => {
+      if (!dragStateRef.current.active) return;
+      dragStateRef.current.active = false;
+      viewport.classList.remove("dragging");
+      viewport.releasePointerCapture?.(event.pointerId);
+    };
+
+    viewport.addEventListener("pointerdown", onPointerDown);
+    viewport.addEventListener("pointermove", onPointerMove);
+    viewport.addEventListener("pointerup", endDrag);
+    viewport.addEventListener("pointercancel", endDrag);
+    viewport.addEventListener("pointerleave", endDrag);
+    return () => {
+      viewport.removeEventListener("pointerdown", onPointerDown);
+      viewport.removeEventListener("pointermove", onPointerMove);
+      viewport.removeEventListener("pointerup", endDrag);
+      viewport.removeEventListener("pointercancel", endDrag);
+      viewport.removeEventListener("pointerleave", endDrag);
+    };
+  }, [song]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const getWheelPixels = (event: WheelEvent) => {
+      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+      if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * viewport.clientHeight;
+      return event.deltaY;
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.deltaY) return;
+      event.preventDefault();
+
+      const oldWidth = getTimelineWidth();
+      const focusX = viewport.scrollLeft + event.clientX - viewport.getBoundingClientRect().left;
+      const anchorRatio = clampNumber(focusX / oldWidth, 0, 1);
+      const delta = getWheelPixels(event);
+      const zoomChange = Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY);
+
+      setTimelineZoom((currentZoom) => {
+        const nextZoom = clampNumber(currentZoom * zoomChange, MIN_TIMELINE_ZOOM, MAX_TIMELINE_ZOOM);
+        if (Math.abs(nextZoom - currentZoom) < 0.001) return currentZoom;
+        const nextWidth = Math.max(1, oldWidth * (nextZoom / Math.max(0.001, currentZoom)));
+        requestAnimationFrame(() => {
+          const maxLeft = Math.max(0, nextWidth - viewport.clientWidth);
+          viewport.scrollLeft = clampNumber(anchorRatio * nextWidth - (event.clientX - viewport.getBoundingClientRect().left), 0, maxLeft);
+        });
+        return nextZoom;
+      });
+    };
+
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, [song]);
+
+  useEffect(() => {
+    const line = playheadRef.current;
+    if (!line) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      isSeekingRef.current = true;
+      line.classList.add("seeking");
+      line.setPointerCapture?.(event.pointerId);
+      seekToClientX(event.clientX);
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (!isSeekingRef.current) return;
+      seekToClientX(event.clientX);
+    };
+
+    const endSeek = (event: PointerEvent) => {
+      if (!isSeekingRef.current) return;
+      isSeekingRef.current = false;
+      line.classList.remove("seeking");
+      line.releasePointerCapture?.(event.pointerId);
+      seekToClientX(event.clientX);
+    };
+
+    line.addEventListener("pointerdown", onPointerDown);
+    line.addEventListener("pointermove", onPointerMove);
+    line.addEventListener("pointerup", endSeek);
+    line.addEventListener("pointercancel", endSeek);
+    return () => {
+      line.removeEventListener("pointerdown", onPointerDown);
+      line.removeEventListener("pointermove", onPointerMove);
+      line.removeEventListener("pointerup", endSeek);
+      line.removeEventListener("pointercancel", endSeek);
+    };
+  }, [song]);
+
+  useEffect(() => {
+    if (!workerRef.current) return;
+    (async () => {
+      try {
+        const manifestUrl = `${import.meta.env.BASE_URL}static/midi-manifest.json`;
+        const res = await fetch(manifestUrl);
+        if (!res.ok) throw new Error(`Failed to fetch ${manifestUrl}`);
+        const list = await res.json() as unknown;
+        const normalized: MidiOption[] = Array.isArray(list)
+          ? (list as unknown[]).filter(
+              (m): m is MidiOption =>
+                m != null &&
+                typeof m === "object" &&
+                "path" in (m as object) &&
+                "name" in (m as object)
+            )
+          : [];
+        setMidiOptions(normalized);
+
+        const persisted = readPersistedMidiState();
+
+        // Restore user-added MIDI files (uploads + camera scans) from
+        // IndexedDB, in the order they were added. Entries whose bytes can't
+        // be read are skipped with a warning; the bundled list and the rest of
+        // the app keep working regardless.
+        let restoredScans: ScannedEntry[] = [];
+        try {
+          const playlistMeta = await midiFileStore.getPlaylistMeta();
+          if (playlistMeta) {
+            const uploads: UploadedEntry[] = [];
+            for (const metaEntry of playlistMeta.uploads) {
+              const record = await midiFileStore.getMidiFile(metaEntry.id);
+              if (record) uploads.push({ id: record.id, name: record.name, midiData: record.bytes });
+              else console.warn(`[midi-file-store] upload "${metaEntry.id}" is missing its MIDI bytes; skipping`);
+            }
+            const scans: ScannedEntry[] = [];
+            for (const metaEntry of playlistMeta.scans) {
+              const record = await midiFileStore.getMidiFile(metaEntry.id);
+              if (record) {
+                scans.push({
+                  id: record.id,
+                  name: record.name,
+                  midiData: record.bytes,
+                  // Photo and note layout are session-only; restored scans
+                  // play back without synchronized highlighting.
+                  noteLayout: [],
+                  warnings: [],
+                  photoUrl: null,
+                  imageWidth: 0,
+                  imageHeight: 0,
+                });
+              } else console.warn(`[midi-file-store] scan "${metaEntry.id}" is missing its MIDI bytes; skipping`);
+            }
+            restoredScans = scans;
+            setUploadedEntries(uploads);
+            setScannedEntries(scans);
+          }
+        } catch (err) {
+          console.warn("[midi-file-store] playlist restore failed", err);
+        }
+
+        if (persisted?.kind === "bundled" && persisted.path) {
+          const restored = normalized.find((m) => m.path === persisted.path) ?? {
+            name: persisted.name,
+            path: persisted.path,
+          };
+          setSelectedMidiPath(restored.path);
+          const midiRes = await fetch(`${import.meta.env.BASE_URL}${restored.path}`);
+          if (!midiRes.ok) throw new Error(`Failed to fetch ${restored.path}`);
+          const buf = await midiRes.arrayBuffer();
+          loadMidiIntoTracks(buf, restored.name, {
+            selectedPath: restored.path,
+            sourceKind: "bundled",
+            persist: false,
+            restoreSec: persisted.currentSec,
+          });
+          return;
+        }
+
+        if (persisted && persisted.kind !== "bundled") {
+          if (persisted.fileId) {
+            // Current save format: binary lives in IndexedDB.
+            const record = await midiFileStore.getMidiFile(persisted.fileId);
+            if (record) {
+              const isScan = restoredScans.some((s) => s.id === persisted.fileId);
+              loadMidiIntoTracks(record.bytes.slice(0), persisted.name, {
+                sourceKind: persisted.kind,
+                fileId: persisted.fileId,
+                persist: false,
+                restoreSec: persisted.currentSec,
+              });
+              if (isScan) setSelectedScanId(persisted.fileId);
+              else setSelectedUploadId(persisted.fileId);
+              return;
+            }
+            // Bytes are gone (e.g. storage was cleared); fall through to the default.
+          } else if (persisted.dataUrl) {
+            // Legacy save format (pre-IndexedDB data URL); keep it readable.
+            const buf = await dataUrlToArrayBuffer(persisted.dataUrl);
+            loadMidiIntoTracks(buf, persisted.name, {
+              sourceKind: persisted.kind,
+              dataUrl: persisted.dataUrl,
+              persist: false,
+              restoreSec: persisted.currentSec,
+            });
+            return;
+          }
+        }
+
+        const preferred = normalized.find((m) => m.name === "60884_Beethoven-Symphony-No51.mid");
+        const first = preferred ?? normalized[0];
+        if (first) {
+          setSelectedMidiPath(first.path);
+          const midiRes = await fetch(`${import.meta.env.BASE_URL}${first.path}`);
+          if (!midiRes.ok) throw new Error(`Failed to fetch ${first.path}`);
+          const buf = await midiRes.arrayBuffer();
+          loadMidiIntoTracks(buf, first.name, {
+            selectedPath: first.path,
+            sourceKind: "bundled",
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSongError(msg);
+        onErrorRef.current?.(msg);
+      }
+    })();
+  }, []);
+
+
+
+  useEffect(() => {
+    if (!workerRef.current || !song || !portsAttachedRef.current) return;
+    for (const track of song.tracks) {
+      const overridePreset = trackPresetOverrides[track.index];
+      if (overridePreset == null) continue;
+      const regions = getRegionsForPreset(overridePreset);
+      workerRef.current.postMessage({
+        type: "setTrackPreset",
+        trackIndex: track.index,
+        presetIndex: overridePreset,
+        override: true,
+        regions,
+      });
+    }
+    applyTrackPanning(song, trackPresetOverrides);
+  }, [trackPresetOverrides, song, getRegionsForPreset]);
+
+  useEffect(() => {
+    if (!song || !portsAttachedRef.current) return;
+    applyTrackControllers(song, trackCcControls);
+    applyTrackMuteSolo(song, trackMixStateRef.current);
+  }, [trackCcControls, song]);
+
+  useEffect(() => {
+    if (!song || !portsAttachedRef.current) return;
+    applyTrackMuteSolo(song, trackMixState);
+  }, [trackMixState, song]);
+
+  async function ensureTrackInfrastructure() {
+    if (!song || !workerRef.current) return;
+    const { ctx, input } = await ensureAudioInfrastructure();
+    if (portsAttachedRef.current && trackNodesRef.current.length === song.tracks.length &&
+        trackNodesRef.current.every((rec) => rec.node.context === ctx)) return;
+    // The master context may have been replaced after closure or Fast Refresh.
+    // Reattach fresh track ports instead of sending notes to the old graph.
+    disconnectTrackNodes();
+    const trackNodes: TrackNode[] = [];
+    for (let i = 0; i < song.tracks.length; i += 1) {
+      const node = new AudioWorkletNode(ctx, "sf2-processor", {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+      });
+      const panner = new StereoPannerNode(ctx, { pan: 0 });
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(1, ctx.currentTime);
+      node.connect(panner);
+      panner.connect(gain);
+      gain.connect(input);
+      trackNodes.push({ node, panner, gain });
+    }
+    trackNodesRef.current = trackNodes;
+
+    const ports = trackNodes.map((rec, index) => ({ trackIndex: index, port: rec.node.port }));
+    workerRef.current.postMessage({ type: "attachPorts", ports }, ports.map((p) => p.port));
+    portsAttachedRef.current = true;
+
+    for (const track of song.tracks) {
+      const overridePreset = trackPresetOverrides[track.index];
+      const defaultPreset = trackDefaultPresetMap[track.index];
+      const presetIndex = overridePreset ?? defaultPreset ?? fallbackPresetIndex;
+      const regions = getRegionsForPreset(presetIndex);
+      workerRef.current.postMessage({
+        type: "setTrackPreset",
+        trackIndex: track.index,
+        presetIndex,
+        override: overridePreset != null,
+        regions,
+      });
+    }
+    applyTrackPanning(song, trackPresetOverrides);
+    applyTrackControllers(song, trackCcControlsRef.current);
+    applyTrackMuteSolo(song, trackMixStateRef.current);
+  }
+
+  async function onPlayPause() {
+    if (!workerRef.current) return;
+    if (playRequested) {
+      // Cancel a pending play request (e.g. play was tapped while the song
+      // or the SoundFont was still loading).
+      autoplayLoadedSongRef.current = false;
+      setPlayRequested(false);
+      return;
+    }
+    if (isPlaying) {
+      workerRef.current.postMessage({ type: "pause" });
+      return;
+    }
+    // Queue the intent even when the song (or the IndexedDB restore feeding
+    // it) isn't ready yet: the tap used to be silently dropped, which felt
+    // like a crash when it happened during startup. The "songLoaded" handler
+    // picks up autoplayLoadedSongRef, and the playRequested effect below
+    // unlocks audio and kicks the SoundFont download in the meantime.
+    autoplayLoadedSongRef.current = true;
+    try {
+      // Unlock audio during the click, before waiting for the SoundFont download.
+      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
+      await ctx.resume();
+      setPlayRequested(true);
+      if (!sf2Ready && !sf2Loading) onLoadDefaultSf2();
+    } catch (err) {
+      autoplayLoadedSongRef.current = false;
+      setSongError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function startPlayback() {
+    if (!song || !workerRef.current) return;
+    try {
+      await ensureTrackInfrastructure();
+      const { ctx } = await ensureAudioInfrastructure();
+      if (ctx.state !== "running") {
+        try {
+          await ctx.resume();
+        } catch (resumeErr) {
+          const resumeMsg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+          throw new Error("Failed to resume audio: " + resumeMsg);
+        }
+      }
+      workerRef.current.postMessage({ type: "play", startSec: songTime });
+      setIsPlaying(true);
+      setSongError("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    }
+  }
+
+  useEffect(() => {
+    if (!playRequested) return;
+    if (sf2Ready) {
+      setPlayRequested(false);
+      void startPlayback();
+    } else if (sf2Error && !sf2Loading) {
+      setPlayRequested(false);
+    }
+  }, [playRequested, sf2Ready, sf2Error, sf2Loading]);
+
+  async function onExportWav() {
+    if (!song || !sf2Ready || isExporting) return;
+    setIsExporting(true);
+    setExportProgress(0);
+    setExportStage("Preparing");
+    setSongError("");
+    try {
+      const sampleRate = 44100;
+      const numChannels = 2;
+      const tailSec = 3;
+      const durationSec = song.durationSec + tailSec;
+      const offlineCtx = new OfflineAudioContext(
+        numChannels,
+        Math.ceil(durationSec * sampleRate),
+        sampleRate
+      );
+      const audioBuffer = offlineCtx.createBuffer(
+        numChannels,
+        Math.ceil(durationSec * sampleRate),
+        sampleRate
+      );
+
+      const anySolo = song.tracks.some((t) => !!trackMixStateRef.current[t.index]?.solo);
+      const offlineTracks: {
+        trackIndex: number;
+        regions: SF2Region[];
+        cc7Volume: number;
+        cc10Pan: number;
+        cc11Expression: number;
+        pan: number;
+        gain: number;
+      }[] = [];
+      const events: {
+        frame: number;
+        seq: number;
+        type: string;
+        trackIndex: number;
+        channel?: number;
+        note?: number;
+        velocity?: number;
+        regions?: SF2Region[];
+      }[] = [];
+
+      for (const track of song.tracks) {
+        const overridePreset = trackPresetOverridesRef.current[track.index];
+        const defaultPreset = trackDefaultPresetMap[track.index];
+        const presetIndex = overridePreset ?? defaultPreset ?? fallbackPresetRef.current;
+        const regions = getRegionsRef.current(presetIndex);
+        const cc = getTrackCc(track.index);
+        const preset = presetOptionMapRef.current.get(presetIndex);
+        const pan = resolveOrchestraPan(track.instrumentName, track.name, preset?.name);
+
+        const muted = !!trackMixStateRef.current[track.index]?.mute;
+        const solo = !!trackMixStateRef.current[track.index]?.solo;
+        const audible = anySolo ? solo : !muted;
+        offlineTracks.push({
+          trackIndex: track.index,
+          regions,
+          cc7Volume: cc.cc7Volume,
+          cc10Pan: cc.cc10Pan,
+          cc11Expression: cc.cc11Expression,
+          pan: pan ?? 0,
+          gain: audible ? 1 : 0,
+        });
+        for (const ev of track.playEvents) {
+          const frame = Math.max(0, Math.round(ev.sec * sampleRate));
+          if (ev.type === "noteOn") {
+            events.push({
+              frame,
+              seq: ev.seq ?? 0,
+              type: "noteOn",
+              trackIndex: track.index,
+              channel: ev.channel,
+              note: ev.note,
+              velocity: ev.velocity,
+            });
+          } else if (ev.type === "noteOff") {
+            events.push({
+              frame,
+              seq: ev.seq ?? 0,
+              type: "noteOff",
+              trackIndex: track.index,
+              channel: ev.channel,
+              note: ev.note,
+            });
+          } else if (ev.type === "program" && overridePreset == null) {
+            const pIdx = resolvePresetRef.current(ev.program ?? 0, ev.bank ?? 0) ?? fallbackPresetRef.current;
+            events.push({
+              frame,
+              seq: ev.seq ?? 0,
+              type: "setPreset",
+              trackIndex: track.index,
+              regions: getRegionsRef.current(pIdx),
+            });
+          }
+        }
+      }
+      setExportStage("Rendering");
+      await renderOfflineSequenceToAudioBufferIncremental({
+        audioBuffer,
+        tracks: offlineTracks,
+        events,
+        maxVoices: Math.max(96, song.tracks.length * 24),
+        onProgress: (progress: number) => {
+          setExportProgress(Math.max(0, Math.min(0.75, progress * 0.75)));
+        },
+      });
+      // The click-time mode is captured for the entire export, even if the user
+      // changes the live control while rendering. Apply once to the summed mix.
+      setExportStage("Mastering dynamics");
+      await applyMasterDynamicsToBuffer(audioBuffer, dynamicsMode, (progress) => {
+        setExportProgress(0.75 + progress * 0.1);
+      });
+      setExportStage("Encoding WAV");
+      const wavBuffer = await encodeWavIncremental(audioBuffer, 16384, (progress) => {
+        setExportProgress(0.85 + Math.max(0, Math.min(0.15, progress * 0.15)));
+      });
+      setExportProgress(1);
+      setExportStage("Saving");
+      const blob = new Blob([wavBuffer], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(songName || "export").replace(/\.[^.]+$/, "")}.wav`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    } finally {
+      setExportStage("");
+      setIsExporting(false);
+    }
+  }
+
+  function loadMidiIntoTracks(
+    buf: ArrayBuffer,
+    name: string,
+    opts: {
+      selectedPath?: string;
+      sourceKind?: MidiSourceKind;
+      dataUrl?: string;
+      /** IndexedDB file id for uploads/scans; persisted instead of the binary. */
+      fileId?: string;
+      persist?: boolean;
+      restoreSec?: number;
+      autoplay?: boolean;
+    } = {}
+  ) {
+    if (!workerRef.current) return;
+    ++midiSelectionRequestRef.current;
+    autoplayLoadedSongRef.current = opts.autoplay ?? false;
+    setPlayRequested(false);
+    // A non-scan/non-upload load clears those selections; scan/upload loads set
+    // theirs again after this call, so the panels track the actually loaded song.
+    setSelectedScanId(null);
+    setSelectedUploadId(null);
+    const selectedPath = opts.selectedPath ?? "";
+    const sourceKind = opts.sourceKind ?? (selectedPath ? "bundled" : "uploaded");
+    const source: CurrentMidiSource = { kind: sourceKind, name, path: selectedPath || undefined };
+    if (isPlaying) workerRef.current.postMessage({ type: "pause" });
+    disconnectTrackNodes();
+    pendingRestoreSecRef.current = opts.restoreSec ?? null;
+    workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
+    setSelectedMidiPath(selectedPath);
+    setCurrentMidiSource(source);
+    setSongName(name);
+    setSongTime(opts.restoreSec ?? 0);
+    setSongError("");
+    setSheetMusicNotice("");
+    lastPersistedTimeRef.current = opts.restoreSec ?? 0;
+    if (opts.persist === false) return;
+    if (source.kind === "bundled") {
+      writePersistedMidiState({ ...source, currentSec: opts.restoreSec ?? 0 });
+      return;
+    }
+    if (opts.fileId) {
+      // Uploads and scans: binary lives in IndexedDB; localStorage keeps only
+      // the small selection metadata (id, name, position).
+      writePersistedMidiState({
+        kind: sourceKind,
+        name,
+        fileId: opts.fileId,
+        currentSec: opts.restoreSec ?? 0,
+      });
+      return;
+    }
+    if (opts.dataUrl) {
+      // Legacy path (sheet-music conversion, Bach generator): keep working.
+      writePersistedMidiState({
+        ...source,
+        dataUrl: opts.dataUrl,
+        currentSec: opts.restoreSec ?? 0,
+      });
+    }
+  }
+
+  async function onUploadMidi(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !workerRef.current) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const id = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const createdAt = Date.now();
+      // Persist first: the file must survive reloads. A failed write only
+      // affects persistence; the file still plays for this session.
+      await midiFileStore.putMidiFile({
+        id,
+        name: file.name,
+        bytes: buf.slice(0),
+        source: "upload",
+        createdAt,
+      });
+      const entry: UploadedEntry = { id, name: file.name, midiData: buf };
+      const nextUploads = [...uploadedEntries, entry];
+      setUploadedEntries(nextUploads);
+      void midiFileStore.putPlaylistMeta({
+        version: 1,
+        uploads: nextUploads.map((e) => ({ id: e.id, name: e.name })),
+        scans: scannedEntries.map((e) => ({ id: e.id, name: e.name })),
+      });
+      loadMidiIntoTracks(buf, file.name, { sourceKind: "uploaded", fileId: id });
+      // Set after the load: loadMidiIntoTracks clears the upload selection first.
+      setSelectedUploadId(id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+      setSong(null);
+    }
+  }
+
+  function selectSheetMusicImage(file: File, source: SheetMusicImageSource) {
+    if (!isSupportedSheetMusicImageFile(file)) {
+      setSongError("Choose a JPG or PNG image of sheet music.");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedSheetMusicImage({ file, name: file.name, previewUrl, source });
+    setPanelOverlay("sheetMusic");
+    setSheetMusicStage("");
+    setSheetMusicNotice(`${file.name} is ready to convert to MIDI.`);
+    setSongError("");
+  }
+
+  function onUploadSheetMusic(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || isParsingSheetMusic) return;
+    selectSheetMusicImage(file, "uploaded");
+  }
+
+  async function onLoadSwedenSheetMusic() {
+    if (isParsingSheetMusic) return;
+
+    setSheetMusicStage("Loading Sweden sheet image...");
+    setSheetMusicNotice("");
+    setSongError("");
+    try {
+      const res = await fetch(SWEDEN_SHEET_IMAGE_URL);
+      if (!res.ok) throw new Error(`Failed to fetch Sweden sheet image (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], "sweden.jpg", { type: blob.type || "image/jpeg" });
+      selectSheetMusicImage(file, "sample");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    } finally {
+      setSheetMusicStage("");
+    }
+  }
+
+  async function onConvertSelectedSheetMusic(useOriginalTranscription = false) {
+    if (!selectedSheetMusicImage || !workerRef.current || isParsingSheetMusic) return;
+    if (useOriginalTranscription && selectedSheetMusicImage.source !== "sample") return;
+
+    setIsParsingSheetMusic(true);
+    setSheetMusicStage("Reading sheet music image...");
+    setSheetMusicNotice("");
+    setSongError("");
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      setSheetMusicStage("Building MIDI from sheet music...");
+      const parsed = useOriginalTranscription
+        ? {
+            midiData: buildSwedenSheetMusicMidi(),
+            fileName: "sweden.midi",
+            warnings: ["Original visual transcription from the Python version: D major, 4/4, 46 BPM, 16 measures. Some passages were simplified from the photo."],
+          }
+        : await parseSheetMusicToMidi(selectedSheetMusicImage.file);
+      let dataUrl: string | undefined;
+      if (parsed.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
+        dataUrl = await arrayBufferToDataUrl(parsed.midiData.slice(0));
+      }
+      window.dispatchEvent(
+        new CustomEvent("sheetmusicreader:generated-midi", {
+          detail: {
+            fileName: parsed.fileName,
+            midiData: parsed.midiData.slice(0),
+            warnings: parsed.warnings,
+          },
+        })
+      );
+      loadMidiIntoTracks(parsed.midiData, parsed.fileName, {
+        sourceKind: "generated",
+        dataUrl,
+      });
+      if (parsed.warnings?.length) setSheetMusicNotice(parsed.warnings.join(" "));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    } finally {
+      setSheetMusicStage("");
+      setIsParsingSheetMusic(false);
+    }
+  }
+
+  async function onSelectMidiPath(nextPath: string, autoplay = false) {
+    if (!nextPath) return;
+    const request = ++midiSelectionRequestRef.current;
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}${nextPath}`);
+      if (!res.ok) throw new Error(`Failed to fetch ${nextPath}`);
+      const buf = await res.arrayBuffer();
+      if (request !== midiSelectionRequestRef.current) return;
+      const selected = midiOptions.find((m) => m.path === nextPath);
+      loadMidiIntoTracks(buf, selected?.name || nextPath, {
+        selectedPath: nextPath,
+        sourceKind: "bundled",
+        autoplay,
+      });
+    } catch (err) {
+      if (request !== midiSelectionRequestRef.current) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    }
+  }
+
+  function buildPlaylistRows(filter: string): WinampPlaylistTrack[] {
+    const q = filter.trim().toLowerCase();
+    const rows: WinampPlaylistTrack[] = [];
+    for (const midi of midiOptions) {
+      if (q && !midi.name.toLowerCase().includes(q)) continue;
+      rows.push({
+        id: `bundled:${midi.path}`,
+        name: midi.name,
+        selected: selectedMidiPath === midi.path && selectedScanId == null && selectedUploadId == null,
+      });
+    }
+    for (const entry of uploadedEntries) {
+      if (q && !entry.name.toLowerCase().includes(q)) continue;
+      rows.push({ id: `upload:${entry.id}`, name: entry.name, selected: selectedUploadId === entry.id });
+    }
+    for (const entry of scannedEntries) {
+      if (q && !entry.name.toLowerCase().includes(q)) continue;
+      rows.push({ id: `scan:${entry.id}`, name: entry.name, selected: selectedScanId === entry.id });
+    }
+    return rows;
+  }
+
+  const playlistRows = useMemo(
+    () => buildPlaylistRows(playlistSearch),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [midiOptions, uploadedEntries, scannedEntries, playlistSearch, selectedMidiPath, selectedScanId, selectedUploadId]
+  );
+
+  function selectPlaylistEntry(id: string, autoplay = false) {
+    if (id.startsWith("upload:")) {
+      const entry = uploadedEntries.find((e) => `upload:${e.id}` === id);
+      if (!entry || !workerRef.current) return;
+      loadMidiIntoTracks(entry.midiData.slice(0), entry.name, {
+        sourceKind: "uploaded",
+        fileId: entry.id,
+        autoplay,
+      });
+      setSelectedUploadId(entry.id);
+      return;
+    }
+    if (id.startsWith("scan:")) {
+      const entry = scannedEntries.find((e) => `scan:${e.id}` === id);
+      if (!entry || !workerRef.current) return;
+      loadMidiIntoTracks(entry.midiData.slice(0), entry.name, {
+        sourceKind: "generated",
+        fileId: entry.id,
+        autoplay,
+      });
+      setSelectedScanId(entry.id);
+      return;
+    }
+    const path = id.replace(/^bundled:/, "");
+    setSelectedScanId(null);
+    setSelectedUploadId(null);
+    void onSelectMidiPath(path, autoplay);
+  }
+
+  function stepPlaylistEntry(delta: 1 | -1) {
+    const rows = buildPlaylistRows("");
+    if (!rows.length) return;
+    const currentId = selectedScanId
+      ? `scan:${selectedScanId}`
+      : selectedUploadId
+        ? `upload:${selectedUploadId}`
+        : selectedMidiPath
+          ? `bundled:${selectedMidiPath}`
+          : null;
+    const currentIdx = currentId ? rows.findIndex((r) => r.id === currentId) : -1;
+    if (shuffleOn && rows.length > 1) {
+      let next = currentIdx;
+      while (next === currentIdx || next < 0) next = Math.floor(Math.random() * rows.length);
+      selectPlaylistEntry(rows[next].id, true);
+      return;
+    }
+    const base = currentIdx < 0 ? (delta === 1 ? -1 : 0) : currentIdx;
+    const next = (base + delta + rows.length) % rows.length;
+    selectPlaylistEntry(rows[next].id, true);
+  }
+
+  function onStopPlayback() {
+    if (!song || !workerRef.current) return;
+    setPlayRequested(false);
+    workerRef.current.postMessage({ type: "pause" });
+    seekToSec(0);
+  }
+
+  async function handleScanComplete({ scan, photoFile }: SheetCamScanResult) {
+    const stamp = new Date().toLocaleString();
+    const name = `Scanned sheet — ${stamp}`;
+    const id = `scan-${Date.now()}`;
+    const midiData = scan.midiData.slice(0);
+    // Persist the scan MIDI so it can be replayed after a reload. A failed
+    // write only affects persistence; playback still works for this session.
+    // (Photo and note layout are intentionally session-only.)
+    await midiFileStore.putMidiFile({
+      id,
+      name,
+      bytes: midiData.slice(0),
+      source: "scan",
+      createdAt: Date.now(),
+    });
+    // The parent owns the photo URL so highlighting survives Sheet Cam unmounting.
+    let photoUrl: string | null = null;
+    if (photoFile) {
+      photoUrl = URL.createObjectURL(photoFile);
+      scanPhotoUrlsRef.current.push(photoUrl);
+    }
+    const entry: ScannedEntry = {
+      id,
+      name,
+      midiData,
+      noteLayout: scan.noteLayout,
+      warnings: scan.warnings ?? [],
+      photoUrl,
+      imageWidth: scan.imageWidth,
+      imageHeight: scan.imageHeight,
+    };
+    const nextScans = [...scannedEntries, entry];
+    setScannedEntries(nextScans);
+    void midiFileStore.putPlaylistMeta({
+      version: 1,
+      uploads: uploadedEntries.map((e) => ({ id: e.id, name: e.name })),
+      scans: nextScans.map((e) => ({ id: e.id, name: e.name })),
+    });
+    setCamSheetOpen(false);
+    onSelectTab("midi");
+    setPianoRollOpen(false);
+    loadMidiIntoTracks(midiData.slice(0), name, { sourceKind: "generated", fileId: id, autoplay: true });
+    // Set after the load: loadMidiIntoTracks clears the scan selection first.
+    setSelectedScanId(id);
+    if (photoUrl) setPanelOverlay("scannedSheet");
+    if (scan.warnings?.length) setSheetMusicNotice(scan.warnings.join(" "));
+  }
+
+  playlistEndedRef.current = () => {
+    const currentId = selectedScanId
+      ? `scan:${selectedScanId}`
+      : selectedUploadId
+        ? `upload:${selectedUploadId}`
+        : selectedMidiPath
+          ? `bundled:${selectedMidiPath}`
+          : null;
+    if (repeatOn && currentId) {
+      selectPlaylistEntry(currentId, true);
+      return;
+    }
+    if (shuffleOn) {
+      stepPlaylistEntry(1);
+      return;
+    }
+    if (currentMidiSource?.kind !== "bundled") return;
+    const index = midiOptions.findIndex((midi) => midi.path === selectedMidiPath);
+    const next = index >= 0 ? midiOptions[index + 1] : undefined;
+    if (next) void onSelectMidiPath(next.path, true);
+  };
+
+  function onBachConfigChange<K extends keyof BachFugueConfig>(key: K, value: BachFugueConfig[K]) {
+    setBachConfig((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function onGenerateBachMusic(useNewSeed = false) {
+    if (!workerRef.current || isGeneratingBach) return;
+    const seed = useNewSeed ? Math.floor(Math.random() * 1_000_000_000) : bachConfig.seed;
+    const nextConfig = { ...bachConfig, seed };
+    setBachConfig(nextConfig);
+    setIsGeneratingBach(true);
+    setSongError("");
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const generated = generateBachMidi(nextConfig);
+      let dataUrl: string | undefined;
+      if (generated.midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
+        dataUrl = await arrayBufferToDataUrl(generated.midiData.slice(0));
+      }
+      loadMidiIntoTracks(generated.midiData, generated.fileName, {
+        sourceKind: "generated",
+        dataUrl,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
+    } finally {
+      setIsGeneratingBach(false);
+    }
+  }
+
+  function onTrackPresetChange(trackIndex: number, nextValue: string) {
+    const parsed = Number(nextValue);
+    const nextPreset: number | null = Number.isFinite(parsed) ? parsed : null;
+    setTrackPresetOverrides((prev) => ({ ...prev, [trackIndex]: nextPreset }));
+    if (!workerRef.current || !portsAttachedRef.current) return;
+    const presetIndex = nextPreset ?? trackDefaultPresetMap[trackIndex] ?? fallbackPresetIndex;
+    const regions = getRegionsForPreset(presetIndex);
+    workerRef.current.postMessage({
+      type: "setTrackPreset",
+      trackIndex,
+      presetIndex,
+      override: nextPreset != null,
+      regions,
+    });
+    applyTrackPanning(song, { ...trackPresetOverridesRef.current, [trackIndex]: nextPreset });
+  }
+
+  function onTrackCcChange(trackIndex: number, key: keyof TrackCc, rawValue: number) {
+    const value = clampCc(rawValue);
+    const current = getTrackCc(trackIndex);
+    const nextTrack: TrackCc = { ...current, [key]: value };
+    const nextAll = { ...trackCcControlsRef.current, [trackIndex]: nextTrack };
+    trackCcControlsRef.current = nextAll;
+    setTrackCcControls(nextAll);
+    const rec = trackNodesRef.current[trackIndex];
+    if (rec?.node) rec.node.port.postMessage({ type: "setControllers", ...nextTrack });
+    applyTrackMuteSolo(song, trackMixStateRef.current);
+  }
+
+  function onToggleTrackMute(trackIndex: number) {
+    const current = trackMixStateRef.current[trackIndex] ?? { mute: false, solo: false };
+    const nextAll: Record<number, TrackMix> = {
+      ...trackMixStateRef.current,
+      [trackIndex]: { ...current, mute: !current.mute },
+    };
+    setTrackMixState(nextAll);
+    applyTrackMuteSolo(song, nextAll);
+  }
+
+  function onToggleTrackSolo(trackIndex: number) {
+    const current = trackMixStateRef.current[trackIndex] ?? { mute: false, solo: false };
+    const nextAll: Record<number, TrackMix> = {
+      ...trackMixStateRef.current,
+      [trackIndex]: { ...current, solo: !current.solo },
+    };
+    setTrackMixState(nextAll);
+    applyTrackMuteSolo(song, nextAll);
+  }
+
+  function formatTrackInlineName(track: SongTrack): string {
+    const generic = /^track\s+\d+$/i.test(track?.name || "");
+    return generic ? "" : (track?.name || "");
+  }
+
+  // The scanned-sheet panel follows the scan that actually produced the loaded song.
+  const activeScanEntry = selectedScanId
+    ? (scannedEntries.find((e) => e.id === selectedScanId) ?? null)
+    : null;
+
+  // Winamp title-bar menu: panels evicted from the default view live here,
+  // plus the tools that used to sit in the quick-tools strip.
+  const winampMenuSections = (
+    <>
+      <NavMenuSection label="Panels">
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("currentMidi")}
+          disabled={!song}
+          aria-label="Show Current MIDI panel"
+          title="Show Current MIDI panel"
+        >
+          <i className="fa-solid fa-circle-info" aria-hidden="true" />
+          <span>Current MIDI</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("trackMixer")}
+          disabled={!song}
+          aria-label="Show Track Mixer panel"
+          title="Show Track Mixer panel"
+        >
+          <i className="fa-solid fa-sliders" aria-hidden="true" />
+          <span>Track Mixer</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("scannedSheet")}
+          disabled={!(activeScanEntry && activeScanEntry.photoUrl && song)}
+          aria-label="Show Scanned Sheet panel"
+          title="Show Scanned Sheet panel"
+        >
+          <i className="fa-solid fa-file-image" aria-hidden="true" />
+          <span>Scanned Sheet</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("sheetMusic")}
+          disabled={!selectedSheetMusicImage}
+          aria-label="Show Sheet Music panel"
+          title="Show Sheet Music panel"
+        >
+          <i className="fa-solid fa-image" aria-hidden="true" />
+          <span>Sheet Music</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("bach")}
+          aria-label="Show Bach Composer panel"
+          title="Show Bach Composer panel"
+        >
+          <i className="fa-solid fa-wand-magic-sparkles" aria-hidden="true" />
+          <span>Bach Composer</span>
+        </button>
+      </NavMenuSection>
+
+      <NavMenuSection label="Views">
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => { onSelectTab("recorder"); setPianoRollOpen(false); }}
+          aria-label="Open MIDI Recorder"
+          title="Open MIDI Recorder"
+        >
+          <i className="fa-solid fa-circle-dot" aria-hidden="true" />
+          <span>Recorder</span>
+        </button>
+        <button
+          type="button"
+          className={`toolbarActionBtn ${pianoRollOpen ? "active" : ""}`}
+          data-close-menu
+          onClick={() => { onSelectTab("midi"); setPianoRollOpen((v) => !v); }}
+          aria-pressed={pianoRollOpen}
+          aria-label={pianoRollOpen ? "Hide piano roll" : "Show piano roll"}
+          title="Toggle piano roll"
+        >
+          <i className="fa-solid fa-music" aria-hidden="true" />
+          <span>Piano Roll</span>
+        </button>
+      </NavMenuSection>
+
+      <NavMenuSection label="MIDI Input">
+        <button
+          type="button"
+          className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
+          onClick={onToggleMidi}
+          disabled={!sf2Ready}
+          aria-pressed={midiEnabled}
+          aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+          title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
+        >
+          <i className="fa-solid fa-plug" aria-hidden="true" />
+          <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
+        </button>
+        <select
+          className="toolbarSelect"
+          value={selectedMidiInput}
+          onChange={(e) => onSelectMidiInput(e.target.value)}
+          disabled={!midiEnabled}
+          aria-label="MIDI input source"
+          title="MIDI input source"
+        >
+          <option value="all">All MIDI Inputs</option>
+          {midiInputs.map((input) => (
+            <option key={input.id} value={input.id}>
+              {input.name}
+            </option>
+          ))}
+        </select>
+      </NavMenuSection>
+
+      <NavMenuSection label="MIDI Output">
+        <button
+          type="button"
+          className={`toolbarActionBtn ${midiOutputEnabled ? "active" : ""}`}
+          onClick={toggleMidiOutput}
+          aria-pressed={midiOutputEnabled}
+          aria-label={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
+          title={midiOutputEnabled ? "Disable MIDI Output" : "Enable MIDI Output"}
+        >
+          <i className="fa-solid fa-share-nodes" aria-hidden="true" />
+          <span>{midiOutputEnabled ? "Output On" : "Output Off"}</span>
+        </button>
+        <select
+          className="toolbarSelect"
+          value={selectedMidiOutput}
+          onChange={(e) => setSelectedMidiOutput(e.target.value)}
+          disabled={!midiOutputEnabled || !midiOutputs.length || isSendingMidi}
+          aria-label="MIDI output destination"
+          title="MIDI output destination"
+        >
+          <option value="">Select Output</option>
+          {midiOutputs.map((output) => (
+            <option key={output.id} value={output.id}>
+              {output.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="toolbarActionBtn toolbarCompactBtn"
+          onClick={onRefreshMidiOutputs}
+          disabled={isSendingMidi}
+          aria-label="Refresh MIDI Outputs"
+          title="Refresh MIDI Outputs"
+        >
+          <i className="fa-solid fa-arrows-rotate" aria-hidden="true" />
+          <span>Refresh Outputs</span>
+        </button>
+        <button
+          type="button"
+          className={`toolbarActionBtn ${isSendingMidi ? "active" : ""}`}
+          onClick={isSendingMidi ? () => stopMidiSend("Send stopped") : onSendMidiToOutput}
+          disabled={!song || !midiOutputEnabled || !selectedMidiOutput}
+          aria-label={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
+          title={isSendingMidi ? "Stop MIDI Send" : "Send MIDI File"}
+        >
+          <i className={`fa-solid ${isSendingMidi ? "fa-stop" : "fa-paper-plane"}`} aria-hidden="true" />
+          <span>{isSendingMidi ? "Stop" : "Send"}</span>
+        </button>
+        <span className="toolbarHoverText midiOutputStatus" title={midiOutputStatus}>
+          {midiOutputStatus}
+        </span>
+      </NavMenuSection>
+
+      <NavMenuSection label="Files">
+        <label className="fileInput toolbarActionBtn toolbarFileBtn">
+          <i className="fa-solid fa-file-arrow-up" aria-hidden="true" />
+          <span>Upload MIDI</span>
+          <input
+            type="file"
+            accept=".mid,.midi"
+            onChange={onUploadMidi}
+            aria-label="Upload MIDI file"
+          />
+        </label>
+        <label
+          className={`fileInput toolbarActionBtn toolbarFileBtn ${isParsingSheetMusic ? "disabled" : ""}`}
+          aria-label="Upload a sheet music JPG or PNG"
+        >
+          <i
+            className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-image"}`}
+            aria-hidden="true"
+          />
+          <span>Upload Sheet</span>
+          <input
+            type="file"
+            accept="image/jpeg,image/png"
+            capture="environment"
+            onChange={onUploadSheetMusic}
+            disabled={isParsingSheetMusic}
+            aria-label="Scan or upload sheet music"
+          />
+        </label>
+        <button
+          type="button"
+          className={`toolbarActionBtn toolbarCompactBtn ${isParsingSheetMusic ? "active" : ""}`}
+          onClick={() => void onConvertSelectedSheetMusic()}
+          disabled={!selectedSheetMusicImage || isParsingSheetMusic}
+          aria-label="Convert selected sheet music to MIDI"
+          title="Convert displayed sheet music to MIDI"
+        >
+          <i
+            className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
+            aria-hidden="true"
+          />
+          <span>{isParsingSheetMusic ? "Converting" : "Convert"}</span>
+        </button>
+      </NavMenuSection>
+
+      <NavMenuSection label="SoundFont">
+        <label className="fileInput toolbarActionBtn toolbarFileBtn">
+          <i className="fa-solid fa-folder-open" aria-hidden="true" />
+          <span>Upload SF2</span>
+          <input type="file" accept=".sf2" onChange={onUploadSf2} aria-label="Upload SF2 file" />
+        </label>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          onClick={onLoadDefaultSf2}
+          disabled={sf2Loading}
+          aria-label={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+          title={sf2Loading ? "Loading default SF2" : "Load Default SF2"}
+        >
+          <i
+            className={`fa-solid ${sf2Loading ? "fa-spinner fa-spin" : "fa-database"}`}
+            aria-hidden="true"
+          />
+          <span>{sf2Loading ? "Loading" : "Default SF2"}</span>
+        </button>
+        <span className="toolbarStatusPill">
+          <span className="toolbarStatusLabel">Loaded</span>
+          <span className="toolbarStatusValue">{sf2Name || "No SoundFont"}</span>
+        </span>
+      </NavMenuSection>
+
+      <NavMenuSection label="Tools">
+        <button
+          type="button"
+          className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
+          onClick={onTogglePower}
+          aria-pressed={audioCtxState === "running"}
+          aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
+          title="Toggle audio power"
+        >
+          <i className="fa-solid fa-power-off" aria-hidden="true" />
+          <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          onClick={onExportWav}
+          disabled={!song || !sf2Ready || isExporting}
+          aria-label="Export WAV"
+          title="Generate offline WAV export"
+        >
+          <i className={`fa-solid ${isExporting ? "fa-spinner fa-spin" : "fa-download"}`} aria-hidden="true" />
+          <span>{isExporting ? "Exporting" : "Export WAV"}</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={onLoadSwedenSheetMusic}
+          disabled={isParsingSheetMusic}
+          aria-label="Show Sweden sheet music"
+          title="Show Sweden sheet music"
+        >
+          <i className="fa-solid fa-music" aria-hidden="true" />
+          <span>Sweden</span>
+        </button>
+        <div className="dynamicsControls" aria-label="Master dynamics">
+          <label htmlFor="master-dynamics-mode">Dynamic compression</label>
+          <select
+            id="master-dynamics-mode"
+            className="toolbarSelect"
+            value={dynamicsMode}
+            onChange={(event) => {
+              if (isDynamicsMode(event.target.value)) onDynamicsModeChange(event.target.value);
+            }}
+          >
+            {DYNAMICS_MODES.map((mode) => (
+              <option key={mode.value} value={mode.value}>{mode.label}</option>
+            ))}
+          </select>
+          <p>{DYNAMICS_MODES.find((mode) => mode.value === dynamicsMode)?.description}</p>
+          <div className="dynamicsMeterRow">
+            <label htmlFor="compression-reduction">Reduction</label>
+            <meter
+              id="compression-reduction"
+              min={0}
+              max={12}
+              value={audioCtxState === "running" && dynamicsMode !== "off" ? dynamicsCompression : 0}
+            />
+            <output htmlFor="compression-reduction" aria-live="off">
+              {audioCtxState === "running" && dynamicsMode !== "off"
+                ? dynamicsCompression.toFixed(1)
+                : "0.0"} dB
+            </output>
+          </div>
+          <span className="dynamicsHint">
+            {dynamicsMode === "off"
+              ? "Playback + WAV export"
+              : `Playback + WAV export · Peak ceiling −1 dBFS${
+                  audioCtxState === "running" && dynamicsLimiting > 0.1
+                    ? ` · Limiting ${dynamicsLimiting.toFixed(1)} dB`
+                    : ""
+                }`}
+          </span>
+        </div>
+      </NavMenuSection>
+    </>
+  );
+  return (
+    <section ref={pageRef} className="card midiReader gbk-winamp-page">
+      <div id="webamp" className="gbk-viewport" style={{ zoom: waZoom, height: viewportPx == null ? `${100 / waZoom}dvh` : `${viewportPx}px` }} data-sf2-ready={sf2Ready}>
+        <div className="gbk-top">
+          <WinampMain
+            marqueeText={song ? `${songName || "Untitled MIDI"} *** ${song.bpm} BPM ***` : "GBK Winamp - no MIDI loaded"}
+            status={isPlaying ? "play" : song ? "pause" : "stop"}
+            working={playRequested || sf2Loading || isExporting || isParsingSheetMusic || isGeneratingBach}
+            songTime={songTime}
+            duration={song?.durationSec ?? 0}
+            onSeek={(sec) => { seekToSec(sec); }}
+            onPlayPause={() => void onPlayPause()}
+            playButtonLabel={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
+            playButtonTitle={playRequested ? "Cancel pending playback" : isPlaying ? "Pause" : "Play"}
+            onStop={onStopPlayback}
+            onPrev={() => stepPlaylistEntry(-1)}
+            onNext={() => stepPlaylistEntry(1)}
+            transportDisabled={!song}
+            volume={masterVolume}
+            onVolumeChange={onMasterVolumeChange}
+            shuffle={shuffleOn}
+            onToggleShuffle={() => setShuffleOn((v) => !v)}
+            repeat={repeatOn}
+            onToggleRepeat={() => setRepeatOn((v) => !v)}
+            playlistOpen={playlistOpen}
+            onTogglePlaylist={() => { onSelectTab("midi"); setPianoRollOpen(false); }}
+            timeData={vizTimeData}
+            menu={winampMenuSections}
+          />
+          {isExporting ? (
+            <div className="exportProgress" aria-live="polite">
+              <div className="exportProgressBar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportProgress * 100)}>
+                <span className="exportProgressFill" style={{ width: `${Math.round(exportProgress * 100)}%` }} />
+              </div>
+              <span className="exportProgressLabel">
+                {exportStage} {Math.round(exportProgress * 100)}%
+              </span>
+            </div>
+          ) : null}
+        </div>
+        <div className="gbk-content">
+          {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
+          {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
+          {songError ? <p className="status error">{songError}</p> : null}
+          {activeTab === "sf2" ? (
+            <div className="gbk-scrollview">{sf2View}</div>
+          ) : activeTab === "recorder" ? (
+            <div className="gbk-scrollview">{recorderView}</div>
+          ) : pianoRollOpen && song ? (
+            <div className="gbk-scrollview">
+              <PianoRoll
+                tracks={song.tracks.map((track) => ({
+                  name: formatTrackInlineName(track) || track.instrumentName || `Track ${track.index + 1}`,
+                  notes: track.notes.map((n) => ({ note: n.note, velocity: n.velocity, startSec: n.startSec, durationSec: n.durationSec })),
+                }))}
+                songTime={songTime}
+                duration={song.durationSec}
+                onSeek={(sec) => { seekToSec(sec); }}
+                onClose={() => setPianoRollOpen(false)}
+              />
+            </div>
+          ) : (
+            <WinampPlaylist
+              tracks={playlistRows}
+              search={playlistSearch}
+              onSearchChange={setPlaylistSearch}
+              onSelectTrack={(id) => selectPlaylistEntry(id)}
+              headerExtra={<span className="winamp-playlist-count">{playlistRows.length} files</span>}
+            />
+          )}
+        </div>
+      </div>
+      <div className="gbk-dock" ref={dockRef} aria-label="Status">
+          <div className="gbk-frow">
+            <div className="gbk-fleft">
+              <button type="button" className="gbk-fbtn" onClick={() => { onSelectTab("midi"); setPianoRollOpen(false); }} aria-pressed={activeTab === "midi" && !pianoRollOpen} aria-label="MIDI Explorer" title="MIDI Explorer">MIDI</button>
+              <button type="button" className="gbk-fbtn" onClick={() => { onSelectTab("sf2"); setPianoRollOpen(false); }} aria-pressed={activeTab === "sf2"} aria-label="SF2 Explorer" title="SF2 Explorer">SF2</button>
+            </div>
+            <button
+              type="button"
+              className="gbk-shutter"
+              onClick={() => setCamSheetOpen(true)}
+              aria-label="Scan sheet music with camera"
+              title="Scan sheet music with camera"
+            >
+              {CAMERA_GLYPH}
+            </button>
+            <div className="gbk-fright">
+              <button type="button" className="gbk-fbtn" onClick={() => ejectInputRef.current?.click()} aria-label="Add MIDI file to playlist" title="Add MIDI file to playlist">+ ADD</button>
+            </div>
+          </div>
+          <div className="gbk-fstatus">
+            <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+            <span> · {song ? `${songName || "Untitled MIDI"} · ${song.bpm} BPM` : "No MIDI loaded"} · Audio {audioCtxState} · {midiStatus}</span>
+          </div>
+        </div>
+        <input ref={ejectInputRef} type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Upload MIDI file" style={{ display: "none" }} />
+        {camSheetOpen ? createPortal(
+          <div className="winamp-modal-backdrop" onClick={() => setCamSheetOpen(false)}>
+            <div className="winamp-modal" role="dialog" aria-modal="true" aria-label="Scan sheet music" onClick={(event) => event.stopPropagation()}>
+              <div className="winamp-modal-titlebar">
+                <span>Sheet Cam</span>
+                <button type="button" className="winamp-modal-close" onClick={() => setCamSheetOpen(false)} aria-label="Close sheet camera">&#215;</button>
+              </div>
+              <SheetCam embedded onScanComplete={(result) => void handleScanComplete(result)} />
+            </div>
+          </div>,
+          document.body
+        ) : null}
+      {panelOverlay === "scannedSheet" && activeScanEntry && activeScanEntry.photoUrl && song ? (
+        <PanelOverlay label="Scanned Sheet" onClose={() => setPanelOverlay(null)}>
+          <WinampPanel title="Scanned Sheet">
+            <div className="sc-sheet-wrap gbk-scan-sheet">
+              <img src={activeScanEntry.photoUrl} alt={`${activeScanEntry.name} scanned sheet music`} />
+              {activeScanEntry.noteLayout.map((note, index) => {
+                const active = songTime >= note.startSec && songTime < note.endSec;
+                return (
+                  <div
+                    key={index}
+                    className={active ? "sc-note-box active" : "sc-note-box"}
+                    style={{
+                      left: `${(note.bbox.x / activeScanEntry.imageWidth) * 100}%`,
+                      top: `${(note.bbox.y / activeScanEntry.imageHeight) * 100}%`,
+                      width: `${(note.bbox.w / activeScanEntry.imageWidth) * 100}%`,
+                      height: `${(note.bbox.h / activeScanEntry.imageHeight) * 100}%`,
+                    }}
+                  />
+                );
+              })}
+            </div>
+            {activeScanEntry.warnings.length > 0 ? (
+              <p className="status">{activeScanEntry.warnings.join(" ")}</p>
+            ) : null}
+          </WinampPanel>
+        </PanelOverlay>
+      ) : null}
+        {panelOverlay === "sheetMusic" && selectedSheetMusicImage ? (
+          <PanelOverlay label="Sheet Music" onClose={() => setPanelOverlay(null)}>
+          <WinampPanel title="Sheet Music">
+          <div className="sheetMusicPreviewPanel" aria-label="Displayed sheet music">
+            <div className="sheetMusicPreviewHeader">
+              <button
+                type="button"
+                className="sheetPreviewToggle"
+                onClick={() => setSheetPreviewCollapsed((v) => !v)}
+                aria-expanded={!sheetPreviewCollapsed}
+                aria-label={sheetPreviewCollapsed ? "Show sheet image preview" : "Hide sheet image preview"}
+                title={sheetPreviewCollapsed ? "Show preview" : "Hide preview"}
+              >
+                <i
+                  className={`fa-solid ${sheetPreviewCollapsed ? "fa-chevron-right" : "fa-chevron-down"}`}
+                  aria-hidden="true"
+                />
+              </button>
+              <span className="songChipLabel">Sheet Image</span>
+              <strong>{selectedSheetMusicImage.name}</strong>
+              <span className="chip">{selectedSheetMusicImage.source === "sample" ? "Sample" : "Uploaded"}</span>
+              <div className="sheetMusicPreviewActions">
+                <button
+                  type="button"
+                  className="toolbarActionBtn sheetMusicConvertBtn sheetMusicConvertPrimary"
+                  onClick={() => void onConvertSelectedSheetMusic()}
+                  disabled={isParsingSheetMusic}
+                  aria-label="Convert previewed sheet music to MIDI"
+                  title="Convert displayed sheet music to MIDI"
+                >
+                  <i
+                    className={`fa-solid ${isParsingSheetMusic ? "fa-spinner fa-spin" : "fa-file-audio"}`}
+                    aria-hidden="true"
+                  />
+                  <span>{isParsingSheetMusic ? "Converting" : "Convert MIDI"}</span>
+                </button>
+                {selectedSheetMusicImage.source === "sample" ? (
+                  <button
+                    type="button"
+                    className="toolbarActionBtn sheetMusicConvertBtn"
+                    onClick={() => void onConvertSelectedSheetMusic(true)}
+                    disabled={isParsingSheetMusic}
+                    aria-label="Load original Sweden transcription"
+                    title="Load the original transcription ported from Python"
+                  >
+                    <span>Load Original MIDI</span>
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {!sheetPreviewCollapsed ? (
+              <div className="sheetMusicPreviewFrame">
+                <img src={selectedSheetMusicImage.previewUrl} alt={`${selectedSheetMusicImage.name} sheet music preview`} />
+              </div>
+            ) : null}
+          </div>
+          {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
+          {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
+          {songError ? <p className="status error">{songError}</p> : null}
+          </WinampPanel>
+          </PanelOverlay>
+        ) : null}
+        {panelOverlay === "bach" ? (
+          <PanelOverlay label="Bach Composer" onClose={() => setPanelOverlay(null)}>
+          <WinampPanel title="Bach Composer">
+          <div className="bachComposerModule">
+            <div className="bachComposerControls">
+              <label>
+                <span>Key</span>
+                <select
+                  value={bachConfig.key}
+                  onChange={(e) => onBachConfigChange("key", e.target.value as BachKey)}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_KEY_OPTIONS.map((key) => (
+                    <option key={key} value={key}>{key}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Length</span>
+                <select
+                  value={bachConfig.length}
+                  onChange={(e) => onBachConfigChange("length", e.target.value as BachLength)}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_LENGTH_OPTIONS.map((length) => (
+                    <option key={length} value={length}>
+                      {length.charAt(0).toUpperCase() + length.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Voices</span>
+                <select
+                  value={bachConfig.voices}
+                  onChange={(e) => onBachConfigChange("voices", Number(e.target.value) as BachFugueConfig["voices"])}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_VOICE_OPTIONS.map((voices) => (
+                    <option key={voices} value={voices}>{voices}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Character</span>
+                <select
+                  value={bachConfig.character}
+                  onChange={(e) => onBachConfigChange("character", e.target.value as BachCharacter)}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_CHARACTER_OPTIONS.map((character) => (
+                    <option key={character} value={character}>{character}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Complexity</span>
+                <select
+                  value={bachConfig.complexity}
+                  onChange={(e) => onBachConfigChange("complexity", Number(e.target.value) as BachFugueConfig["complexity"])}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_COMPLEXITY_OPTIONS.map((complexity) => (
+                    <option key={complexity} value={complexity}>{complexity}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Tempo</span>
+                <select
+                  value={bachConfig.tempo}
+                  onChange={(e) => onBachConfigChange("tempo", Number(e.target.value))}
+                  disabled={isGeneratingBach}
+                >
+                  {BACH_TEMPO_OPTIONS.map((tempo) => (
+                    <option key={tempo} value={tempo}>{tempo}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="bachComposerActions">
+              <button
+                type="button"
+                className="bachActionBtn"
+                onClick={() => void onGenerateBachMusic(false)}
+                disabled={isGeneratingBach}
+                aria-label="Generate Bach Music"
+                title="Generate Bach Music"
+              >
+                <i className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`} aria-hidden="true" />
+                <span>{isGeneratingBach ? "Generating" : "Generate"}</span>
+              </button>
+              <button
+                type="button"
+                className="bachActionBtn"
+                onClick={() => void onGenerateBachMusic(true)}
+                disabled={isGeneratingBach}
+                aria-label="New Seed"
+                title="New Seed"
+              >
+                <i className="fa-solid fa-rotate-right" aria-hidden="true" />
+                <span>New Seed</span>
+              </button>
+              <span className="chip bachSeedChip">Seed {bachConfig.seed}</span>
+            </div>
+          </div>
+          </WinampPanel>
+          </PanelOverlay>
+        ) : null}
+        {panelOverlay === "currentMidi" && song ? (
+          <PanelOverlay label="Current MIDI" onClose={() => setPanelOverlay(null)}>
+          <WinampPanel title="Current MIDI">
+          <div className="midiMetadataPanel" aria-label="MIDI metadata">
+            <div className="midiMetadataTitle">
+              <span className="songChipLabel">Current MIDI</span>
+              <strong>{songName || "Untitled MIDI"}</strong>
+              <span className="chip">
+                {currentMidiSource?.kind === "bundled"
+                  ? "Bundled"
+                  : currentMidiSource?.kind === "generated"
+                    ? "Generated"
+                    : "Uploaded"}
+              </span>
+            </div>
+            <div className="midiMetadataGrid">
+              <span>Format {song.format}</span>
+              <span>{song.tracks.length} tracks</span>
+              <span>{songMetadata?.noteCount ?? 0} notes</span>
+              <span>{songMetadata?.eventCount ?? 0} events</span>
+              <span>{Math.round(song.totalBars)} bars</span>
+              <span>PPQ {song.division}</span>
+              <span>{fmtTime(song.durationSec)} duration</span>
+              {currentMidiSource?.path ? <span>{currentMidiSource.path}</span> : null}
+            </div>
+            {songMetadata?.namedTrackPreview ? (
+              <div className="midiMetadataTracks">{songMetadata.namedTrackPreview}</div>
+            ) : null}
+          </div>
+          </WinampPanel>
+          </PanelOverlay>
+        ) : null}
+      {panelOverlay === "trackMixer" && song ? (
+        <PanelOverlay label="Track Mixer" onClose={() => setPanelOverlay(null)}>
+        <WinampPanel title="Track Mixer">
+        <div className="midiTimelineWrap">
+          <div className="midiTracksSplit">
+            <div className="midiTracksLeft">
+              {visibleTracks.map((track) => (
+                <div key={`left-${track.index}`} className="midiTrackLabelRow">
+                  <div className="midiTrackLabel">
+                    <strong>#{track.index + 1}</strong>
+                    <div className="trackMixButtons">
+                      <button
+                        type="button"
+                        className={`mixBtn ${trackMixState[track.index]?.mute ? "active" : ""}`}
+                        onClick={() => onToggleTrackMute(track.index)}
+                        disabled={!sf2Ready}
+                        title="Mute"
+                      >
+                        <i className="fa-solid fa-volume-xmark" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className={`mixBtn ${trackMixState[track.index]?.solo ? "active" : ""}`}
+                        onClick={() => onToggleTrackSolo(track.index)}
+                        disabled={!sf2Ready}
+                        title="Solo"
+                      >
+                        <i className="fa-solid fa-headphones" aria-hidden="true" />
+                      </button>
+                    </div>
+                    <span>{formatTrackInlineName(track) || track.instrumentName}</span>
+                  </div>
+                  <div className="midiTrackCc">
+                    <CcKnob
+                      label="EXP"
+                      value={getTrackCc(track.index).cc11Expression}
+                      onChange={(next) => onTrackCcChange(track.index, "cc11Expression", next)}
+                      disabled={!sf2Ready}
+                    />
+                    <CcKnob
+                      label="VOL"
+                      value={getTrackCc(track.index).cc7Volume}
+                      onChange={(next) => onTrackCcChange(track.index, "cc7Volume", next)}
+                      disabled={!sf2Ready}
+                    />
+                    <CcKnob
+                      label="PAN"
+                      value={getTrackCc(track.index).cc10Pan}
+                      onChange={(next) => onTrackCcChange(track.index, "cc10Pan", next)}
+                      disabled={!sf2Ready}
+                    />
+                  </div>
+                  <select
+                    value={
+                      trackPresetOverrides[track.index] ??
+                      (trackDefaultPresetMap[track.index] ?? "")
+                    }
+                    onChange={(e) => onTrackPresetChange(track.index, e.target.value)}
+                    disabled={!sf2Ready}
+                  >
+                    <option value="">Prg</option>
+                    {presetOptions.map((p) => (
+                      <option key={`preset-${p.index}`} value={p.index}>
+                        {p.bank}:{p.program} {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="midiScrollViewport" ref={viewportRef}>
+              <div className="midiTimelineContent" style={{ width: `${contentW}px` }} ref={contentRef}>
+                <div ref={playheadRef} className="midiPlayheadOptimized" />
+                {visibleTracks.map((track) => {
+                  const minNote = track.notes.length ? Math.min(...track.notes.map((n) => n.note)) : 48;
+                  const maxNote = track.notes.length ? Math.max(...track.notes.map((n) => n.note)) : 72;
+                  const span = Math.max(1, maxNote - minNote + 1);
+                  return (
+                    <div key={`right-${track.index}`} className="midiTrackSvgRow">
+                      <svg className="midiTrackSvg" viewBox={`0 0 ${timelineW} ${trackH}`} preserveAspectRatio="none">
+                        <rect x="0" y="0" width={timelineW} height={trackH} fill="#0b0e12" />
+                        {track.notes.map((n, idx) => {
+                          const x = (n.startSec / duration) * timelineW;
+                          const w = Math.max(1.5, (n.durationSec / duration) * timelineW);
+                          const y = ((maxNote - n.note) / span) * (trackH - 8) + 2;
+                          const h = Math.max(2, (trackH - 8) / span);
+                          return (
+                            <rect key={idx} x={x} y={y} width={w} height={h} fill="#57a8d8" opacity="0.85" />
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+        </WinampPanel>
+        </PanelOverlay>
+      ) : null}
+    </section>
+  );
+}
