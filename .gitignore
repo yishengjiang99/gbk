@@ -3,5 +3,5 @@ dist
 test-results
 playwright-report
 
-# homr ONNX weights (fetched, not committed)
-public/models/
+# homr ONNX weights staged for the Pages deploy (fetched, not committed)
+public/omr-models/

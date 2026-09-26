@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "gen:midi-manifest": "node scripts/generate-midi-manifest.mjs",
+    "prepare:omr-models": "node scripts/prepare-omr-models.mjs",
     "dev": "npm run gen:midi-manifest && vite",
-    "build": "npm run gen:midi-manifest && vite build",
+    "build": "npm run gen:midi-manifest && npm run prepare:omr-models && vite build",
     "preview": "vite preview",
     "test": "node --import tsx/esm --test test/*.test.ts",
     "test:e2e": "playwright test",
