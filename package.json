@@ -16,6 +16,7 @@
     "test:e2e:ocr-fixture": "playwright test --config test/e2e/ocr-fixture.config.ts"
   },
   "dependencies": {
+    "onnxruntime-web": "^1.22.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
