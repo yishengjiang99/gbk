@@ -27,6 +27,7 @@ import { applyMasterDynamicsToBuffer, DYNAMICS_MODES, isDynamicsMode, type Dynam
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 import { midiFileStore } from "./midi-file-store.ts";
+import { resolveViewportHeightPx } from "./viewport-height.ts";
 
 // ---------------------------------------------------------------------------
 // Local type definitions
@@ -568,6 +569,22 @@ export default function MidiReader({
   const [viewportPx, setViewportPx] = useState<number | null>(null);
   useLayoutEffect(() => {
     const compute = () => {
+      // iOS Safari's 100dvh can get stuck at the value captured while the
+      // toolbar was in a different state, leaving a dead gap below the
+      // footer. Pin the app shell to the *measured* visible height instead;
+      // CSS falls back to 100dvh until the first measurement lands.
+      // (resolveViewportHeightPx is unit-tested in test/viewport-height.test.ts)
+      const appEl = pageRef.current?.closest(".app") as HTMLElement | null;
+      const measured = resolveViewportHeightPx(
+        typeof window.visualViewport !== "undefined" ? window.visualViewport?.height : null,
+        window.innerHeight
+      );
+      if (appEl && measured != null) {
+        const next = `${measured}px`;
+        if (appEl.style.getPropertyValue("--app-h") !== next) {
+          appEl.style.setProperty("--app-h", next);
+        }
+      }
       const shell = pageRef.current;
       const dock = dockRef.current;
       if (!shell || !dock || !(waZoom > 0)) return;
@@ -580,10 +597,13 @@ export default function MidiReader({
       if (pageRef.current) ro.observe(pageRef.current);
       if (dockRef.current) ro.observe(dockRef.current);
     }
+    const vv = typeof window.visualViewport !== "undefined" ? window.visualViewport : null;
+    vv?.addEventListener("resize", compute);
     window.addEventListener("resize", compute);
     window.addEventListener("orientationchange", compute);
     return () => {
       ro?.disconnect();
+      vv?.removeEventListener("resize", compute);
       window.removeEventListener("resize", compute);
       window.removeEventListener("orientationchange", compute);
     };
@@ -979,7 +999,14 @@ export default function MidiReader({
   };
 
   useEffect(() => {
-    const worker = new Worker(new URL("./midi-timer.worker.ts", import.meta.url), { type: "module" });
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./midi-timer.worker.ts", import.meta.url), { type: "module" });
+    } catch (err) {
+      // A dead worker used to leave every play tap silently failing; surface it.
+      setSongError(err instanceof Error ? err.message : `Playback worker failed to start: ${String(err)}`);
+      return;
+    }
     workerRef.current = worker;
     const debugPlayback = window.localStorage.getItem("sf2-e2e-debug") === "1";
     if (debugPlayback) {
@@ -1070,6 +1097,19 @@ export default function MidiReader({
       workerRef.current = null;
       disconnectTrackNodes();
     };
+  }, []);
+
+  // A tap-while-loading race (or any other missed await) used to die as a
+  // silent unhandled rejection; surface it in the status line instead so a
+  // startup failure is diagnosable instead of looking like a crash.
+  useEffect(() => {
+    const onUnhandled = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      setSongError(`Unexpected error: ${msg}`);
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    return () => window.removeEventListener("unhandledrejection", onUnhandled);
   }, []);
 
   useEffect(() => {
@@ -1419,28 +1459,34 @@ export default function MidiReader({
   }
 
   async function onPlayPause() {
-    if (!song || !workerRef.current) return;
+    if (!workerRef.current) return;
     if (playRequested) {
+      // Cancel a pending play request (e.g. play was tapped while the song
+      // or the SoundFont was still loading).
+      autoplayLoadedSongRef.current = false;
       setPlayRequested(false);
-      return;
-    }
-    if (!sf2Ready) {
-      try {
-        // Unlock audio during the click, before waiting for the SoundFont download.
-        const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
-        await ctx.resume();
-        setPlayRequested(true);
-        if (!sf2Loading) onLoadDefaultSf2();
-      } catch (err) {
-        setSongError(err instanceof Error ? err.message : String(err));
-      }
       return;
     }
     if (isPlaying) {
       workerRef.current.postMessage({ type: "pause" });
       return;
     }
-    await startPlayback();
+    // Queue the intent even when the song (or the IndexedDB restore feeding
+    // it) isn't ready yet: the tap used to be silently dropped, which felt
+    // like a crash when it happened during startup. The "songLoaded" handler
+    // picks up autoplayLoadedSongRef, and the playRequested effect below
+    // unlocks audio and kicks the SoundFont download in the meantime.
+    autoplayLoadedSongRef.current = true;
+    try {
+      // Unlock audio during the click, before waiting for the SoundFont download.
+      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
+      await ctx.resume();
+      setPlayRequested(true);
+      if (!sf2Ready && !sf2Loading) onLoadDefaultSf2();
+    } catch (err) {
+      autoplayLoadedSongRef.current = false;
+      setSongError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function startPlayback() {

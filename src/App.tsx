@@ -10,6 +10,7 @@ import {
   MidiMessageHandler,
 } from "./midi-driver";
 import MidiReader from "./midireader";
+import ErrorBoundary from "./ErrorBoundary";
 import { MidiRecorderUI } from "./MidiRecorderUI";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 import masterDynamicsUrl from "./master-dynamics-processor.ts?worker&url";
@@ -1349,6 +1350,7 @@ export default function App() {
   }
 
   return (
+    <ErrorBoundary>
     <div className="app">
       {loading && <p className="status" role="status">{loadingStage}</p>}
       {error && <p className="status error">{error}</p>}
@@ -1860,5 +1862,6 @@ export default function App() {
         <AnalyzerCanvas data={recentTimeData} mode="time" testId="analyzer-time" />
       </div>
     </div>
+    </ErrorBoundary>
   );
 }
