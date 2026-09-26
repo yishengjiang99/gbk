@@ -21,7 +21,8 @@
     "omr-test": "node --import tsx/esm scripts/omr-test.mts",
     "demo:build": "node demo/build.mjs",
     "demo:serve": "node demo/serve.mjs",
-    "demo:run": "node demo/run-demo.mjs"
+    "demo:run": "node demo/run-demo.mjs",
+    "demo:run:page": "DEMO_PAGE=/demo/page.html node demo/run-demo.mjs"
   },
   "type": "module",
   "version": "0.1.0"

@@ -5,6 +5,7 @@ import {
   parseSheetMusicWithLayout,
   type ParsedSheetMusicWithLayout,
 } from "./sheet-music-reader.ts";
+import { isOmrModelAvailable, transcribePhotoWithOmr } from "./omr-sheet-bridge.ts";
 import type { Song } from "./midi-timer.worker.ts";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 import "./sheet-cam.css";
@@ -74,6 +75,7 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
   const onScanCompleteRef = useRef(onScanComplete);
   onScanCompleteRef.current = onScanComplete;
   const [phase, setPhase] = useState<Phase>("camera");
+  const [scanStage, setScanStage] = useState("");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
   const [cameraError, setCameraError] = useState("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -124,6 +126,9 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         streamRef.current = stream;
         setCameraState("live");
+        // Warm the OMR model probe while the user frames the shot, so the
+        // capture path already knows which engine to use.
+        void isOmrModelAvailable();
         return;
       } catch (err) {
         lastErr = err;
@@ -177,8 +182,25 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
       isPlayingRef.current = false;
       songRef.current = null;
       setPhase("scanning");
+      setScanStage("");
       try {
-        const result = await parseSheetMusicWithLayout(file);
+        let result: ParsedSheetMusicWithLayout;
+        if (await isOmrModelAvailable()) {
+          // Camera button -> homr music-recognition worker. Falls back to the
+          // built-in OCR reader when the worker fails mid-flight.
+          try {
+            setScanStage("Reading with music recognition…");
+            result = await transcribePhotoWithOmr(file, (stage) => setScanStage(stage));
+          } catch (omrErr) {
+            result = await parseSheetMusicWithLayout(file);
+            result.warnings = [
+              ...result.warnings,
+              `Music recognition failed (${omrErr instanceof Error ? omrErr.message : String(omrErr)}); used the built-in reader instead.`,
+            ];
+          }
+        } else {
+          result = await parseSheetMusicWithLayout(file);
+        }
         scanRef.current = result;
         setScan(result);
         setPhase("ready");
@@ -498,7 +520,7 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
         <div className="sc-scan-stage">
           {photoUrl && <img src={photoUrl} alt="Captured sheet music" />}
           <div className="sc-spinner" aria-hidden="true" />
-          <div className="sc-status">Scanning the sheet music…</div>
+          <div className="sc-status">{scanStage || "Scanning the sheet music…"}</div>
         </div>
       )}
 

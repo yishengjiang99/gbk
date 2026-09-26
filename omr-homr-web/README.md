@@ -51,6 +51,8 @@ npm run typecheck
 
 ```ts
 // request
+{ type: "load", encoderUrl, decoderUrl, segnetUrl?, wasmPaths?, strictWebGpu?, wasmOnly? }
+// request
 { type: "transcribe-page", pixels: ArrayBuffer, width, height,
   format?: "rgba" | "rgb" | "gray", title?: string }
 // response
@@ -60,15 +62,22 @@ npm run typecheck
 
 `transcribe-staff` is unchanged (Phase 2 API preserved).
 
+`load` options: `strictWebGpu` pins every model to the WebGPU EP (fails
+loudly instead of falling back); `wasmOnly` skips WebGPU entirely. The
+latter exists for GPU-less CI/VMs: SwiftShader has no `shader-f16` (fp16
+WGSL fails to compile) and the fp32 transformer encoder stalls on its
+WebGPU EP there, so a full browser proof on such a machine runs WASM-only.
+
 ### Scoring (kept separate)
 
 - **Layer A (tokens)**: decoded symbols must match the Python oracle
   six-head sequence exactly (C-scale: 21/21).
 - **Layer B (MIDI)**: canonical `(tick, pitch, durationTicks, staff)` event
   lists must match the oracle tokens' MIDI exactly (C-scale: 15 events).
-- **Layer C (layout)**: every sounding MIDI note must have a layout entry;
-  the gate passes if all entries exist and each has a box, or
-  `layoutSource === "midi-fallback"`. Attention boxes are **coarse**
+- **Layer C (layout)**: every sounding MIDI note must have a layout entry.
+  `layoutSource` is `"attention"` only when **every** entry carries a box;
+  partial or missing attention coverage is reported as `"midi-fallback"`.
+  Attention boxes are **coarse**
   (a 24×24 square around the decoder's attention point, mapped through the
   crop→page chain) — documented, not shipped-gated on IoU.
 
@@ -115,6 +124,20 @@ npm run demo:build   # esbuild bundles -> demo/dist/
 npm run demo:serve    # static server on :8901 (background it)
 npm run demo:run      # Playwright driver; exit 0 only if the demo passes
 ```
+
+### Page demo (Phase 3, `transcribe-page`)
+
+`demo/page.html` + `demo/page-demo.ts` run the full-page pipeline in the
+browser on the C-scale page fixture and score Layers A/B/C (tokens exact
+21/21, canonical MIDI events 15/15, layout 15/15 boxed with
+`layoutSource === "attention"`), plus staff count, MIDI header check, and
+warnings. `npm run demo:run:page` drives it via Playwright
+(`DEMO_PAGE=/demo/page.html`); exit 0 only if all layers pass.
+
+On a GPU-less VM (SwiftShader: no `shader-f16`, fp16 WGSL fails to compile,
+fp32 encoder stalls on WebGPU) the demo must bypass WebGPU:
+`DEMO_PAGE='/demo/page.html?wasm=1'` forces the WASM EP for every model.
+Real-GPU browsers use the default auto path unchanged.
 
 ## Layout
 

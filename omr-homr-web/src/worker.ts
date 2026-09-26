@@ -18,7 +18,7 @@ import {
 } from "./page.js";
 
 export type WorkerRequest =
-  | { type: "load"; encoderUrl: string; decoderUrl: string; segnetUrl?: string; wasmPaths?: string; strictWebGpu?: boolean }
+  | { type: "load"; encoderUrl: string; decoderUrl: string; segnetUrl?: string; wasmPaths?: string; strictWebGpu?: boolean; wasmOnly?: boolean }
   | { type: "transcribe-staff"; pixels: ArrayBuffer; width: number; height: number; title?: string }
   | {
       type: "transcribe-page";
@@ -50,6 +50,21 @@ export type WorkerResponse =
       layoutSource: "attention" | "midi-fallback";
       staffCount: number;
       warnings: string[];
+      /**
+       * Maps preprocessed-page coordinates (noteLayout boxes) back onto the
+       * source photo: photoX = cropX + box.x * (cropW / pageWidth), etc.
+       * Absent on older workers; clients must then not place boxes.
+       */
+      pageMapping?: {
+        srcWidth: number;
+        srcHeight: number;
+        cropX: number;
+        cropY: number;
+        cropW: number;
+        cropH: number;
+        pageWidth: number;
+        pageHeight: number;
+      };
       /** Raw decoded symbols (demo/diagnostics; sheet-cam consumes midi + noteLayout). One entry per voice for transcribe-page. */
       symbols: Array<Record<string, string>> | Array<Array<Record<string, string>>>;
     }
@@ -142,6 +157,16 @@ async function handleTranscribePage(
       layoutSource,
       staffCount: staffs.length,
       warnings,
+      pageMapping: {
+        srcWidth: width,
+        srcHeight: height,
+        cropX: page.crop.x,
+        cropY: page.crop.y,
+        cropW: page.crop.width,
+        cropH: page.crop.height,
+        pageWidth: page.preprocessed.width,
+        pageHeight: page.preprocessed.height,
+      },
       symbols: voiceSymbols.map((symbols) =>
         symbols.map((s) => ({
           rhythm: s.rhythm,
@@ -229,7 +254,7 @@ workerSelf.onmessage = (event: { data: WorkerRequest }) => {
             segnetUrl: request.segnetUrl,
           },
           (stage) => post({ type: "progress", stage }),
-          { strictWebGpu: request.strictWebGpu ?? false },
+          { strictWebGpu: request.strictWebGpu ?? false, wasmOnly: request.wasmOnly ?? false },
         );
         post({ type: "ready", webgpu: webGpuAvailable() });
       } else if (request.type === "transcribe-staff") {

@@ -66,6 +66,10 @@ export interface PageImage {
   image: GrayImage;
   /** CLAHE-enhanced grayscale page (SegNet + staff-crop input). */
   preprocessed: GrayImage;
+  /** Autocrop box in source-photo pixels (identity when nothing was cropped).
+   * Lets Worker-protocol clients map preprocessed-page coordinates (note
+   * layout boxes) back onto the original photo. */
+  crop: { x: number; y: number; width: number; height: number };
 }
 
 export interface PredictedSymbols {
@@ -131,7 +135,11 @@ export function preprocessPageImage(
     image = resize(image, 1920, targetH, { interpolation: "nearest" });
   }
   const preprocessed = clahe(image, 1.0, 8, 8);
-  return { image, preprocessed };
+  return {
+    image,
+    preprocessed,
+    crop: { x: box.x, y: box.y, width: box.width, height: box.height },
+  };
 }
 
 /**

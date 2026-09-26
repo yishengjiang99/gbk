@@ -116,7 +116,7 @@ export interface ModelUrls {
 export async function loadModels(
   urls: ModelUrls,
   onProgress?: (stage: string) => void,
-  opts?: { strictWebGpu?: boolean },
+  opts?: { strictWebGpu?: boolean; wasmOnly?: boolean },
 ): Promise<ModelSet> {
   // Multithreaded WASM needs SharedArrayBuffer (COOP/COEP); GitHub Pages does
   // not send those headers, so fall back to a single thread there.
@@ -130,7 +130,15 @@ export async function loadModels(
   const gpu = webGpuAvailable();
   // strictWebGpu (demo/diagnostics): ["webgpu"] with no wasm fallback, so a
   // missing/broken WebGPU fails loudly instead of silently benchmarking wasm.
-  const gpuFirst = !gpu ? ["wasm"] : opts?.strictWebGpu ? ["webgpu"] : ["webgpu", "wasm"];
+  // wasmOnly (GPU-less CI/VMs): skip WebGPU entirely — SwiftShader has no
+  // shader-f16 (fp16 WGSL fails to compile) and the fp32 encoder stalls there.
+  const gpuFirst = opts?.wasmOnly
+    ? ["wasm"]
+    : !gpu
+      ? ["wasm"]
+      : opts?.strictWebGpu
+        ? ["webgpu"]
+        : ["webgpu", "wasm"];
   // Create sessions sequentially: onnxruntime-web's wasm backend throws
   // "multiple calls to 'initWasm()' detected" when two sessions initialize
   // the wasm runtime concurrently (e.g. a webgpu->wasm fallback racing the

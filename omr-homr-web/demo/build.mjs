@@ -22,3 +22,13 @@ await build({
   outfile: root + "demo/dist/demo.bundle.js",
   logLevel: "info",
 });
+
+await build({
+  entryPoints: [root + "demo/page-demo.ts"],
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  target: "es2020",
+  outfile: root + "demo/dist/page-demo.bundle.js",
+  logLevel: "info",
+});
