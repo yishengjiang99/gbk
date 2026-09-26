@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { NavMenuSection } from "./toolbar-menu.tsx";
 import type { SF2Region } from "../sf2-parser.ts";
 import "./winamp/winamp.css";
-import WinampMain from "./winamp/WinampMain.tsx";
+import WinampMain, { CAMERA_GLYPH } from "./winamp/WinampMain.tsx";
 import WinampPlaylist, { type WinampPlaylistTrack } from "./winamp/WinampPlaylist.tsx";
 import PianoRoll from "./winamp/PianoRoll.tsx";
 import WinampPanel from "./winamp/WinampPanel.tsx";
@@ -26,6 +26,7 @@ import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts
 import { applyMasterDynamicsToBuffer, DYNAMICS_MODES, isDynamicsMode, type DynamicsMode } from "./master-dynamics.ts";
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
+import { midiFileStore } from "./midi-file-store.ts";
 
 // ---------------------------------------------------------------------------
 // Local type definitions
@@ -86,16 +87,24 @@ type ScannedEntry = {
   midiData: ArrayBuffer;
   noteLayout: ParsedSheetMusicWithLayout["noteLayout"];
   warnings: string[];
-  dataUrl?: string;
   /** Parent-owned object URL for the scanned photo; revoked on unmount. */
   photoUrl: string | null;
   imageWidth: number;
   imageHeight: number;
 };
+/** A user-uploaded MIDI file (added via the "+" transport button). */
+type UploadedEntry = {
+  id: string;
+  name: string;
+  midiData: ArrayBuffer;
+};
 type ClearableMidiOutput = MIDIOutput & { clear?: () => void };
 type PersistedMidiState = CurrentMidiSource & {
   version: 1;
+  /** Legacy binary payload (pre-IndexedDB); kept readable for old saves. */
   dataUrl?: string;
+  /** IndexedDB file id for uploads/scans; binary lives in the midi-file-store. */
+  fileId?: string;
   currentSec?: number;
   savedAt: number;
 };
@@ -146,7 +155,7 @@ function readPersistedMidiState(): PersistedMidiState | null {
     const parsed = JSON.parse(raw) as Partial<PersistedMidiState>;
     if (parsed.version !== 1 || !parsed.name || !parsed.kind) return null;
     if (parsed.kind === "bundled" && !parsed.path) return null;
-    if (parsed.kind !== "bundled" && !parsed.dataUrl) return null;
+    if (parsed.kind !== "bundled" && !parsed.dataUrl && !parsed.fileId) return null;
     return parsed as PersistedMidiState;
   } catch {
     return null;
@@ -552,6 +561,9 @@ export default function MidiReader({
   }, []);
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [scannedEntries, setScannedEntries] = useState<ScannedEntry[]>([]);
+  /** User-uploaded MIDI files ("+" button); persisted to IndexedDB. */
+  const [uploadedEntries, setUploadedEntries] = useState<UploadedEntry[]>([]);
+  const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
   /** Parent-owned scanned-photo URLs, revoked when the explorer unmounts. */
   const scanPhotoUrlsRef = useRef<string[]>([]);
   useEffect(() => {
@@ -1191,6 +1203,47 @@ export default function MidiReader({
         setMidiOptions(normalized);
 
         const persisted = readPersistedMidiState();
+
+        // Restore user-added MIDI files (uploads + camera scans) from
+        // IndexedDB, in the order they were added. Entries whose bytes can't
+        // be read are skipped with a warning; the bundled list and the rest of
+        // the app keep working regardless.
+        let restoredScans: ScannedEntry[] = [];
+        try {
+          const playlistMeta = await midiFileStore.getPlaylistMeta();
+          if (playlistMeta) {
+            const uploads: UploadedEntry[] = [];
+            for (const metaEntry of playlistMeta.uploads) {
+              const record = await midiFileStore.getMidiFile(metaEntry.id);
+              if (record) uploads.push({ id: record.id, name: record.name, midiData: record.bytes });
+              else console.warn(`[midi-file-store] upload "${metaEntry.id}" is missing its MIDI bytes; skipping`);
+            }
+            const scans: ScannedEntry[] = [];
+            for (const metaEntry of playlistMeta.scans) {
+              const record = await midiFileStore.getMidiFile(metaEntry.id);
+              if (record) {
+                scans.push({
+                  id: record.id,
+                  name: record.name,
+                  midiData: record.bytes,
+                  // Photo and note layout are session-only; restored scans
+                  // play back without synchronized highlighting.
+                  noteLayout: [],
+                  warnings: [],
+                  photoUrl: null,
+                  imageWidth: 0,
+                  imageHeight: 0,
+                });
+              } else console.warn(`[midi-file-store] scan "${metaEntry.id}" is missing its MIDI bytes; skipping`);
+            }
+            restoredScans = scans;
+            setUploadedEntries(uploads);
+            setScannedEntries(scans);
+          }
+        } catch (err) {
+          console.warn("[midi-file-store] playlist restore failed", err);
+        }
+
         if (persisted?.kind === "bundled" && persisted.path) {
           const restored = normalized.find((m) => m.path === persisted.path) ?? {
             name: persisted.name,
@@ -1209,15 +1262,34 @@ export default function MidiReader({
           return;
         }
 
-        if (persisted && persisted.kind !== "bundled" && persisted.dataUrl) {
-          const buf = await dataUrlToArrayBuffer(persisted.dataUrl);
-          loadMidiIntoTracks(buf, persisted.name, {
-            sourceKind: persisted.kind,
-            dataUrl: persisted.dataUrl,
-            persist: false,
-            restoreSec: persisted.currentSec,
-          });
-          return;
+        if (persisted && persisted.kind !== "bundled") {
+          if (persisted.fileId) {
+            // Current save format: binary lives in IndexedDB.
+            const record = await midiFileStore.getMidiFile(persisted.fileId);
+            if (record) {
+              const isScan = restoredScans.some((s) => s.id === persisted.fileId);
+              loadMidiIntoTracks(record.bytes.slice(0), persisted.name, {
+                sourceKind: persisted.kind,
+                fileId: persisted.fileId,
+                persist: false,
+                restoreSec: persisted.currentSec,
+              });
+              if (isScan) setSelectedScanId(persisted.fileId);
+              else setSelectedUploadId(persisted.fileId);
+              return;
+            }
+            // Bytes are gone (e.g. storage was cleared); fall through to the default.
+          } else if (persisted.dataUrl) {
+            // Legacy save format (pre-IndexedDB data URL); keep it readable.
+            const buf = await dataUrlToArrayBuffer(persisted.dataUrl);
+            loadMidiIntoTracks(buf, persisted.name, {
+              sourceKind: persisted.kind,
+              dataUrl: persisted.dataUrl,
+              persist: false,
+              restoreSec: persisted.currentSec,
+            });
+            return;
+          }
         }
 
         const preferred = normalized.find((m) => m.name === "60884_Beethoven-Symphony-No51.mid");
@@ -1520,6 +1592,8 @@ export default function MidiReader({
       selectedPath?: string;
       sourceKind?: MidiSourceKind;
       dataUrl?: string;
+      /** IndexedDB file id for uploads/scans; persisted instead of the binary. */
+      fileId?: string;
       persist?: boolean;
       restoreSec?: number;
       autoplay?: boolean;
@@ -1529,9 +1603,10 @@ export default function MidiReader({
     ++midiSelectionRequestRef.current;
     autoplayLoadedSongRef.current = opts.autoplay ?? false;
     setPlayRequested(false);
-    // A non-scan load clears the scan selection; scan loads set it again after
-    // this call, so the scanned-sheet panel tracks the actually loaded song.
+    // A non-scan/non-upload load clears those selections; scan/upload loads set
+    // theirs again after this call, so the panels track the actually loaded song.
     setSelectedScanId(null);
+    setSelectedUploadId(null);
     const selectedPath = opts.selectedPath ?? "";
     const sourceKind = opts.sourceKind ?? (selectedPath ? "bundled" : "uploaded");
     const source: CurrentMidiSource = { kind: sourceKind, name, path: selectedPath || undefined };
@@ -1546,7 +1621,24 @@ export default function MidiReader({
     setSongError("");
     setSheetMusicNotice("");
     lastPersistedTimeRef.current = opts.restoreSec ?? 0;
-    if (opts.persist !== false && (source.kind === "bundled" || opts.dataUrl)) {
+    if (opts.persist === false) return;
+    if (source.kind === "bundled") {
+      writePersistedMidiState({ ...source, currentSec: opts.restoreSec ?? 0 });
+      return;
+    }
+    if (opts.fileId) {
+      // Uploads and scans: binary lives in IndexedDB; localStorage keeps only
+      // the small selection metadata (id, name, position).
+      writePersistedMidiState({
+        kind: sourceKind,
+        name,
+        fileId: opts.fileId,
+        currentSec: opts.restoreSec ?? 0,
+      });
+      return;
+    }
+    if (opts.dataUrl) {
+      // Legacy path (sheet-music conversion, Bach generator): keep working.
       writePersistedMidiState({
         ...source,
         dataUrl: opts.dataUrl,
@@ -1560,14 +1652,28 @@ export default function MidiReader({
     if (!file || !workerRef.current) return;
     try {
       const buf = await file.arrayBuffer();
-      let dataUrl: string | undefined;
-      if (buf.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
-        dataUrl = await arrayBufferToDataUrl(buf.slice(0));
-      }
-      loadMidiIntoTracks(buf, file.name, {
-        sourceKind: "uploaded",
-        dataUrl,
+      const id = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const createdAt = Date.now();
+      // Persist first: the file must survive reloads. A failed write only
+      // affects persistence; the file still plays for this session.
+      await midiFileStore.putMidiFile({
+        id,
+        name: file.name,
+        bytes: buf.slice(0),
+        source: "upload",
+        createdAt,
       });
+      const entry: UploadedEntry = { id, name: file.name, midiData: buf };
+      const nextUploads = [...uploadedEntries, entry];
+      setUploadedEntries(nextUploads);
+      void midiFileStore.putPlaylistMeta({
+        version: 1,
+        uploads: nextUploads.map((e) => ({ id: e.id, name: e.name })),
+        scans: scannedEntries.map((e) => ({ id: e.id, name: e.name })),
+      });
+      loadMidiIntoTracks(buf, file.name, { sourceKind: "uploaded", fileId: id });
+      // Set after the load: loadMidiIntoTracks clears the upload selection first.
+      setSelectedUploadId(id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
@@ -1694,8 +1800,12 @@ export default function MidiReader({
       rows.push({
         id: `bundled:${midi.path}`,
         name: midi.name,
-        selected: selectedMidiPath === midi.path && selectedScanId == null,
+        selected: selectedMidiPath === midi.path && selectedScanId == null && selectedUploadId == null,
       });
+    }
+    for (const entry of uploadedEntries) {
+      if (q && !entry.name.toLowerCase().includes(q)) continue;
+      rows.push({ id: `upload:${entry.id}`, name: entry.name, selected: selectedUploadId === entry.id });
     }
     for (const entry of scannedEntries) {
       if (q && !entry.name.toLowerCase().includes(q)) continue;
@@ -1707,16 +1817,27 @@ export default function MidiReader({
   const playlistRows = useMemo(
     () => buildPlaylistRows(playlistSearch),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [midiOptions, scannedEntries, playlistSearch, selectedMidiPath, selectedScanId]
+    [midiOptions, uploadedEntries, scannedEntries, playlistSearch, selectedMidiPath, selectedScanId, selectedUploadId]
   );
 
   function selectPlaylistEntry(id: string, autoplay = false) {
+    if (id.startsWith("upload:")) {
+      const entry = uploadedEntries.find((e) => `upload:${e.id}` === id);
+      if (!entry || !workerRef.current) return;
+      loadMidiIntoTracks(entry.midiData.slice(0), entry.name, {
+        sourceKind: "uploaded",
+        fileId: entry.id,
+        autoplay,
+      });
+      setSelectedUploadId(entry.id);
+      return;
+    }
     if (id.startsWith("scan:")) {
       const entry = scannedEntries.find((e) => `scan:${e.id}` === id);
       if (!entry || !workerRef.current) return;
       loadMidiIntoTracks(entry.midiData.slice(0), entry.name, {
         sourceKind: "generated",
-        dataUrl: entry.dataUrl,
+        fileId: entry.id,
         autoplay,
       });
       setSelectedScanId(entry.id);
@@ -1724,6 +1845,7 @@ export default function MidiReader({
     }
     const path = id.replace(/^bundled:/, "");
     setSelectedScanId(null);
+    setSelectedUploadId(null);
     void onSelectMidiPath(path, autoplay);
   }
 
@@ -1732,9 +1854,11 @@ export default function MidiReader({
     if (!rows.length) return;
     const currentId = selectedScanId
       ? `scan:${selectedScanId}`
-      : selectedMidiPath
-        ? `bundled:${selectedMidiPath}`
-        : null;
+      : selectedUploadId
+        ? `upload:${selectedUploadId}`
+        : selectedMidiPath
+          ? `bundled:${selectedMidiPath}`
+          : null;
     const currentIdx = currentId ? rows.findIndex((r) => r.id === currentId) : -1;
     if (shuffleOn && rows.length > 1) {
       let next = currentIdx;
@@ -1759,38 +1883,43 @@ export default function MidiReader({
     const name = `Scanned sheet — ${stamp}`;
     const id = `scan-${Date.now()}`;
     const midiData = scan.midiData.slice(0);
-    let dataUrl: string | undefined;
-    try {
-      if (midiData.byteLength <= MAX_PERSISTED_MIDI_BYTES) {
-        dataUrl = await arrayBufferToDataUrl(midiData.slice(0));
-      }
-    } catch {
-      // Playback works without persistence.
-    }
+    // Persist the scan MIDI so it can be replayed after a reload. A failed
+    // write only affects persistence; playback still works for this session.
+    // (Photo and note layout are intentionally session-only.)
+    await midiFileStore.putMidiFile({
+      id,
+      name,
+      bytes: midiData.slice(0),
+      source: "scan",
+      createdAt: Date.now(),
+    });
     // The parent owns the photo URL so highlighting survives Sheet Cam unmounting.
     let photoUrl: string | null = null;
     if (photoFile) {
       photoUrl = URL.createObjectURL(photoFile);
       scanPhotoUrlsRef.current.push(photoUrl);
     }
-    setScannedEntries((prev) => [
-      ...prev,
-      {
-        id,
-        name,
-        midiData,
-        noteLayout: scan.noteLayout,
-        warnings: scan.warnings ?? [],
-        dataUrl,
-        photoUrl,
-        imageWidth: scan.imageWidth,
-        imageHeight: scan.imageHeight,
-      },
-    ]);
+    const entry: ScannedEntry = {
+      id,
+      name,
+      midiData,
+      noteLayout: scan.noteLayout,
+      warnings: scan.warnings ?? [],
+      photoUrl,
+      imageWidth: scan.imageWidth,
+      imageHeight: scan.imageHeight,
+    };
+    const nextScans = [...scannedEntries, entry];
+    setScannedEntries(nextScans);
+    void midiFileStore.putPlaylistMeta({
+      version: 1,
+      uploads: uploadedEntries.map((e) => ({ id: e.id, name: e.name })),
+      scans: nextScans.map((e) => ({ id: e.id, name: e.name })),
+    });
     setCamSheetOpen(false);
     onSelectTab("midi");
     setPianoRollOpen(false);
-    loadMidiIntoTracks(midiData.slice(0), name, { sourceKind: "generated", dataUrl, autoplay: true });
+    loadMidiIntoTracks(midiData.slice(0), name, { sourceKind: "generated", fileId: id, autoplay: true });
     // Set after the load: loadMidiIntoTracks clears the scan selection first.
     setSelectedScanId(id);
     if (photoUrl) setPanelOverlay("scannedSheet");
@@ -1800,9 +1929,11 @@ export default function MidiReader({
   playlistEndedRef.current = () => {
     const currentId = selectedScanId
       ? `scan:${selectedScanId}`
-      : selectedMidiPath
-        ? `bundled:${selectedMidiPath}`
-        : null;
+      : selectedUploadId
+        ? `upload:${selectedUploadId}`
+        : selectedMidiPath
+          ? `bundled:${selectedMidiPath}`
+          : null;
     if (repeatOn && currentId) {
       selectPlaylistEntry(currentId, true);
       return;
@@ -1970,6 +2101,32 @@ export default function MidiReader({
         >
           <i className="fa-solid fa-wand-magic-sparkles" aria-hidden="true" />
           <span>Bach Composer</span>
+        </button>
+      </NavMenuSection>
+
+      <NavMenuSection label="Views">
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => { onSelectTab("recorder"); setPianoRollOpen(false); }}
+          aria-label="Open MIDI Recorder"
+          title="Open MIDI Recorder"
+        >
+          <i className="fa-solid fa-circle-dot" aria-hidden="true" />
+          <span>Recorder</span>
+        </button>
+        <button
+          type="button"
+          className={`toolbarActionBtn ${pianoRollOpen ? "active" : ""}`}
+          data-close-menu
+          onClick={() => { onSelectTab("midi"); setPianoRollOpen((v) => !v); }}
+          aria-pressed={pianoRollOpen}
+          aria-label={pianoRollOpen ? "Hide piano roll" : "Show piano roll"}
+          title="Toggle piano roll"
+        >
+          <i className="fa-solid fa-music" aria-hidden="true" />
+          <span>Piano Roll</span>
         </button>
       </NavMenuSection>
 
@@ -2222,8 +2379,6 @@ export default function MidiReader({
             onStop={onStopPlayback}
             onPrev={() => stepPlaylistEntry(-1)}
             onNext={() => stepPlaylistEntry(1)}
-            onCamera={() => setCamSheetOpen(true)}
-            onAddMidi={() => ejectInputRef.current?.click()}
             transportDisabled={!song}
             volume={masterVolume}
             onVolumeChange={onMasterVolumeChange}
@@ -2236,14 +2391,6 @@ export default function MidiReader({
             timeData={vizTimeData}
             menu={winampMenuSections}
           />
-          <div className="gbk-extras" role="group" aria-label="Views">
-            <div className="gbk-xseg" role="group" aria-label="View">
-              <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("midi"); setPianoRollOpen(false); }} aria-pressed={activeTab === "midi" && !pianoRollOpen} aria-label="MIDI Explorer" title="MIDI Explorer">MIDI</button>
-              <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("sf2"); setPianoRollOpen(false); }} aria-pressed={activeTab === "sf2"} aria-label="SF2 Explorer" title="SF2 Explorer">SF2</button>
-              <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("recorder"); setPianoRollOpen(false); }} aria-pressed={activeTab === "recorder"} aria-label="MIDI Recorder" title="MIDI Recorder">REC</button>
-            </div>
-            <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("midi"); setPianoRollOpen((v) => !v); }} aria-pressed={pianoRollOpen} aria-label={pianoRollOpen ? "Hide piano roll" : "Show piano roll"} title="Toggle piano roll">PIANO</button>
-          </div>
           {isExporting ? (
             <div className="exportProgress" aria-live="polite">
               <div className="exportProgressBar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportProgress * 100)}>
@@ -2288,8 +2435,28 @@ export default function MidiReader({
           )}
         </div>
         <div className="gbk-dock" aria-label="Status">
-          <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-          <span>{song ? `${songName || "Untitled MIDI"} · ${song.bpm} BPM` : "No MIDI loaded"} · Audio {audioCtxState} · {midiStatus}</span>
+          <div className="gbk-frow">
+            <div className="gbk-fleft">
+              <button type="button" className="gbk-fbtn" onClick={() => { onSelectTab("midi"); setPianoRollOpen(false); }} aria-pressed={activeTab === "midi" && !pianoRollOpen} aria-label="MIDI Explorer" title="MIDI Explorer">MIDI</button>
+              <button type="button" className="gbk-fbtn" onClick={() => { onSelectTab("sf2"); setPianoRollOpen(false); }} aria-pressed={activeTab === "sf2"} aria-label="SF2 Explorer" title="SF2 Explorer">SF2</button>
+            </div>
+            <button
+              type="button"
+              className="gbk-shutter"
+              onClick={() => setCamSheetOpen(true)}
+              aria-label="Scan sheet music with camera"
+              title="Scan sheet music with camera"
+            >
+              {CAMERA_GLYPH}
+            </button>
+            <div className="gbk-fright">
+              <button type="button" className="gbk-fbtn" onClick={() => ejectInputRef.current?.click()} aria-label="Add MIDI file to playlist" title="Add MIDI file to playlist">+ ADD</button>
+            </div>
+          </div>
+          <div className="gbk-fstatus">
+            <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+            <span> · {song ? `${songName || "Untitled MIDI"} · ${song.bpm} BPM` : "No MIDI loaded"} · Audio {audioCtxState} · {midiStatus}</span>
+          </div>
         </div>
         <input ref={ejectInputRef} type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Upload MIDI file" style={{ display: "none" }} />
         {camSheetOpen ? createPortal(

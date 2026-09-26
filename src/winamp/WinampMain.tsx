@@ -34,10 +34,6 @@ export interface WinampMainProps {
   onStop: () => void;
   onPrev: () => void;
   onNext: () => void;
-  /** Opens the sheet-music camera (scan flow adds to the playlist). */
-  onCamera: () => void;
-  /** Opens the MIDI file picker (the old eject action). */
-  onAddMidi: () => void;
   transportDisabled: boolean;
   volume: number; // 0..1
   onVolumeChange: (v: number) => void;
@@ -171,49 +167,13 @@ function Visualizer({ timeData }: { timeData: number[] }) {
   return <canvas ref={canvasRef} id="visualizer" width={80} height={26} aria-hidden="true" />;
 }
 
-/** Silver 3D transport buttons for glyphs the skin has no sprite for. */
-function GlyphTransportButton({
-  id,
-  label,
-  title,
-  onClick,
-  disabled,
-  glyph,
-}: {
-  id: string;
-  label: string;
-  title: string;
-  onClick: () => void;
-  disabled?: boolean;
-  glyph: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      id={id}
-      className="gbk-tbtn"
-      aria-label={label}
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      {glyph}
-    </button>
-  );
-}
-
-const CAMERA_GLYPH = (
+export const CAMERA_GLYPH = (
   <svg viewBox="0 0 16 16" aria-hidden="true">
     <path d="M1.5 5.5h3l1.2-1.8h4.6l1.2 1.8h3v7h-13z" />
     <circle cx="8" cy="9" r="2.4" style={{ fill: "#dcdce6" }} />
   </svg>
 );
 
-const PLUS_GLYPH = (
-  <svg viewBox="0 0 16 16" aria-hidden="true">
-    <path d="M7 2.5h2V7h4.5v2H9v4.5H7V9H2.5V7H7z" />
-  </svg>
-);
 
 export default function WinampMain(props: WinampMainProps) {
   const {
@@ -229,8 +189,6 @@ export default function WinampMain(props: WinampMainProps) {
     onStop,
     onPrev,
     onNext,
-    onCamera,
-    onAddMidi,
     transportDisabled,
     volume,
     onVolumeChange,
@@ -399,20 +357,6 @@ export default function WinampMain(props: WinampMainProps) {
         />
         <WinampActionButton id="stop" label="Stop" title="Stop" onClick={onStop} disabled={transportDisabled} />
         <WinampActionButton id="next" label="Next track" title="Next Track" onClick={onNext} disabled={transportDisabled} />
-        <GlyphTransportButton
-          id="camera-button"
-          label="Scan sheet music with camera"
-          title="Scan sheet music with camera"
-          onClick={onCamera}
-          glyph={CAMERA_GLYPH}
-        />
-        <GlyphTransportButton
-          id="addmidi-button"
-          label="Add MIDI file"
-          title="Add MIDI file to playlist"
-          onClick={onAddMidi}
-          glyph={PLUS_GLYPH}
-        />
       </div>
 
       <div className="shuffle-repeat">
