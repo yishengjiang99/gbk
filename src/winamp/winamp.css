@@ -65,7 +65,8 @@
 section.card.midiReader.gbk-winamp-page {
   flex: 1 1 auto;
   min-height: 0;
-  display: block;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   padding: 0;
   border: 0;
@@ -78,6 +79,7 @@ section.card.midiReader.gbk-winamp-page {
 #webamp.gbk-viewport {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   overflow: hidden;
 }
 
@@ -107,34 +109,35 @@ section.card.midiReader.gbk-winamp-page {
 /* ---- footer control panel ------------------------------------------------- */
 /* MIDI + SF2 on the left, big camera shutter dead center, + ADD on the right,
    with a slim status line beneath the button row. */
-#webamp .gbk-dock {
+.gbk-winamp-page > .gbk-dock {
   flex: 0 0 auto;
   background: #000;
   border-top: 2px solid #2c2c3c;
   padding: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   position: relative;
 }
 
-#webamp .gbk-frow {
+.gbk-dock .gbk-frow {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   padding: 8px 14px 4px;
 }
 
-#webamp .gbk-fleft {
+.gbk-dock .gbk-fleft {
   display: flex;
   gap: 8px;
   justify-content: flex-start;
 }
 
-#webamp .gbk-fright {
+.gbk-dock .gbk-fright {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
 
-#webamp .gbk-fbtn {
+.gbk-dock .gbk-fbtn {
   font-family: "Courier New", monospace;
   font-size: 11px;
   font-weight: 700;
@@ -151,19 +154,19 @@ section.card.midiReader.gbk-winamp-page {
   white-space: nowrap;
 }
 
-#webamp .gbk-fbtn:active {
+.gbk-dock .gbk-fbtn:active {
   border-top-color: #0c0c12;
   border-left-color: #0c0c12;
   border-bottom-color: #8a8aa0;
   border-right-color: #6a6a80;
 }
 
-#webamp .gbk-fbtn[aria-pressed="true"] {
+.gbk-dock .gbk-fbtn[aria-pressed="true"] {
   color: #3dff73;
 }
 
 /* Big round camera shutter button, dead center of the footer button row. */
-#webamp .gbk-shutter {
+.gbk-dock .gbk-shutter {
   width: 64px;
   height: 64px;
   border-radius: 50%;
@@ -180,17 +183,17 @@ section.card.midiReader.gbk-winamp-page {
   padding: 0;
 }
 
-#webamp .gbk-shutter:active {
+.gbk-dock .gbk-shutter:active {
   transform: scale(0.94);
 }
 
-#webamp .gbk-shutter svg {
+.gbk-dock .gbk-shutter svg {
   width: 28px;
   height: 28px;
   fill: #2c2c3c;
 }
 
-#webamp .gbk-fstatus {
+.gbk-dock .gbk-fstatus {
   text-align: center;
   color: #55556a;
   font-size: 10px;
@@ -202,7 +205,7 @@ section.card.midiReader.gbk-winamp-page {
   text-overflow: ellipsis;
 }
 
-#webamp .gbk-fstatus .transportTimer {
+.gbk-dock .gbk-fstatus .transportTimer {
   color: #9a9ab0;
   font-weight: bold;
 }
@@ -341,27 +344,38 @@ section.card.midiReader.gbk-winamp-page {
   margin-top: 0;
 }
 
-/* Internal-scroll chain: every level must be allowed to shrink below its
-   content height, otherwise the track list pushes the window taller instead
-   of scrolling. */
-#webamp .playlist-middle,
-#webamp .playlist-middle-center,
-#webamp .playlist-tracks,
-#webamp .playlist-track-titles {
+/* Internal-scroll chain: every level is a flex column allowed to shrink below
+   its content height, so the track list scrolls instead of pushing the window
+   taller. (The skin's `height: 100%` on .playlist-track-titles can never work:
+   its parent has no definite height, so the percentage resolves to auto and
+   the list grows unbounded.) */
+#webamp .playlist-middle {
+  flex: 1 1 auto;
   min-height: 0;
 }
 
 #webamp .playlist-middle-center {
   background: #0d0d0d;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
 
 #webamp .playlist-tracks {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
+  min-height: 0;
 }
 
 #webamp .playlist-track-titles {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  height: 100%;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 #webamp .playlist-tracks .track-cell {
@@ -420,18 +434,6 @@ section.card.midiReader.gbk-winamp-page {
   color: #e8e8e8;
   font-size: 11px;
   padding: 5px 6px;
-}
-
-#webamp .winamp-playlist-add {
-  flex: 0 0 auto;
-  font-size: 10px;
-  font-weight: bold;
-  color: #f0f0f0;
-  background: linear-gradient(#7a7a7a, #4a4a4a);
-  border: 1px outset #8a8a8a;
-  padding: 6px 8px;
-  cursor: pointer;
-  white-space: nowrap;
 }
 
 #webamp .winamp-playlist-count {
@@ -935,9 +937,9 @@ tbody tr.selected {
 
 /* ---- mobile: the page column scrolls; transport stays sticky ----------------------- */
 @media (max-width: 960px) {
+  /* The app is one fixed screen: the shell never scrolls, only the playlist
+     list scrolls internally. */
   section.card.midiReader.gbk-winamp-page {
-    overflow-y: auto;
-    overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
+    overflow: hidden;
   }
 }

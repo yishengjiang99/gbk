@@ -23,7 +23,6 @@ export interface WinampPlaylistProps {
   search: string;
   onSearchChange: (v: string) => void;
   onSelectTrack: (id: string) => void;
-  onUploadClick: () => void;
   headerExtra?: ReactNode;
 }
 
@@ -32,7 +31,6 @@ export default function WinampPlaylist({
   search,
   onSearchChange,
   onSelectTrack,
-  onUploadClick,
   headerExtra,
 }: WinampPlaylistProps) {
   return (
@@ -90,15 +88,6 @@ export default function WinampPlaylist({
             placeholder="Search…"
             aria-label="Search playlist"
           />
-          <button
-            type="button"
-            className="winamp-playlist-add"
-            onClick={onUploadClick}
-            aria-label="Upload MIDI file"
-            title="Upload MIDI file"
-          >
-            + Add
-          </button>
           {headerExtra}
         </div>
       </div>

@@ -559,6 +559,35 @@ export default function MidiReader({
     window.addEventListener("resize", compute);
     return () => window.removeEventListener("resize", compute);
   }, []);
+  // The footer dock lives OUTSIDE the zoomed #webamp chrome (it is laid out
+  // in real CSS pixels), so #webamp's height is measured in JS: whatever
+  // vertical space the shell has left after the dock, converted back into
+  // #webamp's pre-zoom coordinate space. This pins the dock to the bottom of
+  // the viewport with no gap and no reliance on dvh-inside-zoom.
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [viewportPx, setViewportPx] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const compute = () => {
+      const shell = pageRef.current;
+      const dock = dockRef.current;
+      if (!shell || !dock || !(waZoom > 0)) return;
+      const avail = shell.clientHeight - dock.offsetHeight;
+      if (avail > 0) setViewportPx(avail / waZoom);
+    };
+    compute();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(compute) : null;
+    if (ro) {
+      if (pageRef.current) ro.observe(pageRef.current);
+      if (dockRef.current) ro.observe(dockRef.current);
+    }
+    window.addEventListener("resize", compute);
+    window.addEventListener("orientationchange", compute);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("orientationchange", compute);
+    };
+  }, [waZoom]);
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [scannedEntries, setScannedEntries] = useState<ScannedEntry[]>([]);
   /** User-uploaded MIDI files ("+" button); persisted to IndexedDB. */
@@ -2364,7 +2393,7 @@ export default function MidiReader({
   );
   return (
     <section ref={pageRef} className="card midiReader gbk-winamp-page">
-      <div id="webamp" className="gbk-viewport" style={{ zoom: waZoom, height: `${100 / waZoom}dvh` }} data-sf2-ready={sf2Ready}>
+      <div id="webamp" className="gbk-viewport" style={{ zoom: waZoom, height: viewportPx == null ? `${100 / waZoom}dvh` : `${viewportPx}px` }} data-sf2-ready={sf2Ready}>
         <div className="gbk-top">
           <WinampMain
             marqueeText={song ? `${songName || "Untitled MIDI"} *** ${song.bpm} BPM ***` : "GBK Winamp - no MIDI loaded"}
@@ -2429,12 +2458,12 @@ export default function MidiReader({
               search={playlistSearch}
               onSearchChange={setPlaylistSearch}
               onSelectTrack={(id) => selectPlaylistEntry(id)}
-              onUploadClick={() => ejectInputRef.current?.click()}
               headerExtra={<span className="winamp-playlist-count">{playlistRows.length} files</span>}
             />
           )}
         </div>
-        <div className="gbk-dock" aria-label="Status">
+      </div>
+      <div className="gbk-dock" ref={dockRef} aria-label="Status">
           <div className="gbk-frow">
             <div className="gbk-fleft">
               <button type="button" className="gbk-fbtn" onClick={() => { onSelectTab("midi"); setPianoRollOpen(false); }} aria-pressed={activeTab === "midi" && !pianoRollOpen} aria-label="MIDI Explorer" title="MIDI Explorer">MIDI</button>
@@ -2471,7 +2500,6 @@ export default function MidiReader({
           </div>,
           document.body
         ) : null}
-      </div>
       {panelOverlay === "scannedSheet" && activeScanEntry && activeScanEntry.photoUrl && song ? (
         <PanelOverlay label="Scanned Sheet" onClose={() => setPanelOverlay(null)}>
           <WinampPanel title="Scanned Sheet">
