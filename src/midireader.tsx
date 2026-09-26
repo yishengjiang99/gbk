@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavMenuSection } from "./toolbar-menu.tsx";
 import type { SF2Region } from "../sf2-parser.ts";
 import "./winamp/winamp.css";
@@ -474,6 +475,26 @@ export default function MidiReader({
   const [playlistOpen, setPlaylistOpen] = useState(true);
   const [pianoRollOpen, setPianoRollOpen] = useState(false);
   const [camSheetOpen, setCamSheetOpen] = useState(false);
+  // Winamp chrome is authored at a fixed 275px width; scale it with `zoom`
+  // (layout-affecting, unlike transform) so it fills the available column
+  // width on phones. Measured from the parent's content box so app padding
+  // never causes overflow; capped at 2x so it stays sensible on desktop.
+  const pageRef = useRef<HTMLElement>(null);
+  const [waZoom, setWaZoom] = useState(1);
+  useLayoutEffect(() => {
+    const compute = () => {
+      let w = window.innerWidth || 390;
+      const parent = pageRef.current?.parentElement;
+      if (parent) {
+        const cs = getComputedStyle(parent);
+        w = parent.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0");
+      }
+      setWaZoom(Math.min(Math.max(w / 275, 1), 2));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [scannedEntries, setScannedEntries] = useState<ScannedEntry[]>([]);
   /** Parent-owned scanned-photo URLs, revoked when the explorer unmounts. */
@@ -2005,7 +2026,7 @@ export default function MidiReader({
     </>
   );
   return (
-    <section className="card midiReader">
+    <section ref={pageRef} className="card midiReader gbk-winamp-page" style={{ zoom: waZoom }}>
       <div id="webamp">
         <div className="gbk-main-sticky">
           <WinampMain
@@ -2096,7 +2117,7 @@ export default function MidiReader({
           />
         ) : null}
         <input ref={ejectInputRef} type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Upload MIDI file" style={{ display: "none" }} />
-        {camSheetOpen ? (
+        {camSheetOpen ? createPortal(
           <div className="winamp-modal-backdrop" onClick={() => setCamSheetOpen(false)}>
             <div className="winamp-modal" role="dialog" aria-modal="true" aria-label="Scan sheet music" onClick={(event) => event.stopPropagation()}>
               <div className="winamp-modal-titlebar">
@@ -2105,7 +2126,8 @@ export default function MidiReader({
               </div>
               <SheetCam embedded onScanComplete={(result) => void handleScanComplete(result)} />
             </div>
-          </div>
+          </div>,
+          document.body
         ) : null}
       </div>
       {activeTab === "midi" ? (
@@ -2300,6 +2322,7 @@ export default function MidiReader({
           </WinampPanel>
         ) : null}
         {song ? (
+          <WinampPanel title="Current MIDI">
           <div className="midiMetadataPanel" aria-label="MIDI metadata">
             <div className="midiMetadataTitle">
               <span className="songChipLabel">Current MIDI</span>
@@ -2326,6 +2349,7 @@ export default function MidiReader({
               <div className="midiMetadataTracks">{songMetadata.namedTrackPreview}</div>
             ) : null}
           </div>
+          </WinampPanel>
         ) : null}
       {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
       {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
@@ -2409,14 +2433,14 @@ export default function MidiReader({
                   return (
                     <div key={`right-${track.index}`} className="midiTrackSvgRow">
                       <svg className="midiTrackSvg" viewBox={`0 0 ${timelineW} ${trackH}`} preserveAspectRatio="none">
-                        <rect x="0" y="0" width={timelineW} height={trackH} fill="#f7fbff" />
+                        <rect x="0" y="0" width={timelineW} height={trackH} fill="#0b0e12" />
                         {track.notes.map((n, idx) => {
                           const x = (n.startSec / duration) * timelineW;
                           const w = Math.max(1.5, (n.durationSec / duration) * timelineW);
                           const y = ((maxNote - n.note) / span) * (trackH - 8) + 2;
                           const h = Math.max(2, (trackH - 8) / span);
                           return (
-                            <rect key={idx} x={x} y={y} width={w} height={h} fill="#2d6a93" opacity="0.8" />
+                            <rect key={idx} x={x} y={y} width={w} height={h} fill="#57a8d8" opacity="0.85" />
                           );
                         })}
                       </svg>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   CharacterString,
   marqueeIsLong,
@@ -244,11 +245,14 @@ export default function WinampMain(props: WinampMainProps) {
 
       {menuOpen && (
         <>
-          <div
-            className="winamp-menu-backdrop"
-            onClick={() => setMenuOpen(false)}
-            aria-hidden="true"
-          />
+          {createPortal(
+            <div
+              className="winamp-menu-backdrop"
+              onClick={() => setMenuOpen(false)}
+              aria-hidden="true"
+            />,
+            document.body
+          )}
           <div className="winamp-menu-panel" role="menu" aria-label="Player menu">
             {menu}
           </div>

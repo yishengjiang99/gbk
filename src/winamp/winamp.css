@@ -9,6 +9,9 @@
 
 #webamp {
   position: relative;
+  width: 275px;
+  margin: 0 auto;
+  background: #141414;
   font-family: Arial, sans-serif;
 }
 
@@ -187,50 +190,61 @@
   display: none;
 }
 
-/* ---- our extras strip: view toggle, piano roll, cam sheet ---------------- */
+/* ---- our extras strip: compact Winamp-chrome buttons ---------------------- */
 #webamp .gbk-extras {
   width: 275px;
-  background: #232323;
-  border-top: 1px solid #101010;
-  border-bottom: 2px solid #101010;
-  padding: 6px 8px;
+  box-sizing: border-box;
+  background: #1b1b1b;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  padding: 4px 5px;
   display: flex;
-  gap: 6px;
-  align-items: stretch;
+  gap: 4px;
+  align-items: center;
   flex-wrap: wrap;
 }
 
 #webamp .gbk-xbtn {
+  box-sizing: border-box;
   font-family: Arial, sans-serif;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: bold;
   letter-spacing: 0.5px;
-  color: #f0f0f0;
+  color: #e8e8e8;
   text-shadow: 1px 1px 0 #000;
-  background: linear-gradient(#7a7a7a, #565656 45%, #464646);
-  border: 1px solid #1a1a1a;
-  border-top-color: #9a9a9a;
-  border-left-color: #9a9a9a;
-  padding: 9px 10px;
-  min-height: 36px;
+  background: #2e2e2e;
+  border: 1px solid;
+  border-color: #6f6f6f #161616 #161616 #6f6f6f;
+  border-radius: 0;
+  padding: 0 7px;
+  height: 22px;
+  min-height: 0;
+  line-height: 20px;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+#webamp .gbk-xbtn .fa-solid {
+  font-size: 9px;
 }
 
 #webamp .gbk-xbtn:active {
-  border-top-color: #1a1a1a;
-  border-left-color: #1a1a1a;
-  border-bottom-color: #9a9a9a;
-  border-right-color: #9a9a9a;
+  border-color: #161616 #6f6f6f #6f6f6f #161616;
 }
 
 #webamp .gbk-xbtn[aria-pressed="true"] {
-  background: linear-gradient(#3d3d3d, #565656);
-  border-top-color: #1a1a1a;
-  border-left-color: #1a1a1a;
-  border-bottom-color: #8a8a8a;
-  border-right-color: #8a8a8a;
+  background: #1a1a1a;
+  border-color: #161616 #6f6f6f #6f6f6f #161616;
   color: #7dff7d;
+}
+
+#webamp .gbk-xbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 #webamp .gbk-xseg {
@@ -423,31 +437,19 @@
 /* ---- quick tools strip (always-visible actions the old toolbar exposed) --- */
 #webamp .gbk-quicktools {
   width: 275px;
+  box-sizing: border-box;
   background: #1b1b1b;
-  border-bottom: 2px solid #101010;
-  padding: 6px 8px;
+  border-bottom: 2px solid #000;
+  padding: 4px 5px;
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
-}
-
-#webamp .gbk-quicktools .gbk-xbtn {
-  min-height: 32px;
-  padding: 7px 8px;
-  font-size: 9px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-#webamp .gbk-quicktools .gbk-xbtn:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 /* ---- slim song meta line under the chrome -------------------------------- */
 #webamp .gbk-songmeta {
   width: 275px;
+  box-sizing: border-box;
   background: #141414;
   border-bottom: 2px solid #101010;
   padding: 5px 8px;
@@ -473,7 +475,8 @@
 
 /* ---- generic Winamp-styled window for rehoused panels -------------------- */
 .winamp-gen-window {
-  margin: 10px 0;
+  width: 275px;
+  margin: 8px auto;
   background: #1b1b1b;
   border: 2px outset #6a6a6a;
   max-width: 100%;
@@ -560,4 +563,377 @@
 /* Embedded sheet cam should fill the modal nicely */
 .winamp-modal .sc-screen {
   min-height: auto;
+}
+
+/* ===========================================================================
+ * Full-screen Winamp takeover: kill every remaining light card.
+ * The chrome is authored at 275px; React sets `zoom` on the page section so
+ * the whole column fills the viewport width. Everything below re-skins the
+ * remaining light panels (metadata, sheet music, Bach, track mixer, analyzer,
+ * SF2 explorer, recorder) into dark Winamp chrome.
+ * ========================================================================= */
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: #0b0b0d;
+  color: #d6d6d6;
+}
+
+.app {
+  background: #0b0b0d;
+  color: #d6d6d6;
+}
+
+/* ---- the MIDI page section: no more white card ---------------------------- */
+section.card.midiReader.gbk-winamp-page {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-top: 0;
+  box-shadow: none;
+}
+
+/* ---- generic dark form controls (skin buttons keep their sprites: their
+        selectors are more specific than these element rules) ---------------- */
+button {
+  background: #2e2e2e;
+  border: 1px solid;
+  border-color: #6f6f6f #161616 #161616 #6f6f6f;
+  border-radius: 0;
+  color: #e8e8e8;
+  box-shadow: none;
+}
+
+button:hover:not(:disabled),
+button:focus-visible:not(:disabled) {
+  background: #3a3a3a;
+  color: #ffffff;
+}
+
+button:disabled {
+  background: #222222;
+  border-color: #333333;
+  color: #777777;
+  box-shadow: none;
+}
+
+select,
+input[type="text"],
+input[type="search"],
+input:not([type]) {
+  background: #0d0d0d;
+  color: #e8e8e8;
+  border: 1px solid #4a4a4a;
+  border-radius: 0;
+}
+
+/* ---- toolbar buttons: dark chrome ---------------------------------------- */
+.toolbarActionBtn {
+  background: #2e2e2e;
+  border: 1px solid;
+  border-color: #6f6f6f #161616 #161616 #6f6f6f;
+  border-radius: 0;
+  color: #e8e8e8;
+  box-shadow: none;
+}
+
+.toolbarActionBtn:hover:not(:disabled),
+.toolbarActionBtn:focus-visible:not(:disabled),
+.toolbarActionBtn:focus-within:not(:disabled) {
+  background: #3a3a3a;
+  border-color: #6f6f6f #161616 #161616 #6f6f6f;
+  color: #ffffff;
+}
+
+.toolbarActionBtn.active {
+  background: #1a1a1a;
+  border-color: #161616 #6f6f6f #6f6f6f #161616;
+  color: #7dff7d;
+}
+
+.toolbarActionBtn:disabled,
+.toolbarActionBtn.disabled {
+  background: #222222;
+  border-color: #333333;
+  color: #777777;
+  box-shadow: none;
+}
+
+.toolbarSegmented {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+}
+
+.toolbarSegmented .toolbarActionBtn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.toolbarSegmented .toolbarActionBtn.active {
+  background: #1a1a1a;
+  border-color: #161616 #6f6f6f #6f6f6f #161616;
+  color: #7dff7d;
+}
+
+.toolbarGroupLabel {
+  color: #8a8a8a;
+}
+
+/* ---- dark defaults inside Winamp panels ---------------------------------- */
+.winamp-gen-body {
+  color: #cfd4da;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+}
+
+.winamp-gen-body .chip,
+.gbk-winamp-page .chip {
+  background: #262626;
+  border-color: #3a3a3a;
+  color: #bdbdbd;
+}
+
+.winamp-gen-body .songChipLabel {
+  color: #8a8a8a;
+}
+
+.winamp-gen-body strong {
+  color: #ffffff;
+}
+
+/* ---- current MIDI metadata ------------------------------------------------ */
+.gbk-winamp-page .midiMetadataPanel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  color: #cfd4da;
+}
+
+.gbk-winamp-page .midiMetadataTitle strong {
+  color: #ffffff;
+}
+
+.gbk-winamp-page .midiMetadataTracks {
+  color: #8a8a8a;
+}
+
+/* ---- sheet music preview -------------------------------------------------- */
+.gbk-winamp-page .sheetMusicPreviewPanel {
+  background: #141518;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+}
+
+.gbk-winamp-page .sheetMusicPreviewHeader strong {
+  color: #ffffff;
+}
+
+.gbk-winamp-page .sheetMusicPreviewFrame {
+  background: #0b0d10;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+}
+
+/* ---- Bach composer --------------------------------------------------------- */
+.gbk-winamp-page .bachComposerModule {
+  background: #141518;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+}
+
+.gbk-winamp-page .bachComposerControls span {
+  color: #8a8a8a;
+}
+
+/* ---- track mixer ------------------------------------------------------------ */
+.gbk-winamp-page .midiTimelineWrap {
+  background: #101214;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+}
+
+.gbk-winamp-page .midiTrackLabelRow {
+  background: #16181c;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+}
+
+.gbk-winamp-page .midiTrackLabel {
+  color: #d6d6d6;
+}
+
+.gbk-winamp-page .midiTrackLabel span {
+  color: #9aa4ae;
+}
+
+.gbk-winamp-page .mixBtn {
+  background: #2e2e2e;
+  border: 1px solid;
+  border-color: #6f6f6f #161616 #161616 #6f6f6f;
+  border-radius: 0;
+  color: #cfd4da;
+}
+
+.gbk-winamp-page .mixBtn.active {
+  background: #0a246a;
+  border-color: #4d7dd1;
+  color: #ffffff;
+}
+
+.gbk-winamp-page .ccKnobBtn {
+  background: #16181c;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+  color: #cfd4da;
+}
+
+.gbk-winamp-page .midiTrackSvg {
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+}
+
+/* ---- status lines + export progress ----------------------------------------- */
+.gbk-winamp-page .status {
+  color: #9fb3c8;
+}
+
+.gbk-winamp-page .sheetMusicStatus {
+  background: #1c1c1c;
+  border: 1px solid #3a3a3a;
+  border-radius: 0;
+  color: #9fb3c8;
+}
+
+.gbk-winamp-page .status.error {
+  color: #ff7b7b;
+}
+
+.gbk-winamp-page .exportProgressBar {
+  background: #0d0d0d;
+  border: 1px solid #3a3a3a;
+}
+
+.gbk-winamp-page .exportProgressLabel {
+  color: #9aa4ae;
+}
+
+/* ---- analyzer / dynamics panel ---------------------------------------------- */
+.fixedAnalyzerPanel {
+  background: #141518;
+  border: 2px outset #6a6a6a;
+  border-radius: 0;
+  color: #cfd4da;
+}
+
+.fixedAnalyzerPanel .dynamicsControls {
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.fixedAnalyzerPanel .dynamicsControls > label {
+  color: #ffffff;
+}
+
+.fixedAnalyzerPanel .dynamicsControls p,
+.fixedAnalyzerPanel .dynamicsHint {
+  color: #8a8a8a;
+}
+
+.fixedAnalyzerPanel .analyzerHead h2 {
+  color: #ffffff;
+  font-family: Arial, sans-serif;
+}
+
+.fixedAnalyzerPanel .analyzerBody h3 {
+  color: #9aa4ae;
+  font-family: Arial, sans-serif;
+}
+
+.audioSidebar .fixedAnalyzerPanel {
+  background: #141518;
+  border: 2px outset #6a6a6a;
+  border-radius: 0;
+}
+
+/* ---- status dock -------------------------------------------------------------- */
+.statusDock {
+  background: rgba(20, 20, 22, 0.94);
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.midiStatus {
+  color: #8a8a8a;
+}
+
+/* ---- SF2 explorer tab ----------------------------------------------------------- */
+.topToolbar.card {
+  background: #141518;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+  color: #cfd4da;
+}
+
+.sf2Panel {
+  background: #141518;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+  color: #cfd4da;
+}
+
+.sf2Panel h2,
+.sf2Panel h3,
+.sf2Panel h4 {
+  color: #ffffff;
+}
+
+.presetFilters {
+  color: #cfd4da;
+}
+
+tbody tr {
+  color: #cfd4da;
+}
+
+tbody tr:hover {
+  background: #1e3a5f;
+}
+
+tbody tr.selected {
+  background: #0a246a;
+  color: #ffffff;
+}
+
+/* ---- recorder tab ---------------------------------------------------------------- */
+.midi-recorder-ui {
+  background: #141518;
+  border: 2px outset #6a6a6a;
+  color: #cfd4da;
+  padding: 10px;
+  font-family: Arial, sans-serif;
+}
+
+.midi-recorder-ui h2,
+.midi-recorder-ui h3 {
+  color: #ffffff;
+}
+
+.recorder-error {
+  color: #ff7b7b;
+}
+
+/* ---- mobile: the page column scrolls; transport stays sticky ----------------------- */
+@media (max-width: 960px) {
+  section.card.midiReader.gbk-winamp-page {
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
 }
