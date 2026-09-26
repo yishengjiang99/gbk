@@ -264,9 +264,10 @@ test("Export WAV button triggers export progress indicator", async ({ page }) =>
 
   // Use a shorter bundled MIDI so the export completes before the test timeout.
   await page.getByRole("region", { name: "MIDI playlist" }).getByRole("button", { name: "Dr Dre - Still Dre.mid" }).click();
-  await expect(page.locator(".midiMetadataTitle")).toContainText("Dr Dre - Still Dre.mid");
+  await expect(page.locator(".gbk-dock")).toContainText("Dr Dre - Still Dre.mid");
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });
 
+  await openAppMenu(page);
   const exportBtn = page.getByRole("button", { name: "Export WAV" });
   await expect(exportBtn).toBeEnabled({ timeout: 10_000 });
 
@@ -299,7 +300,7 @@ test("playing and exporting produces a valid, non-silent WAV file", async ({ pag
 
   // Switch to a shorter bundled MIDI so offline rendering finishes in time.
   await page.getByRole("region", { name: "MIDI playlist" }).getByRole("button", { name: "Dr Dre - Still Dre.mid" }).click();
-  await expect(page.locator(".midiMetadataTitle")).toContainText("Dr Dre - Still Dre.mid");
+  await expect(page.locator(".gbk-dock")).toContainText("Dr Dre - Still Dre.mid");
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });
 
   const playBtn = page.getByRole("button", { name: "Play" });
@@ -309,6 +310,7 @@ test("playing and exporting produces a valid, non-silent WAV file", async ({ pag
   // Wait briefly so playback is active; Export WAV remains enabled while playing.
   await page.waitForTimeout(TIMER_TICK_WAIT_MS);
 
+  await openAppMenu(page);
   const exportBtn = page.getByRole("button", { name: "Export WAV" });
   await expect(exportBtn).toBeEnabled({ timeout: 10_000 });
 
@@ -357,7 +359,7 @@ test("selecting a different MIDI file from the playlist loads a new song", async
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 20_000 });
 
   await page.getByRole("region", { name: "MIDI playlist" }).getByRole("button", { name: "Dr Dre - Still Dre.mid" }).click();
-  await expect(page.locator(".midiMetadataTitle")).toContainText("Dr Dre - Still Dre.mid");
+  await expect(page.locator(".gbk-dock")).toContainText("Dr Dre - Still Dre.mid");
 
   // The transport timer should reset to 0:00 and a song should be shown
   await expect(page.locator(".transportTimer")).toContainText("0:00", { timeout: 15_000 });

@@ -687,9 +687,6 @@ export default function App() {
     }
   });
   const [dynamicsMeter, setDynamicsMeter] = useState({ compression: 0, limiting: 0 });
-  const [analyzerCollapsed, setAnalyzerCollapsed] = useState<boolean>(
-    () => window.matchMedia("(max-width: 960px)").matches
-  );
   const [didAutoLoadDefault, setDidAutoLoadDefault] = useState<boolean>(false);
   const [didAutoEnableMidi, setDidAutoEnableMidi] = useState<boolean>(false);
 
@@ -1352,7 +1349,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${activeTab === "midi" ? "hasPlaylist" : ""} ${analyzerCollapsed ? "analyzerCollapsed" : "analyzerOpen"}`}>
+    <div className="app">
       {loading && <p className="status" role="status">{loadingStage}</p>}
       {error && <p className="status error">{error}</p>}
 
@@ -1378,8 +1375,6 @@ export default function App() {
           selectedMidiInput={selectedMidiInput}
           onSelectMidiInput={setSelectedMidiInput}
           midiInputs={midiInputs}
-          analyzerCollapsed={analyzerCollapsed}
-          onToggleAnalyzer={() => setAnalyzerCollapsed((v) => !v)}
           ensureAudioInfrastructure={ensureAudioInfrastructure}
           dynamicsMode={dynamicsMode}
           getRegionsForPreset={getRegionsForPresetIndex}
@@ -1392,647 +1387,477 @@ export default function App() {
             name: p.presetName || "(unnamed)",
           }))}
           onError={(msg: string) => setAudioError(msg)}
-        />
+          onDynamicsModeChange={setDynamicsMode}
+          dynamicsCompression={dynamicsMeter.compression}
+          dynamicsLimiting={dynamicsMeter.limiting}
+          sf2View={
+            activeTab === "sf2" ? (
+              <>
+                {sf2 && showSummaryModal && (
+                            <div className="modalBackdrop" onClick={() => setShowSummaryModal(false)}>
+                              <section className="card summaryModal" onClick={(e) => e.stopPropagation()}>
+                                <h2>File Summary</h2>
+                                <p>
+                                  <strong>Source:</strong> {sourceName}
+                                </p>
+                                <p>
+                                  <strong>Presets:</strong> {presets.length}
+                                </p>
+                                <p>
+                                  <strong>Instruments:</strong> {sf2.pdta.inst.length - 1}
+                                </p>
+                                <p>
+                                  <strong>Samples:</strong> {sf2.pdta.shdr.length - 1}
+                                </p>
+                                <h3>INFO</h3>
+                                <ul className="infoList">
+                                  {Object.entries(sf2.info).map(([k, v]) => {
+                                    const raw = v || "(empty)";
+                                    const rendered =
+                                      k === "ICMT" ? String(raw).replace(/<br\s*\/?>/gi, "\n") : raw;
+                                    return (
+                                      <li key={k}>
+                                        <code>{k}</code>:{" "}
+                                        <span className={k === "ICMT" ? "infoValueMultiline" : undefined}>
+                                          {rendered}
+                                        </span>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                                <button type="button" onClick={() => setShowSummaryModal(false)}>
+                                  Close
+                                </button>
+                              </section>
+                            </div>
+                          )}
 
-      {activeTab === "recorder" && <MidiRecorderUI />}
-
-      {activeTab === "sf2" && (
-        <>
-          <header className="topToolbar card">
-            <div className="appHeaderToolbar toolbarUnified" aria-label="Main controls">
-              <div className="toolbarGroup" aria-label="View">
-                <span className="toolbarGroupLabel">View</span>
-                <div className="toolbarButtonRow toolbarSegmented">
-                  <button
-                    type="button"
-                    className={`toolbarActionBtn ${(activeTab as string) === "midi" ? "active" : ""}`}
-                    onClick={() => setActiveTab("midi")}
-                    aria-pressed={(activeTab as string) === "midi"}
-                    aria-label="MIDI Explorer"
-                    title="MIDI Explorer"
-                  >
-                    <i className="fa-solid fa-music" aria-hidden="true" />
-                    <span>MIDI</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`toolbarActionBtn ${(activeTab as string) === "sf2" ? "active" : ""}`}
-                    onClick={() => setActiveTab("sf2")}
-                    aria-pressed={(activeTab as string) === "sf2"}
-                    aria-label="SF2 Explorer"
-                    title="SF2 Explorer"
-                  >
-                    <i className="fa-solid fa-wave-square" aria-hidden="true" />
-                    <span>SF2</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`toolbarActionBtn ${(activeTab as string) === "recorder" ? "active" : ""}`}
-                    onClick={() => setActiveTab("recorder")}
-                    aria-pressed={(activeTab as string) === "recorder"}
-                    aria-label="MIDI Recorder"
-                    title="MIDI Recorder"
-                  >
-                    <i className="fa-solid fa-record-vinyl" aria-hidden="true" />
-                    <span>Recorder</span>
-                  </button>
-                </div>
-              </div>
-
-              <ToolbarMenu label="Menu" icon="fa-bars" variant="nav">
-                <NavMenuSection label="Audio">
-                  <button
-                    type="button"
-                    className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
-                    onClick={onTogglePower}
-                    aria-pressed={audioCtxState === "running"}
-                    aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
-                    title={audioCtxState === "running" ? "Power Off" : "Power On"}
-                  >
-                    <i className="fa-solid fa-power-off" aria-hidden="true" />
-                    <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
-                  </button>
-                </NavMenuSection>
-
-                <NavMenuSection label="MIDI Input">
-                  <button
-                    type="button"
-                    className={`toolbarActionBtn ${midiEnabled ? "active" : ""}`}
-                    onClick={onToggleMidi}
-                    disabled={!sf2}
-                    aria-pressed={midiEnabled}
-                    aria-label={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-                    title={midiEnabled ? "Disable MIDI" : "Enable MIDI"}
-                  >
-                    <i className="fa-solid fa-plug" aria-hidden="true" />
-                    <span>{midiEnabled ? "Disable MIDI" : "Enable MIDI"}</span>
-                  </button>
-                  <select
-                    className="toolbarSelect"
-                    value={selectedMidiInput}
-                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-                      setSelectedMidiInput(e.target.value)
-                    }
-                    disabled={!midiEnabled}
-                    aria-label="MIDI input source"
-                    title="MIDI input source"
-                  >
-                    <option value="all">All MIDI Inputs</option>
-                    {midiInputs.map((input) => (
-                      <option key={input.id} value={input.id}>
-                        {input.name}
-                      </option>
-                    ))}
-                  </select>
-                </NavMenuSection>
-
-                <NavMenuSection label="SoundFont">
-                  <label className="fileInput toolbarActionBtn toolbarFileBtn">
-                    <i className="fa-solid fa-folder-open" aria-hidden="true" />
-                    <span>Upload SF2</span>
-                    <input type="file" accept=".sf2" onChange={onUploadFile} aria-label="Upload SF2 file" />
-                  </label>
-                  <button
-                    type="button"
-                    className="toolbarActionBtn"
-                    onClick={() => onSelectSample(DEFAULT_SF2.path, DEFAULT_SF2.label)}
-                    disabled={loading}
-                    aria-label={loading ? "Loading default SF2" : "Load Default SF2"}
-                    title={loading ? "Loading default SF2" : "Load Default SF2"}
-                  >
-                    <i className={`fa-solid ${loading ? "fa-spinner fa-spin" : "fa-database"}`} aria-hidden="true" />
-                    <span>{loading ? "Loading" : "Default SF2"}</span>
-                  </button>
-                  <span className="toolbarStatusPill">
-                    <span className="toolbarStatusLabel">Loaded</span>
-                    <span className="toolbarStatusValue">{sourceName || "No SoundFont"}</span>
-                  </span>
-                </NavMenuSection>
-
-                <NavMenuSection label="Tools">
-                  <button
-                    type="button"
-                    className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
-                    onClick={() => setAnalyzerCollapsed((v) => !v)}
-                    aria-pressed={!analyzerCollapsed}
-                    aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-                    title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-                  >
-                    <i className="fa-solid fa-chart-column" aria-hidden="true" />
-                    <span>Analyzer</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="toolbarActionBtn"
-                    onClick={() => setShowSummaryModal((v) => !v)}
-                    disabled={!sf2}
-                    aria-label={showSummaryModal ? "Hide File Summary" : "Show File Summary"}
-                    title={showSummaryModal ? "Hide File Summary" : "Show File Summary"}
-                  >
-                    <i className="fa-solid fa-circle-info" aria-hidden="true" />
-                    <span>{showSummaryModal ? "Hide Summary" : "File Summary"}</span>
-                  </button>
-                  <a
-                    className="toolbarActionBtn"
-                    href="sheet-cam.html"
-                    style={{ textDecoration: "none" }}
-                    aria-label="Open Sheet Cam"
-                    title="Open Sheet Cam"
-                  >
-                    <i className="fa-solid fa-camera" aria-hidden="true" />
-                    <span>Sheet Cam</span>
-                  </a>
-                </NavMenuSection>
-              </ToolbarMenu>
-            </div>
-          </header>
-          {sf2 && showSummaryModal && (
-            <div className="modalBackdrop" onClick={() => setShowSummaryModal(false)}>
-              <section className="card summaryModal" onClick={(e) => e.stopPropagation()}>
-                <h2>File Summary</h2>
-                <p>
-                  <strong>Source:</strong> {sourceName}
-                </p>
-                <p>
-                  <strong>Presets:</strong> {presets.length}
-                </p>
-                <p>
-                  <strong>Instruments:</strong> {sf2.pdta.inst.length - 1}
-                </p>
-                <p>
-                  <strong>Samples:</strong> {sf2.pdta.shdr.length - 1}
-                </p>
-                <h3>INFO</h3>
-                <ul className="infoList">
-                  {Object.entries(sf2.info).map(([k, v]) => {
-                    const raw = v || "(empty)";
-                    const rendered =
-                      k === "ICMT" ? String(raw).replace(/<br\s*\/?>/gi, "\n") : raw;
-                    return (
-                      <li key={k}>
-                        <code>{k}</code>:{" "}
-                        <span className={k === "ICMT" ? "infoValueMultiline" : undefined}>
-                          {rendered}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <button type="button" onClick={() => setShowSummaryModal(false)}>
-                  Close
-                </button>
-              </section>
-            </div>
-          )}
-
-          {sf2 && (
-            <main className="layout sf2Layout">
-              <section className="card sf2Panel presetsPanel">
-                <div className="panelHead">
-                  <h2>Presets</h2>
-                  <span className="panelBadge">{visiblePresets.length}</span>
-                </div>
-                <div className="panelBody">
-                  <div className="presetFilters">
-                    <input
-                      type="search"
-                      placeholder="Search name/bank/program"
-                      value={presetSearch}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setPresetSearch(e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="scroll tableScroll">
-                    <table className="sf2Table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>Name</th>
-                          <th>
-                            <button
-                              type="button"
-                              className="thSort"
-                              onClick={() => onHeaderSortClick("bank")}
-                            >
-                              Bank {sortKey === "bank" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
-                            </button>
-                          </th>
-                          <th>
-                            <button
-                              type="button"
-                              className="thSort"
-                              onClick={() => onHeaderSortClick("program")}
-                            >
-                              Program{" "}
-                              {sortKey === "program" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
-                            </button>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visiblePresets.map((preset) => (
-                          <tr
-                            key={`${preset.bank}:${preset.preset}:${preset._index}`}
-                            className={selectedPreset === preset._index ? "selected" : ""}
-                            onClick={() => {
-                              setSelectedPreset(preset._index);
-                            }}
-                          >
-                            <td>{preset._index}</td>
-                            <td>{preset.presetName || "(unnamed)"}</td>
-                            <td>{preset.bank}</td>
-                            <td>{preset.preset}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </section>
-
-              <section className="card centerPanel sf2Panel detailsPanel">
-                <div className="panelHead">
-                  <h2>Program Details</h2>
-                  <span className="panelBadge">
-                    {selectedPreset == null ? "None" : `Preset #${selectedPreset}`}
-                  </span>
-                </div>
-                <div className="centerPanelScroll">
-                  {selectedPreset == null || !programDetails ? (
-                    <p>Click a program row to inspect its header, zones, and sample preview.</p>
-                  ) : (
-                    <div className="programDetails">
-                      <div className="detailBlock">
-                        <h3>MIDI Select</h3>
-                        <div className="sliderBlock">
-                          <label>
-                            MIDI note: <strong>{midiNote}</strong>
-                          </label>
-                          <input
-                            type="range"
-                            min="0"
-                            max="127"
-                            value={midiNote}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              setMidiNote(Number(e.target.value))
-                            }
-                          />
-                        </div>
-                        <div className="sliderBlock">
-                          <label>
-                            Velocity: <strong>{midiVelocity}</strong>
-                          </label>
-                          <input
-                            type="range"
-                            min="1"
-                            max="127"
-                            value={midiVelocity}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              setMidiVelocity(Number(e.target.value))
-                            }
-                          />
-                        </div>
-                      </div>
-                      <div className="detailBlock">
-                        <h3>Program Header Info</h3>
-                        <p>
-                          <strong>Name:</strong> {programDetails.header.presetName || "(unnamed)"}
-                        </p>
-                        <p>
-                          <strong>Bank:</strong> {programDetails.header.bank}
-                        </p>
-                        <p>
-                          <strong>Program:</strong> {programDetails.header.preset}
-                        </p>
-                        <p>
-                          <strong>presetBagNdx:</strong> {programDetails.header.presetBagNdx}
-                        </p>
-                        <p>
-                          <strong>library/genre/morphology:</strong>{" "}
-                          {programDetails.header.library}/{programDetails.header.genre}/
-                          {programDetails.header.morphology}
-                        </p>
-                      </div>
-
-                      <div className="detailBlock">
-                        <h3>Global Zone</h3>
-                        {programDetails.presetGlobal ? (
-                          <ul className="monoList">
-                            <li>
-                              <button
-                                type="button"
-                                className={`layerButton ${
-                                  selectedLayer?.type === "presetGlobal" ? "selected" : ""
-                                }`}
-                                onClick={() =>
-                                  setSelectedLayer({
-                                    type: "presetGlobal",
-                                    title: `Preset global ${programDetails.presetGlobal!.bagIndex}`,
-                                    context: "global zone",
-                                    levels: [
-                                      {
-                                        label: `Preset global bag ${programDetails.presetGlobal!.bagIndex}`,
-                                        gens: programDetails.presetGlobal!.gens,
-                                        mods: programDetails.presetGlobal!.mods,
-                                      },
-                                    ],
-                                    bagIndex: programDetails.presetGlobal!.bagIndex,
-                                  })
-                                }
-                              >
-                                bag {programDetails.presetGlobal.bagIndex}:{" "}
-                                {programDetails.presetGlobal.gens.length} generators /{" "}
-                                {programDetails.presetGlobal.mods.length} modulators
-                              </button>
-                            </li>
-                          </ul>
-                        ) : (
-                          <p>None</p>
-                        )}
-                      </div>
-
-                      <div className="detailBlock">
-                        <h3>Region Layer</h3>
-                        {programDetails.regionZones.length === 0 ? (
-                          <p>No preset regions</p>
-                        ) : (
-                          <ul className="monoList">
-                            {programDetails.regionZones.map((zone) => {
-                              const instIndex = getLastGeneratorAmount(zone.gens, 41);
-                              const { keyLo, keyHi, velLo, velHi } = zoneKeyVel(zone);
-                              const isSelected =
-                                selectedLayer?.type === "region" &&
-                                selectedLayer?.bagIndex === zone.bagIndex;
-                              return (
-                                <li key={`rz-${zone.bagIndex}`}>
+                          {sf2 && (
+                            <main className="layout sf2Layout">
+                              <section className="card sf2Panel presetsPanel">
+                                <div className="panelHead">
+                                  <h2>Presets</h2>
+                                  <span className="panelBadge">{visiblePresets.length}</span>
                                   <button
                                     type="button"
-                                    className={`layerButton ${isSelected ? "selected" : ""}`}
-                                    onClick={() =>
-                                      setSelectedLayer(
-                                        buildSelectionFromRegion(
-                                          programDetails,
-                                          zone,
-                                          midiNote,
-                                          midiVelocity
-                                        )
-                                      )
-                                    }
+                                    className="toolbarActionBtn"
+                                    onClick={() => setShowSummaryModal((v) => !v)}
+                                    disabled={!sf2}
+                                    aria-label={showSummaryModal ? "Hide File Summary" : "Show File Summary"}
+                                    title={showSummaryModal ? "Hide File Summary" : "Show File Summary"}
                                   >
-                                    bag {zone.bagIndex}: instrument {instIndex}, key {keyLo}-{keyHi},
-                                    vel {velLo}-{velHi}
+                                    <i className="fa-solid fa-circle-info" aria-hidden="true" />
+                                    <span>{showSummaryModal ? "Hide Summary" : "File Summary"}</span>
                                   </button>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </div>
-
-                      <div className="detailBlock">
-                        <h3>Instrument Layer</h3>
-                        {programDetails.instruments.length === 0 ? (
-                          <p>No instruments referenced</p>
-                        ) : (
-                          <div className="instrumentBlocks">
-                            {programDetails.instruments.map((inst) => (
-                              <div key={`inst-${inst.index}`} className="instBlock">
-                                <p>
-                                  <strong>{inst.index}</strong> {inst.name || "(unnamed)"}
-                                </p>
-                                {inst.globalZone ? (
-                                  <p>
-                                    <strong>Global:</strong>{" "}
-                                    <button
-                                      type="button"
-                                      className={`layerButton ${
-                                        selectedLayer?.type === "instrumentGlobal" &&
-                                        selectedLayer?.bagIndex === inst.globalZone.bagIndex
-                                          ? "selected"
-                                          : ""
-                                      }`}
-                                      onClick={() =>
-                                        setSelectedLayer(
-                                          buildSelectionFromInstrumentGlobal(
-                                            programDetails,
-                                            inst,
-                                            midiNote,
-                                            midiVelocity
-                                          )
-                                        )
+                                </div>
+                                <div className="panelBody">
+                                  <div className="presetFilters">
+                                    <input
+                                      type="search"
+                                      placeholder="Search name/bank/program"
+                                      value={presetSearch}
+                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                        setPresetSearch(e.target.value)
                                       }
-                                    >
-                                      {inst.globalZone.gens.length} generators /{" "}
-                                      {inst.globalZone.mods.length} modulators
-                                    </button>
-                                  </p>
-                                ) : (
-                                  <p>
-                                    <strong>Global:</strong> None
-                                  </p>
-                                )}
-                                <ul className="monoList">
-                                  {inst.sampleZones.map((zone) => (
-                                    <li
-                                      key={`iz-${inst.index}-${zone.bagIndex}`}
-                                      className="sampleZoneRow"
-                                    >
+                                    />
+                                  </div>
+                                  <div className="scroll tableScroll">
+                                    <table className="sf2Table">
+                                      <thead>
+                                        <tr>
+                                          <th>#</th>
+                                          <th>Name</th>
+                                          <th>
+                                            <button
+                                              type="button"
+                                              className="thSort"
+                                              onClick={() => onHeaderSortClick("bank")}
+                                            >
+                                              Bank {sortKey === "bank" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
+                                            </button>
+                                          </th>
+                                          <th>
+                                            <button
+                                              type="button"
+                                              className="thSort"
+                                              onClick={() => onHeaderSortClick("program")}
+                                            >
+                                              Program{" "}
+                                              {sortKey === "program" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
+                                            </button>
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {visiblePresets.map((preset) => (
+                                          <tr
+                                            key={`${preset.bank}:${preset.preset}:${preset._index}`}
+                                            className={selectedPreset === preset._index ? "selected" : ""}
+                                            onClick={() => {
+                                              setSelectedPreset(preset._index);
+                                            }}
+                                          >
+                                            <td>{preset._index}</td>
+                                            <td>{preset.presetName || "(unnamed)"}</td>
+                                            <td>{preset.bank}</td>
+                                            <td>{preset.preset}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </section>
+
+                              <section className="card centerPanel sf2Panel detailsPanel">
+                                <div className="panelHead">
+                                  <h2>Program Details</h2>
+                                  <span className="panelBadge">
+                                    {selectedPreset == null ? "None" : `Preset #${selectedPreset}`}
+                                  </span>
+                                </div>
+                                <div className="centerPanelScroll">
+                                  {selectedPreset == null || !programDetails ? (
+                                    <p>Click a program row to inspect its header, zones, and sample preview.</p>
+                                  ) : (
+                                    <div className="programDetails">
+                                      <div className="detailBlock">
+                                        <h3>MIDI Select</h3>
+                                        <div className="sliderBlock">
+                                          <label>
+                                            MIDI note: <strong>{midiNote}</strong>
+                                          </label>
+                                          <input
+                                            type="range"
+                                            min="0"
+                                            max="127"
+                                            value={midiNote}
+                                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                              setMidiNote(Number(e.target.value))
+                                            }
+                                          />
+                                        </div>
+                                        <div className="sliderBlock">
+                                          <label>
+                                            Velocity: <strong>{midiVelocity}</strong>
+                                          </label>
+                                          <input
+                                            type="range"
+                                            min="1"
+                                            max="127"
+                                            value={midiVelocity}
+                                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                              setMidiVelocity(Number(e.target.value))
+                                            }
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="detailBlock">
+                                        <h3>Program Header Info</h3>
+                                        <p>
+                                          <strong>Name:</strong> {programDetails.header.presetName || "(unnamed)"}
+                                        </p>
+                                        <p>
+                                          <strong>Bank:</strong> {programDetails.header.bank}
+                                        </p>
+                                        <p>
+                                          <strong>Program:</strong> {programDetails.header.preset}
+                                        </p>
+                                        <p>
+                                          <strong>presetBagNdx:</strong> {programDetails.header.presetBagNdx}
+                                        </p>
+                                        <p>
+                                          <strong>library/genre/morphology:</strong>{" "}
+                                          {programDetails.header.library}/{programDetails.header.genre}/
+                                          {programDetails.header.morphology}
+                                        </p>
+                                      </div>
+
+                                      <div className="detailBlock">
+                                        <h3>Global Zone</h3>
+                                        {programDetails.presetGlobal ? (
+                                          <ul className="monoList">
+                                            <li>
+                                              <button
+                                                type="button"
+                                                className={`layerButton ${
+                                                  selectedLayer?.type === "presetGlobal" ? "selected" : ""
+                                                }`}
+                                                onClick={() =>
+                                                  setSelectedLayer({
+                                                    type: "presetGlobal",
+                                                    title: `Preset global ${programDetails.presetGlobal!.bagIndex}`,
+                                                    context: "global zone",
+                                                    levels: [
+                                                      {
+                                                        label: `Preset global bag ${programDetails.presetGlobal!.bagIndex}`,
+                                                        gens: programDetails.presetGlobal!.gens,
+                                                        mods: programDetails.presetGlobal!.mods,
+                                                      },
+                                                    ],
+                                                    bagIndex: programDetails.presetGlobal!.bagIndex,
+                                                  })
+                                                }
+                                              >
+                                                bag {programDetails.presetGlobal.bagIndex}:{" "}
+                                                {programDetails.presetGlobal.gens.length} generators /{" "}
+                                                {programDetails.presetGlobal.mods.length} modulators
+                                              </button>
+                                            </li>
+                                          </ul>
+                                        ) : (
+                                          <p>None</p>
+                                        )}
+                                      </div>
+
+                                      <div className="detailBlock">
+                                        <h3>Region Layer</h3>
+                                        {programDetails.regionZones.length === 0 ? (
+                                          <p>No preset regions</p>
+                                        ) : (
+                                          <ul className="monoList">
+                                            {programDetails.regionZones.map((zone) => {
+                                              const instIndex = getLastGeneratorAmount(zone.gens, 41);
+                                              const { keyLo, keyHi, velLo, velHi } = zoneKeyVel(zone);
+                                              const isSelected =
+                                                selectedLayer?.type === "region" &&
+                                                selectedLayer?.bagIndex === zone.bagIndex;
+                                              return (
+                                                <li key={`rz-${zone.bagIndex}`}>
+                                                  <button
+                                                    type="button"
+                                                    className={`layerButton ${isSelected ? "selected" : ""}`}
+                                                    onClick={() =>
+                                                      setSelectedLayer(
+                                                        buildSelectionFromRegion(
+                                                          programDetails,
+                                                          zone,
+                                                          midiNote,
+                                                          midiVelocity
+                                                        )
+                                                      )
+                                                    }
+                                                  >
+                                                    bag {zone.bagIndex}: instrument {instIndex}, key {keyLo}-{keyHi},
+                                                    vel {velLo}-{velHi}
+                                                  </button>
+                                                </li>
+                                              );
+                                            })}
+                                          </ul>
+                                        )}
+                                      </div>
+
+                                      <div className="detailBlock">
+                                        <h3>Instrument Layer</h3>
+                                        {programDetails.instruments.length === 0 ? (
+                                          <p>No instruments referenced</p>
+                                        ) : (
+                                          <div className="instrumentBlocks">
+                                            {programDetails.instruments.map((inst) => (
+                                              <div key={`inst-${inst.index}`} className="instBlock">
+                                                <p>
+                                                  <strong>{inst.index}</strong> {inst.name || "(unnamed)"}
+                                                </p>
+                                                {inst.globalZone ? (
+                                                  <p>
+                                                    <strong>Global:</strong>{" "}
+                                                    <button
+                                                      type="button"
+                                                      className={`layerButton ${
+                                                        selectedLayer?.type === "instrumentGlobal" &&
+                                                        selectedLayer?.bagIndex === inst.globalZone.bagIndex
+                                                          ? "selected"
+                                                          : ""
+                                                      }`}
+                                                      onClick={() =>
+                                                        setSelectedLayer(
+                                                          buildSelectionFromInstrumentGlobal(
+                                                            programDetails,
+                                                            inst,
+                                                            midiNote,
+                                                            midiVelocity
+                                                          )
+                                                        )
+                                                      }
+                                                    >
+                                                      {inst.globalZone.gens.length} generators /{" "}
+                                                      {inst.globalZone.mods.length} modulators
+                                                    </button>
+                                                  </p>
+                                                ) : (
+                                                  <p>
+                                                    <strong>Global:</strong> None
+                                                  </p>
+                                                )}
+                                                <ul className="monoList">
+                                                  {inst.sampleZones.map((zone) => (
+                                                    <li
+                                                      key={`iz-${inst.index}-${zone.bagIndex}`}
+                                                      className="sampleZoneRow"
+                                                    >
+                                                      <button
+                                                        type="button"
+                                                        className={`layerButton ${
+                                                          selectedLayer?.type === "instrumentRegion" &&
+                                                          selectedLayer?.bagIndex === zone.bagIndex
+                                                            ? "selected"
+                                                            : ""
+                                                        }`}
+                                                        onClick={() =>
+                                                          setSelectedLayer(
+                                                            buildSelectionFromInstrumentRegion(
+                                                              programDetails,
+                                                              inst,
+                                                              zone,
+                                                              midiNote,
+                                                              midiVelocity
+                                                            )
+                                                          )
+                                                        }
+                                                      >
+                                                        bag {zone.bagIndex}: sample {zone.sampleID} ({zone.sampleName}
+                                                        ) @ {zone.sampleRate}Hz
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        className="samplePlayButton"
+                                                        title={`Play sample ${zone.sampleID} (${zone.sampleName}) raw`}
+                                                        onClick={() => playRawSample(zone.sampleID)}
+                                                      >
+                                                        ▶
+                                                      </button>
+                                                    </li>
+                                                  ))}
+                                                </ul>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </section>
+
+                              <div className="rightStack">
+                                <section className="card sf2Panel samplePanel">
+                                  <div className="panelHead">
+                                    <h2>PCM Sample Preview</h2>
+                                    <span className="panelBadge">Audio</span>
+                                  </div>
+                                  <div className="panelBody">
+                                    <div className="playControls">
                                       <button
                                         type="button"
-                                        className={`layerButton ${
-                                          selectedLayer?.type === "instrumentRegion" &&
-                                          selectedLayer?.bagIndex === zone.bagIndex
-                                            ? "selected"
-                                            : ""
-                                        }`}
-                                        onClick={() =>
-                                          setSelectedLayer(
-                                            buildSelectionFromInstrumentRegion(
-                                              programDetails,
-                                              inst,
-                                              zone,
-                                              midiNote,
-                                              midiVelocity
-                                            )
-                                          )
-                                        }
+                                        onClick={onPlaySample}
+                                        disabled={selectedPreset == null || !sf2}
                                       >
-                                        bag {zone.bagIndex}: sample {zone.sampleID} ({zone.sampleName}
-                                        ) @ {zone.sampleRate}Hz
+                                        Play Sample
                                       </button>
-                                      <button
-                                        type="button"
-                                        className="samplePlayButton"
-                                        title={`Play sample ${zone.sampleID} (${zone.sampleName}) raw`}
-                                        onClick={() => playRawSample(zone.sampleID)}
-                                      >
-                                        ▶
-                                      </button>
-                                    </li>
-                                  ))}
-                                </ul>
+                                      <span className="audioState">
+                                        {audioReady ? "Audio ready" : "Audio not initialized"}
+                                      </span>
+                                    </div>
+                                    {audioError ? <p className="status error">{audioError}</p> : null}
+                                    {selectedPreset == null || !programDetails?.previewRegion ? (
+                                      <p>Waveform appears when the selected program has playable regions.</p>
+                                    ) : (
+                                      <>
+                                        <WaveformCanvas data={programDetails.previewRegion.sample.dataL} />
+                                        <p>
+                                          <strong>Frames:</strong>{" "}
+                                          {programDetails.previewRegion.sample.dataL.length}{" "}
+                                          <strong>Sample Rate:</strong>{" "}
+                                          {programDetails.previewRegion.sample.sampleRate}
+                                        </p>
+                                      </>
+                                    )}
+                                  </div>
+                                </section>
+                                <section className="card sf2Panel levelPanel">
+                                  <div className="panelHead">
+                                    <h2>Level Details</h2>
+                                  </div>
+                                  {selectedPreset == null || !programDetails ? (
+                                    <p>Select a program to inspect layer generators and modulators.</p>
+                                  ) : !selectedLayer ? (
+                                    <p>
+                                      No matching layer for note {midiNote} velocity {midiVelocity}. Click a region
+                                      or instrument layer to inspect it directly.
+                                    </p>
+                                  ) : (
+                                    <div className="scroll">
+                                      <p>
+                                        <strong>{selectedLayer.title}</strong> ({selectedLayer.context})
+                                      </p>
+                                      {(selectedLayer.levels ?? []).map((level, idx) => (
+                                        <div
+                                          key={`${selectedLayer.type}-${selectedLayer.bagIndex}-level-${idx}`}
+                                          className="levelBlock"
+                                        >
+                                          <p>
+                                            <strong>{level.label}</strong>
+                                          </p>
+                                          {(() => {
+                                            const r = rangeFromGenerators(level.gens);
+                                            return (
+                                              <p className="levelRangeCompact">
+                                                MIDI {r.keyLo}-{r.keyHi} | Vel {r.velLo}-{r.velHi}
+                                              </p>
+                                            );
+                                          })()}
+                                          <table>
+                                            <thead>
+                                              <tr>
+                                                <th>Kind</th>
+                                                <th>Operator/Route</th>
+                                                <th>Value</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {(level.gens ?? []).map((g, gIdx) => (
+                                                <tr key={`g-${idx}-${gIdx}`}>
+                                                  <td>generator</td>
+                                                  <td>{GEN_OPER_NAMES[g.oper] ?? `op${g.oper}`}</td>
+                                                  <td>{formatGeneratorValue(g)}</td>
+                                                </tr>
+                                              ))}
+                                              {(level.mods ?? []).map((m, mIdx) => (
+                                                <tr key={`m-${idx}-${mIdx}`}>
+                                                  <td>modulator</td>
+                                                  <td>
+                                                    src {m.srcOper} → {formatModTarget(m)}
+                                                  </td>
+                                                  <td>
+                                                    amount {m.amount}, amtSrc {m.amtSrcOper}, trans {m.transOper}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </section>
                               </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
+                            </main>
+                          )}
+              </>
+            ) : null
+          }
+          recorderView={activeTab === "recorder" ? <MidiRecorderUI /> : null}
+          midiStatus={midiStatus}
+        />
 
-              <div className="rightStack">
-                <section className="card sf2Panel samplePanel">
-                  <div className="panelHead">
-                    <h2>PCM Sample Preview</h2>
-                    <span className="panelBadge">Audio</span>
-                  </div>
-                  <div className="panelBody">
-                    <div className="playControls">
-                      <button
-                        type="button"
-                        onClick={onPlaySample}
-                        disabled={selectedPreset == null || !sf2}
-                      >
-                        Play Sample
-                      </button>
-                      <span className="audioState">
-                        {audioReady ? "Audio ready" : "Audio not initialized"}
-                      </span>
-                    </div>
-                    {audioError ? <p className="status error">{audioError}</p> : null}
-                    {selectedPreset == null || !programDetails?.previewRegion ? (
-                      <p>Waveform appears when the selected program has playable regions.</p>
-                    ) : (
-                      <>
-                        <WaveformCanvas data={programDetails.previewRegion.sample.dataL} />
-                        <p>
-                          <strong>Frames:</strong>{" "}
-                          {programDetails.previewRegion.sample.dataL.length}{" "}
-                          <strong>Sample Rate:</strong>{" "}
-                          {programDetails.previewRegion.sample.sampleRate}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </section>
-                <section className="card sf2Panel levelPanel">
-                  <div className="panelHead">
-                    <h2>Level Details</h2>
-                  </div>
-                  {selectedPreset == null || !programDetails ? (
-                    <p>Select a program to inspect layer generators and modulators.</p>
-                  ) : !selectedLayer ? (
-                    <p>
-                      No matching layer for note {midiNote} velocity {midiVelocity}. Click a region
-                      or instrument layer to inspect it directly.
-                    </p>
-                  ) : (
-                    <div className="scroll">
-                      <p>
-                        <strong>{selectedLayer.title}</strong> ({selectedLayer.context})
-                      </p>
-                      {(selectedLayer.levels ?? []).map((level, idx) => (
-                        <div
-                          key={`${selectedLayer.type}-${selectedLayer.bagIndex}-level-${idx}`}
-                          className="levelBlock"
-                        >
-                          <p>
-                            <strong>{level.label}</strong>
-                          </p>
-                          {(() => {
-                            const r = rangeFromGenerators(level.gens);
-                            return (
-                              <p className="levelRangeCompact">
-                                MIDI {r.keyLo}-{r.keyHi} | Vel {r.velLo}-{r.velHi}
-                              </p>
-                            );
-                          })()}
-                          <table>
-                            <thead>
-                              <tr>
-                                <th>Kind</th>
-                                <th>Operator/Route</th>
-                                <th>Value</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(level.gens ?? []).map((g, gIdx) => (
-                                <tr key={`g-${idx}-${gIdx}`}>
-                                  <td>generator</td>
-                                  <td>{GEN_OPER_NAMES[g.oper] ?? `op${g.oper}`}</td>
-                                  <td>{formatGeneratorValue(g)}</td>
-                                </tr>
-                              ))}
-                              {(level.mods ?? []).map((m, mIdx) => (
-                                <tr key={`m-${idx}-${mIdx}`}>
-                                  <td>modulator</td>
-                                  <td>
-                                    src {m.srcOper} → {formatModTarget(m)}
-                                  </td>
-                                  <td>
-                                    amount {m.amount}, amtSrc {m.amtSrcOper}, trans {m.transOper}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
-              </div>
-            </main>
-          )}
-        </>
-      )}
 
-      <div className={activeTab === "midi" ? "audioSidebar" : undefined}>
-      <aside className={`fixedAnalyzerPanel card ${analyzerCollapsed ? "collapsed" : ""}`}>
-        <div className="dynamicsControls" aria-label="Master dynamics">
-          <label htmlFor="master-dynamics-mode">Dynamic compression</label>
-          <select id="master-dynamics-mode" value={dynamicsMode}
-            onChange={(event) => {
-              if (isDynamicsMode(event.target.value)) setDynamicsMode(event.target.value);
-            }}>
-            {DYNAMICS_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-          </select>
-          <p>{DYNAMICS_MODES.find((mode) => mode.value === dynamicsMode)?.description}</p>
-          <div className="dynamicsMeterRow">
-            <label htmlFor="compression-reduction">Reduction</label>
-            <meter id="compression-reduction" min={0} max={12}
-              value={audioCtxState === "running" && dynamicsMode !== "off" ? dynamicsMeter.compression : 0} />
-            <output htmlFor="compression-reduction" aria-live="off">
-              {audioCtxState === "running" && dynamicsMode !== "off" ? dynamicsMeter.compression.toFixed(1) : "0.0"} dB
-            </output>
-          </div>
-          <span className="dynamicsHint">
-            {dynamicsMode === "off" ? "Playback + WAV export" : `Playback + WAV export · Peak ceiling −1 dBFS${audioCtxState === "running" && dynamicsMeter.limiting > 0.1 ? ` · Limiting ${dynamicsMeter.limiting.toFixed(1)} dB` : ""}`}
-          </span>
-        </div>
-        <div className="analyzerHead">
-          <h2>{analyzerCollapsed ? "Viz" : "Analyzer"}</h2>
-          <button type="button" onClick={() => setAnalyzerCollapsed((v) => !v)}>
-            {analyzerCollapsed ? "Open" : "Collapse"}
-          </button>
-        </div>
-        {!analyzerCollapsed && (
-          <div className="analyzerBody">
-            <h3>Recent Time Domain</h3>
-            <AnalyzerCanvas data={recentTimeData} mode="time" testId="analyzer-time" />
-            <h3>Recent Frequency Domain</h3>
-            <AnalyzerCanvas data={recentFreqData} mode="freq" testId="analyzer-frequency" />
-          </div>
-        )}
-      </aside>
-      </div>
 
-      <div className="statusDock">
-        <span className="midiStatus">{midiStatus}</span>
-        <span className="midiStatus">Audio: {audioCtxState}</span>
-        <span className="midiStatus statusDockHint">Keyboard: a w s e d f t g y h</span>
+      {/* Hidden analyzer probe: keeps the analyser node connected so the
+          folded Winamp waveform (and any signal diagnostics) keep receiving
+          live time-domain data. */}
+      <div style={{ display: "none" }} aria-hidden="true">
+        <AnalyzerCanvas data={recentTimeData} mode="time" testId="analyzer-time" />
       </div>
     </div>
   );

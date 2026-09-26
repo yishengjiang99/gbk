@@ -1,13 +1,23 @@
 import { expect, type Page } from "@playwright/test";
 
 export async function openAppMenu(page: Page) {
-  const menu = page.locator("details.navMenu");
-  if (!(await menu.getAttribute("open"))) {
-    await menu.locator("summary").click();
+  const toggle = page.getByRole("button", { name: "Player menu" });
+  const panel = page.locator(".winamp-menu-panel");
+  if (!(await panel.isVisible())) {
+    await toggle.click();
   }
-  await expect(menu).toHaveAttribute("open", "");
+  await expect(panel).toBeVisible();
+}
+
+export async function closeAppMenu(page: Page) {
+  const toggle = page.getByRole("button", { name: "Player menu" });
+  const panel = page.locator(".winamp-menu-panel");
+  if (await panel.isVisible()) {
+    await toggle.click();
+  }
+  await expect(panel).not.toBeVisible();
 }
 
 export async function waitForSf2Ready(page: Page) {
-  await expect(page.getByText("GeneralUser-GS.sf2")).toBeAttached({ timeout: 30_000 });
+  await expect(page.locator("#webamp")).toHaveAttribute("data-sf2-ready", "true", { timeout: 60_000 });
 }

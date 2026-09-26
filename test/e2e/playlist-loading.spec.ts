@@ -8,7 +8,7 @@ test("Play queues while SoundFont downloads and starts when ready", async ({ pag
     await route.continue();
   });
   await page.goto("/gbk/");
-  await expect(page.locator(".midiMetadataTitle")).toBeVisible();
+  await expect(page.locator(".gbk-dock")).toBeVisible();
   await expect(page.getByRole("status")).toContainText("Downloading SoundFont");
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect(page.getByRole("button", { name: "Cancel pending playback" })).toBeVisible();
@@ -30,7 +30,7 @@ test("failed SoundFont loading can be retried with Play; playlist works without 
   await page.getByRole("searchbox", { name: "Search playlist" }).fill("Still Dre");
   await expect(playlist.locator(".midiPlaylistTrack")).toHaveCount(1);
   await playlist.locator(".midiPlaylistTrack").click();
-  await expect(page.locator(".midiMetadataTitle")).toContainText("Dr Dre - Still Dre.mid");
+  await expect(page.locator(".gbk-dock")).toContainText("Dr Dre - Still Dre.mid");
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible({ timeout: 30000 });
   expect(attempts).toBe(2);

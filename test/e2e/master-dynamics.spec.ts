@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { openAppMenu, waitForSf2Ready } from "./app-menu.ts";
+import { closeAppMenu, openAppMenu, waitForSf2Ready } from "./app-menu.ts";
 
 function loudChordMidi(): Buffer {
   const events = [0, 0xc0, 61]; // Brass section; a short, deliberately loud tutti.
@@ -61,21 +61,23 @@ test("browser AudioWorklet and offline mastering produce the same stereo samples
 test("orchestral controls persist and live keyboard audio reaches the processed analyzer", async ({ page }) => {
   await page.goto("/");
   await waitForSf2Ready(page);
+  await openAppMenu(page);
   const mode = page.getByLabel("Dynamic compression", { exact: true });
   await expect(mode).toHaveValue("epic");
   await mode.selectOption("gentle");
   await page.reload();
-  await expect(mode).toHaveValue("gentle");
   await waitForSf2Ready(page);
+  await openAppMenu(page);
+  await expect(mode).toHaveValue("gentle");
   await expect(page.getByRole("button", { name: "Export WAV", exact: true })).toBeEnabled();
   await mode.selectOption("off");
-  await openAppMenu(page);
   await page.getByRole("button", { name: "Power On", exact: true }).click();
-  await expect(page.locator(".statusDock")).toContainText("Audio: running");
-  await page.locator("h2").first().click(); // Move keyboard focus off the select.
+  await expect(page.locator(".gbk-dock")).toContainText("Audio: running");
+  await closeAppMenu(page); // Move keyboard focus off the select.
   await page.keyboard.down("a");
   await expect.poll(async () => Number(await page.getByTestId("analyzer-time").getAttribute("data-signal-peak"))).toBeGreaterThan(0.001);
   await page.keyboard.up("a");
+  await openAppMenu(page);
   await mode.selectOption("epic");
   await expect(mode).toHaveValue("epic");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -89,15 +91,18 @@ test("MIDI playback meters compression and WAV exports respect the selected mode
   await page.getByLabel("Import MIDI file", { exact: true }).setInputFiles({
     name: "orchestral-tutti.mid", mimeType: "audio/midi", buffer: loudChordMidi(),
   });
-  await expect(page.locator(".midiMetadataTitle")).toContainText("orchestral-tutti.mid");
+  await expect(page.locator(".gbk-dock")).toContainText("orchestral-tutti.mid");
   await page.getByRole("button", { name: "Play", exact: true }).click();
+  await openAppMenu(page);
   await expect.poll(async () => Number(await page.getByLabel("Reduction", { exact: true }).getAttribute("value"))).toBeGreaterThan(0.5);
+  await closeAppMenu(page);
   const pause = page.getByRole("button", { name: "Pause", exact: true });
   if (await pause.isVisible()) await pause.click();
 
   const peaks: Record<string, number> = {};
   const data: Buffer[] = [];
   for (const mode of ["epic", "off"]) {
+    await openAppMenu(page);
     await page.getByLabel("Dynamic compression", { exact: true }).selectOption(mode);
     const pending = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export WAV", exact: true }).click();
@@ -109,6 +114,7 @@ test("MIDI playback meters compression and WAV exports respect the selected mode
     let peak = 0;
     for (let i = 44; i < wav.length; i += 2) peak = Math.max(peak, Math.abs(wav.readInt16LE(i)) / 32768);
     peaks[mode] = peak;
+    await openAppMenu(page);
     await expect(page.getByRole("button", { name: "Export WAV", exact: true })).toBeEnabled();
   }
   expect(peaks.epic).toBeGreaterThan(0.1);

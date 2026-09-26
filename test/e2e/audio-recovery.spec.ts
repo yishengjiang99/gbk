@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { closeAppMenu, openAppMenu } from "./app-menu.ts";
 
 test("playback rebuilds the master bus and track nodes after the audio context closes", async ({ page }) => {
   const cdp = await page.context().newCDPSession(page);
@@ -17,7 +18,9 @@ test("playback rebuilds the master bus and track nodes after the audio context c
     };
   ` });
   await page.goto("/");
+  await openAppMenu(page);
   await expect(page.getByRole("button", { name: "Export WAV", exact: true })).toBeEnabled();
+  await closeAppMenu(page);
   await page.getByRole("button", { name: "Play", exact: true }).click();
   const peak = () => page.getByTestId("analyzer-time").getAttribute("data-signal-peak").then(Number);
   await expect.poll(peak).toBeGreaterThan(0.002);
@@ -27,10 +30,10 @@ test("playback rebuilds the master bus and track nodes after the audio context c
     expression: "window.audioContexts[window.audioContexts.length - 1].close()", awaitPromise: true,
   });
   expect(closed.exceptionDetails).toBeUndefined();
-  await expect(page.locator(".statusDock")).toContainText("Audio: closed");
+  await expect(page.locator(".gbk-dock")).toContainText("Audio: closed");
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
-  await expect(page.locator(".statusDock")).toContainText("Audio: running");
+  await expect(page.locator(".gbk-dock")).toContainText("Audio: running");
   await expect(page.getByText(/Cannot resume a closed AudioContext/)).not.toBeVisible();
   const result = await cdp.send("Runtime.evaluate", {
     expression: `JSON.stringify({

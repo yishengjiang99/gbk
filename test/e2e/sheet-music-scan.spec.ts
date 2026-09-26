@@ -69,20 +69,27 @@ test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page 
   };
 
   await test.step("scan status reflects real detection", async () => {
+    await expect(page.locator(".winamp-modal .sheetMusicStatus")).not.toContainText(/Sweden transcription demo/i);
+    await page.getByRole("button", { name: /Close Sheet Music/ }).click();
+    await openAppMenu(page);
+    await page.getByRole("button", { name: /Current MIDI/i }).click();
     const metadata = page.getByLabel("MIDI metadata");
     await expect(metadata).toBeVisible({ timeout: 30_000 });
     await expect(metadata).toContainText("sweden-scan.mid");
     await expect(metadata).toContainText("Generated");
     await expect(metadata).toContainText(`${generatedSong.tracks.length} tracks`);
-    await expect(page.locator(".sheetMusicStatus")).not.toContainText(/Sweden transcription demo/i);
+    await page.getByRole("button", { name: /Close Current MIDI/ }).click();
   });
 
   await test.step("generated scan loads into regular MIDI Explorer tracks", async () => {
+    await openAppMenu(page);
+    await page.getByRole("button", { name: /Track Mixer/i }).click();
     await expect(page.locator(".midiTimelineWrap")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".midiTrackLabelRow")).toHaveCount(generatedSong.tracks.length);
     await expect(page.locator(".midiTrackSvgRow")).toHaveCount(generatedSong.tracks.length);
     await expect(page.locator(".midiTrackSvg rect[fill='#2d6a93']").first()).toBeVisible();
     await expect(page.locator(".midiTrackSvg rect[fill='#2d6a93']")).toHaveCount(generatedNotes.length);
+    await page.getByRole("button", { name: /Close Track Mixer/ }).click();
     await expect(page.getByRole("button", { name: "Play", exact: true })).toBeEnabled();
   });
 
@@ -116,17 +123,23 @@ test("scan sheet music image imports generated MIDI", async ({ page }) => {
 
   await waitForSf2Ready(page);
 
+  await openAppMenu(page);
   await page.getByLabel("Scan or upload sheet music").setInputFiles(fixturePath);
   await expect(page.getByLabel("Displayed sheet music")).toContainText("dieLetzteKompanie.jpg");
   await page.getByRole("button", { name: "Convert previewed sheet music to MIDI" }).click();
 
+  await page.getByRole("button", { name: /Close Sheet Music/ }).click();
+
+  await openAppMenu(page);
+  await page.getByRole("button", { name: /Current MIDI/i }).click();
   const metadata = page.getByLabel("MIDI metadata");
   await expect(metadata).toBeVisible({ timeout: 30_000 });
   await expect(metadata.getByText("Generated")).toBeVisible();
   await expect(metadata).toContainText("dieLetzteKompanie-scan.mid");
   await expect(metadata).toContainText(/tracks/);
   await expect(metadata).toContainText(/1[0-9] notes|[2-8][0-9] notes/);
+  await page.getByRole("button", { name: /Close Current MIDI/ }).click();
 
-  await expect(page.locator(".sheetMusicStatus")).toContainText(/Detected \d+ staff groups?, \d+ notehead candidates?, and imported \d+ MIDI notes?/i);
-  await expect(page.locator(".sheetMusicStatus")).not.toContainText(/Sweden transcription demo/i);
+  await expect(page.locator(".gbk-content .sheetMusicStatus")).toContainText(/Detected \d+ staff groups?, \d+ notehead candidates?, and imported \d+ MIDI notes?/i);
+  await expect(page.locator(".gbk-content .sheetMusicStatus")).not.toContainText(/Sweden transcription demo/i);
 });

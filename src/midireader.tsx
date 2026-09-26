@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { NavMenuSection } from "./toolbar-menu.tsx";
 import type { SF2Region } from "../sf2-parser.ts";
@@ -23,7 +23,7 @@ import {
   type BachLength,
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
-import { applyMasterDynamicsToBuffer, type DynamicsMode } from "./master-dynamics.ts";
+import { applyMasterDynamicsToBuffer, DYNAMICS_MODES, isDynamicsMode, type DynamicsMode } from "./master-dynamics.ts";
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 
@@ -404,12 +404,15 @@ interface MidiReaderProps {
   selectedMidiInput: string;
   onSelectMidiInput: (id: string) => void;
   midiInputs?: { id: string; name: string }[];
-  analyzerCollapsed: boolean;
-  onToggleAnalyzer: () => void;
   ensureAudioInfrastructure: (
     opts?: { loadWorklet?: boolean }
   ) => Promise<{ ctx: AudioContext; input: AudioNode }>;
   dynamicsMode: DynamicsMode;
+  onDynamicsModeChange: (mode: DynamicsMode) => void;
+  /** Live compressor reduction in dB, for the dynamics meter in the menu. */
+  dynamicsCompression: number;
+  /** Live limiter reduction in dB, for the dynamics hint in the menu. */
+  dynamicsLimiting: number;
   getRegionsForPreset: (presetIndex: number) => SF2Region[];
   resolvePresetIndex: (program: number, bank: number) => number | null;
   fallbackPresetIndex: number;
@@ -420,6 +423,49 @@ interface MidiReaderProps {
   /** App-owned master volume (0..1); wired to the master gain node. */
   masterVolume: number;
   onMasterVolumeChange: (v: number) => void;
+  /** SF2 explorer view (App-owned); shown in the content region on the sf2 tab. */
+  sf2View: ReactNode;
+  /** Recorder view (App-owned); shown in the content region on the recorder tab. */
+  recorderView: ReactNode;
+  /** Live MIDI-driver status line for the bottom dock. */
+  midiStatus: string;
+}
+
+// ---------------------------------------------------------------------------
+// PanelOverlay — Winamp-styled modal shell for panels evicted from the
+// default view (Current MIDI, Track Mixer, …). Portaled to document.body so
+// the page's `zoom` doesn't affect it; carries `gbk-winamp-page` so the dark
+// panel re-skin still applies to its contents.
+// ---------------------------------------------------------------------------
+function PanelOverlay({
+  label,
+  onClose,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return createPortal(
+    <div className="winamp-modal-backdrop" onClick={onClose}>
+      <div
+        className="winamp-modal gbk-winamp-page"
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="winamp-modal-titlebar">
+          <span>{label}</span>
+          <button type="button" className="winamp-modal-close" onClick={onClose} aria-label={`Close ${label}`}>
+            &#215;
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -442,10 +488,11 @@ export default function MidiReader({
   selectedMidiInput,
   onSelectMidiInput,
   midiInputs = [],
-  analyzerCollapsed,
-  onToggleAnalyzer,
   ensureAudioInfrastructure,
   dynamicsMode,
+  onDynamicsModeChange,
+  dynamicsCompression,
+  dynamicsLimiting,
   getRegionsForPreset,
   resolvePresetIndex,
   fallbackPresetIndex,
@@ -454,6 +501,9 @@ export default function MidiReader({
   vizTimeData,
   masterVolume,
   onMasterVolumeChange,
+  sf2View,
+  recorderView,
+  midiStatus,
 }: MidiReaderProps) {
   const [playRequested, setPlayRequested] = useState(false);
   const [playlistSearch, setPlaylistSearch] = useState("");
@@ -472,9 +522,14 @@ export default function MidiReader({
   // ---- Winamp chrome state (presentation only; engine untouched) ----
   const [shuffleOn, setShuffleOn] = useState(false);
   const [repeatOn, setRepeatOn] = useState(false);
-  const [playlistOpen, setPlaylistOpen] = useState(true);
+  const playlistOpen = true;
   const [pianoRollOpen, setPianoRollOpen] = useState(false);
   const [camSheetOpen, setCamSheetOpen] = useState(false);
+  // Panels evicted from the default view live here; opened from the
+  // title-bar player menu and rendered as overlays.
+  const [panelOverlay, setPanelOverlay] = useState<
+    "currentMidi" | "trackMixer" | "scannedSheet" | "sheetMusic" | "bach" | null
+  >(null);
   // Winamp chrome is authored at a fixed 275px width; scale it with `zoom`
   // (layout-affecting, unlike transform) so it fills the available column
   // width on phones. Measured from the parent's content box so app padding
@@ -516,7 +571,6 @@ export default function MidiReader({
   const [trackPresetOverrides, setTrackPresetOverrides] = useState<Record<number, number | null>>({});
   const [trackCcControls, setTrackCcControls] = useState<Record<number, TrackCc>>({});
   const [trackMixState, setTrackMixState] = useState<Record<number, TrackMix>>({});
-  const [bachModuleOpen, setBachModuleOpen] = useState<boolean>(false);
   const [isGeneratingBach, setIsGeneratingBach] = useState<boolean>(false);
   const [isParsingSheetMusic, setIsParsingSheetMusic] = useState<boolean>(false);
   const [selectedSheetMusicImage, setSelectedSheetMusicImage] = useState<SelectedSheetMusicImage | null>(null);
@@ -1530,6 +1584,7 @@ export default function MidiReader({
 
     const previewUrl = URL.createObjectURL(file);
     setSelectedSheetMusicImage({ file, name: file.name, previewUrl, source });
+    setPanelOverlay("sheetMusic");
     setSheetMusicStage("");
     setSheetMusicNotice(`${file.name} is ready to convert to MIDI.`);
     setSongError("");
@@ -1733,10 +1788,12 @@ export default function MidiReader({
       },
     ]);
     setCamSheetOpen(false);
-    setPlaylistOpen(true);
+    onSelectTab("midi");
+    setPianoRollOpen(false);
     loadMidiIntoTracks(midiData.slice(0), name, { sourceKind: "generated", dataUrl, autoplay: true });
     // Set after the load: loadMidiIntoTracks clears the scan selection first.
     setSelectedScanId(id);
+    if (photoUrl) setPanelOverlay("scannedSheet");
     if (scan.warnings?.length) setSheetMusicNotice(scan.warnings.join(" "));
   }
 
@@ -1850,10 +1907,71 @@ export default function MidiReader({
     ? (scannedEntries.find((e) => e.id === selectedScanId) ?? null)
     : null;
 
-  // Winamp title-bar menu: the app's existing nav sections, minus the actions
-  // promoted to the always-visible quick-tools strip (power, Sweden, Bach).
+  // Winamp title-bar menu: panels evicted from the default view live here,
+  // plus the tools that used to sit in the quick-tools strip.
   const winampMenuSections = (
     <>
+      <NavMenuSection label="Panels">
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("currentMidi")}
+          disabled={!song}
+          aria-label="Show Current MIDI panel"
+          title="Show Current MIDI panel"
+        >
+          <i className="fa-solid fa-circle-info" aria-hidden="true" />
+          <span>Current MIDI</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("trackMixer")}
+          disabled={!song}
+          aria-label="Show Track Mixer panel"
+          title="Show Track Mixer panel"
+        >
+          <i className="fa-solid fa-sliders" aria-hidden="true" />
+          <span>Track Mixer</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("scannedSheet")}
+          disabled={!(activeScanEntry && activeScanEntry.photoUrl && song)}
+          aria-label="Show Scanned Sheet panel"
+          title="Show Scanned Sheet panel"
+        >
+          <i className="fa-solid fa-file-image" aria-hidden="true" />
+          <span>Scanned Sheet</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("sheetMusic")}
+          disabled={!selectedSheetMusicImage}
+          aria-label="Show Sheet Music panel"
+          title="Show Sheet Music panel"
+        >
+          <i className="fa-solid fa-image" aria-hidden="true" />
+          <span>Sheet Music</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={() => setPanelOverlay("bach")}
+          aria-label="Show Bach Composer panel"
+          title="Show Bach Composer panel"
+        >
+          <i className="fa-solid fa-wand-magic-sparkles" aria-hidden="true" />
+          <span>Bach Composer</span>
+        </button>
+      </NavMenuSection>
 
       <NavMenuSection label="MIDI Input">
         <button
@@ -2013,22 +2131,84 @@ export default function MidiReader({
       <NavMenuSection label="Tools">
         <button
           type="button"
-          className={`toolbarActionBtn ${!analyzerCollapsed ? "active" : ""}`}
-          onClick={onToggleAnalyzer}
-          aria-pressed={!analyzerCollapsed}
-          aria-label={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
-          title={analyzerCollapsed ? "Show Analyzer" : "Hide Analyzer"}
+          className={`toolbarActionBtn ${audioCtxState === "running" ? "active" : ""}`}
+          onClick={onTogglePower}
+          aria-pressed={audioCtxState === "running"}
+          aria-label={audioCtxState === "running" ? "Power Off" : "Power On"}
+          title="Toggle audio power"
         >
-          <i className="fa-solid fa-chart-column" aria-hidden="true" />
-          <span>Analyzer</span>
+          <i className="fa-solid fa-power-off" aria-hidden="true" />
+          <span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
         </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          onClick={onExportWav}
+          disabled={!song || !sf2Ready || isExporting}
+          aria-label="Export WAV"
+          title="Generate offline WAV export"
+        >
+          <i className={`fa-solid ${isExporting ? "fa-spinner fa-spin" : "fa-download"}`} aria-hidden="true" />
+          <span>{isExporting ? "Exporting" : "Export WAV"}</span>
+        </button>
+        <button
+          type="button"
+          className="toolbarActionBtn"
+          data-close-menu
+          onClick={onLoadSwedenSheetMusic}
+          disabled={isParsingSheetMusic}
+          aria-label="Show Sweden sheet music"
+          title="Show Sweden sheet music"
+        >
+          <i className="fa-solid fa-music" aria-hidden="true" />
+          <span>Sweden</span>
+        </button>
+        <div className="dynamicsControls" aria-label="Master dynamics">
+          <label htmlFor="master-dynamics-mode">Dynamic compression</label>
+          <select
+            id="master-dynamics-mode"
+            className="toolbarSelect"
+            value={dynamicsMode}
+            onChange={(event) => {
+              if (isDynamicsMode(event.target.value)) onDynamicsModeChange(event.target.value);
+            }}
+          >
+            {DYNAMICS_MODES.map((mode) => (
+              <option key={mode.value} value={mode.value}>{mode.label}</option>
+            ))}
+          </select>
+          <p>{DYNAMICS_MODES.find((mode) => mode.value === dynamicsMode)?.description}</p>
+          <div className="dynamicsMeterRow">
+            <label htmlFor="compression-reduction">Reduction</label>
+            <meter
+              id="compression-reduction"
+              min={0}
+              max={12}
+              value={audioCtxState === "running" && dynamicsMode !== "off" ? dynamicsCompression : 0}
+            />
+            <output htmlFor="compression-reduction" aria-live="off">
+              {audioCtxState === "running" && dynamicsMode !== "off"
+                ? dynamicsCompression.toFixed(1)
+                : "0.0"} dB
+            </output>
+          </div>
+          <span className="dynamicsHint">
+            {dynamicsMode === "off"
+              ? "Playback + WAV export"
+              : `Playback + WAV export · Peak ceiling −1 dBFS${
+                  audioCtxState === "running" && dynamicsLimiting > 0.1
+                    ? ` · Limiting ${dynamicsLimiting.toFixed(1)} dB`
+                    : ""
+                }`}
+          </span>
+        </div>
       </NavMenuSection>
     </>
   );
   return (
-    <section ref={pageRef} className="card midiReader gbk-winamp-page" style={{ zoom: waZoom }}>
-      <div id="webamp">
-        <div className="gbk-main-sticky">
+    <section ref={pageRef} className="card midiReader gbk-winamp-page">
+      <div id="webamp" className="gbk-viewport" style={{ zoom: waZoom, height: `${100 / waZoom}dvh` }} data-sf2-ready={sf2Ready}>
+        <div className="gbk-top">
           <WinampMain
             marqueeText={song ? `${songName || "Untitled MIDI"} *** ${song.bpm} BPM ***` : "GBK Winamp - no MIDI loaded"}
             status={isPlaying ? "play" : song ? "pause" : "stop"}
@@ -2042,7 +2222,8 @@ export default function MidiReader({
             onStop={onStopPlayback}
             onPrev={() => stepPlaylistEntry(-1)}
             onNext={() => stepPlaylistEntry(1)}
-            onEject={() => ejectInputRef.current?.click()}
+            onCamera={() => setCamSheetOpen(true)}
+            onAddMidi={() => ejectInputRef.current?.click()}
             transportDisabled={!song}
             volume={masterVolume}
             onVolumeChange={onMasterVolumeChange}
@@ -2051,37 +2232,17 @@ export default function MidiReader({
             repeat={repeatOn}
             onToggleRepeat={() => setRepeatOn((v) => !v)}
             playlistOpen={playlistOpen}
-            onTogglePlaylist={() => setPlaylistOpen((v) => !v)}
+            onTogglePlaylist={() => { onSelectTab("midi"); setPianoRollOpen(false); }}
             timeData={vizTimeData}
             menu={winampMenuSections}
           />
-          <div className="gbk-extras" role="group" aria-label="Views and tools">
+          <div className="gbk-extras" role="group" aria-label="Views">
             <div className="gbk-xseg" role="group" aria-label="View">
-              <button type="button" className="gbk-xbtn" onClick={() => onSelectTab("midi")} aria-pressed={activeTab === "midi"} aria-label="MIDI Explorer" title="MIDI Explorer">MIDI</button>
-              <button type="button" className="gbk-xbtn" onClick={() => onSelectTab("sf2")} aria-pressed={activeTab === "sf2"} aria-label="SF2 Explorer" title="SF2 Explorer">SF2</button>
-              <button type="button" className="gbk-xbtn" onClick={() => onSelectTab("recorder")} aria-pressed={activeTab === "recorder"} aria-label="MIDI Recorder" title="MIDI Recorder">REC</button>
+              <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("midi"); setPianoRollOpen(false); }} aria-pressed={activeTab === "midi" && !pianoRollOpen} aria-label="MIDI Explorer" title="MIDI Explorer">MIDI</button>
+              <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("sf2"); setPianoRollOpen(false); }} aria-pressed={activeTab === "sf2"} aria-label="SF2 Explorer" title="SF2 Explorer">SF2</button>
+              <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("recorder"); setPianoRollOpen(false); }} aria-pressed={activeTab === "recorder"} aria-label="MIDI Recorder" title="MIDI Recorder">REC</button>
             </div>
-            <button type="button" className="gbk-xbtn" onClick={() => setPianoRollOpen((v) => !v)} aria-pressed={pianoRollOpen} aria-label={pianoRollOpen ? "Hide piano roll" : "Show piano roll"} title="Toggle piano roll">PIANO</button>
-            <button type="button" className="gbk-xbtn" onClick={() => setCamSheetOpen(true)} aria-label="Scan sheet music with camera" title="Scan sheet music with camera">CAM SHEET</button>
-          </div>
-          <div className="gbk-quicktools" role="group" aria-label="Quick tools">
-            <button type="button" className="gbk-xbtn" onClick={onTogglePower} aria-pressed={audioCtxState === "running"} aria-label={audioCtxState === "running" ? "Power Off" : "Power On"} title="Toggle audio power">
-              <i className="fa-solid fa-power-off" aria-hidden="true" /><span>{audioCtxState === "running" ? "Power Off" : "Power On"}</span>
-            </button>
-            <button type="button" className="gbk-xbtn" onClick={onLoadSwedenSheetMusic} disabled={isParsingSheetMusic} aria-label="Show Sweden sheet music" title="Show Sweden sheet music">
-              <i className="fa-solid fa-music" aria-hidden="true" /><span>Sweden</span>
-            </button>
-            <button type="button" className="gbk-xbtn" onClick={() => setBachModuleOpen((open) => !open)} aria-pressed={bachModuleOpen} aria-label={bachModuleOpen ? "Close Bach Composer" : "Open Bach Composer"} title="Toggle Bach composer">
-              <i className={`fa-solid ${isGeneratingBach ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`} aria-hidden="true" /><span>Bach</span>
-            </button>
-            <button type="button" className="gbk-xbtn" onClick={onExportWav} disabled={!song || !sf2Ready || isExporting} aria-label="Export WAV" title="Generate offline WAV export">
-              <i className={`fa-solid ${isExporting ? "fa-spinner fa-spin" : "fa-download"}`} aria-hidden="true" /><span>Export WAV</span>
-            </button>
-          </div>
-          <div className="gbk-songmeta">
-            <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
-            <span className="chip">{song ? `Tempo ${song.bpm} BPM` : "Tempo --"}</span>
-            <span className="chip">{song ? `Sig ${song.timeSig}` : "Sig --"}</span>
+            <button type="button" className="gbk-xbtn" onClick={() => { onSelectTab("midi"); setPianoRollOpen((v) => !v); }} aria-pressed={pianoRollOpen} aria-label={pianoRollOpen ? "Hide piano roll" : "Show piano roll"} title="Toggle piano roll">PIANO</button>
           </div>
           {isExporting ? (
             <div className="exportProgress" aria-live="polite">
@@ -2094,28 +2255,42 @@ export default function MidiReader({
             </div>
           ) : null}
         </div>
-        {playlistOpen ? (
-          <WinampPlaylist
-            tracks={playlistRows}
-            search={playlistSearch}
-            onSearchChange={setPlaylistSearch}
-            onSelectTrack={(id) => selectPlaylistEntry(id)}
-            onUploadClick={() => ejectInputRef.current?.click()}
-            headerExtra={<span className="winamp-playlist-count">{playlistRows.length} files</span>}
-          />
-        ) : null}
-        {pianoRollOpen && song ? (
-          <PianoRoll
-            tracks={song.tracks.map((track) => ({
-              name: formatTrackInlineName(track) || track.instrumentName || `Track ${track.index + 1}`,
-              notes: track.notes.map((n) => ({ note: n.note, velocity: n.velocity, startSec: n.startSec, durationSec: n.durationSec })),
-            }))}
-            songTime={songTime}
-            duration={song.durationSec}
-            onSeek={(sec) => { seekToSec(sec); }}
-            onClose={() => setPianoRollOpen(false)}
-          />
-        ) : null}
+        <div className="gbk-content">
+          {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
+          {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
+          {songError ? <p className="status error">{songError}</p> : null}
+          {activeTab === "sf2" ? (
+            <div className="gbk-scrollview">{sf2View}</div>
+          ) : activeTab === "recorder" ? (
+            <div className="gbk-scrollview">{recorderView}</div>
+          ) : pianoRollOpen && song ? (
+            <div className="gbk-scrollview">
+              <PianoRoll
+                tracks={song.tracks.map((track) => ({
+                  name: formatTrackInlineName(track) || track.instrumentName || `Track ${track.index + 1}`,
+                  notes: track.notes.map((n) => ({ note: n.note, velocity: n.velocity, startSec: n.startSec, durationSec: n.durationSec })),
+                }))}
+                songTime={songTime}
+                duration={song.durationSec}
+                onSeek={(sec) => { seekToSec(sec); }}
+                onClose={() => setPianoRollOpen(false)}
+              />
+            </div>
+          ) : (
+            <WinampPlaylist
+              tracks={playlistRows}
+              search={playlistSearch}
+              onSearchChange={setPlaylistSearch}
+              onSelectTrack={(id) => selectPlaylistEntry(id)}
+              onUploadClick={() => ejectInputRef.current?.click()}
+              headerExtra={<span className="winamp-playlist-count">{playlistRows.length} files</span>}
+            />
+          )}
+        </div>
+        <div className="gbk-dock" aria-label="Status">
+          <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
+          <span>{song ? `${songName || "Untitled MIDI"} · ${song.bpm} BPM` : "No MIDI loaded"} · Audio {audioCtxState} · {midiStatus}</span>
+        </div>
         <input ref={ejectInputRef} type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Upload MIDI file" style={{ display: "none" }} />
         {camSheetOpen ? createPortal(
           <div className="winamp-modal-backdrop" onClick={() => setCamSheetOpen(false)}>
@@ -2130,9 +2305,8 @@ export default function MidiReader({
           document.body
         ) : null}
       </div>
-      {activeTab === "midi" ? (
-        <>
-        {activeScanEntry && activeScanEntry.photoUrl && song ? (
+      {panelOverlay === "scannedSheet" && activeScanEntry && activeScanEntry.photoUrl && song ? (
+        <PanelOverlay label="Scanned Sheet" onClose={() => setPanelOverlay(null)}>
           <WinampPanel title="Scanned Sheet">
             <div className="sc-sheet-wrap gbk-scan-sheet">
               <img src={activeScanEntry.photoUrl} alt={`${activeScanEntry.name} scanned sheet music`} />
@@ -2156,8 +2330,10 @@ export default function MidiReader({
               <p className="status">{activeScanEntry.warnings.join(" ")}</p>
             ) : null}
           </WinampPanel>
-        ) : null}
-        {selectedSheetMusicImage ? (
+        </PanelOverlay>
+      ) : null}
+        {panelOverlay === "sheetMusic" && selectedSheetMusicImage ? (
+          <PanelOverlay label="Sheet Music" onClose={() => setPanelOverlay(null)}>
           <WinampPanel title="Sheet Music">
           <div className="sheetMusicPreviewPanel" aria-label="Displayed sheet music">
             <div className="sheetMusicPreviewHeader">
@@ -2212,9 +2388,14 @@ export default function MidiReader({
               </div>
             ) : null}
           </div>
+          {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
+          {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
+          {songError ? <p className="status error">{songError}</p> : null}
           </WinampPanel>
+          </PanelOverlay>
         ) : null}
-        {bachModuleOpen ? (
+        {panelOverlay === "bach" ? (
+          <PanelOverlay label="Bach Composer" onClose={() => setPanelOverlay(null)}>
           <WinampPanel title="Bach Composer">
           <div className="bachComposerModule">
             <div className="bachComposerControls">
@@ -2320,8 +2501,10 @@ export default function MidiReader({
             </div>
           </div>
           </WinampPanel>
+          </PanelOverlay>
         ) : null}
-        {song ? (
+        {panelOverlay === "currentMidi" && song ? (
+          <PanelOverlay label="Current MIDI" onClose={() => setPanelOverlay(null)}>
           <WinampPanel title="Current MIDI">
           <div className="midiMetadataPanel" aria-label="MIDI metadata">
             <div className="midiMetadataTitle">
@@ -2350,11 +2533,10 @@ export default function MidiReader({
             ) : null}
           </div>
           </WinampPanel>
+          </PanelOverlay>
         ) : null}
-      {sheetMusicStage ? <p className="status sheetMusicStatus">{sheetMusicStage}</p> : null}
-      {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
-      {songError ? <p className="status error">{songError}</p> : null}
-      {song && (
+      {panelOverlay === "trackMixer" && song ? (
+        <PanelOverlay label="Track Mixer" onClose={() => setPanelOverlay(null)}>
         <WinampPanel title="Track Mixer">
         <div className="midiTimelineWrap">
           <div className="midiTracksSplit">
@@ -2452,8 +2634,7 @@ export default function MidiReader({
           </div>
         </div>
         </WinampPanel>
-      )}
-        </>
+        </PanelOverlay>
       ) : null}
     </section>
   );
