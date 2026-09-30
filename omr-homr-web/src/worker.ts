@@ -8,7 +8,7 @@
  */
 import { loadModels, webGpuAvailable, type ModelSet } from "./models.js";
 import { staffSymbolsToNoteEvents, symbolsToMidi, type MidiNoteEvent } from "./midi.js";
-import { transcribeStaff, ENCODER_WIDTH, ENCODER_HEIGHT } from "./transformer.js";
+import { transcribeStaff, encodeStaff, decodeStaff, preprocessStaff, ENCODER_WIDTH, ENCODER_HEIGHT } from "./transformer.js";
 import {
   buildPageNoteLayout,
   detectStaffsInImage,
@@ -123,12 +123,20 @@ async function handleTranscribePage(
   );
   post({ type: "progress", stage: "detecting staffs" });
   const { multiStaffs, staffs } = detectStaffsInImage(masks, page.preprocessed);
+  // parseStaffs' default transcriber always feeds float32 to the encoder;
+  // forward the model's expected dtype (fp16 on WebGPU-capable browsers)
+  // exactly like transcribeStaff does.
+  const encoderInputFloat16 = models.encoderInputFloat16 ?? false;
   const voices = await parseStaffs(
     multiStaffs,
     page.preprocessed,
     models.encoder,
     models.decoder,
-    undefined,
+    async (encoder, decoder, crop) => {
+      const input = preprocessStaff(crop.data, crop.width, crop.height);
+      const context = await encodeStaff(encoder, input, encoderInputFloat16);
+      return decodeStaff(decoder, context);
+    },
     (stage) => post({ type: "progress", stage }),
   );
   post({ type: "progress", stage: "writing MIDI" });

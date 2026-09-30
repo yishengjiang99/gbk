@@ -27,8 +27,14 @@ import type {
 /** Base URL the OMR model files are served from. Override for CDN hosting. */
 export const OMR_MODEL_BASE_URL = "/omr-models/";
 
-/** Pinned onnxruntime-web release serving the WASM runtime files. */
-const ORT_WASM_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
+/**
+ * Same-origin base URL for the self-hosted onnxruntime-web WASM runtime
+ * files. Staged at build time by scripts/prepare-ort-runtime.mjs (copied
+ * from the installed onnxruntime-web npm package, so the files always match
+ * the bundled JS version). Served lazily: nothing under this path is
+ * requested until the first scan constructs the OMR worker.
+ */
+const ORT_WASM_BASE = "/ort-runtime/";
 
 /** Upper bound for one transcription (model download + SegNet + decode). */
 const TRANSCRIBE_TIMEOUT_MS = 600_000;
@@ -175,7 +181,7 @@ function ensureOmrWorker(onProgress?: (stage: string) => void): Promise<Worker> 
         encoderUrl: urls.encoderUrl,
         decoderUrl: urls.decoderUrl,
         segnetUrl: urls.segnetUrl,
-        wasmPaths: ORT_WASM_CDN,
+        wasmPaths: ORT_WASM_BASE,
       });
       await ready;
       return worker;

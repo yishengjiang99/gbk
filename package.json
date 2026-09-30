@@ -6,8 +6,9 @@
   "scripts": {
     "gen:midi-manifest": "node scripts/generate-midi-manifest.mjs",
     "prepare:omr-models": "node scripts/prepare-omr-models.mjs",
+    "prepare:ort-runtime": "node scripts/prepare-ort-runtime.mjs",
     "dev": "npm run gen:midi-manifest && vite",
-    "build": "npm run gen:midi-manifest && npm run prepare:omr-models && vite build",
+    "build": "npm run gen:midi-manifest && npm run prepare:omr-models && npm run prepare:ort-runtime && vite build",
     "preview": "vite preview",
     "test": "node --import tsx/esm --test test/*.test.ts",
     "test:e2e": "playwright test",
@@ -16,7 +17,7 @@
     "test:e2e:ocr-fixture": "playwright test --config test/e2e/ocr-fixture.config.ts"
   },
   "dependencies": {
-    "onnxruntime-web": "^1.22.0",
+    "onnxruntime-web": "^1.30.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
