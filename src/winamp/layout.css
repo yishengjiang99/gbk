@@ -428,3 +428,14 @@
   display: block;
   white-space: normal;
 }
+
+/* ---- App shell: no dead band under the dock.
+        styles.css reserves 4.8-5rem of bottom padding for a fixed transport
+        footer that no longer exists (the dock is in-flow and handles the
+        safe-area inset itself); winamp.css intends padding: 0 but loses the
+        cascade. */
+.app,
+.app.analyzerOpen,
+.app.analyzerCollapsed {
+  padding-bottom: 0;
+}
