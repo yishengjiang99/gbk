@@ -482,6 +482,9 @@ function PanelOverlay({
 // MidiReader component
 // ---------------------------------------------------------------------------
 
+/** Height of the Winamp main window as authored (before zoom). */
+const WINAMP_MAIN_HEIGHT_PX = 116;
+
 export default function MidiReader({
   sf2Ready,
   sf2Name,
@@ -554,11 +557,24 @@ export default function MidiReader({
         const cs = getComputedStyle(parent);
         w = parent.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0");
       }
-      setWaZoom(Math.min(Math.max(w / 275, 1), 2));
+      // Also cap by height: the zoomed main window (116px tall when unzoomed)
+      // may take at most ~34% of the visible height, so short landscape phones
+      // keep room for the playlist/content region instead of losing it to the
+      // chrome and the dock.
+      const h =
+        (typeof window.visualViewport !== "undefined" ? window.visualViewport?.height : null) ||
+        window.innerHeight ||
+        844;
+      const heightCap = (h * 0.34) / WINAMP_MAIN_HEIGHT_PX;
+      setWaZoom(Math.min(Math.max(Math.min(w / 275, heightCap), 1), 2));
     };
     compute();
     window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
+    window.addEventListener("orientationchange", compute);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("orientationchange", compute);
+    };
   }, []);
   // The footer dock lives OUTSIDE the zoomed #webamp chrome (it is laid out
   // in real CSS pixels), so #webamp's height is measured in JS: whatever
@@ -2439,7 +2455,18 @@ export default function MidiReader({
   );
   return (
     <section ref={pageRef} className="card midiReader gbk-winamp-page">
-      <div id="webamp" className="gbk-viewport" style={{ zoom: waZoom, height: viewportPx == null ? `${100 / waZoom}dvh` : `${viewportPx}px` }} data-sf2-ready={sf2Ready}>
+      <div
+        id="webamp"
+        className="gbk-viewport"
+        style={{
+          zoom: waZoom,
+          height: viewportPx == null ? `${100 / waZoom}dvh` : `${viewportPx}px`,
+          // Pre-zoom height of the chrome column, for things (the player menu)
+          // that must fit inside it; vh units inside `zoom` are scaled.
+          ["--gbk-vh" as string]: viewportPx == null ? `${100 / waZoom}dvh` : `${viewportPx}px`,
+        }}
+        data-sf2-ready={sf2Ready}
+      >
         <div className="gbk-top">
           <WinampMain
             marqueeText={song ? `${songName || "Untitled MIDI"} *** ${song.bpm} BPM ***` : "GBK Winamp - no MIDI loaded"}
@@ -2482,9 +2509,15 @@ export default function MidiReader({
           {sheetMusicNotice ? <p className="status sheetMusicStatus">{sheetMusicNotice}</p> : null}
           {songError ? <p className="status error">{songError}</p> : null}
           {activeTab === "sf2" ? (
-            <div className="gbk-scrollview">{sf2View}</div>
+            <div className="gbk-scrollview">
+              {/* Undo the chrome zoom so the explorer's regular (rem-based) UI
+                  lays out at real CSS pixels across the full column width. */}
+              <div className="gbk-unzoom" style={{ zoom: 1 / waZoom }}>{sf2View}</div>
+            </div>
           ) : activeTab === "recorder" ? (
-            <div className="gbk-scrollview">{recorderView}</div>
+            <div className="gbk-scrollview">
+              <div className="gbk-unzoom" style={{ zoom: 1 / waZoom }}>{recorderView}</div>
+            </div>
           ) : pianoRollOpen && song ? (
             <div className="gbk-scrollview">
               <PianoRoll

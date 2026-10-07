@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { parseSF2, SF2Data, SF2Region } from "../sf2-parser.ts";
 import { NavMenuSection, ToolbarMenu } from "./toolbar-menu.tsx";
 import { createExternalMidiBridge, ExternalMidiBridge } from "./external-midi-bridge";
@@ -1395,43 +1396,64 @@ export default function App() {
           sf2View={
             activeTab === "sf2" ? (
               <>
-                {sf2 && showSummaryModal && (
-                            <div className="modalBackdrop" onClick={() => setShowSummaryModal(false)}>
-                              <section className="card summaryModal" onClick={(e) => e.stopPropagation()}>
-                                <h2>File Summary</h2>
-                                <p>
-                                  <strong>Source:</strong> {sourceName}
-                                </p>
-                                <p>
-                                  <strong>Presets:</strong> {presets.length}
-                                </p>
-                                <p>
-                                  <strong>Instruments:</strong> {sf2.pdta.inst.length - 1}
-                                </p>
-                                <p>
-                                  <strong>Samples:</strong> {sf2.pdta.shdr.length - 1}
-                                </p>
-                                <h3>INFO</h3>
-                                <ul className="infoList">
-                                  {Object.entries(sf2.info).map(([k, v]) => {
-                                    const raw = v || "(empty)";
-                                    const rendered =
-                                      k === "ICMT" ? String(raw).replace(/<br\s*\/?>/gi, "\n") : raw;
-                                    return (
-                                      <li key={k}>
-                                        <code>{k}</code>:{" "}
-                                        <span className={k === "ICMT" ? "infoValueMultiline" : undefined}>
-                                          {rendered}
-                                        </span>
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                                <button type="button" onClick={() => setShowSummaryModal(false)}>
-                                  Close
-                                </button>
+                {/* Portaled to <body> so the dialog is sized against the real
+                    viewport rather than the zoomed Winamp column. */}
+                {sf2 && showSummaryModal && createPortal(
+                            <div className="winamp-modal-backdrop" onClick={() => setShowSummaryModal(false)}>
+                              <section
+                                className="winamp-modal summaryModal"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label="File Summary"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="winamp-modal-titlebar">
+                                  <span>File Summary</span>
+                                  <button
+                                    type="button"
+                                    className="winamp-modal-close"
+                                    onClick={() => setShowSummaryModal(false)}
+                                    aria-label="Close File Summary"
+                                  >
+                                    &#215;
+                                  </button>
+                                </div>
+                                <div className="summaryModalBody">
+                                  <p>
+                                    <strong>Source:</strong> {sourceName}
+                                  </p>
+                                  <p>
+                                    <strong>Presets:</strong> {presets.length}
+                                  </p>
+                                  <p>
+                                    <strong>Instruments:</strong> {sf2.pdta.inst.length - 1}
+                                  </p>
+                                  <p>
+                                    <strong>Samples:</strong> {sf2.pdta.shdr.length - 1}
+                                  </p>
+                                  <h3>INFO</h3>
+                                  <ul className="infoList">
+                                    {Object.entries(sf2.info).map(([k, v]) => {
+                                      const raw = v || "(empty)";
+                                      const rendered =
+                                        k === "ICMT" ? String(raw).replace(/<br\s*\/?>/gi, "\n") : raw;
+                                      return (
+                                        <li key={k}>
+                                          <code>{k}</code>:{" "}
+                                          <span className={k === "ICMT" ? "infoValueMultiline" : undefined}>
+                                            {rendered}
+                                          </span>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                  <button type="button" onClick={() => setShowSummaryModal(false)}>
+                                    Close
+                                  </button>
+                                </div>
                               </section>
-                            </div>
+                            </div>,
+                            document.body
                           )}
 
                           {sf2 && (
