@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MIDI Clock Follower</title>
+    <style>
+      :root { --bg: #111318; --panel: #1b1f27; --ink: #e8eaf0; --muted: #8a93a6; --accent: #4cc9a6; --warn: #ff8c5a; }
+      body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      .panel { background: var(--panel); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+      .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 6px 0; }
+      label { color: var(--muted); font-size: 13px; }
+      button, select { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #39404f; background: #262c38; color: var(--ink); }
+      button:hover:not(:disabled) { border-color: var(--accent); cursor: pointer; }
+      button:disabled { opacity: 0.4; }
+      #bpm { font-size: 64px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+      #state { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; background: #39404f; }
+      #state[data-state="running"] { background: var(--accent); color: #05261c; }
+      #state[data-state="lost"] { background: var(--warn); color: #2b1100; }
+      .bar { position: relative; height: 14px; background: #262c38; border-radius: 7px; overflow: hidden; margin-top: 10px; }
+      #phasebar { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
+      .beats { display: flex; gap: 8px; margin-top: 10px; }
+      .beats span { flex: 1; height: 10px; border-radius: 5px; background: #262c38; }
+      .beats span.on { background: var(--accent); }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 8px 0 0; font-size: 13px; }
+      dt { color: var(--muted); }
+      dd { margin: 0; font-variant-numeric: tabular-nums; }
+      input[type="range"] { width: 160px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>MIDI Clock Follower</h1>
+      <div class="panel">
+        <div class="row">
+          <button id="power">Start audio</button>
+          <label>Source
+            <select id="source"><option value="synthetic">Synthetic 120 BPM</option></select>
+          </label>
+          <button id="connect-midi">Use Web MIDI</button>
+          <span id="state" data-state="waiting">waiting</span>
+        </div>
+        <div class="row">
+          <div id="bpm">--</div>
+          <div>BPM<br /><small id="phase-text" style="color: var(--muted)">phase --</small></div>
+        </div>
+        <div class="bar"><div id="phasebar"></div></div>
+        <div class="beats" id="beats"><span></span><span></span><span></span><span></span></div>
+      </div>
+      <div class="panel" id="synth-panel">
+        <div class="row">
+          <button id="synth-start">Start (FA)</button>
+          <button id="synth-continue">Continue (FB)</button>
+          <button id="synth-stop">Stop (FC)</button>
+        </div>
+        <div class="row">
+          <label>Tempo <input id="synth-bpm" type="range" min="60" max="180" value="120" /> <output id="synth-bpm-out">120</output></label>
+          <label>Jitter ±ms <input id="synth-jitter" type="range" min="0" max="6" step="0.5" value="0" /> <output id="synth-jitter-out">0</output></label>
+          <label>Drop % <input id="synth-drop" type="range" min="0" max="10" step="1" value="0" /> <output id="synth-drop-out">0</output></label>
+        </div>
+        <div class="row">
+          <button id="synth-silent">Go silent (timeout)</button>
+          <button id="synth-unplug">Unplug (disconnect)</button>
+          <button id="synth-replug">Reconnect</button>
+        </div>
+      </div>
+      <div class="panel">
+        <dl>
+          <dt>Sync</dt><dd id="d-sync">--</dd>
+          <dt>Beat / song tick</dt><dd id="d-beat">--</dd>
+          <dt>Clicks fired</dt><dd id="d-clicks">0</dd>
+          <dt>Resyncs / dups / gaps</dt><dd id="d-counts">--</dd>
+          <dt>Audio clock</dt><dd id="d-audio">off</dd>
+        </dl>
+      </div>
+    </div>
+    <script type="module" src="/src/midi-clock/main.ts"></script>
+  </body>
+</html>

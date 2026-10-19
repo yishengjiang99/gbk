@@ -9,6 +9,7 @@ export default defineConfig({
       input: {
         main: "index.html",
         "sheet-cam": "sheet-cam.html",
+        "midi-clock": "midi-clock.html",
       },
     },
   },
