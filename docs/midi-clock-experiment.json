@@ -1,0 +1,1094 @@
+{
+  "config": {
+    "spec": {
+      "seed": 1,
+      "bpm": 120,
+      "durationMs": 60000,
+      "jitterMs": 3,
+      "dropProbability": 0.01,
+      "delayEveryTicks": 48,
+      "delayMs": 20
+    },
+    "probeStepMs": 5,
+    "evalFromMs": 2000,
+    "holdMs": 1000,
+    "thresholds": {
+      "settleMs": 2000,
+      "bpmErr": 0.5,
+      "phaseErrMs": 5
+    }
+  },
+  "primary": {
+    "dropped": 23,
+    "delayed": 59,
+    "delivered": 2857,
+    "results": [
+      {
+        "estimator": "last-interval",
+        "settlingMs": null,
+        "phaseMedianMs": 144.46691607250744,
+        "phaseP95Ms": 232.6828983552384,
+        "bpmErrMedian": 10.45487557995456,
+        "bpmErrP95": 36.305741700978416,
+        "resyncs": 0,
+        "excursions": 24,
+        "duplicatesDropped": 0,
+        "gapTicksInferred": 0,
+        "pass": {
+          "settle": false,
+          "bpm": false,
+          "phase": false,
+          "all": false
+        }
+      },
+      {
+        "estimator": "median+phase",
+        "settlingMs": 485,
+        "phaseMedianMs": 0.4237577727212264,
+        "phaseP95Ms": 1.2895545480517965,
+        "bpmErrMedian": 0.05276041080006166,
+        "bpmErrP95": 0.16454161525155087,
+        "resyncs": 0,
+        "excursions": 0,
+        "duplicatesDropped": 58,
+        "gapTicksInferred": 81,
+        "pass": {
+          "settle": true,
+          "bpm": true,
+          "phase": true,
+          "all": true
+        }
+      }
+    ]
+  },
+  "selected": "median+phase",
+  "ablations": [
+    {
+      "name": "spec trace (jitter + 1% drops + 20 ms delays)",
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 144.46691607250744,
+          "phaseP95Ms": 232.6828983552384,
+          "bpmErrMedian": 10.45487557995456,
+          "bpmErrP95": 36.305741700978416,
+          "resyncs": 0,
+          "excursions": 24,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 485,
+          "phaseMedianMs": 0.4237577727212264,
+          "phaseP95Ms": 1.2895545480517965,
+          "bpmErrMedian": 0.05276041080006166,
+          "bpmErrP95": 0.16454161525155087,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 58,
+          "gapTicksInferred": 81,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "jitter only",
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 2.1729018327742247,
+          "phaseP95Ms": 5.763655957568987,
+          "bpmErrMedian": 10.176359234943135,
+          "bpmErrP95": 31.091388322123322,
+          "resyncs": 0,
+          "excursions": 496,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 485,
+          "phaseMedianMs": 0.4292428618814329,
+          "phaseP95Ms": 1.2504046789445054,
+          "bpmErrMedian": 0.05231570755341863,
+          "bpmErrP95": 0.15899785920801435,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "jitter + 1% drops",
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 144.65149898968593,
+          "phaseP95Ms": 232.6152123264755,
+          "bpmErrMedian": 10.179663832595253,
+          "bpmErrP95": 31.976606420759396,
+          "resyncs": 0,
+          "excursions": 15,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 485,
+          "phaseMedianMs": 0.4315531512630125,
+          "phaseP95Ms": 1.311563703460668,
+          "bpmErrMedian": 0.052438562664512745,
+          "bpmErrP95": 0.16185901634823097,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 23,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "jitter + 20 ms delays",
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 2.2391680478885214,
+          "phaseP95Ms": 6.740110708856049,
+          "bpmErrMedian": 10.45487557995456,
+          "bpmErrP95": 34.839720990117,
+          "resyncs": 0,
+          "excursions": 529,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 485,
+          "phaseMedianMs": 0.4138693469191897,
+          "phaseP95Ms": 1.2300656191425687,
+          "bpmErrMedian": 0.052971994876997996,
+          "bpmErrP95": 0.1638613820578172,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 59,
+          "gapTicksInferred": 59,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "no impairments",
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": 25,
+          "phaseMedianMs": 0,
+          "phaseP95Ms": 9.473903143468002e-12,
+          "bpmErrMedian": 1.396927018504357e-11,
+          "bpmErrP95": 2.793854037008714e-11,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 45,
+          "phaseMedianMs": 0,
+          "phaseP95Ms": 0,
+          "bpmErrMedian": 0,
+          "bpmErrP95": 0,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    }
+  ],
+  "robustness": [
+    {
+      "seed": 1,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 144.46691607250744,
+          "phaseP95Ms": 232.6828983552384,
+          "bpmErrMedian": 10.45487557995456,
+          "bpmErrP95": 36.305741700978416,
+          "resyncs": 0,
+          "excursions": 24,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 485,
+          "phaseMedianMs": 0.4237577727212264,
+          "phaseP95Ms": 1.2895545480517965,
+          "bpmErrMedian": 0.05276041080006166,
+          "bpmErrP95": 0.16454161525155087,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 58,
+          "gapTicksInferred": 81,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 2,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 166.62726210871642,
+          "phaseP95Ms": 248.1549361283008,
+          "bpmErrMedian": 10.473970295802545,
+          "bpmErrP95": 35.86255939449748,
+          "resyncs": 0,
+          "excursions": 5,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 480,
+          "phaseMedianMs": 0.44146803220002084,
+          "phaseP95Ms": 1.181544874066039,
+          "bpmErrMedian": 0.06250308614927746,
+          "bpmErrP95": 0.1706182072190927,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 58,
+          "gapTicksInferred": 78,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 3,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 157.02378927705792,
+          "phaseP95Ms": 238.05323609674164,
+          "bpmErrMedian": 10.750926528789563,
+          "bpmErrP95": 37.44170514591681,
+          "resyncs": 0,
+          "excursions": 19,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 190,
+          "phaseMedianMs": 0.40353443475519646,
+          "phaseP95Ms": 1.205732909709429,
+          "bpmErrMedian": 0.049315119232929305,
+          "bpmErrP95": 0.19288439599264962,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 56,
+          "gapTicksInferred": 99,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 4,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 161.6006665988389,
+          "phaseP95Ms": 248.40768712406978,
+          "bpmErrMedian": 10.697901333569149,
+          "bpmErrP95": 37.62955420107417,
+          "resyncs": 0,
+          "excursions": 13,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 690,
+          "phaseMedianMs": 0.49191003103032926,
+          "phaseP95Ms": 1.3987759646681752,
+          "bpmErrMedian": 0.05579871864190977,
+          "bpmErrP95": 0.18881071207759703,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 59,
+          "gapTicksInferred": 97,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 5,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 105.87767491958407,
+          "phaseP95Ms": 209.12320267481542,
+          "bpmErrMedian": 9.876154568337427,
+          "bpmErrP95": 36.52928318176737,
+          "resyncs": 0,
+          "excursions": 15,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 315,
+          "phaseMedianMs": 0.4675616997644738,
+          "phaseP95Ms": 1.3271600751811732,
+          "bpmErrMedian": 0.05790000589566091,
+          "bpmErrP95": 0.16832969734119274,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 57,
+          "gapTicksInferred": 89,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 6,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 147.9279081544978,
+          "phaseP95Ms": 246.9332934702829,
+          "bpmErrMedian": 10.275206336339451,
+          "bpmErrP95": 35.55812586965169,
+          "resyncs": 0,
+          "excursions": 9,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 335,
+          "phaseMedianMs": 0.3575262496546827,
+          "phaseP95Ms": 1.2237897733006275,
+          "bpmErrMedian": 0.059610105997990104,
+          "bpmErrP95": 0.16526290887179584,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 56,
+          "gapTicksInferred": 78,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 7,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 126.3638015435949,
+          "phaseP95Ms": 234.18871312719315,
+          "bpmErrMedian": 10.584060532993618,
+          "bpmErrP95": 38.02290457346197,
+          "resyncs": 0,
+          "excursions": 26,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 835,
+          "phaseMedianMs": 0.3785665191458065,
+          "phaseP95Ms": 1.2177068587296462,
+          "bpmErrMedian": 0.054550615248416534,
+          "bpmErrP95": 0.17339578572840253,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 57,
+          "gapTicksInferred": 101,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 8,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 65.98353259939434,
+          "phaseP95Ms": 210.36798702705917,
+          "bpmErrMedian": 10.39315121340401,
+          "bpmErrP95": 36.933364172764726,
+          "resyncs": 0,
+          "excursions": 108,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 520,
+          "phaseMedianMs": 0.45970922002010656,
+          "phaseP95Ms": 1.2209165516826677,
+          "bpmErrMedian": 0.05571855363233169,
+          "bpmErrP95": 0.15150019422198113,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 57,
+          "gapTicksInferred": 86,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 9,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 125.7504359261728,
+          "phaseP95Ms": 230.25258793804514,
+          "bpmErrMedian": 10.693460553517333,
+          "bpmErrP95": 38.067719992218116,
+          "resyncs": 0,
+          "excursions": 33,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 965,
+          "phaseMedianMs": 0.4330757553769141,
+          "phaseP95Ms": 1.2150357348685266,
+          "bpmErrMedian": 0.06940898617898483,
+          "bpmErrP95": 0.17286335319559498,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 59,
+          "gapTicksInferred": 93,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 10,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 64.78269705204316,
+          "phaseP95Ms": 229.90473659641017,
+          "bpmErrMedian": 10.942394533775527,
+          "bpmErrP95": 37.4324886476422,
+          "resyncs": 0,
+          "excursions": 57,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 275,
+          "phaseMedianMs": 0.3778743562641296,
+          "phaseP95Ms": 1.0610286343408621,
+          "bpmErrMedian": 0.04987504898535633,
+          "bpmErrP95": 0.1487641810854683,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 59,
+          "gapTicksInferred": 84,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 11,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 143.33763306155114,
+          "phaseP95Ms": 217.39159525230517,
+          "bpmErrMedian": 10.855165733059373,
+          "bpmErrP95": 36.20649823354708,
+          "resyncs": 0,
+          "excursions": 7,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 310,
+          "phaseMedianMs": 0.4445567021607033,
+          "phaseP95Ms": 1.2491275813886202,
+          "bpmErrMedian": 0.055586610498806976,
+          "bpmErrP95": 0.1587701195568343,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 59,
+          "gapTicksInferred": 85,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 12,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 102.89446001492782,
+          "phaseP95Ms": 227.2485751930401,
+          "bpmErrMedian": 10.330921401796445,
+          "bpmErrP95": 36.89683793602168,
+          "resyncs": 0,
+          "excursions": 22,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 210,
+          "phaseMedianMs": 0.3799464205063903,
+          "phaseP95Ms": 1.1481900946011572,
+          "bpmErrMedian": 0.051652802761765315,
+          "bpmErrP95": 0.16764299657167214,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 57,
+          "gapTicksInferred": 87,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 13,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 119.7952562617921,
+          "phaseP95Ms": 229.464194022585,
+          "bpmErrMedian": 10.744778119054587,
+          "bpmErrP95": 37.3094237842337,
+          "resyncs": 0,
+          "excursions": 13,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 460,
+          "phaseMedianMs": 0.4546814203365557,
+          "phaseP95Ms": 1.2973779049252336,
+          "bpmErrMedian": 0.06126240039277775,
+          "bpmErrP95": 0.17644564546185393,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 56,
+          "gapTicksInferred": 90,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 14,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 147.63615743014685,
+          "phaseP95Ms": 230.476739636363,
+          "bpmErrMedian": 10.252573765999465,
+          "bpmErrP95": 35.864329751333145,
+          "resyncs": 0,
+          "excursions": 7,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 255,
+          "phaseMedianMs": 0.49600120365174877,
+          "phaseP95Ms": 1.4625317160465556,
+          "bpmErrMedian": 0.07175664925178182,
+          "bpmErrP95": 0.21216233192397738,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 59,
+          "gapTicksInferred": 78,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 15,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 108.0947371814922,
+          "phaseP95Ms": 248.3818490218309,
+          "bpmErrMedian": 10.887649705877607,
+          "bpmErrP95": 35.49854804849642,
+          "resyncs": 0,
+          "excursions": 32,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 605,
+          "phaseMedianMs": 0.3963450952101747,
+          "phaseP95Ms": 1.1323290391781111,
+          "bpmErrMedian": 0.055916514013333085,
+          "bpmErrP95": 0.15279462250147446,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 59,
+          "gapTicksInferred": 83,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 16,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 145.6704235639954,
+          "phaseP95Ms": 232.10645325984913,
+          "bpmErrMedian": 10.53842341101668,
+          "bpmErrP95": 36.751353342086475,
+          "resyncs": 0,
+          "excursions": 4,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 230,
+          "phaseMedianMs": 0.48055998681680495,
+          "phaseP95Ms": 1.2398951753289345,
+          "bpmErrMedian": 0.053596227543849295,
+          "bpmErrP95": 0.15847800461384054,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 57,
+          "gapTicksInferred": 79,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 17,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 98.76159409744645,
+          "phaseP95Ms": 244.37878346267348,
+          "bpmErrMedian": 10.239431983560152,
+          "bpmErrP95": 35.92425285627522,
+          "resyncs": 0,
+          "excursions": 27,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 420,
+          "phaseMedianMs": 0.475054510689669,
+          "phaseP95Ms": 1.383937440904148,
+          "bpmErrMedian": 0.06183865208895156,
+          "bpmErrP95": 0.19062082778073375,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 58,
+          "gapTicksInferred": 87,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 18,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 104.63169179306082,
+          "phaseP95Ms": 227.14626563826386,
+          "bpmErrMedian": 10.194990210500563,
+          "bpmErrP95": 36.54316475070004,
+          "resyncs": 0,
+          "excursions": 25,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 255,
+          "phaseMedianMs": 0.4241668285670149,
+          "phaseP95Ms": 1.2995820839312455,
+          "bpmErrMedian": 0.05453930298104126,
+          "bpmErrP95": 0.17881606226704605,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 58,
+          "gapTicksInferred": 93,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 19,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 83.06728464470817,
+          "phaseP95Ms": 212.17475051396636,
+          "bpmErrMedian": 10.279714310379902,
+          "bpmErrP95": 35.36212359137704,
+          "resyncs": 0,
+          "excursions": 35,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 520,
+          "phaseMedianMs": 0.41825623875091367,
+          "phaseP95Ms": 1.2425849442188044,
+          "bpmErrMedian": 0.057190665540346686,
+          "bpmErrP95": 0.1745020346363333,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 58,
+          "gapTicksInferred": 83,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    },
+    {
+      "seed": 20,
+      "results": [
+        {
+          "estimator": "last-interval",
+          "settlingMs": null,
+          "phaseMedianMs": 66.80632824213242,
+          "phaseP95Ms": 229.45638520100772,
+          "bpmErrMedian": 10.82632895385862,
+          "bpmErrP95": 36.51769223543866,
+          "resyncs": 0,
+          "excursions": 30,
+          "duplicatesDropped": 0,
+          "gapTicksInferred": 0,
+          "pass": {
+            "settle": false,
+            "bpm": false,
+            "phase": false,
+            "all": false
+          }
+        },
+        {
+          "estimator": "median+phase",
+          "settlingMs": 335,
+          "phaseMedianMs": 0.4547446743004002,
+          "phaseP95Ms": 1.2590334632858928,
+          "bpmErrMedian": 0.05212599284399744,
+          "bpmErrP95": 0.19504709369591922,
+          "resyncs": 0,
+          "excursions": 0,
+          "duplicatesDropped": 57,
+          "gapTicksInferred": 87,
+          "pass": {
+            "settle": true,
+            "bpm": true,
+            "phase": true,
+            "all": true
+          }
+        }
+      ]
+    }
+  ]
+}

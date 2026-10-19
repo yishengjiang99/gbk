@@ -28,6 +28,13 @@ offline mastering removes that delay and flushes the tail before WAV encoding.
 The reduction meter shows compression, with a separate indication when limiting
 is active. Export captures the mode selected when Export WAV is clicked.
 
+### MIDI clock follower demo
+
+`midi-clock.html` follows MIDI Clock (F8/FA/FB/FC) from Web MIDI or a built-in synthetic source: a Worker estimates
+BPM and beat phase, and an AudioWorklet (`src/midi-clock/click-processor.ts`) schedules a click on the audio clock.
+See `docs/midi-clock-follower.md` (clock-domain conversion, sync-lost timeout, teardown) and
+`docs/midi-clock-experiment.md` (estimator comparison, `npm run experiment:midi-clock`).
+
 ### Synth and MIDI modules
 
 - `src/App.jsx`
