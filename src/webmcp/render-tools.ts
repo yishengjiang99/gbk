@@ -24,7 +24,7 @@ export function jobView(j: RenderJob) {
   return {
     jobId: j.id, projectId: j.projectId, revision: j.revision, status: j.status, progress: Math.round(j.progress * 100), artifactId: j.artifactId ?? null, error: j.error ?? null,
     ...(r ? { filename: safeFilename(j.projectName, "wav"), durationSeconds: +r.durationSeconds.toFixed(3), musicSeconds: +r.musicSeconds.toFixed(3), tailSeconds: r.tailSeconds, sampleRate: r.sampleRate, channels: r.channels, format: r.format, frames: r.framesRendered, bytes: r.byteLength, sha256: r.sha256,
-      peakDbFS: r.peakDbFS, rmsDbFS: r.rmsDbFS, clippedSamples: r.clippedSamples, validated: r.validated, instruments: r.instruments, soundFont: r.soundFont, renderMs: r.renderMs, warnings: r.warnings } : {}),
+      peakDbFS: r.peakDbFS, rmsDbFS: r.rmsDbFS, clippedSamples: r.clippedSamples, validated: r.validated, instruments: r.instruments, soundFont: r.soundFont, renderMs: r.renderMs, loudness: r.loudness, warnings: r.warnings } : {}),
   };
 }
 const artifactView = (a: ArtifactMeta) => ({ artifactId: a.id, kind: a.kind, filename: a.filename, mimeType: a.mimeType, bytes: a.bytes, sha256: a.sha256, createdAt: new Date(a.createdAt).toISOString(), projectId: a.projectId, projectName: a.projectName, revision: a.revision, jobId: a.jobId ?? null, wav: a.wav ?? null });
@@ -44,7 +44,10 @@ export function buildRenderTools(c: WorkstationController): ToolDef[] {
   return [
     { name: "gbk_render_wav", readOnly: false,
       description: "Render the committed project to a validated WAV with the SF2 engine, fully headless (no click, no audio unlock, no Player, no pre-loaded SoundFont; GeneralUser GS loads automatically). Snapshot semantics: later edits do not affect the render. output: artifact (default; saved in browser storage, read bytes with gbk_read_wav_bytes), audio (MCP audio content when small and supported, else artifact reference), bytes (inline base64 only if <= 256 KiB, else artifact reference). download defaults to false and never happens unless true. Returns ok only after render + validation; if it takes longer than waitSeconds you get a real jobId to poll with gbk_get_render_status.",
-      inputSchema: obj({ sampleRate: { type: "integer", enum: [44100, 48000] }, channels: { type: "integer", enum: [1, 2] }, format: { type: "string", enum: ["pcm16", "float32"] }, tailSeconds: { type: "number", minimum: 0, maximum: 30 }, normalize: { type: "boolean" },
+      inputSchema: obj({ sampleRate: { type: "integer", enum: [44100, 48000] }, channels: { type: "integer", enum: [1, 2] }, format: { type: "string", enum: ["pcm16", "float32"] }, tailSeconds: { type: "number", minimum: 0, maximum: 30 },
+        normalize: { anyOf: [{ type: "string", enum: ["loudness", "peak", "off"] }, { type: "boolean" }], description: "whole-file level (true = peak, false = off), one gain for the entire file (dynamics preserved): loudness (default) = -16 LUFS integrated capped at -1 dBTP; peak = -1 dBTP; off = raw engine output" },
+        targetLufs: { type: "number", minimum: -40, maximum: -5, description: "integrated loudness target for normalize=loudness (default -16)" },
+        autoPan: { type: "boolean", description: "orchestra-seating auto-pan per track, as in live playback (default true)" },
         saveArtifact: { type: "boolean" }, download: { type: "boolean" }, output: { type: "string", enum: ["artifact", "audio", "bytes"] }, waitSeconds: { type: "number", minimum: 0, maximum: 600, description: "how long this call waits for completion (default 300)" },
         allowSilence: { type: "boolean" }, silenceThresholdDbFS: { type: "number", minimum: -140, maximum: 0 }, includeMidi: { type: "boolean", description: "also save the MIDI export as an artifact (default true)" } }),
       run: async (a, signal) => {
@@ -52,7 +55,7 @@ export function buildRenderTools(c: WorkstationController): ToolDef[] {
         const output = (a.output as string) ?? "artifact";
         // audio output always keeps an artifact so a text-only host can fall back to it.
         const save = output === "bytes" ? (a.saveArtifact as boolean) ?? true : true;
-        const job = renderJobs().submit(p, { sampleRate: (a.sampleRate as 44100) ?? 44100, channels: (a.channels as 2) ?? 2, format: (a.format as "pcm16") ?? "pcm16", tailSeconds: (a.tailSeconds as number) ?? 3, normalize: !!a.normalize, allowSilence: !!a.allowSilence, silenceThresholdDbFS: a.silenceThresholdDbFS as number | undefined }, { saveArtifact: save, signal });
+        const job = renderJobs().submit(p, { sampleRate: (a.sampleRate as 44100) ?? 44100, channels: (a.channels as 2) ?? 2, format: (a.format as "pcm16") ?? "pcm16", tailSeconds: (a.tailSeconds as number) ?? 3, normalize: (typeof a.normalize === "boolean" ? a.normalize : (a.normalize as "loudness" | undefined)), targetLufs: a.targetLufs as number | undefined, autoPan: a.autoPan as boolean | undefined, allowSilence: !!a.allowSilence, silenceThresholdDbFS: a.silenceThresholdDbFS as number | undefined }, { saveArtifact: save, signal });
         let midiArtifactId: string | null = null; const warnings: string[] = [];
         if (a.includeMidi !== false) {
           try { const { bytes, filename } = c.prepareMidiExport(); midiArtifactId = (await store().save({ kind: "midi", filename, mimeType: "audio/midi", sha256: await sha256Hex(bytes), projectId: p.id, projectName: p.name, revision: p.revision }, new Blob([bytes as BlobPart], { type: "audio/midi" }))).id; }

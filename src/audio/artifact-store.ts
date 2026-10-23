@@ -5,7 +5,7 @@ import { RenderError, asRenderError } from "./render-error.ts";
 export interface ArtifactMeta {
   id: string; kind: "wav" | "midi"; filename: string; mimeType: string; bytes: number; sha256: string;
   createdAt: number; projectId: string; projectName: string; revision: number; jobId?: string;
-  wav?: { durationSeconds: number; sampleRate: number; channels: number; format: string; frames: number; peakDbFS: number; rmsDbFS: number; clippedSamples: number; validated: boolean };
+  wav?: { durationSeconds: number; sampleRate: number; channels: number; format: string; frames: number; peakDbFS: number; rmsDbFS: number; clippedSamples: number; validated: boolean; loudness?: import("./loudness.ts").LoudnessReport };
 }
 export interface ArtifactBackend {
   put(meta: ArtifactMeta, blob: Blob): Promise<void>;

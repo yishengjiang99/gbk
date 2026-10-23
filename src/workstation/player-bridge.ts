@@ -5,7 +5,7 @@ import { parseSmf, serializeSmf } from "./smf.ts";
 import { secToTick, tickToSec } from "./timing.ts";
 import type { Project, TrackMix } from "./model.ts";
 import type { SF2Region } from "../sf2/soundfont.ts";
-import { renderProjectOffline } from "../audio/offline-renderer.ts";
+import { renderProjectOffline, setLivePresetOverridesProvider } from "../audio/offline-renderer.ts";
 import { normalizeEffects, type EffectsParams, type VoiceOverride } from "../sf2/voice-overrides.ts";
 
 export interface PlayerHandle {
@@ -25,6 +25,8 @@ export interface PlayerHandle {
   /** Global reverb / chorus parameters for every track engine and the offline render. */
   setEffects?(params: EffectsParams): void;
   /** Resolved preset + zones of a player track. */
+  /** Preset index the user pinned on this player track (track menu), or null. */
+  getTrackPresetOverride?(trackIndex: number): number | null;
   getTrackRegions?(trackIndex: number): { presetName: string; presetIndex: number; regions: SF2Region[] } | null;
 }
 
@@ -129,13 +131,21 @@ export function bindController(c: WorkstationController) {
   });
   c.attachDriver(driverFor(c));
   // Headless: no player, no AudioContext, no unlock. Same renderer as the player's Export WAV and gbk_render_wav.
-  c.host.renderWav = async (project, signal) => (await renderProjectOffline(project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, signal)).blob;
+  c.host.renderWav = async (project, signal, normalize) => (await renderProjectOffline(project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3, normalize }, signal)).blob;
   c.host.checkpoint = async (project) => {
     if (typeof indexedDB === "undefined") throw new Error("IndexedDB unavailable");
     const { midiFileStore } = await import("../midi-file-store.ts");
     const { PROJECT_SCHEMA_VERSION } = await import("./model.ts");
     await midiFileStore.putProject({ id: project.id, schemaVersion: PROJECT_SCHEMA_VERSION, savedAt: Date.now(), project });
   };
+  // Offline renders of the project the player has loaded use the player's pinned per-track presets (live parity).
+  setLivePresetOverridesProvider((project) => {
+    const h = playerBridge.handle;
+    if (!h?.getTrackPresetOverride || playerBridge.loadedProjectId !== project.id) return undefined;
+    const out: Record<string, number> = {};
+    project.tracks.forEach((t, i) => { const ov = h.getTrackPresetOverride!(i + 1); if (ov != null) out[t.id] = ov; });
+    return Object.keys(out).length ? out : undefined;
+  });
   c.host.trackRegions = (project, trackId) => {
     const i = project.tracks.findIndex((t) => t.id === trackId);
     return i < 0 ? null : playerBridge.handle?.getTrackRegions?.(i + 1) ?? null;

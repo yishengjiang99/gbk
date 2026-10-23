@@ -28,6 +28,11 @@ const BASE_REV = int(0, Number.MAX_SAFE_INTEGER, "Optimistic concurrency: the re
 /** Strict-ish runtime validation for the subset of JSON Schema used here (agents can send anything). */
 export function validate(schema: JsonSchema, v: unknown, path = "input"): void {
   const bad = (m: string) => { throw new WorkstationError("INVALID_ARGUMENT", `${path}: ${m}`); };
+  if (Array.isArray(schema.anyOf)) {
+    const errs: string[] = [];
+    for (const alt of schema.anyOf as JsonSchema[]) { try { validate(alt, v, path); return; } catch (e) { errs.push((e as Error).message.replace(`${path}: `, "")); } }
+    bad(errs.join(" or "));
+  }
   const t = schema.type;
   if (t === "object") {
     if (typeof v !== "object" || v === null || Array.isArray(v)) bad("expected object");
@@ -195,10 +200,10 @@ export function buildCoreTools(c: WorkstationController): ToolDef[] {
     { name: "gbk_redo", readOnly: false, description: "Redo (same history as the user).", inputSchema: obj({}), run: () => ({ data: { redone: c.redo() } }) },
     { name: "gbk_prepare_midi_export", readOnly: false, description: "Build a Standard MIDI File (tempo/meter, timed CC, bend/pressure, programs, raw events) and offer it as a browser-local download.", inputSchema: obj({ download: { type: "boolean" } }),
       run: (a) => { const { bytes, filename } = c.prepareMidiExport(); if (a.download !== false) c.host.download?.(bytes, filename); return { data: { filename, bytes: bytes.length, downloaded: a.download !== false && !!c.host.download } }; } },
-    { name: "gbk_prepare_wav_export", readOnly: false, description: "Offline-render the project with the headless SF2 renderer (same engine as gbk_render_wav; no audio unlock needed). Offers a browser download unless download is false (legacy behavior); prefer gbk_render_wav for artifacts and byte transfer.", inputSchema: obj({ download: { type: "boolean" } }),
+    { name: "gbk_prepare_wav_export", readOnly: false, description: "Offline-render the project with the headless SF2 renderer (same engine as gbk_render_wav; no audio unlock needed). Offers a browser download unless download is false (legacy behavior); prefer gbk_render_wav for artifacts and byte transfer.", inputSchema: obj({ download: { type: "boolean" }, normalize: { type: "string", enum: ["loudness", "peak", "off"], description: "whole-file level (default loudness: -16 LUFS, <= -1 dBTP)" } }),
       run: async (a, signal) => {
         if (!c.host.renderWav) throw new WorkstationError("UNSUPPORTED", "no renderer in this runtime");
-        const blob = await c.host.renderWav(c.project, signal);
+        const blob = await c.host.renderWav(c.project, signal, a.normalize as "loudness" | "peak" | "off" | undefined);
         if (signal.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
         const filename = `${c.project.name.replace(/[^\w\- .]/g, "_").slice(0, 80) || "gbk"}.wav`;
         const requested = a.download !== false && !!c.host.download && c.host.download(blob, filename) !== false;

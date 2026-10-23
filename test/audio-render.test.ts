@@ -77,7 +77,7 @@ test("44.1 vs 48 kHz, mono vs stereo, float32", async () => {
   await validateWav(f.blob, { format: "float32", sampleRate: 44100, channels: 2 });
 });
 
-test("normalize is opt-in and whole-file (dynamics preserved)", async () => {
+test("normalize peak is whole-file (dynamics preserved vs the default loudness render)", async () => {
   const p = fixture();
   const n = await render(p, { normalize: true });
   assert.ok(Math.abs(n.peakDbFS - -1) < 0.3, `peak ${n.peakDbFS}`);

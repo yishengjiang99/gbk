@@ -56,7 +56,7 @@ export class RenderJobManager {
         if (job.saveArtifact) {
           this.patch(id, { status: "saving", progress: 0.97 });
           const a: ArtifactMeta = await this.store().save({ kind: "wav", filename: safeFilename(snap.name, "wav"), mimeType: "audio/wav", sha256: r.sha256, projectId: snap.id, projectName: snap.name, revision: snap.revision, jobId: id,
-            wav: { durationSeconds: r.durationSeconds, sampleRate: r.sampleRate, channels: r.channels, format: r.format, frames: r.framesRendered, peakDbFS: r.peakDbFS, rmsDbFS: r.rmsDbFS, clippedSamples: r.clippedSamples, validated: true } }, r.blob);
+            wav: { durationSeconds: r.durationSeconds, sampleRate: r.sampleRate, channels: r.channels, format: r.format, frames: r.framesRendered, peakDbFS: r.peakDbFS, rmsDbFS: r.rmsDbFS, clippedSamples: r.clippedSamples, validated: true, loudness: r.loudness } }, r.blob);
           artifactId = a.id;
         }
         if (opts.keepResult !== false) { this.results.set(id, r); for (const k of [...this.results.keys()].slice(0, -2)) this.results.delete(k); } // keep the last 2 in memory

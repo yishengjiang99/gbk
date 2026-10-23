@@ -26,6 +26,7 @@ import {
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
 import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
+import { resolveOrchestraPan } from "./audio/orchestra-pan.ts";
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 import { midiFileStore } from "./midi-file-store.ts";
@@ -362,41 +363,8 @@ function CcKnob({ label, value, onChange, disabled = false }: CcKnobProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Orchestra pan heuristics
+// Orchestra pan heuristics: src/audio/orchestra-pan.ts (shared with the offline renderer)
 // ---------------------------------------------------------------------------
-
-interface PanRule {
-  test: RegExp;
-  pan: number;
-}
-
-const ORCHESTRA_PAN_RULES: PanRule[] = [
-  { test: /\bviolin\s*(?:ii|2)\b/i, pan: -0.35 },
-  { test: /\bviolin\b/i, pan: -0.75 },
-  { test: /\bviola\b/i, pan: 0.3 },
-  { test: /\bcello\b/i, pan: 0.65 },
-  { test: /\b(double\s*bass|contrabass|upright\s*bass)\b/i, pan: 0.8 },
-  { test: /\b(piccolo|flute)\b/i, pan: -0.15 },
-  { test: /\boboe\b/i, pan: -0.05 },
-  { test: /\bclarinet\b/i, pan: 0.05 },
-  { test: /\bbassoon\b/i, pan: 0.15 },
-  { test: /\b(french\s*horn|horn)\b/i, pan: -0.5 },
-  { test: /\btrumpet\b/i, pan: 0.25 },
-  { test: /\b(trombone|tuba)\b/i, pan: 0.5 },
-  { test: /\btimpani\b/i, pan: -0.1 },
-];
-
-function resolveOrchestraPan(...labels: (string | undefined)[]): number | null {
-  const merged = labels
-    .filter(Boolean)
-    .join(" | ")
-    .toLowerCase();
-  if (!merged) return null;
-  for (const rule of ORCHESTRA_PAN_RULES) {
-    if (rule.test.test(merged)) return rule.pan;
-  }
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // MidiReader props
@@ -1675,6 +1643,10 @@ export default function MidiReader({
       effectsRef.current = fx;
       for (const rec of trackNodesRef.current) rec.node?.port.postMessage({ type: "setEffects", effects: fx });
     },
+    getTrackPresetOverride: (i) => {
+      const track = song?.tracks?.[i]; if (!track) return null;
+      return trackPresetOverridesRef.current[track.index] ?? null;
+    },
     getTrackRegions: (i) => {
       const track = song?.tracks?.[i]; if (!track) return null;
       const presetIndex = trackPresetOverridesRef.current[track.index] ?? trackDefaultPresetMap[track.index] ?? fallbackPresetRef.current;
@@ -1707,6 +1679,7 @@ export default function MidiReader({
       setTrackVoice: (i, ov) => bridgeImplRef.current!.setTrackVoice!(i, ov),
       setEffects: (fx) => bridgeImplRef.current!.setEffects!(fx),
       getTrackRegions: (i) => bridgeImplRef.current!.getTrackRegions!(i),
+      getTrackPresetOverride: (i) => bridgeImplRef.current!.getTrackPresetOverride!(i),
     });
     return () => playerBridge.attach(null);
   }, []);
