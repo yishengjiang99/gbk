@@ -139,3 +139,20 @@ See `docs/midi-clock-follower.md` (clock-domain conversion, sync-lost timeout, t
   - `.github/workflows/deploy-pages.yml`
   - On push to `main`: build + deploy `dist` to GitHub Pages.
 # gbk
+
+
+## Workstation + WebMCP (agent tools)
+
+GBK opens on an editable **workstation**: tick-based piano roll, CC / pitch-bend automation lanes, transport, and an
+agent activity / proposal panel. The original player, playlist, SoundFont explorer, Bach generator, sheet music and
+recorder live under **Player / Library** (a modal; the audio engine stays mounted).
+
+- Edit by hand: drag to select a range, drag notes to move, drag the note end to resize, double-click to add/delete,
+  arrows transpose / scroll, alt+arrows nudge, +/- zoom, Delete removes. Lanes: click adds a point, drag moves,
+  alt-click deletes, shift-drag draws. Undo/Redo share one history with agents.
+- **Enable Agent Tools** registers `gbk_*` tools with WebMCP (`document.modelContext`, Chrome with WebMCP enabled).
+  Agents stage *proposals*; you audition A/B and press **Accept** or **Reject**. Off by default; GBK works without it.
+- Timed CC (all 0–127), 14-bit pitch bend and pressure now play, seek, loop, export to MIDI/WAV and MIDI-out consistently.
+
+Docs: [architecture](docs/architecture.md) · [WebMCP tools](docs/webmcp.md) · [controller pipeline](docs/controller-pipeline.md) ·
+[demo walkthrough](docs/demo-walkthrough.md).

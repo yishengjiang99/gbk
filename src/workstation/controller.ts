@@ -16,6 +16,8 @@ export interface TransportState { playing: boolean; positionTick: number; audioR
 export interface TransportDriver {
   play(fromTick: number): Promise<void> | void; pause(): void; stop(): void; seek(tick: number): void;
   isAudioReady(): boolean;
+  /** Try to unlock audio + load the default SoundFont. Resolves true when ready. */
+  prepare?(): Promise<boolean>;
   /** Audition a candidate project over a tick range without mutating state. Returns cleanup. */
   preview?(project: Project, startTick: number, endTick: number, signal?: AbortSignal): Promise<void>;
 }
@@ -172,18 +174,22 @@ export class WorkstationController {
   // ---- transport -----------------------------------------------------------
   attachDriver(d: TransportDriver | null) { this.driver = d; this.updateTransport({ audioReady: !!d?.isAudioReady() }); }
   updateTransport(t: Partial<TransportState>) { this.set({ transport: { ...this.state.transport, ...t } }); }
+  private async readyDriver(): Promise<TransportDriver> {
+    if (this.driver && !this.driver.isAudioReady() && this.driver.prepare) { const ok = await this.driver.prepare(); this.updateTransport({ audioReady: ok }); }
+    return this.needDriver();
+  }
   private needDriver(): TransportDriver {
     if (!this.driver || !this.driver.isAudioReady()) throw new WorkstationError("AUDIO_NOT_READY", "Audio engine not ready; the user must click in the page to start audio (autoplay policy) and load a SoundFont.");
     return this.driver;
   }
-  async play() { const d = this.needDriver(); await d.play(this.state.transport.positionTick); this.updateTransport({ playing: true }); }
+  async play() { const d = await this.readyDriver(); await d.play(this.state.transport.positionTick); this.updateTransport({ playing: true }); }
   pause() { this.driver?.pause(); this.updateTransport({ playing: false }); }
   stop() { this.driver?.stop(); this.updateTransport({ playing: false, positionTick: 0 }); }
   seek(tick: number) { const t = Math.max(0, Math.round(tick)); this.driver?.seek(t); this.updateTransport({ positionTick: t }); }
 
   async previewProposal(id: string, variant: "A" | "B", signal?: AbortSignal) {
     const p = this.getProposal(id);
-    const d = this.needDriver();
+    const d = await this.readyDriver();
     if (!d.preview) throw new WorkstationError("UNSUPPORTED", "preview not supported by this driver");
     this.set({ previewing: `${id}:${variant}` });
     try { await d.preview(variant === "A" ? p.original : p.candidate, p.range.startTick, p.range.endTick, signal); }

@@ -15,6 +15,8 @@ export interface PlayerHandle {
   exportWav(onBlob: (b: Blob) => void): Promise<void>;
   /** Player track index (SMF order; 0 = conductor) -> mix (base layer). */
   setTrackMix(trackIndex: number, mix: TrackMix): void;
+  /** Kick the default SoundFont download if none is loaded/loading. */
+  requestSf2(): void;
 }
 
 type Listener = () => void;
@@ -25,13 +27,18 @@ class PlayerBridge {
   loadedProjectId: string | null = null;
   private songWaiters: Listener[] = [];
   private suppressNextImport = false;
+  /** Set when an edited project was restored from IndexedDB; the player's startup re-load of the same song must not clobber it. */
+  restored = false;
   ctrl: WorkstationController | null = null;
 
   attach(h: PlayerHandle | null) { this.handle = h; this.ctrl?.attachDriver(this.ctrl ? driverFor(this.ctrl) : null); }
   /** Player loaded a song the user picked (playlist/upload/Bach/sheet). Mirror it into the workstation. */
-  onPlayerLoadedBuffer(buf: ArrayBuffer, name: string) {
+  onPlayerLoadedBuffer(buf: ArrayBuffer, name: string, isSessionRestore = false) {
     if (this.suppressNextImport) { this.suppressNextImport = false; return; }
     if (!this.ctrl) return;
+    const nm = name.replace(/\.(mid|midi)$/i, "");
+    // Player re-opening its last song on startup must not clobber the edited project restored from IndexedDB.
+    if (isSessionRestore && this.ctrl.project.revision > 0 && this.ctrl.project.name === nm) return;
     try {
       const p = parseSmf(buf, name.replace(/\.(mid|midi)$/i, ""));
       this.ctrl.load(p);
@@ -67,6 +74,13 @@ export function driverFor(c: WorkstationController): TransportDriver {
   const b = playerBridge;
   return {
     isAudioReady: () => !!b.handle?.isReady(),
+    async prepare() {
+      const h = b.handle; if (!h) return false;
+      try { await h.unlockAudio(); } catch { return false; }
+      h.requestSf2();
+      for (let i = 0; i < 240 && !h.isReady(); i++) await new Promise((r) => setTimeout(r, 250));
+      return h.isReady();
+    },
     async play(fromTick) {
       const h = b.handle!; await h.unlockAudio();
       const sec = tickToSec(c.project, fromTick);
@@ -99,7 +113,8 @@ export function bindController(c: WorkstationController) {
   c.attachDriver(driverFor(c));
   c.host.renderWav = async (project) => {
     const h = playerBridge.handle;
-    if (!h?.isReady()) throw Object.assign(new Error("Load a SoundFont first"), { code: "AUDIO_NOT_READY" });
+    if (!h) throw new Error("player not mounted");
+    if (!h.isReady() && !(await driverFor(c).prepare!())) throw Object.assign(new Error("Load a SoundFont first"), { code: "AUDIO_NOT_READY" });
     if (!playerBridge.inSync(project)) await playerBridge.loadProject(project, false, 0);
     await new Promise((r) => setTimeout(r, 0));
     let blob: Blob | null = null;

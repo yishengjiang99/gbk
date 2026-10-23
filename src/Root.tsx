@@ -11,10 +11,13 @@ export default function Root() {
   }, [playerOpen]);
   return (
     <>
-      <WorkstationView onOpenPlayer={() => setPlayerOpen(true)} />
+      {/* While the player modal is open the workstation is inert + hidden from the a11y tree (proper modal semantics). */}
+      <div aria-hidden={playerOpen || undefined} ref={(el) => { if (el) { if (playerOpen) el.setAttribute("inert", ""); else el.removeAttribute("inert"); } }}>
+        <WorkstationView onOpenPlayer={() => setPlayerOpen(true)} />
+      </div>
       <div className={`ws-player-modal ${playerOpen ? "open" : ""}`} role="dialog" aria-modal={playerOpen} aria-hidden={!playerOpen} aria-label="Player and library" data-testid="player-modal">
         <div className="ws-player-frame">
-          <button className="ws-player-close" onClick={() => setPlayerOpen(false)} aria-label="Close player">✕ Close player</button>
+          <button className="ws-player-close" data-testid="close-player" onClick={() => setPlayerOpen(false)} aria-label="Close player">✕ Close player</button>
           <App />
         </div>
       </div>

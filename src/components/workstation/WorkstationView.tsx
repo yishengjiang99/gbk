@@ -47,7 +47,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
         <button disabled={!state.canUndo} onClick={() => workstation.undo()}>Undo</button>
         <button disabled={!state.canRedo} onClick={() => workstation.redo()}>Redo</button>
         <button onClick={exportMidi} data-testid="export-midi">Export MIDI</button>
-        <button onClick={exportWav} disabled={!state.transport.audioReady}>Export WAV</button>
+        <button onClick={exportWav} data-testid="export-wav">Export WAV</button>
         <label className={`ws-pill ${agent.on && agent.available ? "on" : "off"}`} title={agent.available ? "Expose gbk_* tools to in-browser agents via WebMCP" : "WebMCP not available in this browser"}>
           <input type="checkbox" data-testid="agent-toggle" checked={agent.on} disabled={!agent.available} onChange={(e) => agent.setOn(e.target.checked)} /> Enable Agent Tools {agent.available ? "" : "(unavailable)"}
         </label>
