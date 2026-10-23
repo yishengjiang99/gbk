@@ -29,6 +29,8 @@ export interface BachFugueConfig {
   complexity: 1 | 2 | 3 | 4 | 5;
   tempo: number;
   seed: number;
+  /** Search attempts (best-scoring kept). Default 10; GBK's arrangement tool uses fewer for responsiveness. */
+  attempts?: number;
 }
 
 interface KeyContext {
@@ -681,7 +683,7 @@ export function generateFugue(config: BachFugueConfig): BachPiece {
   let bestScore = -Infinity;
   let bestMeta: Omit<BachPiece, "notes" | "totalBeats"> | null = null;
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < Math.max(1, config.attempts ?? 10); attempt += 1) {
     const notes: FugueNote[] = [];
     const analysis: string[] = [];
     for (const ev of structure) {
