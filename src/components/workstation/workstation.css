@@ -142,3 +142,6 @@ html.studio-fit, html.studio-fit body { height: 100%; overflow: hidden; }
   .ws-tabbody > .ws-tracks { display: contents; }
 }
 .ws-tracks.ws-flow { column-width: 180px; }
+/* The legacy player's mobile rule (styles.css: html, body, #root { height:100%; overflow:hidden } under max-width)
+   must not apply to the landing/Explore page: it scrolls normally on phones too. */
+html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-y: visible; }
