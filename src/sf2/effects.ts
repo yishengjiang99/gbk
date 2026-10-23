@@ -6,6 +6,13 @@ const f = Math.fround;
 const COMB_TUNING = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
 const ALLPASS_TUNING = [556, 441, 341, 225];
 const STEREO_SPREAD = 23;
+/**
+ * Reverb return scale. Freeverb feeds the combs with (L+R)*0.015 and scales the wet return by 3 (scalewet), so its
+ * wet return is level * 3. The port kept the input gain but dropped scalewet (return 0.35 at the default level), so
+ * sends were ~18 dB quieter than FluidSynth and inaudible. Default reverbLevel 0.5 now gives FluidSynth's default
+ * return (level 0.9 * scalewet 3 = 2.7); reverbLevel 1 gives 5.4.
+ */
+export const REVERB_RETURN_MAX = 5.4;
 
 export class SF2Effects {
   readonly buf: Float32Array;
@@ -17,7 +24,7 @@ export class SF2Effects {
   readonly sr: number;
   roomFeedback = f(0.84);
   damp = f(0.2);
-  reverbWet = f(0.35);
+  reverbWet = f(REVERB_RETURN_MAX * 0.5);
   chorusDepthSec = 0.004;
   chorusBaseSec = 0.012;
   chorusRateHz = 0.6;
@@ -45,7 +52,7 @@ export class SF2Effects {
     const c = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
     if (Number.isFinite(p.roomSize)) this.roomFeedback = f(0.7 + 0.28 * c(p.roomSize!, 0, 1));
     if (Number.isFinite(p.damping)) this.damp = f(0.4 * c(p.damping!, 0, 1));
-    if (Number.isFinite(p.reverbLevel)) this.reverbWet = f(0.7 * c(p.reverbLevel!, 0, 1));
+    if (Number.isFinite(p.reverbLevel)) this.reverbWet = f(REVERB_RETURN_MAX * c(p.reverbLevel!, 0, 1));
     if (Number.isFinite(p.chorusLevel)) this.chorusWet = c(p.chorusLevel!, 0, 1);
     if (Number.isFinite(p.chorusRateHz)) this.chorusRateHz = c(p.chorusRateHz!, 0.01, 10);
     // Delay line is 50 ms: keep base + depth inside it.
@@ -87,7 +94,9 @@ export class SF2Effects {
 
   /** One frame: wet reverb + chorus from the send buses, written to outL / outR. */
   process(revL: number, revR: number, choL: number, choR: number): void {
-    const input = f(f((revL + revR) * 0.5) * f(0.03));
+    // Freeverb / FluidSynth feed the combs with the MONO send * 0.03; the send buses here are panned (gL + gR = 1),
+    // so their sum (not their average) is the mono send.
+    const input = f(f(revL + revR) * f(0.03));
     let oL = 0, oR = 0;
     for (let k = 0; k < 8; k++) { oL = f(oL + this.comb(k, input)); oR = f(oR + this.comb(8 + k, input)); }
     for (let k = 0; k < 4; k++) { oL = this.allpass(16 + k, oL); oR = this.allpass(20 + k, oR); }

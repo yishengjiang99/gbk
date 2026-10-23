@@ -9,6 +9,8 @@ import { loadSoundFont, resolveInstrument, type LoadedSoundFont, type ResolvedIn
 import { encodeChunk, wavDataBytes, wavHeader, type WavFormat } from "./wav-encoder.ts";
 import { StatsAccumulator, validateWav, type AudioStats, type WavInfo } from "./audio-validation.ts";
 import { RenderError, throwIfAborted, yieldToEventLoop } from "./render-error.ts";
+import { LoudnessMeter, chooseGain, LOUDNESS_TARGET_LUFS, type LoudnessReport, type NormalizeMode } from "./loudness.ts";
+import { resolveOrchestraPan, stereoPanGains } from "./orchestra-pan.ts";
 
 export interface OfflineRenderOptions {
   sampleRate: 44100 | 48000;
@@ -16,8 +18,21 @@ export interface OfflineRenderOptions {
   format: WavFormat;
   /** Seconds rendered after the last event for releases and reverb/chorus tails. Default 3. */
   tailSeconds?: number;
-  /** Opt-in whole-file peak normalization to -1 dBFS (one gain for the entire file; CC dynamics preserved). */
-  normalize?: boolean;
+  /**
+   * Whole-file level (ONE gain for the entire file, measured on a first pass; never per section, so CC/velocity
+   * dynamics and section contrast are preserved exactly):
+   * - "loudness" (default): integrated BS.1770 loudness to `targetLufs` (-16 LUFS), capped at -1 dBTP true peak.
+   * - "peak" (or `true`): true peak to -1 dBTP.
+   * - "off" (or `false`): raw engine output (master gain -3 dB, like live playback at full volume).
+   */
+  normalize?: boolean | NormalizeMode;
+  /** Integrated loudness target for normalize "loudness". Default -16 LUFS. */
+  targetLufs?: number;
+  /** Orchestra-seating auto-pan per track, as in live playback (StereoPannerNode after each track). Default true. */
+  autoPan?: boolean;
+  /** Player per-track preset overrides (trackId -> SoundFont preset index); pinned like the live player (the track's
+   *  program changes are ignored). Defaults to the live player's overrides when the player has this project loaded. */
+  presetOverrides?: Record<string, number>;
   startTick?: number; endTick?: number;
   /** Intentional silence: do not fail validation on an all-silent result. */
   allowSilence?: boolean;
@@ -27,6 +42,8 @@ export interface OfflineRenderOptions {
   /** Hard limits (explicit RENDER_TOO_LARGE instead of exhausting memory). Defaults 40 min / 1.5 GiB. */
   maxSeconds?: number; maxBytes?: number;
   chunkFrames?: number;
+  /** Max bytes of float mix kept between the measure and encode passes (else the engine re-renders). Default 384 MiB. */
+  cacheBytes?: number;
 }
 export type RenderStage = "loading" | "resolving" | "rendering" | "encoding" | "validating";
 export type ProgressFn = (progress: number, stage: RenderStage) => void;
@@ -38,8 +55,10 @@ export interface RenderResult {
   peakDbFS: number; rmsDbFS: number; clippedSamples: number; gain: number; validated: true;
   wav: WavInfo; stats: AudioStats; instruments: InstrumentReport[]; warnings: string[]; soundFont: string;
   noteCount: number; renderMs: number;
+  /** Loudness measurement and the whole-file gain that was applied. */
+  loudness: LoudnessReport;
 }
-export interface InstrumentReport { trackId: string; trackName: string; channel: number; presetName: string; bank: number; program: number; substituted: boolean; muted: boolean }
+export interface InstrumentReport { trackId: string; trackName: string; channel: number; presetName: string; bank: number; program: number; substituted: boolean; muted: boolean; pan: number; presetOverride: boolean }
 
 const CLS = { setup: 0, program: 1, cc: 2, ctl: 3, noteOff: 4, noteOn: 5 } as const;
 
@@ -70,10 +89,15 @@ export function barEnd(p: Project, tick: number): number {
   return b ? b.tick + b.length : tick;
 }
 
-export interface RenderPlan { tracks: TrackState[]; events: SynthEvent[]; startFrame: number; musicFrames: number; instruments: InstrumentReport[]; warnings: string[]; audibleNotes: number }
+export interface RenderPlan {
+  tracks: TrackState[]; events: SynthEvent[]; startFrame: number; musicFrames: number; instruments: InstrumentReport[]; warnings: string[]; audibleNotes: number;
+  /** Post-engine stereo pan per track (live StereoPannerNode), by track index. */
+  pans: number[];
+}
+export interface PlanOptions { startTick?: number; endTick?: number; autoPan?: boolean; presetOverrides?: Record<string, number> }
 
 /** Project -> engine track states + frame-scheduled events (same controller semantics as realtime playback). */
-export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number, range: { startTick?: number; endTick?: number } = {}): RenderPlan {
+export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number, range: PlanOptions = {}): RenderPlan {
   const f = framer(p, sampleRate);
   const startTick = Math.max(0, range.startTick ?? 0);
   // Default range end: the last event; if the project declares a song structure, at least the end of its last
@@ -84,7 +108,7 @@ export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number
   const at = (tick: number) => Math.max(0, f(Math.max(tick, startTick)) - startFrame);
   const events: SynthEvent[] = []; let seq = 0;
   const push = (frame: number, cls: number, e: SynthEvent) => { e.frame = frame; e.seq = cls * 1e8 + seq++; events.push(e); };
-  const warnings: string[] = []; const instruments: InstrumentReport[] = []; const tracks: TrackState[] = [];
+  const warnings: string[] = []; const instruments: InstrumentReport[] = []; const tracks: TrackState[] = []; const pans: number[] = [];
   const anySolo = p.tracks.some((t) => t.mix.solo);
   let audibleNotes = 0;
   const effects = p.sound?.effects;
@@ -101,10 +125,18 @@ export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number
     const progs = p.programs.filter((g) => g.trackId === t.id).sort((a, b) => a.tick - b.tick);
     const initial = [...progs].reverse().find((g) => g.tick <= startTick);
     const ch0 = initial?.channel ?? t.channel;
-    const inst = res(initial?.program ?? 0, initial?.bankMsb ?? 0, ch0);
+    const ovIdx = range.presetOverrides?.[t.id];
+    const pinned = ovIdx != null && ovIdx >= 0 && ovIdx < sf.presets.length;
+    if (ovIdx != null && !pinned) warnings.push(`preset override ${ovIdx} for track "${t.name}" is not in this SoundFont; ignored`);
+    const inst = pinned
+      ? { regions: sf.regionList(ovIdx!), presetName: sf.presets[ovIdx!].presetName, bank: sf.presets[ovIdx!].bank, program: sf.presets[ovIdx!].preset, substituted: false }
+      : res(initial?.program ?? 0, initial?.bankMsb ?? 0, ch0);
     tracks.push({ trackIndex: ti, regions: inst.regions, pan: 0, gain: muted ? 0 : 1 });
-    instruments.push({ trackId: t.id, trackName: t.name, channel: t.channel, presetName: inst.presetName, bank: inst.bank, program: inst.program, substituted: inst.substituted, muted });
-    for (const g of progs) if (g.tick > startTick && g.tick < endTick) push(at(g.tick), CLS.program, { type: "setPreset", trackIndex: ti, regions: res(g.program, g.bankMsb, g.channel).regions });
+    const pan = range.autoPan === false ? 0 : resolveOrchestraPan(t.name, inst.presetName) ?? 0;
+    pans.push(pan);
+    instruments.push({ trackId: t.id, trackName: t.name, channel: t.channel, presetName: inst.presetName, bank: inst.bank, program: inst.program, substituted: inst.substituted, muted, pan, presetOverride: pinned });
+    // A pinned player override ignores the track's program changes (same as the live player).
+    if (!pinned) for (const g of progs) if (g.tick > startTick && g.tick < endTick) push(at(g.tick), CLS.program, { type: "setPreset", trackIndex: ti, regions: res(g.program, g.bankMsb, g.channel).regions });
     const ov = p.sound?.tracks[t.id];
     if (ov?.length) push(0, CLS.setup, { type: "setVoiceOverrides", trackIndex: ti, overrides: ov });
     // Mix defaults are the base layer under authored automation (same as the realtime controllerStateAt).
@@ -140,7 +172,7 @@ export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number
   if (p.raw.some((r) => r.kind === "sysex")) warnings.push("SysEx events are kept in the project/MIDI export but have no effect on the SF2 render");
   events.sort((a, b) => a.frame! - b.frame! || a.seq! - b.seq!);
   const lastEvent = events.length ? events[events.length - 1].frame! : 0;
-  return { tracks, events, startFrame, musicFrames: Math.max(lastEvent, f(endTick) - startFrame, 0), instruments, warnings, audibleNotes };
+  return { tracks, events, startFrame, musicFrames: Math.max(lastEvent, f(endTick) - startFrame, 0), instruments, warnings, audibleNotes, pans };
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -151,26 +183,56 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 export { sha256Hex };
 
-/** One deterministic pass over the plan. `sink` receives each rendered chunk (planar float). */
+/**
+ * One deterministic pass over the plan, mirroring live playback's topology: one Sf2SynthEngine per audible track
+ * (each with its own reverb/chorus and master stage, like the per-track AudioWorklet nodes), then the track's
+ * StereoPannerNode law, then a sum. `sink` receives each mixed chunk (planar float).
+ */
 async function runEngine(plan: RenderPlan, sr: number, totalFrames: number, chunkFrames: number, sink: (l: Float32Array, r: Float32Array, n: number) => void, signal?: AbortSignal, onProgress?: (x: number) => void) {
-  const engine = new Sf2SynthEngine(sr, { maxVoices: Math.max(96, plan.tracks.length * 24) });
-  engine.setTrackStates(plan.tracks);
+  const hasNotes = new Set<number>();
+  for (const e of plan.events) if (e.type === "noteOn") hasNotes.add(e.trackIndex ?? -1);
+  const voices = plan.tracks.filter((t) => (t.gain ?? 1) > 0 && hasNotes.has(t.trackIndex)).map((t) => {
+    const engine = new Sf2SynthEngine(sr); // live per-track node default (64 voices)
+    engine.setTrackStates([t]);
+    return { ti: t.trackIndex, engine, events: [] as SynthEvent[], ei: 0, L: new Float32Array(chunkFrames), R: new Float32Array(chunkFrames), g: stereoPanGains(plan.pans[t.trackIndex] ?? 0) };
+  });
+  const byTrack = new Map(voices.map((v) => [v.ti, v]));
+  for (const e of plan.events) {
+    const ti = e.trackIndex ?? -1;
+    if (ti < 0) for (const v of voices) v.events.push(e); else byTrack.get(ti)?.events.push(e);
+  }
   const L = new Float32Array(chunkFrames), R = new Float32Array(chunkFrames);
-  const ev = plan.events; let ei = 0;
   for (let cursor = 0; cursor < totalFrames; cursor += chunkFrames) {
     throwIfAborted(signal);
     const n = Math.min(chunkFrames, totalFrames - cursor);
-    let local = 0;
-    while (ei < ev.length && ev[ei].frame! < cursor + n) {
-      const fr = Math.max(0, ev[ei].frame! - cursor);
-      if (fr > local) { engine.renderRange(L.subarray(local, fr), R.subarray(local, fr)); local = fr; }
-      engine.dispatchEvent(ev[ei++]);
+    L.fill(0); R.fill(0);
+    for (const v of voices) {
+      let local = 0; const ev = v.events;
+      while (v.ei < ev.length && ev[v.ei].frame! < cursor + n) {
+        const fr = Math.max(0, ev[v.ei].frame! - cursor);
+        if (fr > local) { v.engine.renderRange(v.L.subarray(local, fr), v.R.subarray(local, fr)); local = fr; }
+        v.engine.dispatchEvent(ev[v.ei++]);
+      }
+      if (n > local) v.engine.renderRange(v.L.subarray(local, n), v.R.subarray(local, n));
+      const { ll, rl, lr, rr } = v.g;
+      for (let i = 0; i < n; i++) { const l = v.L[i], r = v.R[i]; L[i] += l * ll + r * rl; R[i] += l * lr + r * rr; }
     }
-    if (n > local) engine.renderRange(L.subarray(local, n), R.subarray(local, n));
     sink(L, R, n);
     onProgress?.((cursor + n) / totalFrames);
     if (((cursor / chunkFrames) & 7) === 7) await yieldToEventLoop();
   }
+}
+
+/** Live-player state provider (registered by the player bridge): per-track preset overrides for a project. */
+let liveOverrides: ((p: Project) => Record<string, number> | undefined) | null = null;
+export function setLivePresetOverridesProvider(fn: typeof liveOverrides) { liveOverrides = fn; }
+
+export function normalizeMode(n: OfflineRenderOptions["normalize"]): NormalizeMode {
+  if (n === undefined) return "loudness";
+  if (n === true) return "peak";
+  if (n === false) return "off";
+  if (n === "off" || n === "peak" || n === "loudness") return n;
+  throw new RenderError("INVALID_ARGUMENT", 'normalize must be "loudness", "peak", "off" or a boolean');
 }
 
 /**
@@ -191,7 +253,11 @@ export async function renderProjectOffline(project: Project, options: OfflineRen
   throwIfAborted(signal);
   onProgress?.(0, "resolving");
   const sr = options.sampleRate;
-  const plan = buildRenderPlan(p, sfl.sf, sr, options);
+  const mode = normalizeMode(options.normalize);
+  const targetLufs = options.targetLufs ?? LOUDNESS_TARGET_LUFS;
+  if (!(targetLufs >= -40 && targetLufs <= -5)) throw new RenderError("INVALID_ARGUMENT", "targetLufs must be in [-40, -5]");
+  const presetOverrides = options.presetOverrides ?? liveOverrides?.(project);
+  const plan = buildRenderPlan(p, sfl.sf, sr, { ...options, presetOverrides });
   const tailFrames = Math.round(tail * sr);
   const totalFrames = plan.musicFrames + tailFrames;
   if (totalFrames <= 0) throw new RenderError("EMPTY_PROJECT", "nothing to render (zero length)");
@@ -202,19 +268,37 @@ export async function renderProjectOffline(project: Project, options: OfflineRen
   if (size > (options.maxBytes ?? 1.5 * 2 ** 30)) throw new RenderError("RENDER_TOO_LARGE", `WAV would be ${(size / 2 ** 20).toFixed(0)} MiB, over the in-browser limit`);
   if (!plan.audibleNotes && !options.allowSilence) throw new RenderError("UNEXPECTED_SILENCE", "every track with notes is muted (or no notes in range); nothing audible to render");
   const chunk = options.chunkFrames ?? 8192;
-  let gain = 1;
-  if (options.normalize) {
-    let peak = 0;
-    await runEngine(plan, sr, totalFrames, chunk, (l, r, n) => { for (let i = 0; i < n; i++) { const a = Math.max(Math.abs(l[i]), Math.abs(r[i])); if (a > peak) peak = a; } }, signal, (x) => onProgress?.(x * 0.5, "rendering"));
-    gain = peak > 0 ? Math.pow(10, -1 / 20) / peak : 1;
-  }
+  // Pass 1 (always): measure integrated loudness + true peak of the exact signal that will be encoded.
+  const meter = new LoudnessMeter(sr, options.channels);
+  const twoPass = mode !== "off";
+  // Keep pass 1's mix (planar float) when it fits, so the gain pass only re-encodes instead of re-rendering; the
+  // engine is deterministic, so this is bit-identical to rendering twice.
+  const cacheable = twoPass && totalFrames * 8 <= (options.cacheBytes ?? 384 * 2 ** 20);
+  let cacheL: Float32Array | null = null, cacheR: Float32Array | null = null;
+  if (cacheable) { try { cacheL = new Float32Array(totalFrames); cacheR = new Float32Array(totalFrames); } catch { cacheL = cacheR = null; } }
+  let cpos = 0;
+  if (twoPass) await runEngine(plan, sr, totalFrames, chunk, (l, r, n) => {
+    meter.push(l, r, n);
+    if (cacheL && cacheR) { cacheL.set(l.subarray(0, n), cpos); cacheR.set(r.subarray(0, n), cpos); cpos += n; }
+  }, signal, (x) => onProgress?.(x * (cacheL ? 0.9 : 0.5), "rendering"));
+  let loud = twoPass ? chooseGain(mode, meter.result(), targetLufs, undefined, meter) : null;
+  const gain = loud ? loud.gainLinear : 1;
+  const outMeter = twoPass ? null : meter;
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(size); } catch { throw new RenderError("RENDER_TOO_LARGE", `could not allocate ${(size / 2 ** 20).toFixed(0)} MiB for the WAV`); }
   bytes.set(header);
   let off = header.length;
   const enc = { clipped: 0, nonFinite: 0 };
-  await runEngine(plan, sr, totalFrames, chunk, (l, r, n) => { const b = encodeChunk(spec, l, r, n, gain, enc); bytes.set(b, off); off += b.length; }, signal,
-    (x) => onProgress?.(options.normalize ? 0.5 + x * 0.5 : x, "rendering"));
+  const encode = (l: Float32Array, r: Float32Array, n: number) => { outMeter?.push(l, r, n); const b = encodeChunk(spec, l, r, n, gain, enc); bytes.set(b, off); off += b.length; };
+  if (cacheL && cacheR) {
+    for (let i = 0; i < totalFrames; i += chunk) {
+      const n = Math.min(chunk, totalFrames - i);
+      encode(cacheL.subarray(i, i + n), cacheR.subarray(i, i + n), n);
+      if (((i / chunk) & 31) === 31) { throwIfAborted(signal); onProgress?.(0.9 + 0.1 * (i / totalFrames), "rendering"); await yieldToEventLoop(); }
+    }
+    cacheL = cacheR = null;
+  } else await runEngine(plan, sr, totalFrames, chunk, encode, signal, (x) => onProgress?.(twoPass ? 0.5 + x * 0.5 : x, "rendering"));
+  if (!loud) loud = chooseGain("off", outMeter!.result(), targetLufs);
   if (enc.nonFinite) throw new RenderError("NON_FINITE_SAMPLES", `${enc.nonFinite} NaN/Infinity samples produced by the synth`);
   if (off !== size) throw new RenderError("INTERNAL_ERROR", `encoded ${off} bytes, expected ${size}`);
   onProgress?.(1, "encoding");
@@ -231,6 +315,6 @@ export async function renderProjectOffline(project: Project, options: OfflineRen
     blob, bytes, sha256, mimeType: "audio/wav", durationSeconds: v.info.durationSeconds, musicSeconds: plan.musicFrames / sr, tailSeconds: tail,
     sampleRate: sr, channels: options.channels, format: options.format, framesRendered: totalFrames, byteLength: size,
     peakDbFS: v.stats.peakDbFS, rmsDbFS: v.stats.rmsDbFS, clippedSamples: v.stats.clippedSamples, gain: +gain.toFixed(6), validated: true,
-    wav: v.info, stats: v.stats, instruments: plan.instruments, warnings: [...plan.warnings, ...v.warnings], soundFont: sfl.label, noteCount: plan.audibleNotes, renderMs: Date.now() - t0,
+    wav: v.info, stats: v.stats, instruments: plan.instruments, warnings: [...plan.warnings, ...v.warnings], soundFont: sfl.label, noteCount: plan.audibleNotes, renderMs: Date.now() - t0, loudness: loud,
   };
 }

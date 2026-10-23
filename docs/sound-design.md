@@ -73,5 +73,22 @@ the user accepts, two WAV exports differ, the tail energy rises, then undo and r
 The headless renderer (`src/audio/offline-renderer.ts`) drives the same `Sf2SynthEngine` as the live player and
 honours programs/banks (channel 10 → bank 128), CC7/10/11/1/64/91/93, pitch bend, voice overrides and project
 effects, the full tempo map and a configurable release tail. Missing presets fall back to bank 0 with a warning
-(`INSTRUMENT_NOT_FOUND` if nothing matches). Known gap: per-track player preset overrides and orchestral auto-pan
-from the live player are not applied to the offline render.
+(`INSTRUMENT_NOT_FOUND` if nothing matches). Per-track player preset overrides and
+orchestral auto-pan are applied (see below).
+
+### Reverb/chorus level, loudness and live parity (offline + live)
+
+- **Reverb return.** `SF2Effects` follows Freeverb/FluidSynth: combs are fed the mono send (sum of the panned send
+  buses) times 0.03, and the wet return defaults to FluidSynth's 2.7 (`reverbLevel` 0.5; 1.0 = 5.4). Previously the
+  return was 0.35 on half the input, about 24 dB quieter, so CC91 and gen16 sends could not be heard. This applies to
+  live playback and offline renders alike (same engine).
+- **Topology parity.** Offline renders use one engine per audible track (own reverb/chorus and master stage), then
+  the live StereoPannerNode law (orchestra auto-pan, `autoPan:false` to disable), then a sum, which is exactly the
+  live per-track AudioWorklet graph. Player-pinned per-track presets are applied and pin the track (program changes
+  ignored), as in the player.
+- **Loudness.** Default `normalize: "loudness"`: BS.1770-4 integrated loudness (K-weighting, gated) to **-16 LUFS**,
+  capped at **-1 dBTP** true peak (4x oversampled). It is one gain for the whole file and never per section, so CC
+  and velocity dynamics are unchanged. `"peak"` sets the true peak to -1 dBTP; `"off"` gives the raw engine output.
+  The result's `loudness` field reports input/output LUFS, true peak, the gain and which limit applied.
+- **Tail.** `tailSeconds` (default 3) follows the last note-off, so releases and the reverb tail are rendered and
+  decay inside it. Renders are deterministic: identical input gives an identical SHA-256.

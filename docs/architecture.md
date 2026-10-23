@@ -38,7 +38,8 @@ Project ──structuredClone──▶ RenderJobManager (FIFO, cancel, status)
    soundfont-loader (cached, /gbk/ base, progress, abort, timeout)
                               ▼
    offline-renderer: buildRenderPlan (sample-frame schedule from tempo map; setup/program/CC/notes, mix as CC7/10/11)
-     → Sf2SynthEngine.renderRange in chunks, yielding to the event loop
+     → one Sf2SynthEngine per audible track (live parity) → StereoPanner law → sum, in yielding chunks
+     → pass 1 measures BS.1770 loudness + true peak (mix cached), one whole-file gain
      → wav-encoder (PCM16/float32, mono/stereo, 44.1/48 kHz, RF64 for huge files) into one preallocated buffer
      → audio-validation (header, duration, silence, clipping, non-finite) → SHA-256
                               ▼

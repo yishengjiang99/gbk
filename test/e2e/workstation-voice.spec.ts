@@ -30,7 +30,7 @@ function wavStats(path: string) {
 const energy = (s: Float32Array, a: number, z: number) => { let e = 0; for (let i = Math.max(0, a); i < Math.min(s.length, z); i++) e += s[i] * s[i]; return e; };
 
 async function exportWav(page: Page, path: string) {
-  const [dl, r] = await Promise.all([page.waitForEvent("download", { timeout: 280_000 }), tool(page, "gbk_prepare_wav_export", {})]);
+  const [dl, r] = await Promise.all([page.waitForEvent("download", { timeout: 280_000 }), tool(page, "gbk_prepare_wav_export", { normalize: "off" })]);
   expect(r.ok, JSON.stringify(r.error)).toBe(true);
   await dl.saveAs(path); return wavStats(path);
 }

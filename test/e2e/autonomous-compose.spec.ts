@@ -85,7 +85,7 @@ test("Midnight Invention: compose from scratch and render a validated WAV with n
   expect(midi.ok && midi.data.downloaded === false).toBe(true);
 
   const t0 = Date.now();
-  let r = await tool(page, "gbk_render_wav", { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3, normalize: false, saveArtifact: true, download: false, output: "artifact" });
+  let r = await tool(page, "gbk_render_wav", { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3, saveArtifact: true, download: false, output: "artifact" });
   expect(r.ok, JSON.stringify(r.error)).toBe(true);
   if (r.data.status !== "completed") {
     for (let i = 0; i < 600 && r.data.status !== "completed"; i++) { await page.waitForTimeout(500); r = await tool(page, "gbk_get_render_status", { jobId: r.data.jobId }); expect(["failed", "cancelled"]).not.toContain(r.data.status); }
@@ -109,19 +109,25 @@ test("Midnight Invention: compose from scratch and render a validated WAV with n
   const wav = Buffer.concat(parts);
   expect(wav.length).toBe(meta.data.bytes);
   expect(createHash("sha256").update(wav).digest("hex")).toBe(meta.data.sha256);
-  writeFileSync(`${SHOTS}/gbk-midnight-invention.wav`, wav);
+  writeFileSync(`${SHOTS}/gbk-midnight-invention-v2.wav`, wav);
   const h = parseWavHeader(new Uint8Array(wav));
   expect([h.container, h.sampleRate, h.channels, h.bitsPerSample]).toEqual(["RIFF", 44100, 2, 16]);
   const v = await validateWav(new Uint8Array(wav), { sampleRate: 44100, channels: 2, durationSeconds: expectedDur, toleranceSeconds: 0.01 });
-  const secDb = (a: number, b: number) => { const w = v.stats.windowRmsDbFS.slice(Math.round(a / 0.1), Math.round(b / 0.1)); return w.reduce((s, x) => s + x, 0) / w.length; };
+  const secDb = (a: number, b: number) => { const w = v.stats.windowRmsDbFS.slice(Math.round(a / 0.1), Math.round(b / 0.1)); return 10 * Math.log10(w.reduce((s, x) => s + 10 ** (x / 10), 0) / w.length + 1e-30); }; // power mean
   const barSec = 4 * 60 / 108;
   const intro = secDb(0, 4 * barSec), dev = secDb(16 * barSec, 28 * barSec), tail = secDb(32 * barSec + 0.2, 32 * barSec + 1.5);
   console.log("wav", JSON.stringify({ bytes: wav.length, sha256: meta.data.sha256, peakDbFS: v.stats.peakDbFS, rmsDbFS: v.stats.rmsDbFS, introRms: intro, developmentRms: dev, tailRms: tail, lastAudibleSec: v.stats.lastAudibleSec }));
   expect(dev - intro).toBeGreaterThan(3); // section energy -> CC11 / velocity dynamics audible in PCM
-  // Music reaches the final bar and decays naturally inside the rendered tail (never cut at the file end).
+  // Music reaches the final bar; the reverb tail rings after it and decays inside the rendered tail (not cut).
+  const body = secDb(28 * barSec, 32 * barSec), end = secDb(expectedDur - 0.4, expectedDur);
+  console.log("tail", JSON.stringify({ body, tail, end, loudness: r.data.loudness }));
   expect(v.stats.lastAudibleSec!).toBeGreaterThan(31 * barSec);
-  expect(v.stats.lastAudibleSec!).toBeLessThan(expectedDur - 1);
-  expect(tail).toBeLessThan(-60);
+  expect(tail).toBeGreaterThan(-90);            // reverb present after the last note-off
+  expect(end).toBeLessThan(tail - 15);          // ...and decaying before the file ends
+  // Default whole-file loudness: -16 LUFS integrated (or true-peak limited at -1 dBTP).
+  expect(r.data.loudness.mode).toBe("loudness");
+  expect(r.data.loudness.outputTruePeakDbTP).toBeLessThanOrEqual(-0.99);
+  if (r.data.loudness.limitedBy === "loudness") expect(Math.abs(r.data.loudness.outputLufs + 16)).toBeLessThan(0.05);
 
   // MIDI artifact contains the generated notes, tempo and CCs.
   const midiArt = (await tool(page, "gbk_list_render_artifacts", { kind: "midi", projectId })).data.artifacts[0];

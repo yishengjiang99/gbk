@@ -156,7 +156,7 @@ export interface EffectsParams {
   roomSize: number;
   /** High-frequency damping 0..1 (0.4 * damping per comb). */
   damping: number;
-  /** Reverb return level 0..1 (1 = Freeverb wet scale 0.7). */
+  /** Reverb return level 0..1 (0.5 = FluidSynth default return 2.7, 1 = 5.4). */
   reverbLevel: number;
   /** Chorus return level 0..1. */
   chorusLevel: number;

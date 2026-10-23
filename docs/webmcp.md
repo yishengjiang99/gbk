@@ -117,7 +117,7 @@ user-owned projects still go through proposals and Accept.
 ### Rendering and artifacts
 | Tool | Purpose |
 | --- | --- |
-| `gbk_render_wav` | `{sampleRate: 44100|48000, channels: 1|2, format: pcm16|float32, tailSeconds, normalize, range, includeMidi, output: "artifact"|"audio"|"bytes", download:false, waitSeconds}`. Never downloads unless `download:true`. Returns job id, status, artifact id, size, SHA-256, duration, peak/RMS, clipping, instruments (incl. substitutions) and warnings. |
+| `gbk_render_wav` | `{sampleRate: 44100|48000, channels: 1|2, format: pcm16|float32, tailSeconds, normalize: loudness|peak|off (default loudness), targetLufs, autoPan, range, includeMidi, output: "artifact"|"audio"|"bytes", download:false, waitSeconds}`. Never downloads unless `download:true`. Returns job id, status, artifact id, size, SHA-256, duration, peak/RMS, clipping, `loudness` (input/output LUFS, true peak, gain, limiter), instruments (incl. substitutions, pan, pinned preset) and warnings. |
 | `gbk_get_render_status`, `gbk_cancel_render` | Poll / cancel a job (queued → loading → rendering → encoding → validating → saving → completed). |
 | `gbk_list_render_artifacts`, `gbk_get_render_artifact` | IndexedDB-persisted WAV/MIDI artifacts (survive reload). |
 | `gbk_read_wav_bytes` | `{artifactId, offset, length ≤ 262144}` → base64 chunk, `nextOffset`, `eof`, total size and SHA-256. Use it to pull a full WAV into the agent; verify by SHA-256. |
