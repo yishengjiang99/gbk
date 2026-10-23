@@ -180,7 +180,7 @@ test("studio fits the viewport: no vertical scrolling of the page or any panel",
     await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
     await page.getByTestId("keys-toggle").click(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
     for (const t of ["tracks", "composer", "agent", "sound", "files"]) {
-      const tab = page.getByTestId(`tab-${t}`); if (await tab.count()) await tab.click();
+      const tab = page.getByTestId(`tab-${t}`); if (await tab.count()) await tab.dispatchEvent("click"); // the floating Keys window may sit over the tabs
       const r = await page.evaluate(() => {
         const bad: string[] = [];
         for (const e of document.querySelectorAll(".ws, .ws *")) {
@@ -195,4 +195,47 @@ test("studio fits the viewport: no vertical scrolling of the page or any panel",
     }
     await page.mouse.wheel(0, 2000); expect(await page.evaluate(() => scrollY)).toBe(0);
   }
+});
+
+test("landing scrolls normally (studio-only fit), wheel + touch", async ({ page }) => {
+  // short viewports so the landing overflows even with an empty song list (fresh e2e data dir)
+  for (const [w, h] of [[1280, 480], [390, 560]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto("/"); await expect(page.getByTestId("explore-page")).toBeVisible();
+    await page.waitForFunction(() => document.scrollingElement!.scrollHeight > innerHeight + 50, null, { timeout: 20_000 });
+    expect(await page.evaluate(() => document.documentElement.classList.contains("studio-fit"))).toBe(false);
+    await page.mouse.move(w / 2, h / 2); await page.mouse.wheel(0, 100000);
+    await expect.poll(() => page.evaluate(() => Math.ceil(scrollY + innerHeight) >= document.scrollingElement!.scrollHeight - 2)).toBe(true);
+    await page.evaluate(() => scrollTo(0, 0));
+    // touch-style scroll: the document is a normal scroller (overflow not hidden)
+    expect(await page.evaluate(() => getComputedStyle(document.body).overflowY)).not.toBe("hidden");
+  }
+  await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.classList.contains("studio-fit"))).toBe(true);
+});
+
+test("Keys is a floating draggable window: default closed, opens, drags, closes", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/studio"); await page.evaluate(() => localStorage.removeItem("gbk.keysWindowPos")); await page.reload();
+  await expect(page.getByTestId("workstation")).toBeVisible();
+  await expect(page.getByTestId("keys-window")).toHaveCount(0);
+  const rollBefore = (await page.getByTestId("piano-roll").boundingBox())!.height;
+  await page.getByTestId("keys-toggle").click();
+  const win = page.getByTestId("keys-window"); await expect(win).toBeVisible(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
+  expect((await page.getByTestId("piano-roll").boundingBox())!.height).toBe(rollBefore); // floats: no layout space
+  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+  const b0 = (await win.boundingBox())!; const hb = (await page.getByTestId("keys-window-handle").boundingBox())!;
+  await page.mouse.move(hb.x + 40, hb.y + hb.height / 2); await page.mouse.down();
+  await page.mouse.move(hb.x - 200, hb.y - 300, { steps: 8 }); await page.mouse.up();
+  const b1 = (await win.boundingBox())!;
+  expect(b1.x).toBeLessThan(b0.x - 100); expect(b1.y).toBeLessThan(b0.y - 100);
+  // clamped to the viewport
+  await page.mouse.move(b1.x + 40, b1.y + 10); await page.mouse.down(); await page.mouse.move(-500, -500, { steps: 5 }); await page.mouse.up();
+  const b2 = (await win.boundingBox())!; expect(b2.x).toBeGreaterThanOrEqual(0); expect(b2.y).toBeGreaterThanOrEqual(0);
+  // position remembered
+  await page.getByTestId("keys-window-close").click(); await expect(win).toHaveCount(0);
+  await page.getByTestId("keys-toggle").click(); const b3 = (await win.boundingBox())!;
+  expect(Math.abs(b3.x - b2.x)).toBeLessThan(2); expect(Math.abs(b3.y - b2.y)).toBeLessThan(2);
+  await page.getByTestId("keys-window-min").click(); await expect(page.getByTestId("live-keyboard")).toHaveCount(0);
+  await page.getByTestId("keys-window-close").click(); await expect(win).toHaveCount(0);
 });
