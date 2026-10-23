@@ -1,3 +1,4 @@
+import { overridesToNrpn } from "../sf2/voice-overrides.ts";
 // Standard MIDI File <-> Project. Lossless for notes, timed CC, bend, pressure, program/bank,
 // tempo/meter, and keeps unsupported events (sysex, other meta) as raw bytes for re-export.
 import { DEFAULT_MIX, TRACK_COLORS, PROJECT_SCHEMA_VERSION, emptyProject, newId, computeEndTick, type Project, type Track } from "./model.ts";
@@ -94,7 +95,9 @@ export function encVlq(v: number): number[] {
 interface Ev { tick: number; order: number; seq: number; bytes: number[] }
 
 /** Serialize to SMF format 1. Track 0 = conductor (tempo/meter); then one MTrk per project track. */
-export function serializeSmf(p: Project): Uint8Array {
+/** soundNrpn: also emit the project's additive voice overrides as SF2 NRPNs (9.6) at tick 0 (file export only;
+ * the internal player path applies overrides directly and must not receive them twice). */
+export function serializeSmf(p: Project, opts: { soundNrpn?: boolean } = {}): Uint8Array {
   const chunks: number[][] = [];
   let seq = 0;
   const conductor: Ev[] = [];
@@ -115,6 +118,11 @@ export function serializeSmf(p: Project): Uint8Array {
     for (const b of p.pitchBends) if (b.trackId === tr.id) evs.push({ tick: b.tick, order: 5, seq: seq++, bytes: [0xe0 | b.channel, b.value & 0x7f, (b.value >> 7) & 0x7f] });
     for (const c of p.channelPressure) if (c.trackId === tr.id) evs.push({ tick: c.tick, order: 6, seq: seq++, bytes: [0xd0 | c.channel, c.value] });
     for (const c of p.polyPressure) if (c.trackId === tr.id) evs.push({ tick: c.tick, order: 6, seq: seq++, bytes: [0xa0 | c.channel, c.pitch, c.value] });
+    const ovr = opts.soundNrpn ? p.sound?.tracks[tr.id] : undefined;
+    if (ovr?.length) {
+      const chans = new Set([tr.channel, ...p.notes.filter((n) => n.trackId === tr.id).map((n) => n.channel)]);
+      for (const ch of chans) for (const b of overridesToNrpn(ovr, ch).bytes) evs.push({ tick: 0, order: 1.5, seq: seq++, bytes: b });
+    }
     chunks.push(encodeTrack(evs));
   }
   const out: number[] = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, (chunks.length >> 8) & 255, chunks.length & 255, (p.ppq >> 8) & 255, p.ppq & 255];

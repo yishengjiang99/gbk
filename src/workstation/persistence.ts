@@ -17,6 +17,11 @@ export function migrateProject(raw: unknown): Project | null {
     p.schemaVersion = 1;
   }
   for (const k of ["tracks", "notes", "ccs", "programs", "tempos", "timeSigs"]) if (!Array.isArray(p[k])) return null;
+  // Optional sound layer (GBK sound design): drop it if malformed rather than rejecting the project.
+  if (p.sound !== undefined) {
+    const snd = p.sound as { tracks?: unknown; effects?: unknown } | null;
+    if (!snd || typeof snd !== "object" || typeof snd.tracks !== "object" || snd.tracks === null) delete p.sound;
+  }
   if (typeof p.id !== "string" || typeof p.ppq !== "number" || p.ppq <= 0) return null;
   return p as unknown as Project;
 }

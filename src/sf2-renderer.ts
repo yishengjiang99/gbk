@@ -8,6 +8,8 @@ import {
 } from "./sf2/modulator.ts";
 import { Gen, clampGen, valueRange, roundHalfAway } from "./sf2/geninfo.ts";
 import { SF2Effects } from "./sf2/effects.ts";
+import { type VoiceOverride, type EffectsParams, computeOverrideDeltas } from "./sf2/voice-overrides.ts";
+export type { VoiceOverride, EffectsParams } from "./sf2/voice-overrides.ts";
 import { MasterBus, MASTER_GAIN_DEFAULT_DB } from "./sf2/master-bus.ts";
 export { MasterBus, MASTER_BUS_DEFAULTS, MASTER_GAIN_DEFAULT_DB, type MasterBusParams } from "./sf2/master-bus.ts";
 
@@ -58,6 +60,12 @@ export interface SynthEvent {
   tracks?: TrackState[];
   maxVoices?: number;
   events?: SynthEvent[];
+  /** setVoiceOverrides: generator overrides for `trackIndex` (-1 / absent = every voice of this engine). */
+  overrides?: VoiceOverride[] | null;
+  /** setVoiceOverrides: also refresh realtime generators of sounding voices. */
+  updateActive?: boolean;
+  /** setEffects: global reverb / chorus parameters. */
+  effects?: Partial<EffectsParams>;
 }
 
 // ── DSP helpers (Double math like the Swift port) ─────────────────────────────
@@ -267,6 +275,9 @@ export class Sf2Voice {
   effKey = 0; effVel = 0;
   chorusAmt = 0; reverbAmt = 0; regChorus = 0; regReverb = 0;
   qCb = 0;
+  /** GBK voice-override generator deltas (native units), applied with the modulator sums. */
+  readonly ovr = new Float64Array(61); hasOvr = false; hasSendMods = false;
+  region: SF2Region | null = null;
   constructor(sr: number) {
     this.volEnv = new VolEnv(sr); this.modEnv = new ModEnv(sr); this.modLfo = new LFO(sr); this.vibLfo = new LFO(sr); this.lpf = new TwoPoleLPF(sr);
   }
@@ -283,6 +294,8 @@ export class Sf2Voice {
     this.baseRate0 = 1; this.trackGain = 1; this.modEnvToPitch = 0; this.modLfoToVol = 0;
     this.keyDown = true; this.deferred = false; this.sostenuto = false; this.list = null; this.effKey = 0; this.effVel = 0;
     this.chorusAmt = 0; this.reverbAmt = 0; this.regChorus = 0; this.regReverb = 0; this.qCb = 0;
+    if (this.hasOvr) this.ovr.fill(0);
+    this.hasOvr = false; this.hasSendMods = false; this.region = null;
   }
 }
 const EMPTY = new Float32Array(1);
@@ -355,7 +368,15 @@ export class Sf2SynthEngine {
   private fx: SF2Effects;
   /** G-11: mix the built-in reverb / chorus into renderRange / renderScheduled. */
   effectsEnabled = true;
+  /**
+   * GBK extension: SoundFont 2.01 default modulators 8.4.8 (CC91 -> reverb send, 200) and 8.4.9 (CC93 -> chorus
+   * send, 200) for voices whose modulator list has none (2.04 files and hand-built regions omit them). Off in the
+   * cross-engine parity renderer because sf2player-swift does not implement this extension.
+   */
+  sendCcModulators = true;
   private frameL = 0; private frameR = 0;
+  /** Voice overrides by trackIndex + 1 (slot 0 = trackIndex -1 = all voices of this engine). */
+  private overrides: (VoiceOverride[] | null)[] = new Array(MAX_TRACKS + 1).fill(null);
 
   constructor(outSr: number, options: Sf2SynthEngineOptions = {}) {
     this.outSr = outSr;
@@ -615,10 +636,54 @@ export class Sf2SynthEngine {
         this.updateChannelVoices(channel);
         return;
       }
+      case "setVoiceOverrides":
+        this.setVoiceOverrides(trackIndex, msg.overrides ?? null, !!msg.updateActive);
+        return;
+      case "setEffects":
+        if (msg.effects) this.setEffectParams(msg.effects);
+        return;
       default:
         return;
     }
   }
+
+  /** Non-real-time: install generator overrides for a track (trackIndex < 0 = all voices). */
+  setVoiceOverrides(trackIndex: number, list: VoiceOverride[] | null, updateActive = false): void {
+    const slot = trackIndex >= 0 && trackIndex < MAX_TRACKS ? trackIndex + 1 : 0;
+    this.overrides[slot] = list && list.length ? list.slice() : null;
+    if (!updateActive) return;
+    const d = this.scratch;
+    for (let i = 0; i < this.count; i++) {
+      const v = this.pool[this.order[i]];
+      if (!v.region || (slot !== 0 && v.trackIndex !== trackIndex)) continue;
+      this.loadOverrides(v, v.region, v.effKey);
+      // Realtime generators (filter, pitch, LFO depths, pan, attenuation, sends) follow immediately;
+      // envelope times / LFO rates are note-on only (SF2 8.1.3 semantics).
+      this.evalMods(v, d);
+      this.applyLive(v, d);
+    }
+  }
+  getVoiceOverrides(trackIndex: number): VoiceOverride[] | null {
+    return this.overrides[trackIndex >= 0 && trackIndex < MAX_TRACKS ? trackIndex + 1 : 0];
+  }
+
+  /** Global reverb / chorus parameters (enabled=false is the off switch). */
+  setEffectParams(p: Partial<EffectsParams>): void {
+    if (typeof p.enabled === "boolean") this.effectsEnabled = p.enabled;
+    this.fx.setParams(p);
+  }
+
+  private loadOverrides(v: Sf2Voice, reg: SF2Region, key: number): void {
+    const t = v.trackIndex >= 0 && v.trackIndex < MAX_TRACKS ? this.overrides[v.trackIndex + 1] : null;
+    const g = this.overrides[0];
+    let any = computeOverrideDeltas(g, reg, key, v.ovr);
+    if (t) {
+      const d = this.scratch2;
+      if (computeOverrideDeltas(t, reg, key, d)) { for (let k = 0; k < 61; k++) v.ovr[k] += d[k]; any = true; }
+    }
+    v.hasOvr = any;
+  }
+  private scratch2 = new Float64Array(61);
 
   private applyTrackCcs(t: TrackRT, ch: number): void {
     this.controlChange(ch, 7, t.cc7); this.controlChange(ch, 10, t.cc10); this.controlChange(ch, 11, t.cc11);
@@ -702,6 +767,8 @@ export class Sf2SynthEngine {
     v.exclusiveClass = reg.exclusiveClass;
     v.vibToPitch = reg.vibLfoToPitchCents; v.modToPitch = reg.modLfoToPitchCents;
     v.modEnvToFc = reg.modEnvToFilterFcCents; v.modLfoToFc = reg.modLfoToFilterFcCents;
+    v.region = reg;
+    this.loadOverrides(v, reg, effKey);
     this.specVoice(v, reg, effKey, trackGain);
     v.volEnv.noteOn();
     v.modEnv.noteOn();
@@ -711,6 +778,12 @@ export class Sf2SynthEngine {
     d.fill(0);
     const c = Math.max(0, Math.min(15, v.channel));
     for (let k = 0; k < 64; k++) d[k] = this.nrpn[c * 64 + k];   // N-04
+    if (v.hasOvr) for (let k = 0; k < 61; k++) d[k] += v.ovr[k];
+    if (this.sendCcModulators && !v.hasSendMods) {
+      const cc = this.ccs, b = c * 128;
+      if (cc[b + 91] !== 0) d[16] += 200 * (cc[b + 91] / 128);   // 8.4.8: linear unipolar CC91 x 200
+      if (cc[b + 93] !== 0) d[15] += 200 * (cc[b + 93] / 128);   // 8.4.9: linear unipolar CC93 x 200
+    }
     const mods = v.mods;
     if (!mods) return;
     const ch = this.chans[c];
@@ -752,6 +825,9 @@ export class Sf2SynthEngine {
   private specVoice(v: Sf2Voice, reg: SF2Region, note: number, trackGain: number): void {
     const mods = reg.modulators === undefined || reg.modulators === null ? DEFAULT_MODS_204 : reg.modulators;
     v.mods = mods.length > 0 ? mods : null;
+    let sendMods = false;
+    for (let k = 0; k < mods.length; k++) { const m = mods[k]; if ((m.dest === 15 || m.dest === 16) && (m.src & 0x80) && ((m.src & 0x7f) === 91 || (m.src & 0x7f) === 93)) sendMods = true; }
+    v.hasSendMods = sendMods;
     v.regAtten = reg.initialAttenuationCb; v.regPan = reg.pan;
     v.regFc = reg.initialFilterFcCents; v.regQ = reg.initialFilterQCb;
     v.regVib = reg.vibLfoToPitchCents; v.regModPitch = reg.modLfoToPitchCents;

@@ -4,6 +4,8 @@ import { WorkstationController, type TransportDriver } from "./controller.ts";
 import { parseSmf, serializeSmf } from "./smf.ts";
 import { secToTick, tickToSec } from "./timing.ts";
 import type { Project, TrackMix } from "./model.ts";
+import type { SF2Region } from "../sf2/soundfont.ts";
+import { normalizeEffects, type EffectsParams, type VoiceOverride } from "../sf2/voice-overrides.ts";
 
 export interface PlayerHandle {
   /** Load SMF bytes into the player (does not persist into the playlist). */
@@ -17,6 +19,12 @@ export interface PlayerHandle {
   setTrackMix(trackIndex: number, mix: TrackMix): void;
   /** Kick the default SoundFont download if none is loaded/loading. */
   requestSf2(): void;
+  /** Player track index -> SF2 generator overrides (applied at note-on; realtime ones also to sounding voices). */
+  setTrackVoice?(trackIndex: number, overrides: VoiceOverride[]): void;
+  /** Global reverb / chorus parameters for every track engine and the offline render. */
+  setEffects?(params: EffectsParams): void;
+  /** Resolved preset + zones of a player track. */
+  getTrackRegions?(trackIndex: number): { presetName: string; presetIndex: number; regions: SF2Region[] } | null;
 }
 
 type Listener = () => void;
@@ -58,13 +66,21 @@ class PlayerBridge {
     this.suppressNextImport = true;
     h.loadBuffer(bytes.buffer.slice(0) as ArrayBuffer, `${p.name}.mid`, { autoplay, restoreSec: startSec });
     this.loadedRevision = p.revision; this.loadedProjectId = p.id;
-    return wait.then(() => this.applyMix());
+    return wait.then(() => this.applyMix(p));
   }
   /** Effective mix = temporary override ?? persisted default; serialized track i -> player track i+1. */
-  applyMix() {
+  applyMix(p?: Project) {
     const c = this.ctrl, h = this.handle; if (!c || !h) return;
-    const { project, overrides } = c.getState();
+    const { overrides } = c.getState();
+    const project = p ?? c.getState().project;
     project.tracks.forEach((t, i) => h.setTrackMix(i + 1, { ...t.mix, ...(overrides[t.id] ?? {}) }));
+    this.applySound(project);
+  }
+  /** Sound layer of `project` (committed, or a proposal candidate while previewing B) -> engines. */
+  applySound(project: Project) {
+    const h = this.handle; if (!h) return;
+    project.tracks.forEach((t, i) => h.setTrackVoice?.(i + 1, project.sound?.tracks[t.id] ?? []));
+    h.setEffects?.(normalizeEffects(project.sound?.effects));
   }
   inSync(p: Project) { return this.loadedProjectId === p.id && this.loadedRevision === p.revision; }
 }
@@ -106,7 +122,7 @@ export function bindController(c: WorkstationController) {
   playerBridge.ctrl = c;
   let lastMixKey = "";
   c.subscribe((s) => {
-    const key = JSON.stringify([s.project.tracks.map((t) => t.mix), s.overrides]);
+    const key = JSON.stringify([s.project.tracks.map((t) => t.mix), s.overrides, s.project.sound ?? null]);
     if (key === lastMixKey) return; lastMixKey = key;
     if (playerBridge.loadedProjectId === s.project.id) playerBridge.applyMix();
   });
@@ -121,6 +137,10 @@ export function bindController(c: WorkstationController) {
     await playerBridge.handle!.exportWav((b) => { blob = b; });
     if (!blob) throw new Error("WAV export failed");
     return blob;
+  };
+  c.host.trackRegions = (project, trackId) => {
+    const i = project.tracks.findIndex((t) => t.id === trackId);
+    return i < 0 ? null : playerBridge.handle?.getTrackRegions?.(i + 1) ?? null;
   };
   c.host.download = (data, filename) => {
     const blob = data instanceof Blob ? data : new Blob([data as BlobPart], { type: "audio/midi" });

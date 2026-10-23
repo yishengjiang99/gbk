@@ -666,6 +666,15 @@ export default function MidiReader({
   const midiSendOutputRef = useRef<MIDIOutput | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const trackNodesRef = useRef<TrackNode[]>([]);
+  // Sound-design layer from the workstation (per player-track generator overrides + global effects).
+  const trackVoiceRef = useRef<Record<number, import("./sf2/voice-overrides.ts").VoiceOverride[]>>({});
+  const effectsRef = useRef<import("./sf2/voice-overrides.ts").EffectsParams | null>(null);
+  const applySoundToNodes = () => {
+    trackNodesRef.current.forEach((rec, i) => {
+      rec.node?.port.postMessage({ type: "setVoiceOverrides", trackIndex: -1, overrides: trackVoiceRef.current[i] ?? [], updateActive: true });
+      if (effectsRef.current) rec.node?.port.postMessage({ type: "setEffects", effects: effectsRef.current });
+    });
+  };
   const masterVolumeRef = useRef(masterVolume);
   const portsAttachedRef = useRef<boolean>(false);
   const dragStateRef = useRef<{ active: boolean; startX: number; startLeft: number }>({
@@ -1479,6 +1488,7 @@ export default function MidiReader({
     applyTrackPanning(song, trackPresetOverrides);
     applyTrackControllers(song, trackCcControlsRef.current);
     applyTrackMuteSolo(song, trackMixStateRef.current);
+    applySoundToNodes();
   }
 
   async function onPlayPause() {
@@ -1645,6 +1655,12 @@ export default function MidiReader({
           }
         }
       }
+      // Sound layer: overrides per track + global effects, before any note (frame 0, seq -1).
+      if (effectsRef.current) events.push({ frame: 0, seq: -1, type: "setEffects", trackIndex: -1, effects: effectsRef.current } as never);
+      for (const track of song.tracks) {
+        const ov = trackVoiceRef.current[track.index];
+        if (ov?.length) events.push({ frame: 0, seq: -1, type: "setVoiceOverrides", trackIndex: track.index, overrides: ov } as never);
+      }
       setExportStage("Rendering");
       await renderOfflineSequenceToAudioBufferIncremental({
         audioBuffer,
@@ -1754,6 +1770,21 @@ export default function MidiReader({
     isReady: () => sf2Ready,
     exportWav: (cb) => onExportWav(cb),
     requestSf2: () => { if (!sf2Ready && !sf2Loading) onLoadDefaultSf2(); },
+    setTrackVoice: (i, ov) => {
+      trackVoiceRef.current = { ...trackVoiceRef.current, [i]: ov };
+      trackNodesRef.current[i]?.node?.port.postMessage({ type: "setVoiceOverrides", trackIndex: -1, overrides: ov, updateActive: true });
+    },
+    setEffects: (fx) => {
+      effectsRef.current = fx;
+      for (const rec of trackNodesRef.current) rec.node?.port.postMessage({ type: "setEffects", effects: fx });
+    },
+    getTrackRegions: (i) => {
+      const track = song?.tracks?.[i]; if (!track) return null;
+      const presetIndex = trackPresetOverridesRef.current[track.index] ?? trackDefaultPresetMap[track.index] ?? fallbackPresetRef.current;
+      if (presetIndex == null) return null;
+      const regions = getRegionsRef.current(presetIndex) ?? [];
+      return { presetIndex, presetName: presetOptionMapRef.current.get(presetIndex)?.name ?? `#${presetIndex}`, regions };
+    },
     setTrackMix: (i, m) => {
       const nextTrack: TrackCc = { cc7Volume: clampCc(m.volume), cc10Pan: clampCc(m.pan), cc11Expression: clampCc(m.expression) };
       trackCcControlsRef.current = { ...trackCcControlsRef.current, [i]: nextTrack };
@@ -1776,6 +1807,9 @@ export default function MidiReader({
       exportWav: (cb) => bridgeImplRef.current!.exportWav(cb),
       setTrackMix: (i, m) => bridgeImplRef.current!.setTrackMix(i, m),
       requestSf2: () => bridgeImplRef.current!.requestSf2(),
+      setTrackVoice: (i, ov) => bridgeImplRef.current!.setTrackVoice!(i, ov),
+      setEffects: (fx) => bridgeImplRef.current!.setEffects!(fx),
+      getTrackRegions: (i) => bridgeImplRef.current!.getTrackRegions!(i),
     });
     return () => playerBridge.attach(null);
   }, []);

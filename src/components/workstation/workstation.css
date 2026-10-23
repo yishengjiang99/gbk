@@ -32,3 +32,9 @@
 .ws-player-frame { position: relative; margin: 24px auto; max-width: 100%; }
 .ws-player-close { position: sticky; top: 0; z-index: 2; margin-bottom: 6px; }
 @media (max-width: 900px) { .ws-body { grid-template-columns: 1fr; } .ws-tracks, .ws-agent { max-height: 220px; } }
+.ws-sound { border-top: 1px solid #262b36; padding: 6px; } .ws-sound h4 { margin: 4px 0; }
+.ws-sound-row { display: grid; grid-template-columns: 96px 1fr 70px; } .ws-sound-row input { width: 100%; }
+.ws-sound-row.ovr span:first-child { color: #ffcc80; }
+.ws-adsr { background: #11141a; border-radius: 4px; display: block; margin-bottom: 4px; }
+.ws-sound-diff { background: #10301e; border: 1px solid #2e8b57; padding: 4px; border-radius: 4px; margin: 4px 0; }
+.ws-side { overflow: auto; max-height: calc(100vh - 44px); border-left: 1px solid #262b36; } .ws-side .ws-agent { max-height: none; border-left: none; }

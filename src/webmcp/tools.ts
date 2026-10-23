@@ -79,8 +79,8 @@ export const CC_CAPS: Record<number, { name: string; audible: boolean; note?: st
   64: { name: "Sustain", audible: true }, 66: { name: "Sostenuto", audible: true }, 67: { name: "Soft pedal", audible: true },
   71: { name: "Resonance", audible: false, note: "routed + stored; audible only if the preset defines a CC71 modulator" },
   74: { name: "Brightness", audible: false, note: "routed + stored; audible only if the preset defines a CC74 modulator" },
-  91: { name: "Reverb send", audible: false, note: "stored/exported; no reverb processing exists in GBK" },
-  93: { name: "Chorus send", audible: false, note: "stored/exported; no chorus processing exists in GBK" },
+  91: { name: "Reverb send", audible: true, note: "SF2 2.01 default modulator 8.4.8: adds up to 20% reverb send (0.1% x 200 at CC 127) on top of the zone's reverbEffectsSend" },
+  93: { name: "Chorus send", audible: true, note: "SF2 2.01 default modulator 8.4.9: adds up to 20% chorus send on top of the zone's chorusEffectsSend" },
 };
 
 const NOTE_SCHEMA = obj({ trackId: str(), tick: int(0, 1e9), duration: int(1, 1e9), pitch: int(0, 127), velocity: int(1, 127), channel: int(0, 15, "defaults to the track channel") }, ["trackId", "tick", "duration", "pitch", "velocity"]);
@@ -93,7 +93,10 @@ export function buildCoreTools(c: WorkstationController): ToolDef[] {
   };
   return [
     { name: "gbk_get_capabilities", readOnly: true, description: "What this GBK build can and cannot do (implemented tools, audible vs stored-only CCs, audio readiness).", inputSchema: obj({}),
-      run: () => ({ data: { audioReady: c.getState().transport.audioReady, controllers: CC_CAPS, otherControllers: "CC 0-127 are preserved, scheduled and exported; unlisted CCs only matter if the SoundFont preset maps them", pitchBend: "14-bit, audible (default range 2 semitones, RPN0 supported)", pressure: "channel + poly pressure routed to SF2 modulators", unsupported: ["arbitrary JS/DOM/filesystem/network", "reverb/chorus effects", "SMPTE time division", "server-side MCP"], approval: "commit_proposal from an agent requires the user to press Accept in the GBK proposal panel" } }) },
+      run: () => ({ data: { audioReady: c.getState().transport.audioReady, controllers: CC_CAPS, otherControllers: "CC 0-127 are preserved, scheduled and exported; unlisted CCs only matter if the SoundFont preset maps them", pitchBend: "14-bit, audible (default range 2 semitones, RPN0 supported)", pressure: "channel + poly pressure routed to SF2 modulators",
+        effects: { reverb: "Freeverb-style stereo (8 combs + 4 allpasses), driven per voice by SF2 reverbEffectsSend (gen 16) + CC91; params via gbk_set_effects", chorus: "two quadrature-modulated delay lines, driven by chorusEffectsSend (gen 15) + CC93", offlineWav: true, deterministic: true },
+        voiceEditing: { tools: ["gbk_get_voice_settings", "gbk_propose_voice_patch", "gbk_set_effects"], scope: "per track, optional key range; applied at note-on (realtime generators also update sounding notes)", midiExport: "additive overrides without key range export as SF2 NRPNs (CC99=120); absolute / key-ranged overrides and effects params are project-only" },
+        unsupported: ["arbitrary JS/DOM/filesystem/network", "per-preset effects types / GS-XG effect macros", "SMPTE time division", "server-side MCP"], approval: "commit_proposal from an agent requires the user to press Accept in the GBK proposal panel" } }) },
     { name: "gbk_get_project_summary", readOnly: true, description: "Project name, PPQ, tempo/meter maps, counts, revision, pending proposals.", inputSchema: obj({}), run: () => ({ data: summary() }) },
     { name: "gbk_list_tracks", readOnly: true, description: "Tracks with stable ids, names, channels, mix defaults, note counts and program.", inputSchema: obj({}),
       run: () => ({ data: P().tracks.map((t) => ({ id: t.id, name: t.name, channel: t.channel, mix: t.mix, override: c.getState().overrides[t.id] ?? null, visible: t.visible, notes: P().notes.filter((n) => n.trackId === t.id).length, program: P().programs.find((g) => g.trackId === t.id) ?? null })) }) },
