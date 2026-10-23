@@ -14,6 +14,7 @@ import MidiReader from "./midireader";
 import ErrorBoundary from "./ErrorBoundary";
 import { MidiRecorderUI } from "./MidiRecorderUI";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
+import { primeSoundFontCache, setActiveSoundFont } from "./audio/soundfont-loader.ts";
 import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
 
 // ---------------------------------------------------------------------------
@@ -863,6 +864,10 @@ export default function App() {
       setLoadingStage(`Parsing SoundFont: ${name}…`);
       const parsed = parseSF2(u8);
       setSf2(parsed);
+      // Share the parsed font with the headless renderer: the bundled default seeds its cache (no second
+      // download); any other (uploaded) font becomes the active font for offline WAV renders.
+      if (name === DEFAULT_SF2.label) primeSoundFontCache(DEFAULT_SF2.path, parsed.soundFont, name);
+      else setActiveSoundFont(parsed.soundFont, name);
       setSourceName(name);
       setSelectedPreset(null);
       setSelectedLayer(null);

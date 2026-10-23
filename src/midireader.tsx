@@ -1555,142 +1555,39 @@ export default function MidiReader({
     }
   }, [playRequested, sf2Ready, sf2Error, sf2Loading]);
 
-  async function onExportWav(onBlob?: (b: Blob) => void) {
-    if (!song || !sf2Ready || isExporting) return;
+  /** Export WAV through the shared headless renderer (same engine as WebMCP gbk_render_wav). Resolves only with a
+   * validated WAV; every failure rejects (and is shown in the player) - never a silent early return. */
+  async function onExportWav(onBlob?: (b: Blob) => void): Promise<Blob> {
+    const project = playerBridge.ctrl?.project;
+    const fail = (code: string, msg: string): never => { setSongError(msg); onError?.(msg); throw Object.assign(new Error(msg), { code }); };
+    if (isExporting) fail("BUSY", "A WAV export is already running");
+    if (!project || !project.notes.length) fail("EMPTY_PROJECT", "Nothing to export: load or compose a song first");
     setIsExporting(true);
     setExportProgress(0);
     setExportStage("Preparing");
     setSongError("");
     try {
-      const sampleRate = 44100;
-      const numChannels = 2;
-      const tailSec = 3;
-      const durationSec = song.durationSec + tailSec;
-      const offlineCtx = new OfflineAudioContext(
-        numChannels,
-        Math.ceil(durationSec * sampleRate),
-        sampleRate
-      );
-      const audioBuffer = offlineCtx.createBuffer(
-        numChannels,
-        Math.ceil(durationSec * sampleRate),
-        sampleRate
-      );
-
-      const anySolo = song.tracks.some((t) => !!trackMixStateRef.current[t.index]?.solo);
-      const offlineTracks: {
-        trackIndex: number;
-        regions: SF2Region[];
-        cc7Volume: number;
-        cc10Pan: number;
-        cc11Expression: number;
-        pan: number;
-        gain: number;
-      }[] = [];
-      const events: {
-        frame: number;
-        seq: number;
-        type: string;
-        trackIndex: number;
-        channel?: number;
-        note?: number;
-        velocity?: number;
-        regions?: SF2Region[];
-      }[] = [];
-
-      for (const track of song.tracks) {
-        const overridePreset = trackPresetOverridesRef.current[track.index];
-        const defaultPreset = trackDefaultPresetMap[track.index];
-        const presetIndex = overridePreset ?? defaultPreset ?? fallbackPresetRef.current;
-        const regions = getRegionsRef.current(presetIndex);
-        const cc = getTrackCc(track.index);
-        const preset = presetOptionMapRef.current.get(presetIndex);
-        const pan = resolveOrchestraPan(track.instrumentName, track.name, preset?.name);
-
-        const muted = !!trackMixStateRef.current[track.index]?.mute;
-        const solo = !!trackMixStateRef.current[track.index]?.solo;
-        const audible = anySolo ? solo : !muted;
-        offlineTracks.push({
-          trackIndex: track.index,
-          regions,
-          cc7Volume: cc.cc7Volume,
-          cc10Pan: cc.cc10Pan,
-          cc11Expression: cc.cc11Expression,
-          pan: pan ?? 0,
-          gain: audible ? 1 : 0,
-        });
-        for (const ev of track.playEvents) {
-          const frame = Math.max(0, Math.round(ev.sec * sampleRate));
-          if (ev.type === "noteOn") {
-            events.push({
-              frame,
-              seq: ev.seq ?? 0,
-              type: "noteOn",
-              trackIndex: track.index,
-              channel: ev.channel,
-              note: ev.note,
-              velocity: ev.velocity,
-            });
-          } else if (ev.type === "noteOff") {
-            events.push({
-              frame,
-              seq: ev.seq ?? 0,
-              type: "noteOff",
-              trackIndex: track.index,
-              channel: ev.channel,
-              note: ev.note,
-            });
-          } else if (ev.type === "cc" || ev.type === "pitchBend" || ev.type === "channelPressure" || ev.type === "polyPressure") {
-            // Same authored automation as realtime playback (worker), via the engine's controller path.
-            events.push({ frame, seq: ev.seq ?? 0, trackIndex: track.index, ...ctlToSynth(ev as unknown as CtlPlayEvent) } as never);
-          } else if (ev.type === "program" && overridePreset == null) {
-            const pIdx = resolvePresetRef.current(ev.program ?? 0, ev.bank ?? 0) ?? fallbackPresetRef.current;
-            events.push({
-              frame,
-              seq: ev.seq ?? 0,
-              type: "setPreset",
-              trackIndex: track.index,
-              regions: getRegionsRef.current(pIdx),
-            });
-          }
-        }
-      }
-      // Sound layer: overrides per track + global effects, before any note (frame 0, seq -1).
-      if (effectsRef.current) events.push({ frame: 0, seq: -1, type: "setEffects", trackIndex: -1, effects: effectsRef.current } as never);
-      for (const track of song.tracks) {
-        const ov = trackVoiceRef.current[track.index];
-        if (ov?.length) events.push({ frame: 0, seq: -1, type: "setVoiceOverrides", trackIndex: track.index, overrides: ov } as never);
-      }
-      setExportStage("Rendering");
-      await renderOfflineSequenceToAudioBufferIncremental({
-        audioBuffer,
-        tracks: offlineTracks,
-        events,
-        maxVoices: Math.max(96, song.tracks.length * 24),
-        onProgress: (progress: number) => {
-          setExportProgress(Math.max(0, Math.min(0.75, progress * 0.75)));
-        },
-      });
-      setExportStage("Encoding WAV");
-      const wavBuffer = await encodeWavIncremental(audioBuffer, 16384, (progress) => {
-        setExportProgress(0.85 + Math.max(0, Math.min(0.15, progress * 0.15)));
+      const { renderProjectOffline } = await import("./audio/offline-renderer.ts");
+      const labels: Record<string, string> = { loading: "Loading SoundFont", resolving: "Resolving instruments", rendering: "Rendering", encoding: "Encoding WAV", validating: "Validating" };
+      const r = await renderProjectOffline(project!, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, undefined, (x, st) => {
+        setExportStage(labels[st] ?? st); setExportProgress(Math.max(0, Math.min(1, x)));
       });
       setExportProgress(1);
-      setExportStage("Saving");
-      const blob = new Blob([wavBuffer], { type: "audio/wav" });
-      if (onBlob) { onBlob(blob); return; }
-      const url = URL.createObjectURL(blob);
+      if (onBlob) { onBlob(r.blob); return r.blob; }
+      const url = URL.createObjectURL(r.blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${(songName || "export").replace(/\.[^.]+$/, "")}.wav`;
+      a.download = `${(project!.name || songName || "export").replace(/\.[^.]+$/, "")}.wav`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      return r.blob;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
       onError?.(msg);
+      throw err;
     } finally {
       setExportStage("");
       setIsExporting(false);
@@ -1768,7 +1665,7 @@ export default function MidiReader({
     pause: () => workerRef.current?.postMessage({ type: "pause" }),
     seek: (sec) => { seekToSec(sec); },
     isReady: () => sf2Ready,
-    exportWav: (cb) => onExportWav(cb),
+    exportWav: async (cb) => { await onExportWav(cb); },
     requestSf2: () => { if (!sf2Ready && !sf2Loading) onLoadDefaultSf2(); },
     setTrackVoice: (i, ov) => {
       trackVoiceRef.current = { ...trackVoiceRef.current, [i]: ov };
@@ -2471,8 +2368,8 @@ export default function MidiReader({
         <button
           type="button"
           className="toolbarActionBtn"
-          onClick={() => void onExportWav()}
-          disabled={!song || !sf2Ready || isExporting}
+          onClick={() => { onExportWav().catch(() => { /* surfaced via songError */ }); }}
+          disabled={!song || isExporting}
           aria-label="Export WAV"
           title="Generate offline WAV export"
         >
