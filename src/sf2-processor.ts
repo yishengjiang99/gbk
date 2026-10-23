@@ -39,6 +39,11 @@ class Sf2Processor extends AudioWorkletProcessor {
       this.engine.setMaxVoices(Math.max(64, msg.maxVoices ?? 64));
       return;
     }
+    if (msg.type === "setMasterGainDb") {
+      const db = (msg as { db?: number }).db;
+      if (typeof db === "number" && Number.isFinite(db)) this.engine.masterGainDb = db;
+      return;
+    }
     if (msg.type === "setSequence") {
       this.scheduledEvents = Array.isArray(msg.events) ? msg.events : [];
       this.scheduledEventIndex = 0;
