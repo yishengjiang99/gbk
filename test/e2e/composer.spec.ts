@@ -113,3 +113,31 @@ test("smoke: page + composer connect in other engines", async ({ page }) => {
   await expect(page.getByTestId("workstation")).toBeVisible();
   await signIn(page, "e2e-code-2");
 });
+
+// Regression: a /s/<slug> link must show exactly that song, even though the player's startup default song
+// (Beethoven) and the autosave restore race it. Previously the startup song replaced the share in fresh profiles.
+test("share link always opens the shared song (startup default/restore must not win)", async ({ browser, baseURL }) => {
+  test.skip(test.info().project.name !== "chrome-no-webmcp", "desktop Chrome only");
+  const { readFileSync } = await import("node:fs");
+  const proj = JSON.parse(readFileSync("songs/2026-10-23-midnight-invention/project.json", "utf8"));
+  const owner = await browser.newContext(); const op = await owner.newPage();
+  await op.goto("/studio");
+  const slug = await op.evaluate(async ({ proj }) => {
+    const j = async (r: Response) => { if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.json(); };
+    const s = await j(await fetch("/api/session", { credentials: "same-origin" }));
+    const l = await j(await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": s.csrf }, body: JSON.stringify({ code: "e2e-code-2" }) }));
+    const r = await j(await fetch("/api/shares", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": l.csrf }, body: JSON.stringify({ title: "Midnight Invention", project: proj }) }));
+    return r.slug as string;
+  }, { proj });
+  await owner.close();
+  for (const warm of [false, true]) {
+    const ctx = await browser.newContext(); const p = await ctx.newPage();
+    if (warm) { await p.goto("/studio"); await expect.poll(async () => (await ws(p)).notes, { timeout: 30_000 }).toBeGreaterThan(1000); } // player default loaded + autosaved
+    await p.goto(`/s/${slug}`);
+    await expect.poll(async () => (await ws(p)).name, { timeout: 20_000 }).toBe("Midnight Invention");
+    await p.waitForTimeout(10_000); // give the player's startup song load every chance to clobber it
+    const st = await ws(p);
+    expect(st.name).toBe("Midnight Invention"); expect(st.notes).toBe(proj.notes.length); expect(st.readOnly).toBeTruthy();
+    await ctx.close();
+  }
+});

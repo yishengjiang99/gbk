@@ -1,3 +1,4 @@
+import { playerBridge } from "../workstation/player-bridge.ts";
 // Browser client for shared songs. Uploading happens ONLY from an explicit Share click (that click is the consent).
 import { apiBase } from "./bridge-client.ts";
 import { workstation } from "../workstation/instance.ts";
@@ -20,6 +21,7 @@ export const mediaUrl = (slug: string, kind: "wav" | "midi" | "mp3") => `${apiBa
 
 /** Load a shared song as a NEW read-only local project (validated: shared data is untrusted). */
 export async function openShared(slug: string, fork = false): Promise<ShareInfo> {
+  playerBridge.holdStartupLoads = true; // in-app navigation to a share: an in-flight player startup load must not win
   const s = await getShare(slug);
   const p = sanitizeSharedProject(s.project);
   if (workstation.project.tracks.length || workstation.project.notes.length) await workstation.host.checkpoint?.(workstation.project); // never overwrite the user's current work

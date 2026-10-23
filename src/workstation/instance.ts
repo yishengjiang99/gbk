@@ -8,7 +8,11 @@ export const workstation: WorkstationController = g.__gbkWorkstation ?? (g.__gbk
 if (!(g as { __gbkBound?: boolean }).__gbkBound) {
   (g as { __gbkBound?: boolean }).__gbkBound = true;
   bindController(workstation);
-  if (typeof indexedDB !== "undefined") { enableAutosave(workstation); void restoreLatest(workstation).then((ok) => { if (ok) playerBridge.restored = true; }); }
+  // Opening a shared song (/s/<slug>): skip the autosave restore and the player's startup song so the share wins.
+  const shareRoute = typeof location !== "undefined" && /\/s\/[A-Za-z0-9_-]+\/?$/.test(location.pathname);
+  if (shareRoute) playerBridge.holdStartupLoads = true;
+  if (typeof indexedDB !== "undefined" && shareRoute) enableAutosave(workstation);
+  else if (typeof indexedDB !== "undefined") { enableAutosave(workstation); void restoreLatest(workstation).then((ok) => { if (ok) playerBridge.restored = true; }); }
 }
 
 // Gallery deep link: /gbk/?song=<yyyy-mm-dd-slug> loads songs/<dir>/project.json (written by `npm run song:publish`).

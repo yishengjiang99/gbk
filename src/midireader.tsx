@@ -1352,6 +1352,7 @@ export default function MidiReader({
               dataUrl: persisted.dataUrl,
               persist: false,
               restoreSec: persisted.currentSec,
+              startup: true,
             });
             return;
           }
@@ -1367,6 +1368,7 @@ export default function MidiReader({
           if (!userPickedDuringStartup()) loadMidiIntoTracks(buf, first.name, {
             selectedPath: first.path,
             sourceKind: "bundled",
+            startup: true,
           });
         }
       } catch (err) {
@@ -1575,6 +1577,7 @@ export default function MidiReader({
       fileId?: string;
       persist?: boolean;
       restoreSec?: number;
+      startup?: boolean;
       autoplay?: boolean;
     } = {}
   ) {
@@ -1592,7 +1595,7 @@ export default function MidiReader({
     if (isPlaying) workerRef.current.postMessage({ type: "pause" });
     disconnectTrackNodes();
     pendingRestoreSecRef.current = opts.restoreSec ?? null;
-    playerBridge.onPlayerLoadedBuffer(buf.slice(0), name, opts.restoreSec != null);
+    playerBridge.onPlayerLoadedBuffer(buf.slice(0), name, opts.restoreSec != null, opts.startup === true);
     workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
     setSelectedMidiPath(selectedPath);
     setCurrentMidiSource(source);
