@@ -102,3 +102,6 @@
 .ws select, .ws input:not([type="range"]):not([type="checkbox"]):not([type="radio"]) { background: #1a2029; color: #eef1f7; border: 1px solid #465063; border-radius: 6px; padding: 2px 6px; }
 .ws select option { background: #1a2029; color: #eef1f7; }
 .xp-video { width: 100%; max-width: 720px; aspect-ratio: 16 / 9; display: block; margin: 14px 0 4px; border-radius: 10px; border: 1px solid #353d4d; background: #000; }
+/* Page background matches the compose theme full height (no seam where .xp's 100vh box ends). */
+html:has(.xp), html:has(.xp) body, html:has(.ws), html:has(.ws) body { background: #161b24; }
+.xp { min-height: 100dvh; }

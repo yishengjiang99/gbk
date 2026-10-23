@@ -163,3 +163,13 @@ test("share link always opens the shared song (startup default/restore must not 
     await ctx.close();
   }
 });
+
+test("theme: landing background is uniform full height; Keys track picker is dark", async ({ page }) => {
+  await page.goto("/"); await expect(page.getByTestId("explore-page")).toBeVisible();
+  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(22, 27, 36)");
+  await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
+  await page.getByTestId("keys-toggle").click();
+  const sel = page.getByTestId("live-track"); await expect(sel).toBeVisible({ timeout: 60_000 });
+  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(26, 32, 41)");
+  await page.getByTestId("live-keyboard").screenshot({ path: `${SHOTS}/keys-track-picker.png` });
+});
