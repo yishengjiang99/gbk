@@ -46,7 +46,7 @@ test("C-scale via OMR with jsdelivr blocked: 15 notes, same-origin runtime", asy
     return route.continue();
   });
 
-  await page.goto("/gbk/");
+  await page.goto("/gbk/?player=1");
   const shutter = page.getByRole("button", { name: "Scan sheet music with camera" });
   await expect(shutter).toBeVisible({ timeout: 60_000 });
 

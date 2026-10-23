@@ -14,7 +14,7 @@ async function playNearEnd(page: Page) {
 }
 
 test("playlist advances automatically and stops after the final song", async ({ page }) => {
-  await page.goto("/gbk/");
+  await page.goto("/gbk/?player=1");
   const playlist = page.getByRole("region", { name: "MIDI playlist" });
   await playlist.getByRole("button", { name: "Never-Gonna-Give-You-Up-1.mid", exact: true }).click();
   await expect(page.locator(".gbk-dock")).toContainText("Never-Gonna");
@@ -35,7 +35,7 @@ test("playlist advances automatically and stops after the final song", async ({ 
 });
 
 test("pausing does not advance the playlist", async ({ page }) => {
-  await page.goto("/gbk/");
+  await page.goto("/gbk/?player=1");
   await expect(page.locator(".gbk-dock")).toBeVisible();
   const title = await page.locator(".gbk-dock").textContent();
   await page.getByRole("button", { name: "Play", exact: true }).click();

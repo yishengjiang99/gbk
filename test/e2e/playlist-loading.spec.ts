@@ -7,7 +7,7 @@ test("Play queues while SoundFont downloads and starts when ready", async ({ pag
     await gate;
     await route.continue();
   });
-  await page.goto("/gbk/");
+  await page.goto("/gbk/?player=1");
   await expect(page.locator(".gbk-dock")).toBeVisible();
   await expect(page.getByRole("status")).toContainText("Downloading SoundFont");
   await page.getByRole("button", { name: "Play", exact: true }).click();
@@ -23,7 +23,7 @@ test("failed SoundFont loading can be retried with Play; playlist works without 
     if (++attempts === 1) await route.abort();
     else await route.continue();
   });
-  await page.goto("/gbk/");
+  await page.goto("/gbk/?player=1");
   await expect(page.getByText(/SoundFont loading failed:/)).toBeVisible();
   const playlist = page.getByRole("region", { name: "MIDI playlist" });
   await expect(playlist).toBeVisible();

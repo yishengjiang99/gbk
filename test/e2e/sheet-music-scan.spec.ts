@@ -14,7 +14,7 @@ test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page 
   const baselineSong = parseMidiBuffer(baselineMidi.buffer.slice(baselineMidi.byteOffset, baselineMidi.byteOffset + baselineMidi.byteLength));
   const baselineNotes = baselineSong.tracks.flatMap((track) => track.notes);
 
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
 
   const generatedMidiPromise = page.evaluate(
     () =>
@@ -118,7 +118,7 @@ test("sweden sheet photo transcribes close to the baseline MIDI", async ({ page 
 test("scan sheet music image imports generated MIDI", async ({ page }) => {
   const fixturePath = path.resolve(process.cwd(), "dieLetzteKompanie.jpg");
 
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await waitForSf2Ready(page);

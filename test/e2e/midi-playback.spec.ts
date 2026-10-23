@@ -156,7 +156,7 @@ async function waitForAudioSignal(
 // ---------------------------------------------------------------------------
 
 test("default Beethoven MIDI plays and produces audio signal", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
 
@@ -183,7 +183,7 @@ test("default Beethoven MIDI plays and produces audio signal", async ({ page }) 
 // ---------------------------------------------------------------------------
 
 test("Play button changes to Pause and back, timer advances while playing", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
 
@@ -225,7 +225,7 @@ test("Play button changes to Pause and back, timer advances while playing", asyn
 // ---------------------------------------------------------------------------
 
 test("pause then resume resumes audio signal", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
 
@@ -256,7 +256,7 @@ test("pause then resume resumes audio signal", async ({ page }) => {
 // ---------------------------------------------------------------------------
 
 test("Export WAV button triggers export progress indicator", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
 
@@ -292,7 +292,7 @@ test("Export WAV button triggers export progress indicator", async ({ page }) =>
 
 test("playing and exporting produces a valid, non-silent WAV file", async ({ page }, testInfo) => {
   testInfo.setTimeout(120_000);
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
 
@@ -351,7 +351,7 @@ test("playing and exporting produces a valid, non-silent WAV file", async ({ pag
 // ---------------------------------------------------------------------------
 
 test("selecting a different MIDI file from the playlist loads a new song", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
   await waitForSf2Ready(page);
 

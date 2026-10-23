@@ -3,7 +3,7 @@ import { openAppMenu } from "./app-menu.ts";
 
 for (const kind of ["blank", "corrupt"] as const) {
   test(`${kind} sheet preserves the loaded MIDI and emits no generated song`, async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/gbk/?player=1");
     await openAppMenu(page);
     await page.getByRole("button", { name: /Current MIDI/i }).click();
     const metadata = page.getByLabel("MIDI metadata");
