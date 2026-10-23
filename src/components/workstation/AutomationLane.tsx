@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Project } from "../../workstation/model.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import { workstation } from "./useWorkstation.ts";
+import { lowerBound, visiblePoints } from "../../workstation/visible.ts";
 import type { View } from "./PianoRollEditor.tsx";
 
 const KEY_W = 36;
@@ -56,7 +57,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
       let prev: { tick: number; value: number } | null = null;
       for (const p of list) {
         if (p.tick > endTick && prev && prev.tick > endTick) break;
-        if (!prev) g.moveTo(KEY_W, yv(p.value));
+        if (!prev) g.moveTo(Math.max(KEY_W, x(p.tick)), yv(p.value));
         if (prev && step) g.lineTo(x(p.tick), yv(prev.value));
         g.lineTo(x(p.tick), yv(p.value)); prev = p;
       }
@@ -64,8 +65,9 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
       g.stroke(); g.setLineDash([]);
       if (!dashed && view.pxPerTick * project.ppq > 6) { g.fillStyle = color; for (const p of list) if (p.tick >= view.scrollTick && p.tick <= endTick) g.fillRect(x(p.tick) - 2, yv(p.value) - 2, 4, 4); }
     };
-    curve(pts, track?.color ?? "#4fc3f7", false);
-    if (candPts) curve(candPts, "#7cffb2", true);
+    const margin = (width * 0.25) / view.pxPerTick;
+    curve(visiblePoints(pts, view.scrollTick - margin, endTick + margin), track?.color ?? "#4fc3f7", false);
+    if (candPts) curve(visiblePoints(candPts, view.scrollTick - margin, endTick + margin), "#7cffb2", true);
     if (drawPts.current) curve(drawPts.current, "#fff", true);
     g.fillStyle = "#1b1e25"; g.fillRect(0, 0, KEY_W, H);
     g.fillStyle = "#aaa"; g.font = "9px sans-serif"; g.fillText(String(max), 2, 10); g.fillText("0", 2, H - 3);
@@ -74,7 +76,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
 
   // Live value during playback (rAF-throttled via controller subscription, not per-event React state).
   useEffect(() => workstation.subscribe((s) => {
-    let v: number | null = null; for (const p of pts) { if (p.tick <= s.transport.positionTick) v = p.value; else break; }
+    const v: number | null = pts[lowerBound(pts, s.transport.positionTick + 1) - 1]?.value ?? null;
     setLive((old) => (old === v ? old : v));
   }), [pts]);
 

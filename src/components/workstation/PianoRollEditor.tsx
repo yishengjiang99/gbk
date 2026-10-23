@@ -2,15 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Note, Project } from "../../workstation/model.ts";
 import { bars as barList, tickToSec } from "../../workstation/timing.ts";
 import { diffNotes } from "../../workstation/diff.ts";
+import { buildNoteIndex, visibleNotes } from "../../workstation/visible.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import { workstation } from "./useWorkstation.ts";
 
 export interface View { scrollTick: number; pxPerTick: number; lowPitch: number; highPitch: number }
 const KEY_W = 36;
 
-interface Props { project: Project; proposal: Proposal | null; view: View; setView: (v: View) => void; height: number }
+interface Props { project: Project; proposal: Proposal | null; view: View; setView: (v: View) => void; height: number; onManualScroll?: () => void; onWidth?: (px: number) => void }
 
-export function PianoRollEditor({ project, proposal, view, setView, height }: Props) {
+export function PianoRollEditor({ project, proposal, view, setView, height, onManualScroll, onWidth }: Props) {
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
@@ -20,11 +21,12 @@ export function PianoRollEditor({ project, proposal, view, setView, height }: Pr
   const rowH = height / (view.highPitch - view.lowPitch + 1);
   const diff = useMemo(() => (proposal ? diffNotes(proposal.original, proposal.candidate) : null), [proposal]);
   const barsMemo = useMemo(() => barList(project, project.endTick + project.ppq * 16), [project.timeSigs, project.ppq, project.endTick]);
+  const noteIndex = useMemo(() => buildNoteIndex(project.notes), [project.notes]);
   const trackById = useMemo(() => new Map(project.tracks.map((t) => [t.id, t])), [project.tracks]);
 
   useEffect(() => {
     const el = wrap.current; if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth)); ro.observe(el); setWidth(el.clientWidth);
+    const upd = () => { setWidth(el.clientWidth); onWidth?.(el.clientWidth - KEY_W); }; const ro = new ResizeObserver(upd); ro.observe(el); upd();
     return () => ro.disconnect();
   }, []);
 
@@ -35,7 +37,8 @@ export function PianoRollEditor({ project, proposal, view, setView, height }: Pr
   const snap = (t: number) => { const q = project.ppq / 4; return Math.round(t / q) * q; };
   const noteAt = (px: number, py: number): Note | undefined => {
     const t = tickAt(px), p = pitchAt(py);
-    for (let i = project.notes.length - 1; i >= 0; i--) { const n = project.notes[i]; if (n.pitch === p && n.tick <= t && n.tick + n.duration >= t && trackById.get(n.trackId)?.visible !== false) return n; }
+    const cand = visibleNotes(noteIndex, t, t);
+    for (let i = cand.length - 1; i >= 0; i--) { const n = cand[i]; if (n.pitch === p && n.tick <= t && n.tick + n.duration >= t && trackById.get(n.trackId)?.visible !== false) return n; }
   };
 
   // Static layer (grid + notes + overlays) redrawn when inputs change; playhead on rAF.
@@ -64,7 +67,8 @@ export function PianoRollEditor({ project, proposal, view, setView, height }: Pr
       const removed = new Set(diff?.removed.map((n) => n.id) ?? []);
       const moved = new Map(diff?.moved.map((m) => [m.before.id, m.after]) ?? []);
       const selIds = new Set(sel.noteIds);
-      for (const n of project.notes) {
+      const margin = (width * 0.25) / view.pxPerTick;
+      for (const n of visibleNotes(noteIndex, view.scrollTick - margin, endTick + margin)) {
         if (n.tick > endTick || n.tick + n.duration < view.scrollTick || n.pitch < view.lowPitch || n.pitch > view.highPitch) continue;
         const t = trackById.get(n.trackId); if (t && !t.visible) continue;
         const alpha = 0.35 + (n.velocity / 127) * 0.65;
@@ -99,7 +103,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height }: Pr
     tick();
     const unsub = workstation.subscribe((s) => { if (s.transport.playing && !raf) raf = requestAnimationFrame(tick); else if (!s.transport.playing) { cancelAnimationFrame(raf); raf = 0; tick(); } });
     return () => { cancelAnimationFrame(raf); unsub(); };
-  }, [project, diff, view, width, height, barsMemo]);
+  }, [project, diff, view, width, height, barsMemo, noteIndex]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
@@ -157,7 +161,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height }: Pr
       workstation.edit([{ op: "updateNotes", updates: ids.map((id) => ({ id, pitch: Math.max(0, Math.min(127, byId.get(id)!.pitch + dp)) })) }], { label: "transpose" }); e.preventDefault();
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       if (ids.length && e.altKey) { const dt = (e.key === "ArrowRight" ? 1 : -1) * project.ppq / 4; const byId = new Map(project.notes.map((n) => [n.id, n])); workstation.edit([{ op: "updateNotes", updates: ids.map((id) => ({ id, tick: Math.max(0, byId.get(id)!.tick + dt) })) }], { label: "nudge" }); }
-      else setView({ ...view, scrollTick: Math.max(0, view.scrollTick + (e.key === "ArrowRight" ? 1 : -1) * project.ppq * 4) });
+      else { onManualScroll?.(); setView({ ...view, scrollTick: Math.max(0, view.scrollTick + (e.key === "ArrowRight" ? 1 : -1) * project.ppq * 4) }); }
       e.preventDefault();
     } else if (e.key === "+" || e.key === "=") setView({ ...view, pxPerTick: Math.min(2, view.pxPerTick * 1.25) });
     else if (e.key === "-") setView({ ...view, pxPerTick: Math.max(0.005, view.pxPerTick / 1.25) });
@@ -165,12 +169,12 @@ export function PianoRollEditor({ project, proposal, view, setView, height }: Pr
   };
   const onWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) setView({ ...view, pxPerTick: Math.max(0.005, Math.min(2, view.pxPerTick * (e.deltaY < 0 ? 1.15 : 1 / 1.15))) });
-    else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) setView({ ...view, scrollTick: Math.max(0, view.scrollTick + (e.deltaX || e.deltaY) / view.pxPerTick) });
+    else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) { onManualScroll?.(); setView({ ...view, scrollTick: Math.max(0, view.scrollTick + (e.deltaX || e.deltaY) / view.pxPerTick) }); }
     else { const d = e.deltaY > 0 ? -2 : 2; const lo = Math.max(0, Math.min(127 - (view.highPitch - view.lowPitch), view.lowPitch + d)); setView({ ...view, lowPitch: lo, highPitch: lo + (view.highPitch - view.lowPitch) }); }
   };
 
   return (
-    <div ref={wrap} className="ws-roll" style={{ position: "relative", height }}>
+    <div ref={wrap} className="ws-roll" style={{ position: "relative", height }} data-scroll-tick={Math.round(view.scrollTick)} data-visible-ticks={Math.round((width - KEY_W) / view.pxPerTick)}>
       <canvas ref={canvas} style={{ width: "100%", height, display: "block", touchAction: "none" }} tabIndex={0} role="application"
         aria-label="Piano roll editor. Drag to select a range, drag notes to move, drag note end to resize, double-click to add or delete, arrows transpose/scroll, alt+arrows nudge, +/- zoom, Delete removes."
         data-testid="piano-roll" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onKeyDown={onKeyDown} onWheel={onWheel} onPointerLeave={() => setHover(null)} />
