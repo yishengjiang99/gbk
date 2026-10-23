@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import type { Proposal, WorkstationState } from "../../workstation/controller.ts";
 import { diffNotes, diffSummary } from "../../workstation/diff.ts";
 import { workstation } from "./useWorkstation.ts";
-import { getModelContext, registerWebMcpTools, unregisterWebMcpTools } from "../../webmcp/adapter.ts";
+import { agentToolsMode, getModelContext, registerWebMcpTools, unregisterWebMcpTools } from "../../webmcp/adapter.ts";
 import { buildAllTools } from "../../webmcp/registry.ts";
 
 const LS = "gbk.agentTools";
 
 export function useAgentToolsToggle() {
-  const available = typeof document !== "undefined" && !!getModelContext();
-  const [on, setOn] = useState(() => { try { return localStorage.getItem(LS) === "1"; } catch { return false; } });
+  // Always available: the real WebMCP API when the browser has it, otherwise the in-page shim (window.gbkTools).
+  const mode = typeof document !== "undefined" ? agentToolsMode() : "shim";
+  const available = typeof document !== "undefined";
+  // Shim mode is page-local (no flags, no cross-origin exposure), so it defaults on unless the user turned it off.
+  const [on, setOn] = useState(() => { try { const v = localStorage.getItem(LS); return v === null ? mode === "shim" : v === "1"; } catch { return mode === "shim"; } });
   useEffect(() => {
     try { localStorage.setItem(LS, on ? "1" : "0"); } catch { /* private mode */ }
     if (!available) return;
@@ -18,7 +21,7 @@ export function useAgentToolsToggle() {
     void registerWebMcpTools(workstation, buildAllTools(workstation)).then((r) => { reg = r; if (cancelled) r?.unregister(); });
     return () => { cancelled = true; reg?.unregister(); };
   }, [on, available]);
-  return { available, on, setOn };
+  return { available, mode, on, setOn };
 }
 
 export function AgentPanel({ state, focusProposal, setFocus }: { state: WorkstationState; focusProposal: Proposal | null; setFocus: (id: string | null) => void }) {
@@ -43,7 +46,7 @@ export function AgentPanel({ state, focusProposal, setFocus }: { state: Workstat
   return (
     <aside className="ws-agent" aria-label="Agent activity" data-testid="agent-panel">
       <h3>Agent activity</h3>
-      <div className="ws-row"><span className={`ws-pill ${state.agentToolsEnabled ? "on" : "off"}`} data-testid="webmcp-status">WebMCP {state.agentToolsEnabled ? "on" : getModelContext() ? "off" : "unavailable"}</span></div>
+      <div className="ws-row"><span className={`ws-pill ${state.agentToolsEnabled ? "on" : "off"}`} data-testid="webmcp-status">{getModelContext() ? "WebMCP" : "Agent tools (shim: window.gbkTools)"} {state.agentToolsEnabled ? "on" : "off"}</span></div>
       <div className="ws-kv"><b>Last tool</b><span data-testid="last-tool">{lastAgent ? `${lastAgent.action} ${lastAgent.ok ? "✓" : "✗"} ${lastAgent.detail ?? ""}` : "–"}</span></div>
       <div className="ws-kv"><b>Last action</b><span>{last ? `${last.source}: ${last.action}` : "–"}</span></div>
       <div className="ws-kv"><b>Selection</b><span>{state.project.selection.endTick > state.project.selection.startTick ? `ticks ${state.project.selection.startTick}–${state.project.selection.endTick}, ${state.project.selection.noteIds.length} notes` : "none"}</span></div>
