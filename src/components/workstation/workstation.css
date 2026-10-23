@@ -38,3 +38,16 @@
 .ws-adsr { background: #11141a; border-radius: 4px; display: block; margin-bottom: 4px; }
 .ws-sound-diff { background: #10301e; border: 1px solid #2e8b57; padding: 4px; border-radius: 4px; margin: 4px 0; }
 .ws-side { overflow: auto; max-height: calc(100vh - 44px); border-left: 1px solid #262b36; } .ws-side .ws-agent { max-height: none; border-left: none; }
+
+/* Live keyboard */
+.ws-keys { border-top: 1px solid rgba(127,127,127,.3); padding: 6px 8px; }
+.ws-keys .ws-row { gap: 6px; flex-wrap: wrap; align-items: center; }
+.ws-warn { color: #e0a030; }
+.ws-rec.on { color: #fff; background: #c0392b; }
+.ws-piano { display: flex; position: relative; height: 96px; margin-top: 6px; user-select: none; touch-action: none; }
+.ws-pkey { position: relative; border: 1px solid #444; border-radius: 0 0 4px 4px; padding: 0; display: flex; align-items: flex-end; justify-content: center; font-size: 10px; }
+.ws-pkey.white { flex: 0 0 32px; height: 100%; background: #f4f4f4; color: #666; z-index: 1; }
+.ws-pkey.black { flex: 0 0 22px; height: 60%; margin: 0 -11px; background: #222; color: #bbb; z-index: 2; }
+.ws-pkey.lit.white { background: #8ecbff; }
+.ws-pkey.lit.black { background: #2f7fd0; }
+.ws-pkey-hint { pointer-events: none; padding-bottom: 3px; }
