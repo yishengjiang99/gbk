@@ -54,7 +54,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
         <div><h1>GBK Composer</h1><p>Describe music in plain words; an AI agent composes it with GBK's MIDI workstation and SoundFont synth, right in your browser.</p></div>
         <button className="xp-cta" data-testid="compose-cta" onClick={() => onCompose()}>Compose your own →</button>
       </header>
-      <video className="xp-video" data-testid="launch-video" controls playsInline preload="metadata" poster="/media/compose-launch-poster-v2.jpg" src="/media/compose-launch-v2.mp4" aria-label="GBK Composer launch video" />
+      <video className="xp-video" data-testid="launch-video" controls playsInline preload="metadata" poster="/media/compose-launch-cover.jpg" src="/media/compose-launch-v3.mp4" aria-label="GBK Composer launch video" />
       <div className="xp-starters">{STARTER_PROMPTS.slice(0, 3).map((p) => <button key={p.label} onClick={() => onCompose(p.text)} title={p.text}>{p.label}</button>)}<button onClick={() => onCompose()} className="xp-ghost">Open the workstation</button></div>
       {me && <MySongs />}
       <h2>Top songs</h2>
