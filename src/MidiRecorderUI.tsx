@@ -1,3 +1,5 @@
+import { recorderEventsToSmf } from "./workstation/recording.ts";
+import { playerBridge } from "./workstation/player-bridge.ts";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { createMidiDriver, type MidiDriver, type MidiStateChange } from "./midi-driver";
 import { createMidiRecorder, type MidiRecorderSnapshot } from "./midi-recorder";
@@ -127,6 +129,14 @@ export function MidiRecorderUI(): JSX.Element {
     requestStats();
   };
 
+  const onOpenInWorkstation = (): void => {
+    const evs = recorderRef.current?.events() ?? [];
+    if (!evs.length) { setError("Nothing recorded yet"); return; }
+    const bytes = recorderEventsToSmf(evs);
+    // Same entry path as every other MIDI source: the player loads it and the workstation mirrors it.
+    playerBridge.handle?.loadBuffer(bytes.buffer.slice(0) as ArrayBuffer, `Recording ${new Date().toLocaleTimeString()}.mid`, { autoplay: false, restoreSec: 0 });
+  };
+
   const onDownload = (): void => {
     recorderRef.current?.download();
   };
@@ -186,6 +196,9 @@ export function MidiRecorderUI(): JSX.Element {
         )}
 
         <button onClick={isRecording ? onStop : onStart}>{isRecording ? "Stop" : "Record"}</button>
+        <button onClick={onOpenInWorkstation} disabled={!recorderRef.current || isRecording} data-testid="recorder-open-workstation">
+          Open in workstation
+        </button>
         <button onClick={onDownload} disabled={!recorderRef.current || isRecording}>
           Download JSON
         </button>

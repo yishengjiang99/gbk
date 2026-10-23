@@ -36,6 +36,8 @@ export interface MidiRecorderExports {
   recordMessage(timestampMs: number, data: ArrayLike<number>): void;
   flush(): void;
   download(filename?: string): void;
+  /** All recorded events (ms since start). */
+  events(): MidiRecorderEvent[];
   snapshot(): MidiRecorderSnapshot;
   reset(): void;
 }
@@ -343,6 +345,13 @@ export function createMidiRecorder(options?: {
     return out;
   }
 
+  function allEvents(): MidiRecorderEvent[] {
+    const events: MidiRecorderEvent[] = [];
+    for (const batch of recordedBatches) events.push(...batch.events);
+    events.push(...pendingBatch);
+    return events;
+  }
+
   function download(filename = "recording.json"): void {
     const events: MidiRecorderEvent[] = [];
     for (const batch of recordedBatches) events.push(...batch.events);
@@ -391,6 +400,7 @@ export function createMidiRecorder(options?: {
     recordMessage,
     flush,
     download,
+    events: allEvents,
     snapshot,
     reset,
     buildTypedEvents,
