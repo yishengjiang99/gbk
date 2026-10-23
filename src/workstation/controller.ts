@@ -26,16 +26,27 @@ export interface WorkstationState {
   project: Project; proposals: Proposal[]; transport: TransportState;
   /** Temporary live overrides (mixer knobs while playing). Not persisted; never rewrite authored CCs. */
   overrides: Record<string, Partial<TrackMix>>;
-  canUndo: boolean; canRedo: boolean; activity: ActivityEntry[]; agentToolsEnabled: boolean;
+  canUndo: boolean; canRedo: boolean; session?: AutonomousSession | null; activity: ActivityEntry[]; agentToolsEnabled: boolean;
   previewing: string | null;
 }
 /** App-provided capabilities (SoundFont presets, offline render, downloads). All optional. */
 export interface WorkstationHost {
   listPresets?(): { index: number; bank: number; program: number; name: string }[];
   renderWav?(project: Project, signal?: AbortSignal): Promise<Blob>;
-  download?(data: Blob | Uint8Array, filename: string): void;
+  download?(data: Blob | Uint8Array, filename: string): void | boolean;
+  /** Persist a project snapshot (IndexedDB) before switching projects. */
+  checkpoint?(project: Project): Promise<void>;
   /** SoundFont zones the track currently plays (its resolved preset), for voice inspection. */
   trackRegions?(project: Project, trackId: string): { presetName: string; presetIndex: number; regions: import("../sf2/soundfont.ts").SF2Region[] } | null;
+}
+export interface AutonomousSession {
+  id: string; projectId: string; createdAt: number; expiresAt: number; active: boolean; purpose: string;
+  /** Revision right after the project was created (a checkpoint the user can revert to). */
+  baseRevision: number;
+}
+export interface CreateProjectOptions {
+  name: string; tempo?: number; timeSignature?: [number, number]; key?: string; ppq?: number; replaceCurrent?: boolean;
+  owner?: "user" | "agent"; descriptors?: Record<string, string>; sessionMinutes?: number; purpose?: string;
 }
 export type ApprovalHandler = (p: Proposal) => Promise<boolean>;
 
@@ -61,7 +72,7 @@ export class WorkstationController {
   get project(): Project { return this.state.project; }
   subscribe(fn: (s: WorkstationState) => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   private set(patch: Partial<WorkstationState>) {
-    this.state = { ...this.state, ...patch, canUndo: this.undoStack.length > 0, canRedo: this.redoStack.length > 0 };
+    this.state = { ...this.state, ...patch, canUndo: this.undoStack.length > 0, canRedo: this.redoStack.length > 0, session: this.session };
     for (const l of this.listeners) l(this.state);
   }
   log(source: "user" | "agent", action: string, ok: boolean, detail?: string) {
@@ -71,9 +82,73 @@ export class WorkstationController {
 
   // ---- project lifecycle ---------------------------------------------------
   load(project: Project) {
+    if (this.session && this.session.projectId !== project.id) this.endSession("project switched");
     this.undoStack = []; this.redoStack = [];
     this.set({ project, proposals: [], overrides: {}, transport: { ...this.state.transport, playing: false, positionTick: 0 } });
   }
+  // ---- new projects + scoped autonomous sessions ----------------------------
+  private session: AutonomousSession | null = null;
+  getSession(): AutonomousSession | null {
+    const s = this.session;
+    if (s && (Date.now() > s.expiresAt)) { this.endSession("expired"); return null; }
+    return s;
+  }
+  /** True only for the agent-owned project the active session was created for. Never for user projects. */
+  autonomousAllowed(projectId = this.project.id): boolean {
+    const s = this.getSession();
+    return !!s && s.active && s.projectId === projectId && this.project.id === projectId && this.project.meta?.owner === "agent";
+  }
+  endSession(reason = "ended by user") {
+    if (!this.session) return;
+    this.session = null;
+    this.log("user", `autonomous session ended (${reason})`, true);
+    this.set({});
+  }
+  /** Revert every autonomous change: back to the empty project state created by gbk_create_project. */
+  discardAutonomousWork(): boolean {
+    const s = this.session;
+    if (!s || s.projectId !== this.project.id) return false;
+    while (this.project.revision > s.baseRevision && this.undo()) { /* walk back through the session's history */ }
+    this.endSession("work discarded by user");
+    return true;
+  }
+  /** Create a fresh project (never silently overwrites: the current one is checkpointed unless replaceCurrent). */
+  async createProject(o: CreateProjectOptions): Promise<{ project: Project; previousProjectId: string; checkpointed: boolean; session: AutonomousSession | null }> {
+    const ppq = o.ppq ?? 480;
+    if (!Number.isInteger(ppq) || ppq < 24 || ppq > 32767) throw new WorkstationError("INVALID_ARGUMENT", "ppq must be an integer in [24, 32767]");
+    const tempo = o.tempo ?? 120;
+    if (!(tempo >= 10 && tempo <= 400)) throw new WorkstationError("INVALID_ARGUMENT", "tempo must be in [10, 400] BPM");
+    const [num, den] = o.timeSignature ?? [4, 4];
+    if (!(Number.isInteger(num) && num >= 1 && num <= 32 && [1, 2, 4, 8, 16, 32].includes(den))) throw new WorkstationError("INVALID_ARGUMENT", "timeSignature must be [1..32, power of two]");
+    const prev = this.project;
+    let checkpointed = false;
+    const hasContent = prev.tracks.length > 0 || prev.notes.length > 0;
+    if (hasContent && !o.replaceCurrent) {
+      if (!this.host.checkpoint) throw new WorkstationError("UNSUPPORTED", "cannot checkpoint the current project; pass replaceCurrent:true to switch anyway");
+      await this.host.checkpoint(prev); checkpointed = true;
+    }
+    const p = emptyProject(o.name.slice(0, 128) || "Untitled", ppq);
+    p.tempos = [{ tick: 0, microPerQuarter: Math.round(60e6 / tempo) }];
+    p.timeSigs = [{ tick: 0, numerator: num, denominator: den }];
+    p.meta = { owner: o.owner ?? "user", createdAt: Date.now(), ...(o.key ? { key: o.key.slice(0, 32) } : {}), ...(o.descriptors ? { descriptors: o.descriptors } : {}), sections: [] };
+    this.load(p);
+    this.session = null;
+    if (o.owner === "agent") {
+      this.session = { id: `ses_${p.id}`, projectId: p.id, createdAt: Date.now(), expiresAt: Date.now() + (o.sessionMinutes ?? 120) * 60_000, active: true, purpose: (o.purpose ?? "compose a new piece").slice(0, 200), baseRevision: p.revision };
+    }
+    this.log(o.owner === "agent" ? "agent" : "user", `create project "${p.name}"`, true, checkpointed ? `previous project ${prev.id} checkpointed` : undefined);
+    return { project: p, previousProjectId: prev.id, checkpointed, session: this.session };
+  }
+  /**
+   * Agent edit: applied immediately (one undo step, checkpointed in history) inside the autonomous session's own
+   * project; anywhere else it becomes a proposal that needs the user's Accept.
+   */
+  agentApply(ops: Op[], opts: { label: string; baseRevision?: number; signal?: AbortSignal }): { committed: true; revision: number; warnings: string[] } | { committed: false; proposal: Proposal } {
+    if (opts.signal?.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
+    if (this.autonomousAllowed()) { const r = this.edit(ops, { baseRevision: opts.baseRevision, label: `agent: ${opts.label}`, source: "agent" }); return { committed: true, ...r }; }
+    return { committed: false, proposal: this.propose(ops, { baseRevision: opts.baseRevision, source: "agent", summary: opts.label }) };
+  }
+
   private checkRev(baseRevision: number | undefined) {
     if (baseRevision !== undefined && baseRevision !== this.state.project.revision)
       throw new WorkstationError("STALE_REVISION", `baseRevision ${baseRevision} != current ${this.state.project.revision}`, { currentRevision: this.state.project.revision });
@@ -162,7 +237,9 @@ export class WorkstationController {
     const p = this.getProposal(id);
     if (p.status !== "pending") throw new WorkstationError(p.status === "stale" ? "STALE_REVISION" : "INVALID_ARGUMENT", `proposal is ${p.status}`);
     this.checkRev(p.baseRevision);
-    if (opts.source === "agent") {
+    if (opts.source === "agent" && this.autonomousAllowed(p.projectId)) {
+      // Authorized autonomous session on the agent's own new project: no per-change dialog (still undoable).
+    } else if (opts.source === "agent") {
       if (!this.approvalHandler) throw new WorkstationError("USER_APPROVAL_REQUIRED", "Commit needs the user to press Accept in the GBK proposal panel.");
       const ok = await this.approvalHandler(p);
       if (opts.signal?.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
@@ -170,7 +247,7 @@ export class WorkstationController {
       this.checkRev(p.baseRevision);
     }
     const next = applyOps(this.project, p.ops);
-    this.commitProject(next, `accept: ${p.summary}`);
+    this.commitProject(next, `${opts.source === "agent" && this.autonomousAllowed(p.projectId) ? "agent (session)" : "accept"}: ${p.summary}`);
     this.setProposal(id, { status: "committed" });
     this.log(opts.source, `commit ${id}`, true);
     return { revision: this.project.revision };

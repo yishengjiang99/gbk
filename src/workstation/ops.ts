@@ -1,5 +1,5 @@
 import { validateOverride, normalizeEffects, EFFECTS_RANGES, type VoiceOverride, type EffectsParams } from "../sf2/voice-overrides.ts";
-import { TRACK_COLORS, computeEndTick, newId, type CCEvent, type Note, type Project, type Track, type TrackMix } from "./model.ts";
+import { TRACK_COLORS, computeEndTick, newId, type CCEvent, type Note, type Project, type Section, type TempoEvent, type TimeSigEvent, type Track, type TrackMix, type TrackRole } from "./model.ts";
 
 export type Op =
   | { op: "addNotes"; notes: Omit<Note, "id">[] }
@@ -8,11 +8,17 @@ export type Op =
   | { op: "setCC"; trackId: string; channel: number; controller: number; startTick: number; endTick: number; mode: "replace" | "merge"; points: { tick: number; value: number }[] }
   | { op: "removeCC"; ids: string[] }
   | { op: "updateTrack"; trackId: string; name?: string; channel?: number; visible?: boolean; mix?: Partial<TrackMix> }
-  | { op: "addTrack"; name: string; channel: number; id?: string }
+  | { op: "addTrack"; name: string; channel: number; id?: string; role?: TrackRole; mix?: Partial<TrackMix>; program?: number; bankMsb?: number; bankLsb?: number }
+  | { op: "setTempoMap"; events: TempoEvent[] }
+  | { op: "setTimeSigMap"; events: TimeSigEvent[] }
+  | { op: "setSections"; sections: Section[] }
+  | { op: "setMeta"; key?: string; descriptors?: Record<string, string>; style?: string; seed?: number }
   | { op: "setProgram"; trackId: string; program: number; bankMsb: number; bankLsb: number }
   /** merge: replaces entries with the same (gen, keyLo, keyHi) and keeps the rest; replace: the list becomes `overrides`. */
   | { op: "setVoicePatch"; trackId: string; overrides: VoiceOverride[]; mode: "merge" | "replace" }
   | { op: "setEffects"; params: Partial<EffectsParams> };
+
+export const TRACK_ROLES: TrackRole[] = ["melody", "harmony", "bass", "counterpoint", "accompaniment", "percussion", "pad", "other"];
 
 export class WorkstationError extends Error {
   constructor(public code: string, message: string, public details?: unknown) { super(message); }
@@ -55,7 +61,50 @@ export function validateOps(p: Project, ops: Op[]): string[] {
         if (o.channel !== undefined) int(o.channel, 0, 15, "channel");
         if (o.mix) for (const k of ["volume", "pan", "expression"] as const) if (o.mix[k] !== undefined) int(o.mix[k], 0, 127, k);
         break;
-      case "addTrack": int(o.channel, 0, 15, "channel"); break;
+      case "addTrack":
+        int(o.channel, 0, 15, "channel");
+        if (o.program !== undefined) int(o.program, 0, 127, "program");
+        if (o.bankMsb !== undefined) int(o.bankMsb, 0, 127, "bankMsb"); if (o.bankLsb !== undefined) int(o.bankLsb, 0, 127, "bankLsb");
+        if (o.mix) for (const k of ["volume", "pan", "expression"] as const) if (o.mix[k] !== undefined) int(o.mix[k], 0, 127, k);
+        if (o.role !== undefined && !TRACK_ROLES.includes(o.role)) throw new WorkstationError("INVALID_ARGUMENT", `role must be one of ${TRACK_ROLES.join(", ")}`);
+        if (o.id && p.tracks.some((t) => t.id === o.id)) throw new WorkstationError("INVALID_ARGUMENT", `track id ${o.id} already exists`);
+        break;
+      case "setTempoMap": {
+        if (!Array.isArray(o.events) || !o.events.length || o.events.length > 1024) throw new WorkstationError("INVALID_ARGUMENT", "tempo map needs 1..1024 events");
+        let last = -1;
+        for (const e of o.events) {
+          int(e.tick, 0, 1e9, "tempo tick"); int(e.microPerQuarter, 1, 0xffffff, "microPerQuarter");
+          if (e.tick <= last) throw new WorkstationError("INVALID_ARGUMENT", "tempo events must be strictly increasing in tick");
+          last = e.tick;
+        }
+        if (o.events[0].tick !== 0) throw new WorkstationError("INVALID_ARGUMENT", "the first tempo event must be at tick 0 (bar 1)");
+        break;
+      }
+      case "setTimeSigMap": {
+        if (!Array.isArray(o.events) || !o.events.length || o.events.length > 1024) throw new WorkstationError("INVALID_ARGUMENT", "meter map needs 1..1024 events");
+        let last = -1;
+        for (const e of o.events) {
+          int(e.tick, 0, 1e9, "meter tick"); int(e.numerator, 1, 255, "numerator");
+          if (![1, 2, 4, 8, 16, 32, 64].includes(e.denominator)) throw new WorkstationError("INVALID_ARGUMENT", "denominator must be a power of two (1..64)");
+          if (e.tick <= last) throw new WorkstationError("INVALID_ARGUMENT", "meter events must be strictly increasing in tick");
+          last = e.tick;
+        }
+        if (o.events[0].tick !== 0) throw new WorkstationError("INVALID_ARGUMENT", "the first meter event must be at tick 0 (bar 1)");
+        break;
+      }
+      case "setSections": {
+        if (!Array.isArray(o.sections) || o.sections.length > 256) throw new WorkstationError("INVALID_ARGUMENT", "at most 256 sections");
+        const sorted = [...o.sections].sort((a, b) => a.startBar - b.startBar);
+        for (let i = 0; i < sorted.length; i++) {
+          const s = sorted[i];
+          if (typeof s.name !== "string" || !s.name.trim()) throw new WorkstationError("INVALID_ARGUMENT", "section name required");
+          int(s.startBar, 1, 100000, "startBar"); int(s.bars, 1, 100000, "bars");
+          if (s.energy !== undefined && !(typeof s.energy === "number" && s.energy >= 0 && s.energy <= 1)) throw new WorkstationError("INVALID_ARGUMENT", "energy must be in [0, 1]");
+          if (i && sorted[i - 1].startBar + sorted[i - 1].bars > s.startBar) throw new WorkstationError("INVALID_RANGE", `section "${s.name}" overlaps "${sorted[i - 1].name}"`);
+        }
+        break;
+      }
+      case "setMeta": break;
       case "setProgram":
         if (!trackIds.has(o.trackId)) throw new WorkstationError("INVALID_ARGUMENT", `unknown track ${o.trackId}`);
         int(o.program, 0, 127, "program"); int(o.bankMsb, 0, 127, "bankMsb"); int(o.bankLsb, 0, 127, "bankLsb"); break;
@@ -120,7 +169,16 @@ export function applyOps(src: Project, ops: Op[]): Project {
         sound.effects = normalizeEffects({ ...(sound.effects ?? {}), ...o.params });
         break;
       }
-      case "addTrack": p.tracks.push({ id: o.id ?? newId("trk"), name: o.name.slice(0, 128), channel: o.channel, color: TRACK_COLORS[p.tracks.length % TRACK_COLORS.length], visible: true, mix: { volume: 100, pan: 64, expression: 127, mute: false, solo: false } }); break;
+      case "addTrack": {
+        const id = o.id ?? newId("trk");
+        p.tracks.push({ id, name: o.name.slice(0, 128), channel: o.channel, color: TRACK_COLORS[p.tracks.length % TRACK_COLORS.length], visible: true, mix: { volume: 100, pan: 64, expression: 127, mute: false, solo: false, ...(o.mix ?? {}) }, ...(o.role ? { role: o.role } : {}) });
+        if (o.program !== undefined) p.programs.unshift({ id: newId("pg"), trackId: id, channel: o.channel, tick: 0, program: o.program, bankMsb: o.bankMsb ?? 0, bankLsb: o.bankLsb ?? 0 });
+        break;
+      }
+      case "setTempoMap": p.tempos = o.events.map((e) => ({ tick: e.tick, microPerQuarter: e.microPerQuarter })); break;
+      case "setTimeSigMap": p.timeSigs = o.events.map((e) => ({ tick: e.tick, numerator: e.numerator, denominator: e.denominator })); break;
+      case "setSections": p.meta = { ...(p.meta ?? {}), sections: [...o.sections].sort((a, b) => a.startBar - b.startBar).map((s) => ({ name: s.name.slice(0, 64), startBar: s.startBar, bars: s.bars, ...(s.energy !== undefined ? { energy: s.energy } : {}) })) }; break;
+      case "setMeta": p.meta = { ...(p.meta ?? {}), ...(o.key !== undefined ? { key: o.key.slice(0, 32) } : {}), ...(o.style !== undefined ? { style: o.style.slice(0, 32) } : {}), ...(o.seed !== undefined ? { seed: o.seed } : {}), ...(o.descriptors ? { descriptors: { ...(p.meta?.descriptors ?? {}), ...o.descriptors } } : {}) }; break;
     }
   }
   p.notes.sort((a, b) => a.tick - b.tick || a.pitch - b.pitch);
@@ -138,6 +196,10 @@ export function summarizeOps(ops: Op[]): string {
       case "removeCC": return `remove ${o.ids.length} CC event(s)`;
       case "updateTrack": return `update track ${o.trackId}`;
       case "addTrack": return `add track "${o.name}"`;
+      case "setTempoMap": return `set tempo map (${o.events.length} event(s))`;
+      case "setTimeSigMap": return `set meter map (${o.events.length} event(s))`;
+      case "setSections": return `set ${o.sections.length} section(s)`;
+      case "setMeta": return "set composition metadata";
       case "setProgram": return `set program ${o.program} (bank ${o.bankMsb}/${o.bankLsb}) on ${o.trackId}`;
       case "setVoicePatch": return `${o.mode} ${o.overrides.length} voice override(s) on ${o.trackId}`;
       case "setEffects": return `set effects ${Object.keys(o.params).join(", ")}`;
