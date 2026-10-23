@@ -6,7 +6,7 @@ import { join } from "node:path";
 export interface SongJson {
   title: string; slug: string; date: string; composer: string; description?: string; key?: string | null; tempo?: number; meter?: string; bars?: number;
   style?: string | null; seed?: number | null; durationSeconds: number; noteCount?: number; tracks?: { name: string; color: string }[];
-  render?: { loudness?: { integratedLufs?: number; truePeakDbTP?: number } | null; peakDbFS?: number };
+  render?: { loudness?: { outputLufs?: number; outputTruePeakDbTP?: number } | null; peakDbFS?: number };
   files: Record<string, { name: string; bytes: number; sha256: string; url?: string; inRepo?: boolean }>;
 }
 const MEDIA = ["song.mid", "song.mp3", "video.mp4", "poster.png", "project.json", "song.json", "notes.md"];
@@ -22,7 +22,7 @@ const page = (title: string, body: string, base: string) => `<!doctype html><htm
 
 function metaLine(s: SongJson) {
   const l = s.render?.loudness;
-  return [s.date, s.key, s.tempo && `${s.tempo} BPM`, s.meter, s.bars && `${s.bars} bars`, s.style, mmss(s.durationSeconds), l?.integratedLufs != null && `${l.integratedLufs.toFixed(1)} LUFS`].filter(Boolean).map(esc).join(" · ");
+  return [s.date, s.key, s.tempo && `${s.tempo} BPM`, s.meter, s.bars && `${s.bars} bars`, s.style, mmss(s.durationSeconds), l?.outputLufs != null && `${l.outputLufs.toFixed(1)} LUFS`].filter(Boolean).map(esc).join(" · ");
 }
 const tracks = (s: SongJson) => (s.tracks ?? []).map((t) => `<span><span class="chip" style="background:${esc(t.color)}"></span>${esc(t.name)}</span>`).join(" ");
 function downloads(s: SongJson, rel: string) {

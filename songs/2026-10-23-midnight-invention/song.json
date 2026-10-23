@@ -1,0 +1,505 @@
+{
+  "schema": 1,
+  "title": "Midnight Invention",
+  "slug": "2026-10-23-midnight-invention",
+  "date": "2026-10-23",
+  "composer": "GBK autonomous composer (WebMCP tools)",
+  "description": "A four-voice baroque invention in C minor for string trio and harpsichord: a quiet introduction, a theme, a dense development and a decrescendo coda.",
+  "key": "C minor",
+  "tempo": 108,
+  "meter": "4/4",
+  "bars": 33,
+  "style": "baroque",
+  "seed": 12345,
+  "durationSeconds": 74.111,
+  "noteCount": 941,
+  "instruments": [
+    {
+      "trackId": "trk_mvlaz62do18c3te",
+      "trackName": "Violin",
+      "channel": 0,
+      "presetName": "Violin",
+      "bank": 0,
+      "program": 40,
+      "substituted": false,
+      "muted": false,
+      "pan": -0.75,
+      "presetOverride": false
+    },
+    {
+      "trackId": "trk_mvlaz62zo1a57ge",
+      "trackName": "Viola",
+      "channel": 1,
+      "presetName": "Viola",
+      "bank": 0,
+      "program": 41,
+      "substituted": false,
+      "muted": false,
+      "pan": 0.3,
+      "presetOverride": false
+    },
+    {
+      "trackId": "trk_mvlaz63bo1cfqay",
+      "trackName": "Cello",
+      "channel": 2,
+      "presetName": "Cello",
+      "bank": 0,
+      "program": 42,
+      "substituted": false,
+      "muted": false,
+      "pan": 0.65,
+      "presetOverride": false
+    },
+    {
+      "trackId": "trk_mvlaz63jo1eklz4",
+      "trackName": "Harpsichord",
+      "channel": 3,
+      "presetName": "Harpsichord",
+      "bank": 0,
+      "program": 6,
+      "substituted": false,
+      "muted": false,
+      "pan": 0,
+      "presetOverride": false
+    }
+  ],
+  "sections": [
+    {
+      "name": "Introduction",
+      "startBar": 1,
+      "bars": 4,
+      "energy": 0.3
+    },
+    {
+      "name": "Theme",
+      "startBar": 5,
+      "bars": 12,
+      "energy": 0.7
+    },
+    {
+      "name": "Development",
+      "startBar": 17,
+      "bars": 12,
+      "energy": 0.95
+    },
+    {
+      "name": "Coda",
+      "startBar": 29,
+      "bars": 4,
+      "energy": 0.5
+    }
+  ],
+  "tracks": [
+    {
+      "name": "Violin",
+      "color": "#4fc3f7",
+      "role": "melody"
+    },
+    {
+      "name": "Viola",
+      "color": "#ffb74d",
+      "role": "harmony"
+    },
+    {
+      "name": "Cello",
+      "color": "#81c784",
+      "role": "bass"
+    },
+    {
+      "name": "Harpsichord",
+      "color": "#e57373",
+      "role": "accompaniment"
+    }
+  ],
+  "render": {
+    "sampleRate": 44100,
+    "channels": 2,
+    "format": "pcm16",
+    "peakDbFS": -1.85,
+    "rmsDbFS": -20.21,
+    "clippedSamples": 0,
+    "loudness": {
+      "mode": "loudness",
+      "targetLufs": -16,
+      "truePeakCeilingDbTP": -1,
+      "inputLufs": -29.59,
+      "inputTruePeakDbTP": -15.44,
+      "gainDb": 13.6,
+      "outputLufs": -16,
+      "outputTruePeakDbTP": -1.85,
+      "limitedBy": "loudness",
+      "gainLinear": 4.784203224051568
+    },
+    "normalize": "loudness"
+  },
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "frames": 2224,
+    "codec": "h264+aac"
+  },
+  "files": {
+    "wav": {
+      "name": "song.wav",
+      "bytes": 13073256,
+      "sha256": "53e719624c50da6f183225b3878e28cc16749b248f5a83f2a96a4e870e78b106",
+      "url": "https://github.com/yishengjiang99/gbk/releases/download/song-2026-10-23-midnight-invention/song.wav",
+      "inRepo": false
+    },
+    "mid": {
+      "name": "song.mid",
+      "bytes": 12555,
+      "sha256": "f4d026bbdf386e054977b0d4dd620914351f69e9b5220156d634cd542059a2e7"
+    },
+    "mp3": {
+      "name": "song.mp3",
+      "bytes": 1780525,
+      "sha256": "740fce2fc319edfa71f85fb1149a5c096bebae4076ac80519a4a995b8eb49bd4"
+    },
+    "mp4": {
+      "name": "video.mp4",
+      "bytes": 8076106,
+      "sha256": "a2bc41036d22c2e6b371fde416360775ec4464a2fdfeb598144eba4cc926d219"
+    },
+    "poster": {
+      "name": "poster.png",
+      "bytes": 92556,
+      "sha256": "c64bab81f3b8a40a390483d3f6008a55fa3d24bf20721a9f07d0b9028cbd31e4"
+    }
+  },
+  "recipe": {
+    "steps": [
+      {
+        "tool": "gbk_create_project",
+        "args": {
+          "name": "Midnight Invention",
+          "tempo": 108,
+          "timeSignature": [
+            4,
+            4
+          ],
+          "key": "C minor",
+          "ppq": 480,
+          "replaceCurrent": true
+        }
+      },
+      {
+        "tool": "gbk_create_track",
+        "args": {
+          "name": "Violin",
+          "program": 40,
+          "role": "melody",
+          "pan": 40
+        }
+      },
+      {
+        "tool": "gbk_create_track",
+        "args": {
+          "name": "Viola",
+          "program": 41,
+          "role": "harmony",
+          "pan": 56
+        }
+      },
+      {
+        "tool": "gbk_create_track",
+        "args": {
+          "name": "Cello",
+          "program": 42,
+          "role": "bass",
+          "pan": 84
+        }
+      },
+      {
+        "tool": "gbk_create_track",
+        "args": {
+          "name": "Harpsichord",
+          "program": 6,
+          "role": "accompaniment",
+          "pan": 64,
+          "volume": 92
+        }
+      },
+      {
+        "tool": "gbk_set_tempo_map",
+        "args": {
+          "events": [
+            {
+              "bar": 1,
+              "bpm": 108
+            }
+          ]
+        }
+      },
+      {
+        "tool": "gbk_set_time_signature_map",
+        "args": {
+          "events": [
+            {
+              "bar": 1,
+              "numerator": 4,
+              "denominator": 4
+            }
+          ]
+        }
+      },
+      {
+        "tool": "gbk_set_song_structure",
+        "args": {
+          "sections": [
+            {
+              "name": "Introduction",
+              "startBar": 1,
+              "bars": 4,
+              "energy": 0.3
+            },
+            {
+              "name": "Theme",
+              "startBar": 5,
+              "bars": 12,
+              "energy": 0.7
+            },
+            {
+              "name": "Development",
+              "startBar": 17,
+              "bars": 12,
+              "energy": 0.95
+            },
+            {
+              "name": "Coda",
+              "startBar": 29,
+              "bars": 4,
+              "energy": 0.5
+            }
+          ]
+        }
+      },
+      {
+        "tool": "gbk_generate_arrangement",
+        "args": {
+          "style": "baroque",
+          "key": "C minor",
+          "tempo": 108,
+          "bars": 32,
+          "seed": 12345,
+          "voices": 4,
+          "complexity": 4,
+          "instrumentation": [
+            "violin",
+            "viola",
+            "cello",
+            "harpsichord"
+          ],
+          "features": {
+            "counterpoint": true,
+            "dynamicExpression": true,
+            "articulation": true,
+            "cadences": true
+          }
+        }
+      },
+      {
+        "tool": "gbk_generate_cc_curve",
+        "args": {
+          "trackIds": [
+            "$track[0]",
+            "$track[1]",
+            "$track[2]"
+          ],
+          "controller": 11,
+          "shape": "decrescendo",
+          "from": 110,
+          "to": 45,
+          "range": {
+            "unit": "bars",
+            "start": 29,
+            "end": 32
+          }
+        }
+      },
+      {
+        "tool": "gbk_commit_proposal",
+        "args": {
+          "proposalId": "$proposal"
+        }
+      }
+    ],
+    "render": {
+      "sampleRate": 44100,
+      "channels": 2,
+      "format": "pcm16",
+      "tailSeconds": 3
+    }
+  },
+  "toolCalls": [
+    {
+      "tool": "gbk_create_project",
+      "args": {
+        "name": "Midnight Invention",
+        "tempo": 108,
+        "timeSignature": [
+          4,
+          4
+        ],
+        "key": "C minor",
+        "ppq": 480,
+        "replaceCurrent": true
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_create_track",
+      "args": {
+        "name": "Violin",
+        "program": 40,
+        "role": "melody",
+        "pan": 40
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_create_track",
+      "args": {
+        "name": "Viola",
+        "program": 41,
+        "role": "harmony",
+        "pan": 56
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_create_track",
+      "args": {
+        "name": "Cello",
+        "program": 42,
+        "role": "bass",
+        "pan": 84
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_create_track",
+      "args": {
+        "name": "Harpsichord",
+        "program": 6,
+        "role": "accompaniment",
+        "pan": 64,
+        "volume": 92
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_set_tempo_map",
+      "args": {
+        "events": [
+          {
+            "bar": 1,
+            "bpm": 108
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_set_time_signature_map",
+      "args": {
+        "events": [
+          {
+            "bar": 1,
+            "numerator": 4,
+            "denominator": 4
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_set_song_structure",
+      "args": {
+        "sections": [
+          {
+            "name": "Introduction",
+            "startBar": 1,
+            "bars": 4,
+            "energy": 0.3
+          },
+          {
+            "name": "Theme",
+            "startBar": 5,
+            "bars": 12,
+            "energy": 0.7
+          },
+          {
+            "name": "Development",
+            "startBar": 17,
+            "bars": 12,
+            "energy": 0.95
+          },
+          {
+            "name": "Coda",
+            "startBar": 29,
+            "bars": 4,
+            "energy": 0.5
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_generate_arrangement",
+      "args": {
+        "style": "baroque",
+        "key": "C minor",
+        "tempo": 108,
+        "bars": 32,
+        "seed": 12345,
+        "voices": 4,
+        "complexity": 4,
+        "instrumentation": [
+          "violin",
+          "viola",
+          "cello",
+          "harpsichord"
+        ],
+        "features": {
+          "counterpoint": true,
+          "dynamicExpression": true,
+          "articulation": true,
+          "cadences": true
+        }
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_generate_cc_curve",
+      "args": {
+        "trackIds": [
+          "trk_mvlaz62do18c3te",
+          "trk_mvlaz62zo1a57ge",
+          "trk_mvlaz63bo1cfqay"
+        ],
+        "controller": 11,
+        "shape": "decrescendo",
+        "from": 110,
+        "to": 45,
+        "range": {
+          "unit": "bars",
+          "start": 29,
+          "end": 32
+        }
+      },
+      "ok": true
+    },
+    {
+      "tool": "gbk_commit_proposal",
+      "args": {
+        "proposalId": "prop_1_8"
+      },
+      "ok": true
+    }
+  ],
+  "generator": {
+    "gbkCommit": "0993c28"
+  }
+}
