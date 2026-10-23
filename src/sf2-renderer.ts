@@ -244,7 +244,8 @@ class TwoPoleLPF {
   }
 }
 
-class Voice {
+/** Internal voice state (exposed read-only for tests via Sf2SynthEngine.debugVoice). */
+export class Sf2Voice {
   note = 0; channel = 0; trackIndex = -1; velocity = 0;
   pos = 0; baseRate = 1; rate = 1;
   start = 0; end = 0; loopStart = 0; loopEnd = 0;
@@ -328,7 +329,7 @@ export class Sf2SynthEngine {
   readonly outSr: number;
   maxVoices: number;
   private capacity: number;
-  private pool: Voice[];
+  private pool: Sf2Voice[];
   private order: Int32Array;
   private free: Int32Array;
   private freeCount: number;
@@ -353,7 +354,7 @@ export class Sf2SynthEngine {
     this.outSr = outSr;
     this.maxVoices = Math.max(1, options.maxVoices ?? 64);
     this.capacity = Math.max(this.maxVoices, options.voiceCapacity ?? this.maxVoices);
-    this.pool = Array.from({ length: this.capacity }, () => new Voice(outSr));
+    this.pool = Array.from({ length: this.capacity }, () => new Sf2Voice(outSr));
     this.order = new Int32Array(this.capacity);
     this.free = new Int32Array(this.capacity);
     for (let i = 0; i < this.capacity; i++) this.free[i] = this.capacity - 1 - i;
@@ -398,7 +399,7 @@ export class Sf2SynthEngine {
     const mv = Math.max(1, n ?? this.maxVoices);
     if (mv > this.capacity) {
       const old = this.capacity;
-      for (let i = old; i < mv; i++) this.pool.push(new Voice(this.outSr));
+      for (let i = old; i < mv; i++) this.pool.push(new Sf2Voice(this.outSr));
       const order = new Int32Array(mv); order.set(this.order.subarray(0, this.count));
       const free = new Int32Array(mv); free.set(this.free.subarray(0, this.freeCount));
       let fc = this.freeCount;
@@ -474,6 +475,9 @@ export class Sf2SynthEngine {
   pickRegions(note: number, velocity: number, regions: SF2Region[] = this.regions): SF2Region[] {
     return regions.filter((r) => note >= r.keyRange[0] && note <= r.keyRange[1] && velocity >= r.velRange[0] && velocity <= r.velRange[1]);
   }
+
+  /** Tests / inspection only: the i-th sounding voice's internal state. */
+  debugVoice(i: number): Sf2Voice | undefined { return i < this.count ? this.pool[this.order[i]] : undefined; }
 
   // ── real-time core ─────────────────────────────────────────────────────────
 
@@ -602,7 +606,7 @@ export class Sf2SynthEngine {
     }
   }
 
-  private keyOffVoice(v: Voice): void {
+  private keyOffVoice(v: Sf2Voice): void {
     v.keyDown = false;
     const c = Math.max(0, Math.min(15, v.channel));
     if (this.ccs[c * 128 + 64] >= 64 || v.sostenuto) { v.deferred = true; return; }
@@ -644,7 +648,7 @@ export class Sf2SynthEngine {
     if (this.count > 0) this.removeVoice(minIdx);
   }
 
-  private makeVoice(v: Voice, reg: SF2Region, note: number, velocity: number, channel: number, trackIndex: number,
+  private makeVoice(v: Sf2Voice, reg: SF2Region, note: number, velocity: number, channel: number, trackIndex: number,
     trackPanPos: number, trackGain: number, list: SF2Region[]): void {
     v.reset();
     v.list = list;
@@ -675,7 +679,7 @@ export class Sf2SynthEngine {
     v.modEnv.noteOn();
   }
 
-  private evalMods(v: Voice, d: Float64Array): void {
+  private evalMods(v: Sf2Voice, d: Float64Array): void {
     d.fill(0);
     const c = Math.max(0, Math.min(15, v.channel));
     for (let k = 0; k < 64; k++) d[k] = this.nrpn[c * 64 + k];   // N-04
@@ -692,7 +696,7 @@ export class Sf2SynthEngine {
     }
   }
 
-  private applyLive(v: Voice, d: Float64Array): void {
+  private applyLive(v: Sf2Voice, d: Float64Array): void {
     const qCb = Math.max(0, Math.min(960, v.regQ + d[9]));
     // G-08: Q cB above DC; DC gain reduced by Q/2; RBJ q from peak/DC ratio G = 10^(Q/200).
     const gq = Math.pow(10, qCb / 200);
@@ -717,7 +721,7 @@ export class Sf2SynthEngine {
     v.rate = v.baseRate;
   }
 
-  private specVoice(v: Voice, reg: SF2Region, note: number, trackGain: number): void {
+  private specVoice(v: Sf2Voice, reg: SF2Region, note: number, trackGain: number): void {
     const mods = reg.modulators === undefined || reg.modulators === null ? DEFAULT_MODS_204 : reg.modulators;
     v.mods = mods.length > 0 ? mods : null;
     v.regAtten = reg.initialAttenuationCb; v.regPan = reg.pan;
@@ -878,7 +882,7 @@ export class Sf2SynthEngine {
     this.updateChannelVoices(channel);
   }
 
-  private advancePos(v: Voice): void {
+  private advancePos(v: Sf2Voice): void {
     v.pos += v.rate;
     if (v.looping && !v.inReleaseTail) {
       if (v.pos >= v.loopEnd) {
