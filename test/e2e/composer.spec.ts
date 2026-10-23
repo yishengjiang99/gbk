@@ -180,7 +180,7 @@ test("studio fits the viewport: no vertical scrolling of the page or any panel",
     await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
     await page.getByTestId("keys-toggle").click(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
     for (const t of ["tracks", "composer", "agent", "sound", "files"]) {
-      const tab = page.getByTestId(`tab-${t}`); if (await tab.count()) await tab.click();
+      const tab = page.getByTestId(`tab-${t}`); if (await tab.count()) await tab.dispatchEvent("click"); // the floating Keys window may sit over the tabs
       const r = await page.evaluate(() => {
         const bad: string[] = [];
         for (const e of document.querySelectorAll(".ws, .ws *")) {
