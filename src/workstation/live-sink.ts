@@ -1,62 +1,91 @@
-// Browser LiveSink: a dedicated low-latency SF2 AudioWorklet engine that plays the selected track's preset,
-// resolved exactly like the offline renderer (resolveTrackPreset over the renderer SoundFont), with the track's fader + pan.
-import sf2ProcessorUrl from "../sf2-processor.ts?worker&url";
+// Browser LiveSink: a dedicated low-latency SF2 AudioWorklet engine that always plays the workstation's selected track,
+// with that track's preset resolved exactly like the offline renderer (resolveTrackPreset over the renderer SoundFont)
+// and its fader + pan. Selection, program/bank and mix changes re-point the engine immediately.
 import type { WorkstationController } from "./controller.ts";
 import type { LiveSink } from "./live-input.ts";
-import { loadSoundFont } from "../audio/soundfont-loader.ts";
+import { selectedTrackId } from "./live-input.ts";
+import { loadSoundFont, peekSoundFont } from "../audio/soundfont-loader.ts";
 import { resolveTrackPreset } from "../audio/offline-renderer.ts";
 
-export class Sf2LiveSink implements LiveSink {
-  private ctx: AudioContext | null = null;
-  private node: AudioWorkletNode | null = null;
-  private gain: GainNode | null = null;
-  private pan: StereoPannerNode | null = null;
-  private boot: Promise<void> | null = null;
-  private presetKey = "";
-  error: string | null = null;
-  constructor(private c: WorkstationController) {}
+/** The audio side (Web Audio in the browser, a fake in tests). */
+export interface LiveGraph { post(msg: Record<string, unknown>): void; setMix(gain: number, pan: number): void; readonly latencyMs: number | null; readonly state: string; resume(): void }
 
-  /** Create/resume the AudioContext (call from a user gesture) and load the worklet + SoundFont. */
+export async function createWebAudioGraph(): Promise<LiveGraph> {
+  // Dynamic so node tests (fake graph) never resolve the Vite worker URL.
+  // @ts-ignore Vite query import (typed in vite-env.d.ts for static imports only)
+  const { default: url } = (await import("../sf2-processor.ts?worker&url")) as { default: string };
+  const ctx = new AudioContext({ latencyHint: "interactive" });
+  await ctx.audioWorklet.addModule(url);
+  const node = new AudioWorkletNode(ctx, "sf2-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+  const gain = ctx.createGain(), pan = ctx.createStereoPanner();
+  node.connect(gain).connect(pan).connect(ctx.destination);
+  if (ctx.state !== "running") await ctx.resume().catch(() => undefined);
+  return {
+    post: (m) => node.port.postMessage(m),
+    setMix: (g, p) => { gain.gain.setValueAtTime(g, ctx.currentTime); pan.pan.setValueAtTime(p, ctx.currentTime); },
+    get latencyMs() { return Math.round(((ctx.baseLatency ?? 0) + ((ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0)) * 1000); },
+    get state() { return ctx.state; },
+    resume: () => { if (ctx.state === "suspended") void ctx.resume(); },
+    // debug handles for headless checks
+    ...({ ctx, pan } as object),
+  } as LiveGraph;
+}
+
+export interface LiveInstrument { trackId: string; presetName: string; presetIndex: number; bank: number; program: number }
+
+export class Sf2LiveSink implements LiveSink {
+  graph: LiveGraph | null = null;
+  private boot: Promise<void> | null = null;
+  private presetIndex = -1;
+  /** Track + preset the engine is currently set to. */
+  current: LiveInstrument | null = null;
+  error: string | null = null;
+  constructor(private c: WorkstationController, private makeGraph: () => Promise<LiveGraph> = createWebAudioGraph) {
+    c.subscribe(() => this.refresh());
+  }
+
+  /** Create/resume the audio graph (call from a user gesture) and load the SoundFont. */
   prepare(): Promise<void> {
-    if (this.ctx && this.ctx.state === "suspended") void this.ctx.resume();
+    this.graph?.resume();
     if (this.boot) return this.boot;
     this.boot = (async () => {
-      const ctx = new AudioContext({ latencyHint: "interactive" });
-      this.ctx = ctx;
-      await ctx.audioWorklet.addModule(sf2ProcessorUrl);
-      const node = new AudioWorkletNode(ctx, "sf2-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
-      this.gain = ctx.createGain(); this.pan = ctx.createStereoPanner();
-      node.connect(this.gain).connect(this.pan).connect(ctx.destination);
-      this.node = node;
-      await loadSoundFont();
-      if (ctx.state !== "running") await ctx.resume().catch(() => undefined);
+      const [g] = await Promise.all([this.makeGraph(), loadSoundFont()]);
+      this.graph = g; this.error = null; this.refresh();
     })().catch((e) => { this.error = (e as Error).message; this.boot = null; throw e; });
     return this.boot;
   }
-  get ready(): boolean { return !!this.node; }
-  get latencyMs(): number | null { return this.ctx ? Math.round(((this.ctx.baseLatency ?? 0) + ((this.ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0)) * 1000) : null; }
+  get ready(): boolean { return !!this.graph; }
+  get latencyMs(): number | null { return this.graph?.latencyMs ?? null; }
 
-  /** Point the engine at the track's preset (renderer parity) and its mix. Cheap when nothing changed. */
-  private async sync(trackId: string) {
-    const sf = await loadSoundFont();
-    const p = this.c.project; const t = p.tracks.find((x) => x.id === trackId); if (!t || !this.node || !this.ctx) return;
-    const now = this.ctx.currentTime, ov = this.c.getState().overrides[t.id] ?? {};
-    const vol = ov.volume ?? t.mix.volume, pan = ov.pan ?? t.mix.pan;
-    this.gain!.gain.setValueAtTime(t.mix.mute ? 0 : (vol / 100) ** 2, now);
-    this.pan!.pan.setValueAtTime(Math.max(-1, Math.min(1, (pan - 64) / 63)), now);
-    const r = resolveTrackPreset(p, trackId, sf.sf);
-    const key = `${trackId}:${r?.presetIndex}`;
-    if (r && key !== this.presetKey) { this.presetKey = key; this.node.port.postMessage({ type: "setPreset", channel: 0, regions: r.regions }); }
+  /** The track's instrument exactly as the renderer resolves it (null until the SoundFont is loaded). */
+  describe(trackId: string | null): LiveInstrument | null {
+    const sf = peekSoundFont(); if (!sf || !trackId) return null;
+    const r = resolveTrackPreset(this.c.project, trackId, sf.sf);
+    return r ? { trackId, presetName: r.presetName, presetIndex: r.presetIndex, bank: r.bank, program: r.program } : null;
+  }
+  /** Synchronously point the engine at the track's current preset + mix. Cheap: regions are cached per preset. */
+  private apply(trackId: string): boolean {
+    const sf = peekSoundFont(); const g = this.graph; const t = this.c.project.tracks.find((x) => x.id === trackId);
+    if (!sf || !g || !t) return false;
+    const r = resolveTrackPreset(this.c.project, trackId, sf.sf); if (!r) return false;
+    const ov = this.c.getState().overrides[t.id] ?? {};
+    g.setMix(t.mix.mute ? 0 : ((ov.volume ?? t.mix.volume) / 100) ** 2, Math.max(-1, Math.min(1, ((ov.pan ?? t.mix.pan) - 64) / 63)));
+    if (r.presetIndex !== this.presetIndex) {
+      if (this.current && this.current.trackId !== trackId) this.allNotesOff(); // don't leave the old instrument hanging
+      this.presetIndex = r.presetIndex; g.post({ type: "setPreset", channel: 0, regions: r.regions });
+    }
+    this.current = { trackId, presetName: r.presetName, presetIndex: r.presetIndex, bank: r.bank, program: r.program };
+    return true;
   }
   private post(trackId: string, msg: Record<string, unknown>) {
-    if (this.node && this.presetKey.startsWith(`${trackId}:`)) { this.node.port.postMessage(msg); return; } // hot path: no awaits
-    void this.prepare().then(() => this.sync(trackId)).then(() => this.node?.port.postMessage(msg)).catch(() => undefined);
+    if (this.apply(trackId)) { this.graph!.post(msg); return; } // hot path: synchronous
+    void this.prepare().then(() => { if (this.apply(trackId)) this.graph?.post(msg); }).catch(() => undefined);
   }
   noteOn(trackId: string, note: number, velocity: number) { this.post(trackId, { type: "noteOn", channel: 0, note, velocity }); }
-  noteOff(trackId: string, note: number) { this.post(trackId, { type: "noteOff", channel: 0, note }); }
+  noteOff(_trackId: string, note: number) { this.graph?.post({ type: "noteOff", channel: 0, note }); } // never re-points the engine
   controlChange(trackId: string, controller: number, value: number) { this.post(trackId, { type: "controlChange", channel: 0, controller, value }); }
   pitchBend(trackId: string, value: number) { this.post(trackId, { type: "pitchBend", channel: 0, velocity: value }); }
-  allNotesOff() { this.node?.port.postMessage({ type: "controlChange", channel: 0, controller: 64, value: 0 }); this.node?.port.postMessage({ type: "controlChange", channel: 0, controller: 123, value: 0 }); }
-  /** Re-sync preset + mix after track selection / mix changes. */
-  refresh(trackId: string | null) { if (trackId && this.node) void this.sync(trackId); }
+  allNotesOff() { this.graph?.post({ type: "controlChange", channel: 0, controller: 64, value: 0 }); this.graph?.post({ type: "controlChange", channel: 0, controller: 123, value: 0 }); }
+  /** Re-point at the selected track (selection / program / mix changed). */
+  refresh(trackId: string | null = selectedTrackId(this.c.project)) { if (trackId) this.apply(trackId); }
 }

@@ -5,6 +5,7 @@ import { PianoRollEditor, type View } from "./PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "./AutomationLane.tsx";
 import { AgentPanel, useAgentToolsToggle } from "./AgentPanel.tsx";
 import { LiveKeyboard } from "./LiveKeyboard.tsx";
+import { selectedTrackId } from "../../workstation/live-input.ts";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
@@ -18,17 +19,16 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
   const rollPx = useRef(900);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [lanes, setLanes] = useState<LaneKind[]>([11, 1]);
-  const [laneTrack, setLaneTrack] = useState<string>("");
   const pending = state.proposals.filter((x) => x.status === "pending");
   const focus = state.proposals.find((x) => x.id === focusId && x.status === "pending") ?? pending[pending.length - 1] ?? null;
   const setFocus = useCallback((id: string | null) => setFocusId(id), []);
-  const trackForLanes = p.tracks.find((t) => t.id === laneTrack) ?? p.tracks.find((t) => p.selection.trackIds.includes(t.id)) ?? p.tracks.find((t) => p.notes.some((n) => n.trackId === t.id)) ?? p.tracks[0];
+  // One selection for everything (track list, piano roll, lanes, Sound panel, Keys panel): workstation.selection.
+  const trackForLanes = p.tracks.find((t) => t.id === selectedTrackId(p));
   // Default zoom: ~4 bars of the first meter visible (not the whole song).
   useEffect(() => {
     const ts = p.timeSigs[0] ?? { numerator: 4, denominator: 4 };
     const barTicks = ((p.ppq * 4) / ts.denominator) * ts.numerator;
     setView((v) => ({ ...v, scrollTick: 0, pxPerTick: Math.max(0.005, Math.min(2, rollPx.current / (4 * barTicks))) }));
-    setLaneTrack("");
   }, [p.id]);
   // Auto lanes: show the controllers the selected track actually uses (plus bend/pressure when present).
   useEffect(() => {
@@ -113,7 +113,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
               <div key={t.id} className={`ws-track ${trackForLanes?.id === t.id ? "active" : ""}`} data-testid={`track-${t.name}`}>
                 <div className="ws-row">
                   <span className="ws-swatch" style={{ background: t.color }} />
-                  <button className="ws-link" onClick={() => { setLaneTrack(t.id); workstation.setSelection({ trackIds: [t.id] }); }} title={t.name}>{t.name}</button>
+                  <button className="ws-link" onClick={() => workstation.setSelection({ trackIds: [t.id] })} title={t.name}>{t.name}</button>
                   <span className="ws-dim">ch{t.channel + 1} · {count}</span>
                 </div>
                 <div className="ws-row">
