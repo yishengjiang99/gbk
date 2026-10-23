@@ -5,7 +5,7 @@ export type Route = { view: "explore" } | { view: "studio" } | { view: "share"; 
 export function parseRoute(pathname = location.pathname, search = location.search): Route {
   const b = base(); let rel = pathname.startsWith(b) ? pathname.slice(b.length) : pathname.replace(/^\//, "");
   rel = rel.replace(/\/$/, "");
-  const m = /^s\/([a-z0-9]{4,32})$/.exec(rel);
+  const m = /^s\/([a-z0-9][a-z0-9-]{3,127})$/.exec(rel);
   if (m) return { view: "share", slug: m[1], fork: new URLSearchParams(search).get("fork") === "1" };
   if (rel === "studio" || new URLSearchParams(search).has("player")) return { view: "studio" };
   return rel === "" || rel === "explore" ? { view: "explore" } : { view: "studio" };

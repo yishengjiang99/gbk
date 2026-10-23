@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import App from "./App";
 import { WorkstationView } from "./components/workstation/WorkstationView.tsx";
 import { ExplorePage } from "./components/explore/ExplorePage.tsx";
-import { parseRoute, navigate, type Route } from "./agent/routes.ts";
+import { parseRoute, navigate, appUrl, type Route } from "./agent/routes.ts";
 import { apiBase } from "./agent/bridge-client.ts";
 import { openShared } from "./agent/share-client.ts";
 
@@ -23,7 +23,7 @@ export default function Root() {
   useEffect(() => {
     if (route.view !== "share") return;
     setShareErr("");
-    void openShared(route.slug, route.fork).catch((e) => setShareErr(`Could not open shared song: ${(e as Error).message}`));
+    void openShared(route.slug, route.fork).then((sh) => { if (sh.slug && sh.slug !== route.slug) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); }).catch((e) => setShareErr(`Could not open shared song: ${(e as Error).message}`));
   }, [route]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && playerOpen) setPlayerOpen(false); };

@@ -131,7 +131,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (typeof b.title === "string") store.setTitle(row.slug, b.title.trim().slice(0, SHARE_LIMITS.titleChars));
     if (typeof b.public === "boolean") store.setPublic(row.slug, b.public);
     req.log.info({ evt: "share_update", user: s.user, slug: row.slug, public: b.public });
-    return { ...store.view(store.bySlug(row.slug)!), url: `${origin}/s/${row.slug}` };
+    const fresh = store.byId(row.id)!; return { ...store.view(fresh), url: `${origin}/s/${fresh.slug}` };
   });
   app.delete("/api/shares/:slug", async (req, reply) => {
     const s = currentSession(req, sessions);

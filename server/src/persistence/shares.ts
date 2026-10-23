@@ -8,7 +8,13 @@ export interface ShareRow { id: string; slug: string; owner: string; title: stri
 export interface ShareView { slug: string; title: string; owner: string; createdAt: string; public: boolean; parent: { slug: string; title: string; owner: string } | null; hasMidi: boolean; hasWav: boolean; hasMp3: boolean; wav: unknown; forks: number; updatedAt: string; projectId: string | null }
 
 const SLUG = "abcdefghijkmnpqrstuvwxyz23456789";
-const slug = () => [...randomBytes(8)].map((b) => SLUG[b % SLUG.length]).join("");
+const shortId = () => [...randomBytes(8)].map((b) => SLUG[b % SLUG.length]).join("");
+/** Kebab-case of a song title (ASCII, max 48 chars); "" when nothing usable remains. */
+export const kebabTitle = (t: string) => String(t ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/g, "");
+/** Canonical share slug: "<kebab-title>-<shortid>" (or just the short id for an empty title). */
+export const nameSlug = (title: string, id: string) => { const k = kebabTitle(title); return k ? `${k}-${id}` : id; };
+/** Short id from any slug form: a bare 8-char id or the trailing "-xxxxxxxx" of a name slug. */
+export const shortIdOf = (s: string) => { const m = /(?:^|-)([a-z0-9]{8})$/.exec(String(s)); return m ? m[1] : null; };
 
 export class ShareStore {
   private db: DatabaseSync;
@@ -25,35 +31,55 @@ export class ShareStore {
     if (!cols.includes("project_id")) this.db.exec("ALTER TABLE shares ADD COLUMN project_id TEXT");
     if (!cols.includes("updated_at")) this.db.exec("ALTER TABLE shares ADD COLUMN updated_at INTEGER");
     this.db.exec("CREATE INDEX IF NOT EXISTS shares_owner_project ON shares(owner, project_id)");
+    // Name slugs: short_id is the stable random id (the old bare slug); slug = kebab(title)-short_id.
+    if (!cols.includes("short_id")) this.db.exec("ALTER TABLE shares ADD COLUMN short_id TEXT");
+    this.db.exec("UPDATE shares SET short_id = slug WHERE short_id IS NULL");
+    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS shares_short_id ON shares(short_id)");
+    for (const r of this.db.prepare("SELECT id, title, short_id, slug FROM shares").all() as { id: string; title: string; short_id: string; slug: string }[]) {
+      const want = nameSlug(r.title, r.short_id); if (want !== r.slug) this.db.prepare("UPDATE shares SET slug = ? WHERE id = ?").run(want, r.id);
+    }
+  }
+  private reslug(id: string) {
+    const r = this.db.prepare("SELECT title, short_id FROM shares WHERE id = ?").get(id) as { title: string; short_id: string } | undefined;
+    if (r) this.db.prepare("UPDATE shares SET slug = ? WHERE id = ?").run(nameSlug(r.title, r.short_id), id);
   }
   create(o: { owner: string; title: string; projectJson: string; parentSlug?: string | null }): ShareRow {
     const parent = o.parentSlug ? this.bySlug(o.parentSlug) : null;
-    const id = `shr_${randomBytes(9).toString("hex")}`; const s = slug();
-    this.db.prepare("INSERT INTO shares (id, slug, owner, title, project_json, parent_id, created_at, public) VALUES (?,?,?,?,?,?,?,1)").run(id, s, o.owner, o.title, o.projectJson, parent?.id ?? null, Date.now());
-    return this.bySlug(s)!;
+    const id = `shr_${randomBytes(9).toString("hex")}`; const sid = shortId();
+    this.db.prepare("INSERT INTO shares (id, slug, short_id, owner, title, project_json, parent_id, created_at, public) VALUES (?,?,?,?,?,?,?,?,1)").run(id, nameSlug(o.title, sid), sid, o.owner, o.title, o.projectJson, parent?.id ?? null, Date.now());
+    return this.bySlug(sid)!;
   }
   /** Auto-save: one PRIVATE row per (owner, local project id); later saves overwrite it (latest version only). */
   upsertAutosave(o: { owner: string; projectId: string; title: string; projectJson: string; parentSlug?: string | null }): { row: ShareRow; created: boolean } {
     const cur = this.db.prepare("SELECT slug FROM shares WHERE owner = ? AND project_id = ?").get(o.owner, o.projectId) as { slug: string } | undefined;
     if (cur) {
       this.db.prepare("UPDATE shares SET project_json = ?, updated_at = ?, title = CASE WHEN public = 1 THEN title ELSE ? END WHERE slug = ?").run(o.projectJson, Date.now(), o.title, cur.slug);
-      return { row: this.bySlug(cur.slug)!, created: false };
+      const r = this.bySlug(cur.slug)!; this.reslug(r.id);
+      return { row: this.bySlug(r.short_id)!, created: false };
     }
     const parent = o.parentSlug ? this.bySlug(o.parentSlug) : null;
-    const id = `shr_${randomBytes(9).toString("hex")}`; const sl = slug(); const now = Date.now();
-    this.db.prepare("INSERT INTO shares (id, slug, owner, title, project_json, parent_id, created_at, public, project_id, updated_at) VALUES (?,?,?,?,?,?,?,0,?,?)").run(id, sl, o.owner, o.title, o.projectJson, parent?.id ?? null, now, o.projectId, now);
+    const id = `shr_${randomBytes(9).toString("hex")}`; const sl = shortId(); const now = Date.now();
+    this.db.prepare("INSERT INTO shares (id, slug, short_id, owner, title, project_json, parent_id, created_at, public, project_id, updated_at) VALUES (?,?,?,?,?,?,?,?,0,?,?)").run(id, nameSlug(o.title, sl), sl, o.owner, o.title, o.projectJson, parent?.id ?? null, now, o.projectId, now);
     return { row: this.bySlug(sl)!, created: true };
   }
-  setTitle(slugv: string, title: string) { this.db.prepare("UPDATE shares SET title = ?, updated_at = ? WHERE slug = ?").run(title, Date.now(), slugv); }
-  bySlug(s: string): ShareRow | null { return (this.db.prepare("SELECT * FROM shares WHERE slug = ?").get(String(s).slice(0, 32)) as unknown as ShareRow) ?? null; }
+  /** Renaming (or publishing with a title) also moves the canonical slug; the old one keeps resolving via its short id. */
+  setTitle(slugv: string, title: string) { const id = this.idOf(slugv); this.db.prepare("UPDATE shares SET title = ?, updated_at = ? WHERE id = ?").run(title, Date.now(), id); this.reslug(id); }
+  /** Resolve any slug form: exact canonical slug, bare short id (legacy links), or any "<words>-<shortid>" (stale names). */
+  bySlug(s: string): ShareRow | null {
+    const v = String(s).slice(0, 128);
+    const exact = this.db.prepare("SELECT * FROM shares WHERE slug = ?").get(v) as unknown as ShareRow | undefined; if (exact) return exact;
+    const sid = shortIdOf(v); if (!sid) return null;
+    return (this.db.prepare("SELECT * FROM shares WHERE short_id = ?").get(sid) as unknown as ShareRow) ?? null;
+  }
+  private idOf(s: string) { return this.bySlug(s)?.id ?? "\u0000"; }
   byId(id: string): ShareRow | null { return (this.db.prepare("SELECT * FROM shares WHERE id = ?").get(id) as unknown as ShareRow) ?? null; }
   setMedia(slugv: string, kind: "midi" | "wav" | "mp3", bytes: Uint8Array, meta?: unknown) {
-    if (kind === "mp3") this.db.prepare("UPDATE shares SET mp3 = ? WHERE slug = ?").run(bytes, slugv);
-    else if (kind === "wav") this.db.prepare("UPDATE shares SET wav = ?, wav_meta = ? WHERE slug = ?").run(bytes, meta ? JSON.stringify(meta).slice(0, 4000) : null, slugv);
-    else this.db.prepare("UPDATE shares SET midi = ? WHERE slug = ?").run(bytes, slugv);
+    if (kind === "mp3") this.db.prepare("UPDATE shares SET mp3 = ? WHERE id = ?").run(bytes, this.idOf(slugv));
+    else if (kind === "wav") this.db.prepare("UPDATE shares SET wav = ?, wav_meta = ? WHERE id = ?").run(bytes, meta ? JSON.stringify(meta).slice(0, 4000) : null, this.idOf(slugv));
+    else this.db.prepare("UPDATE shares SET midi = ? WHERE id = ?").run(bytes, this.idOf(slugv));
   }
-  setPublic(slugv: string, pub: boolean) { this.db.prepare("UPDATE shares SET public = ? WHERE slug = ?").run(pub ? 1 : 0, slugv); }
-  delete(slugv: string) { this.db.prepare("DELETE FROM shares WHERE slug = ?").run(slugv); }
+  setPublic(slugv: string, pub: boolean) { this.db.prepare("UPDATE shares SET public = ? WHERE id = ?").run(pub ? 1 : 0, this.idOf(slugv)); }
+  delete(slugv: string) { this.db.prepare("DELETE FROM shares WHERE id = ?").run(this.idOf(slugv)); }
   list(o: { owner?: string; limit: number; offset: number }): ShareView[] {
     const rows = (o.owner
       ? this.db.prepare("SELECT id, slug, owner, title, parent_id, created_at, public, midi IS NOT NULL AS hm, wav IS NOT NULL AS hw, mp3 IS NOT NULL AS h3, wav_meta, project_id, updated_at FROM shares WHERE owner = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ? OFFSET ?").all(o.owner, o.limit, o.offset)
