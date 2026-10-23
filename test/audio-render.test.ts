@@ -39,7 +39,7 @@ test("renders non-silent, correctly timed, unclipped PCM16 stereo with no audio 
   const r = await render(fixture());
   assert.equal(r.validated, true);
   assert.equal(r.sampleRate, 44100); assert.equal(r.channels, 2);
-  assert.ok(Math.abs(r.durationSeconds - (6 + 2)) < 0.01, `duration ${r.durationSeconds}`); // 3 bars @120 = 6 s + 2 s tail
+  assert.ok(Math.abs(r.durationSeconds - (5740 / 960 + 2)) < 0.01, `duration ${r.durationSeconds}`); // last note-off (tick 5740 @120) + 2 s tail
   assert.ok(r.peakDbFS > -45, `peak ${r.peakDbFS}`);
   assert.equal(r.clippedSamples, 0);
   assert.equal(r.instruments[0].presetName.length > 0, true);
@@ -65,13 +65,13 @@ test("re-rendering the same project is byte-identical (deterministic)", async ()
 test("tempo change affects duration (tempo map honoured)", async () => {
   const p = fixture(); p.tempos = [{ tick: 0, microPerQuarter: 500000 }, { tick: 1920, microPerQuarter: 1000000 }]; // bar 2+ at 60 BPM
   const r = await render(p, { tailSeconds: 0 });
-  assert.ok(Math.abs(r.musicSeconds - (2 + 8)) < 0.001, `music ${r.musicSeconds}`);
+  assert.ok(Math.abs(r.musicSeconds - (2 + 3820 / 480)) < 0.001, `music ${r.musicSeconds}`); // bar 1 @120, rest @60
 });
 
 test("44.1 vs 48 kHz, mono vs stereo, float32", async () => {
   const p = fixture();
   const a = await render(p, { sampleRate: 48000, channels: 1 });
-  assert.equal(a.wav.sampleRate, 48000); assert.equal(a.wav.channels, 1); assert.equal(a.framesRendered, 8 * 48000);
+  assert.equal(a.wav.sampleRate, 48000); assert.equal(a.wav.channels, 1); assert.equal(a.framesRendered, Math.round(5740 / 960 * 48000) + 2 * 48000);
   const f = await render(p, { format: "float32" });
   assert.equal(f.wav.format, "float32"); assert.equal(f.wav.audioFormat, 3); assert.equal(f.byteLength, 58 + f.framesRendered * 8);
   await validateWav(f.blob, { format: "float32", sampleRate: 44100, channels: 2 });
@@ -135,10 +135,16 @@ test("empty project rejects with EMPTY_PROJECT; allowSilence renders an intentio
   assert.equal(s.peakDbFS, -999);
 });
 
+test("declared song structure sets the musical length (bar-aligned) even when the last note ends earlier", async () => {
+  const p = fixture([{ op: "setSections", sections: [{ name: "A", startBar: 1, bars: 4 }] } as Op]);
+  const r = await render(p, { tailSeconds: 0 });
+  assert.ok(Math.abs(r.musicSeconds - 8) < 0.001, `music ${r.musicSeconds}`);
+});
+
 test("notes extending beyond the last bar are rendered to their end", async () => {
   const p = fixture([{ op: "addNotes", notes: [{ trackId: "t1", channel: 0, tick: 5000, duration: 3000, pitch: 64, velocity: 90 }] }]);
   const r = await render(p, { tailSeconds: 0 });
-  assert.ok(Math.abs(r.musicSeconds - 10) < 0.001); // note ends in bar 5 -> bar-aligned end at 10 s
+  assert.ok(Math.abs(r.musicSeconds - 8000 / 960) < 0.001); // rendered to the note end, past the last bar line
 });
 
 test("cancellation rejects with OPERATION_CANCELLED", async () => {
