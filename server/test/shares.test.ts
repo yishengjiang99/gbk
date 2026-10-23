@@ -72,3 +72,47 @@ test("validation: malformed / oversized / hostile projects are rejected or clean
     assert.ok(codes.includes(429), "upload rate limit");
   } finally { await s.app.close(); }
 });
+
+test("auto-save is PRIVATE: invisible to others/anonymous until the owner publishes with a title; forks start private", async () => {
+  const s = await startServer(new ScriptModel([() => reply("Nocturne in D Minor")]));
+  try {
+    const alice = await login(s.base, "code-a"), bob = await login(s.base, "code-b");
+    const c = await song();
+    assert.equal((await fetch(`${s.base}/api/songs/autosave`, { method: "PUT", headers: { "content-type": "application/json", origin: "http://composer.test" }, body: JSON.stringify({ project: c.project }) })).status, 401);
+    const a1 = await (await fetch(`${s.base}/api/songs/autosave`, { method: "PUT", headers: H(alice), body: JSON.stringify({ project: c.project }) })).json();
+    assert.equal(a1.public, false); assert.equal(a1.created, true); assert.equal(a1.owner, "alice");
+    // a later revision updates the same row (latest version only)
+    const a2 = await (await fetch(`${s.base}/api/songs/autosave`, { method: "PUT", headers: H(alice), body: JSON.stringify({ project: { ...c.project, revision: c.project.revision + 1 } }) })).json();
+    assert.equal(a2.slug, a1.slug); assert.equal(a2.created, false); assert.equal(a2.public, false);
+    // private: not in public explore, not readable by anonymous or bob (no media either), but in alice's "mine"
+    const pubList = (await (await fetch(`${s.base}/api/shares`)).json()).shares as { slug: string }[];
+    assert.ok(!pubList.some((x) => x.slug === a1.slug), "private song must not be on Explore");
+    assert.ok(!(await (await fetch(`${s.base}/api/shares?mine=1`, { headers: H(bob) })).json()).shares.some((x: { slug: string }) => x.slug === a1.slug));
+    assert.equal((await fetch(`${s.base}/api/shares/${a1.slug}`)).status, 404);
+    assert.equal((await fetch(`${s.base}/api/shares/${a1.slug}`, { headers: H(bob) })).status, 404);
+    assert.equal((await fetch(`${s.base}/api/shares/${a1.slug}/media/midi`)).status, 404);
+    const mine = (await (await fetch(`${s.base}/api/shares?mine=1`, { headers: H(alice) })).json()).shares;
+    assert.equal(mine.length, 1); assert.equal(mine[0].public, false);
+    // bob cannot suggest/publish alice's song
+    assert.equal((await fetch(`${s.base}/api/songs/${a1.slug}/suggest-title`, { method: "POST", headers: H(bob), body: "{}" })).status, 404);
+    assert.equal((await fetch(`${s.base}/api/shares/${a1.slug}`, { method: "PATCH", headers: H(bob), body: JSON.stringify({ public: true }) })).status, 404);
+    // AI title suggestion, then explicit publish with the (edited) title
+    const sug = await (await fetch(`${s.base}/api/songs/${a1.slug}/suggest-title`, { method: "POST", headers: H(alice), body: "{}" })).json();
+    assert.equal(sug.title, "Nocturne in D Minor"); assert.equal(sug.source, "ai");
+    assert.equal((await fetch(`${s.base}/api/shares/${a1.slug}`, { method: "PATCH", headers: H(alice), body: JSON.stringify({ title: "  " }) })).status, 400);
+    const pubd = await (await fetch(`${s.base}/api/shares/${a1.slug}`, { method: "PATCH", headers: H(alice), body: JSON.stringify({ public: true, title: sug.title }) })).json();
+    assert.equal(pubd.public, true); assert.equal(pubd.title, "Nocturne in D Minor");
+    const anon = await (await fetch(`${s.base}/api/shares/${a1.slug}`)).json(); assert.equal(anon.title, "Nocturne in D Minor");
+    assert.ok((await (await fetch(`${s.base}/api/shares`)).json()).shares.some((x: { slug: string }) => x.slug === a1.slug));
+    // further auto-saves never un-publish nor rename a published song
+    const a3 = await (await fetch(`${s.base}/api/songs/autosave`, { method: "PUT", headers: H(alice), body: JSON.stringify({ project: { ...c.project, name: "renamed locally", revision: 99 } }) })).json();
+    assert.equal(a3.public, true); assert.equal(a3.title, "Nocturne in D Minor");
+    // bob forks it: his auto-saved fork is private to him and records the parent
+    const fork = new WorkstationController(); fork.loadShared(sanitizeSharedProject(anon.project)); fork.fork();
+    const f = await (await fetch(`${s.base}/api/songs/autosave`, { method: "PUT", headers: H(bob), body: JSON.stringify({ project: fork.project, parentSlug: a1.slug }) })).json();
+    assert.equal(f.public, false); assert.equal(f.owner, "bob"); assert.equal(f.parent.slug, a1.slug);
+    assert.equal((await fetch(`${s.base}/api/shares/${f.slug}`)).status, 404, "fork private to the forker");
+    assert.equal((await fetch(`${s.base}/api/shares/${f.slug}`, { headers: H(alice) })).status, 404);
+    assert.equal((await (await fetch(`${s.base}/api/shares/${a1.slug}`)).json()).forks, 0, "private forks are not counted publicly");
+  } finally { await s.app.close(); }
+});

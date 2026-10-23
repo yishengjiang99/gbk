@@ -39,7 +39,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   healthRoutes(app, cfg, () => ({ connections: hub.registry.size, activeRuns: hub.activeRuns }), VERSION);
   configRoutes(app, cfg);
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute));
-  shareRoutes(app, cfg, sessions, shares, new RateLimiter(10));
+  shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model);
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);
     else socket.destroy();

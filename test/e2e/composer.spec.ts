@@ -65,6 +65,18 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   expect(v.stats.peakDbFS).toBeGreaterThan(-30); expect(v.stats.clippedSamples).toBe(0);
   expect(h.durationSeconds).toBeGreaterThan(60);
   console.log("wav", JSON.stringify({ bytes: wav.length, sha256: createHash("sha256").update(wav).digest("hex"), durationSeconds: h.durationSeconds, peakDbFS: v.stats.peakDbFS, rmsDbFS: v.stats.rmsDbFS }));
+  // auto-saved PRIVATE + Publish dialog offered with an AI-suggested title; keep it private for now
+  await expect(page.getByTestId("publish-dialog")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("publish-title")).toHaveValue("Midnight Fugue in D Minor", { timeout: 15_000 });
+  await page.screenshot({ path: `${SHOTS}/composer-e2e-publish-dialog.png` });
+  await page.getByTestId("publish-cancel").click();
+  await page.getByTestId("my-songs-studio").locator("summary").click();
+  await expect(page.getByTestId("my-song").first()).toHaveAttribute("data-public", "0");
+  const privSlug = await page.getByTestId("my-song").first().getAttribute("data-slug");
+  const anon0 = await browser.newContext(); const a0 = await anon0.newPage();
+  expect((await a0.request.get(`/api/shares/${privSlug}`)).status()).toBe(404);
+  expect(((await (await a0.request.get(`/api/shares`)).json()).shares as { slug: string }[]).some((x) => x.slug === privSlug)).toBe(false);
+  await anon0.close();
   await page.screenshot({ path: `${SHOTS}/composer-e2e-panel.png`, fullPage: false });
 
   // follow-up edit on the SAME project, no regeneration
@@ -78,13 +90,19 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   expect(JSON.stringify(after.voice)).toMatch(/"gen":8|filterCutoff|"value"/);
   await page.screenshot({ path: `${SHOTS}/composer-e2e-followup.png` });
 
-  // share -> anonymous viewer opens the link (read-only, new local project) -> fork
-  await page.getByTestId("share-btn").click();
+  // the follow-up run finished: Publish dialog again -> edit the suggested title -> confirm (the only way to go public)
+  await expect(page.getByTestId("publish-dialog")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("publish-title")).toHaveValue("Midnight Fugue in D Minor", { timeout: 15_000 });
+  await page.getByTestId("publish-title").fill("Midnight Fugue in D Minor (dark cello)");
+  await page.getByTestId("publish-confirm").click();
+  await expect(page.getByTestId("publish-dialog")).toBeHidden();
   const link = await page.getByTestId("share-link").locator("a").getAttribute("href");
-  expect(link).toMatch(/\/s\/[a-z0-9]{8}$/);
+  expect(link).toMatch(/\/s\/[a-z0-9]{8}$/); expect(link).toContain(privSlug!);
   const anon = await browser.newContext(); const v2 = await anon.newPage();
   await v2.goto("/");
   await expect(v2.getByTestId("share-card").first()).toBeVisible();
+  await expect(v2.getByTestId("share-card").first()).toContainText("Midnight Fugue in D Minor (dark cello)");
+  expect(await v2.getByTestId("my-songs").count()).toBe(0); // logged out: no My songs
   await expect(v2.getByTestId("share-card").first().getByTestId("card-audio")).toBeVisible(); // shared WAV preview
   await v2.goto(new URL(link!).pathname);
   await expect(v2.getByTestId("readonly-banner")).toBeVisible({ timeout: 30_000 });

@@ -47,3 +47,34 @@ export async function shareCurrent(title?: string): Promise<ShareInfo> {
 }
 export async function setSharePublic(slug: string, pub: boolean) { return ok(await fetch(`${apiBase()}/shares/${slug}`, { method: "PATCH", credentials: "same-origin", headers: H(), body: JSON.stringify({ public: pub }) })); }
 export async function deleteShare(slug: string) { return ok(await fetch(`${apiBase()}/shares/${slug}`, { method: "DELETE", credentials: "same-origin", headers: H(false) })); }
+
+// ---- My songs: private auto-save + publish ------------------------------------------------------------
+export interface SavedSong extends ShareInfo { updatedAt?: string; projectId?: string | null; created?: boolean }
+/** Save (upsert) the project as the caller's PRIVATE song. Never makes anything public. */
+export async function autosaveProject(p: Project): Promise<SavedSong> {
+  return ok(await fetch(`${apiBase()}/songs/autosave`, { method: "PUT", credentials: "same-origin", headers: H(), body: JSON.stringify({ project: p, parentSlug: p.meta?.forkOf ?? null }) }));
+}
+export async function uploadMedia(slug: string, kind: "wav" | "midi" | "mp3", blob: Blob, meta?: unknown) {
+  return ok(await fetch(`${apiBase()}/shares/${slug}/media/${kind}`, { method: "PUT", credentials: "same-origin", headers: { ...H(false), "content-type": kind === "wav" ? "audio/wav" : kind === "mp3" ? "audio/mpeg" : "audio/midi", ...(meta ? { "x-gbk-wav-meta": JSON.stringify(meta) } : {}) }, body: blob }));
+}
+export async function suggestTitle(slug: string): Promise<{ title: string; source: string }> {
+  return ok(await fetch(`${apiBase()}/songs/${slug}/suggest-title`, { method: "POST", credentials: "same-origin", headers: H(), body: "{}" }));
+}
+/** The user's explicit confirm in the Publish dialog: set the title and make the song public. */
+export async function publishSong(slug: string, title: string): Promise<SavedSong> {
+  return ok(await fetch(`${apiBase()}/shares/${slug}`, { method: "PATCH", credentials: "same-origin", headers: H(), body: JSON.stringify({ public: true, title }) }));
+}
+
+/** Open one of MY saved songs as an editable local project (same project id, so auto-save keeps updating that song). */
+export async function openOwn(slug: string): Promise<ShareInfo> {
+  playerBridge.holdStartupLoads = true;
+  const s = await getShare(slug) as ShareInfo & { project: unknown; projectId?: string | null; mine?: boolean };
+  if (!s.mine) return openShared(slug);
+  const p = sanitizeSharedProject(s.project);
+  if (workstation.project.tracks.length || workstation.project.notes.length) await workstation.host.checkpoint?.(workstation.project);
+  const id = s.projectId || p.id;
+  const { songAutosaver } = await import("./autosave.ts");
+  songAutosaver.adopt(id, s, p.revision);
+  workstation.load({ ...p, id, name: s.title.slice(0, 120) });
+  return s;
+}

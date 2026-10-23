@@ -66,7 +66,8 @@ export function startFakeModel(port = 0, opts: { failFirst?: number; usage?: boo
       if (req.url !== "/v1/chat/completions" || req.headers.authorization !== "Bearer fake-key") { res.writeHead(401).end('{"error":{"message":"bad key"}}'); return; }
       if (fails > 0) { fails--; res.writeHead(429, { "retry-after": "0" }).end('{"error":{"message":"slow down"}}'); return; }
       const j = JSON.parse(body); requests.push({ messages: j.messages, tools: j.tools ?? [] });
-      const step = nextStep(j.messages);
+      // Title suggestions come without tools; answer deterministically.
+      const step = !(j.tools ?? []).length && /name short musical compositions/.test(JSON.stringify(j.messages[0] ?? "")) ? { text: "Midnight Fugue in D Minor" } : nextStep(j.messages);
       const chunks: unknown[] = [];
       const base = { id: `chatcmpl_${++seq}`, object: "chat.completion.chunk", model: j.model };
       if ("text" in step) { for (const part of step.text.match(/.{1,40}/gs) ?? []) chunks.push({ ...base, choices: [{ index: 0, delta: { content: part } }] }); chunks.push({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }); }

@@ -4,6 +4,8 @@ import { listShares, mediaUrl, getShare, type ShareInfo } from "../../agent/shar
 import { sanitizeSharedProject } from "../../agent/share-schema.ts";
 import { renderJobs } from "../../audio/render-job.ts";
 import { STARTER_PROMPTS } from "../composer/ComposerPanel.tsx";
+import { MySongs } from "../songs/MySongs.tsx";
+import { apiBase } from "../../agent/bridge-client.ts";
 
 const PAGE = 12;
 function Preview({ s }: { s: ShareInfo }) {
@@ -30,6 +32,8 @@ function Preview({ s }: { s: ShareInfo }) {
 export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string) => void; onOpen: (slug: string, fork: boolean) => void }) {
   const [page, setPage] = useState(0); const [items, setItems] = useState<ShareInfo[] | null>(null); const [err, setErr] = useState("");
   useEffect(() => { setItems(null); listShares(page * PAGE, PAGE + 1).then(setItems).catch((e) => setErr((e as Error).message)); }, [page]);
+  const [me, setMe] = useState<string | null>(null);
+  useEffect(() => { void fetch(`${apiBase()}/session`, { credentials: "same-origin" }).then((r) => r.json()).then((b) => setMe(b.authenticated ? b.user : null)).catch(() => undefined); }, []);
   const shown = (items ?? []).slice(0, PAGE); const more = (items?.length ?? 0) > PAGE;
   return (
     <div className="xp" data-testid="explore-page">
@@ -38,6 +42,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
         <button className="xp-cta" data-testid="compose-cta" onClick={() => onCompose()}>Compose your own →</button>
       </header>
       <div className="xp-starters">{STARTER_PROMPTS.slice(0, 3).map((p) => <button key={p.label} onClick={() => onCompose(p.text)} title={p.text}>{p.label}</button>)}<button onClick={() => onCompose()} className="xp-ghost">Open the workstation</button></div>
+      {me && <MySongs />}
       <h2>Recently shared</h2>
       {err && <div className="cmp-error">{err}</div>}
       {items === null && !err && <div className="ws-dim">Loading…</div>}

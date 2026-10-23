@@ -1,3 +1,4 @@
+import { songAutosaver } from "../../agent/autosave.ts";
 // AI Composer panel: prompt -> server agent -> real gbk_* tools in THIS page via the authenticated bridge.
 import { useEffect, useRef, useState } from "react";
 import { useAgentSession } from "../../agent/useAgentSession.ts";
@@ -16,6 +17,16 @@ const STATUS: Record<string, string> = { idle: "Offline", connecting: "Connectin
 
 export function ComposerPanel({ project, readOnly }: { project: Project; readOnly: string | null }) {
   const s = useAgentSession();
+  // Private auto-save while logged in; when a run that produced a saved song finishes, offer Publish (never automatic).
+  useEffect(() => { if (s.auth.authenticated) songAutosaver.start(); else songAutosaver.stop(); }, [s.auth.authenticated]);
+  const [publishReq, setPublishReq] = useState(0); const prevRun = useRef<string | null>(null);
+  useEffect(() => {
+    const was = prevRun.current; prevRun.current = s.run?.runId ?? null;
+    if (!was || s.run) return;
+    const last = s.items[s.items.length - 1];
+    if (last?.role === "error") return;
+    void songAutosaver.flush().then((song) => { if (song && !song.public) setPublishReq((x) => x + 1); });
+  }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; }); const [code, setCode] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { const f = () => input.current?.focus(); window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
@@ -51,7 +62,7 @@ export function ComposerPanel({ project, readOnly }: { project: Project; readOnl
         </form>
         <ComposerSettings info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.user} onLogout={() => void s.logout()} onReset={s.reset} />
       </>)}
-      <SharePanel project={project} readOnly={readOnly} authenticated={s.auth.authenticated} />
+      <SharePanel project={project} readOnly={readOnly} authenticated={s.auth.authenticated} publishRequest={publishReq} />
     </aside>
   );
 }
