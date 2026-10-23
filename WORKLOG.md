@@ -26,7 +26,7 @@ No legacy mode is kept. Matrix: docs/SF2_COMPLIANCE.md (same IDs as the Swift ma
 - src/sf2/master-bus.ts provides masterGain (-3 dB), then a stereo-linked compressor (-6 dBFS, 4:1, 6 dB knee, 5/100 ms), then a lookahead brickwall limiter (-0.3 dBFS ceiling, 50 ms release, 1.5 ms lookahead = 66 frames at 44.1 kHz), then a safety soft clip (<= ceiling < 1).
 - The engine exposes `masterGainDb`, `masterDynamicsEnabled` (default true) and `master.setParams()`. It is applied in renderRange and renderScheduled. renderRangeWithSends (the G-11 measurement API) is pre-master.
 - The compliance tests' SpecRender sets dynamics off and gain 0 dB. test/master-bus.test.ts covers the bound, quiet passthrough, attack/release within 2%, recovery, and NaN/Inf/denormals.
-- Note: the gbk app still runs its own src/master-dynamics.ts after the engine, so app playback now goes through two dynamics stages. This is not changed here; the user decides.
+- (Resolved 2026-10-22: the app master-dynamics stage was removed.)
 - The int16 writers in midireader.tsx already clamp to +/-1.
 
 ## Compliance tests, matrix and parity (2026-10-22)
@@ -41,3 +41,14 @@ No legacy mode is kept. Matrix: docs/SF2_COMPLIANCE.md (same IDs as the Swift ma
   - Tolerance is 1e-6. The worst value observed in the test set is 1.4e-14. The scratch sweep of 135 scenarios gave worst 2.3e-10, with 121 bit-exact.
 - `npm test` (with the Swift bin): 253/253. `npm run build`: OK.
 - Not done: FluidSynth diff script (fluidsynth isn't installable on the box without sudo); macOS libm parity.
+
+## 2026-10-22 (pre-merge fixes)
+- Track CC7/CC10/CC11 restored: engine `setControllers` (engine-wide) writes CC7/10/11 into all 16 channels'
+  controller state; track-indexed values (setTrackStates non-default, or any track setControllers CC) are written
+  into each channel the track plays on (first noteOn per channel, then live). They act through the 2.01 default
+  modulators only. Power-on defaults (100/64/127) never clobber in-stream CCs. App: removed the CC7/CC11 == 0
+  mute hack; controllers + master gain sent at track setup and on change.
+- Removed the app's src/master-dynamics.ts, its worklet, UI, CSS, tests and the WAV-export mastering pass. Audio now
+  goes through the engine master stage only. Volume knob -> engine masterGainDb (`volumeToMasterGainDb`, full = -3 dB).
+- Tests: test/track-controllers.test.ts (level/pan vs the concave/linear default modulator curves); parity
+  scenarios trackcc / trackcc_off (22 scenarios, worst 1.4e-14 vs Swift).

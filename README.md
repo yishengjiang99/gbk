@@ -8,25 +8,16 @@ This project is a React + Vite web app for:
 
 ## High-Level Modules
 
-### Orchestral dynamics
+### Master output
 
-The analyzer sidebar has a **Dynamic compression** control with **Epic orchestra**
-(default), **Gentle orchestra**, and **Off**. The selection is saved locally and
-applies to MIDI file playback, live keyboard/MIDI notes, and WAV exports. Raw SF2
-sample previews remain unprocessed. External MIDI output is unaffected.
+All audio goes through the SF2 engine's own master stage only (`src/sf2/master-bus.ts`):
+gain (−3 dB default), stereo-linked compressor, lookahead brickwall limiter (−0.3 dBFS) and a
+safety soft clip. The app no longer has a separate dynamics stage. The Winamp volume knob maps to
+the engines' `masterGainDb` (full volume = −3 dB, `volumeToMasterGainDb`).
 
-`src/master-dynamics.ts` provides the shared stereo DSP: a soft-knee RMS compressor,
-a 70 Hz detector high-pass, adaptive release, and a stereo-linked lookahead limiter.
-Epic uses a −22 dB threshold, 2:1 ratio, 12 dB knee, 25 ms attack, up to 450 ms release,
-and 3 dB makeup gain. Gentle uses −18 dB, 1.5:1, 12 dB, 35 ms, up to 550 ms, and 1.5 dB.
-The limiter holds sample peaks below −1 dBFS; it is not an oversampled true-peak
-limiter. Off bypasses both stages. Mode changes are smoothed over 20 ms.
-
-`src/master-dynamics-processor.ts` runs once after all tracks are mixed, before
-the analyzer and output. Live audio has 5 ms of lookahead latency in every mode;
-offline mastering removes that delay and flushes the tail before WAV encoding.
-The reduction meter shows compression, with a separate indication when limiting
-is active. Export captures the mode selected when Export WAV is clicked.
+Per-track CC7 volume, CC10 pan and CC11 expression knobs are sent as `setControllers` and written
+into the engine's MIDI channel controller state, so they act through the SF2 2.01 default
+modulators (CC7/CC11 → 960 cB concave attenuation, CC10 → pan).
 
 ### MIDI clock follower demo
 

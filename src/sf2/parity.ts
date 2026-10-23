@@ -6,10 +6,11 @@ import { Sf2SynthEngine, sortEvents, type SynthEvent, type TrackState } from "..
 export interface ScenarioEvent {
   frame?: number; seq?: number; type: string; channel?: number; trackIndex?: number; note?: number; velocity?: number;
   controller?: number; value?: number; program?: number; preset?: number;
+  cc7Volume?: number; cc10Pan?: number; cc11Expression?: number; pan?: number; gain?: number;
 }
 export interface Scenario {
   font: string; sampleRate?: number; frames?: number; effects?: boolean; masterGainDb?: number; masterDynamics?: boolean; strict?: boolean; programs?: boolean; maxVoices?: number;
-  tracks?: { trackIndex?: number; preset?: number; gain?: number; pan?: number }[];
+  tracks?: { trackIndex?: number; preset?: number; gain?: number; pan?: number; cc7Volume?: number; cc10Pan?: number; cc11Expression?: number }[];
   events?: ScenarioEvent[];
 }
 
@@ -27,6 +28,7 @@ export function renderScenario(s: Scenario, read: (path: string) => Uint8Array):
   if (s.programs) engine.loadPrograms(sf);
   const tracks: TrackState[] = (s.tracks ?? []).map((t) => ({
     trackIndex: t.trackIndex ?? 0, regions: t.preset !== undefined ? sf!.regionList(t.preset) : undefined, pan: t.pan, gain: t.gain,
+    cc7Volume: t.cc7Volume, cc10Pan: t.cc10Pan, cc11Expression: t.cc11Expression,
   }));
   engine.setTrackStates(tracks);
   const events: SynthEvent[] = (s.events ?? []).map((e, i) => ({

@@ -74,11 +74,11 @@ test("test_MIDI07_programChange", () => {
   const r = new SpecRender(b);
   r.engine.loadPrograms(new SF2SoundFont(b.build(), STRICT));
   ev(r, { type: "programChange", program: 5 }); r.noteOn(60);
-  assert.equal(voices(r).at(-1)!.regPan, 300);
+  assert.equal(voices(r).slice(-1)[0].regPan, 300);
   r.cc(0, 8); ev(r, { type: "programChange", program: 5 }); r.noteOn(61);
-  assert.equal(voices(r).at(-1)!.regPan, 200, "bank select at next program change");
+  assert.equal(voices(r).slice(-1)[0].regPan, 200, "bank select at next program change");
   ev(r, { type: "programChange", program: 0, channel: 9 }); r.noteOn(62, 127, 9);
-  assert.equal(voices(r).at(-1)!.regPan, -100, "channel 10 -> bank 128");
+  assert.equal(voices(r).slice(-1)[0].regPan, -100, "channel 10 -> bank 128");
 });
 
 test("test_MIDI08_dataEntryRouting", () => {

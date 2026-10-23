@@ -298,8 +298,13 @@ function readSampleMono(data: Float32Array, pos: number): number {
   return a + (b - a) * f;
 }
 
-interface TrackRT { present: boolean; list: SF2Region[] | null; cc7: number; cc10: number; cc11: number; pan: number; gain: number }
-function resetTrack(t: TrackRT): void { t.present = false; t.list = null; t.cc7 = 100; t.cc10 = 64; t.cc11 = 127; t.pan = 0; t.gain = 1; }
+/**
+ * Per-track state. When a track carries explicit CC7/CC10/CC11 (`ccSet`), those values are written into the
+ * MIDI channel controller state of every channel the track plays on (`chanMask`), so they act through the
+ * 2.01 default modulators (8.4.5 CC7 / 8.4.6 CC10 / 8.4.7 CC11) exactly like in-stream controller events.
+ */
+interface TrackRT { present: boolean; list: SF2Region[] | null; cc7: number; cc10: number; cc11: number; pan: number; gain: number; ccSet: boolean; chanMask: number }
+function resetTrack(t: TrackRT): void { t.present = false; t.list = null; t.cc7 = 100; t.cc10 = 64; t.cc11 = 127; t.pan = 0; t.gain = 1; t.ccSet = false; t.chanMask = 0; }
 
 export class ChannelRT {
   bend = 8192; pws = 2; rpnMsb = 127; rpnLsb = 127; pressure = 0;
@@ -423,6 +428,8 @@ export class Sf2SynthEngine {
       r.cc7 = Math.max(0, Math.min(127, t.cc7Volume ?? 100));
       r.cc10 = Math.max(0, Math.min(127, t.cc10Pan ?? 64));
       r.cc11 = Math.max(0, Math.min(127, t.cc11Expression ?? 127));
+      // Power-on defaults are already the channel state; only non-default track CCs override in-stream CCs.
+      r.ccSet = r.cc7 !== 100 || r.cc10 !== 64 || r.cc11 !== 127;
       r.pan = Math.max(-1, Math.min(1, t.pan ?? 0));
       r.gain = Math.max(0, t.gain ?? 1);
     }
@@ -431,6 +438,7 @@ export class Sf2SynthEngine {
 
   /** MIDI power-on channel state: CC7 100, CC10 64, CC11 127, others 0; bend center, range 2. */
   resetChannels(): void {
+    this.cc7Volume = 100; this.cc10Pan = 64; this.cc11Expression = 127;
     for (let c = 0; c < 16; c++) {
       this.chans[c].reset();
       const b = c * 128;
@@ -530,6 +538,10 @@ export class Sf2SynthEngine {
           }
         }
         if (!any) return;
+        if (track && track.ccSet && (track.chanMask & (1 << ch)) === 0) {
+          track.chanMask |= 1 << ch;
+          this.applyTrackCcs(track, ch);
+        }
         const trackGain = track ? track.gain : 1;
         const trackPan = track ? track.pan : 0;
         for (let k = 0; k < list.length; k++) {
@@ -556,11 +568,16 @@ export class Sf2SynthEngine {
           if (Number.isFinite(msg.cc11Expression)) t.cc11 = cc(msg.cc11Expression!);
           if (Number.isFinite(msg.pan)) t.pan = Math.max(-1, Math.min(1, msg.pan!));
           if (Number.isFinite(msg.gain)) t.gain = Math.max(0, msg.gain!);
+          if (Number.isFinite(msg.cc7Volume) || Number.isFinite(msg.cc10Pan) || Number.isFinite(msg.cc11Expression)) {
+            t.ccSet = true;
+            for (let c = 0; c < 16; c++) if (t.chanMask & (1 << c)) this.applyTrackCcs(t, c);
+          }
           return;
         }
-        if (Number.isFinite(msg.cc7Volume)) this.cc7Volume = cc(msg.cc7Volume!);
-        if (Number.isFinite(msg.cc10Pan)) this.cc10Pan = cc(msg.cc10Pan!);
-        if (Number.isFinite(msg.cc11Expression)) this.cc11Expression = cc(msg.cc11Expression!);
+        // Engine-wide (one engine per app track): CC7/10/11 go to every channel's controller state.
+        if (Number.isFinite(msg.cc7Volume)) { this.cc7Volume = cc(msg.cc7Volume!); for (let c = 0; c < 16; c++) this.controlChange(c, 7, this.cc7Volume); }
+        if (Number.isFinite(msg.cc10Pan)) { this.cc10Pan = cc(msg.cc10Pan!); for (let c = 0; c < 16; c++) this.controlChange(c, 10, this.cc10Pan); }
+        if (Number.isFinite(msg.cc11Expression)) { this.cc11Expression = cc(msg.cc11Expression!); for (let c = 0; c < 16; c++) this.controlChange(c, 11, this.cc11Expression); }
         return;
       }
       case "controlChange": {
@@ -601,6 +618,10 @@ export class Sf2SynthEngine {
       default:
         return;
     }
+  }
+
+  private applyTrackCcs(t: TrackRT, ch: number): void {
+    this.controlChange(ch, 7, t.cc7); this.controlChange(ch, 10, t.cc10); this.controlChange(ch, 11, t.cc11);
   }
 
   /** MIDI-02/03 key-off: deferred while CC64 is down or the note is held by sostenuto. */

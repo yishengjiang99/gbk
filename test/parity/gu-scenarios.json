@@ -3064,5 +3064,165 @@
 }
 ],
 "masterDynamics": false
+},
+{
+"name": "trackcc",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"tracks": [
+{
+"trackIndex": 0,
+"preset": 0,
+"cc7Volume": 80,
+"cc10Pan": 20,
+"cc11Expression": 100
+},
+{
+"trackIndex": 1,
+"preset": 40
+}
+],
+"events": [
+{
+"frame": 10,
+"type": "noteOn",
+"trackIndex": 0,
+"channel": 0,
+"note": 60,
+"velocity": 100
+},
+{
+"frame": 20,
+"type": "noteOn",
+"trackIndex": 1,
+"channel": 1,
+"note": 67,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "setControllers",
+"trackIndex": 0,
+"cc7Volume": 50,
+"cc10Pan": 110
+},
+{
+"frame": 12000,
+"type": "setControllers",
+"trackIndex": 1,
+"cc11Expression": 60,
+"cc10Pan": 0
+},
+{
+"frame": 16000,
+"type": "setControllers",
+"cc11Expression": 90,
+"cc7Volume": 127
+},
+{
+"frame": 18000,
+"type": "noteOn",
+"trackIndex": 0,
+"channel": 2,
+"note": 64,
+"velocity": 110
+},
+{
+"frame": 24000,
+"type": "noteOff",
+"trackIndex": 0,
+"channel": 0,
+"note": 60
+},
+{
+"frame": 26000,
+"type": "noteOff",
+"trackIndex": 1,
+"channel": 1,
+"note": 67
+}
+]
+},
+{
+"name": "trackcc_off",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"tracks": [
+{
+"trackIndex": 0,
+"preset": 0,
+"cc7Volume": 80,
+"cc10Pan": 20,
+"cc11Expression": 100
+},
+{
+"trackIndex": 1,
+"preset": 40
+}
+],
+"events": [
+{
+"frame": 10,
+"type": "noteOn",
+"trackIndex": 0,
+"channel": 0,
+"note": 60,
+"velocity": 100
+},
+{
+"frame": 20,
+"type": "noteOn",
+"trackIndex": 1,
+"channel": 1,
+"note": 67,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "setControllers",
+"trackIndex": 0,
+"cc7Volume": 50,
+"cc10Pan": 110
+},
+{
+"frame": 12000,
+"type": "setControllers",
+"trackIndex": 1,
+"cc11Expression": 60,
+"cc10Pan": 0
+},
+{
+"frame": 16000,
+"type": "setControllers",
+"cc11Expression": 90,
+"cc7Volume": 127
+},
+{
+"frame": 18000,
+"type": "noteOn",
+"trackIndex": 0,
+"channel": 2,
+"note": 64,
+"velocity": 110
+},
+{
+"frame": 24000,
+"type": "noteOff",
+"trackIndex": 0,
+"channel": 0,
+"note": 60
+},
+{
+"frame": 26000,
+"type": "noteOff",
+"trackIndex": 1,
+"channel": 1,
+"note": 67
+}
+],
+"masterDynamics": false,
+"masterGainDb": 0
 }
 ]

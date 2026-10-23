@@ -38,11 +38,10 @@ test("playback rebuilds the master bus and track nodes after the audio context c
   const result = await cdp.send("Runtime.evaluate", {
     expression: `JSON.stringify({
       contexts: audioContexts.map(ctx => ctx.state),
-      masters: audioNodes.filter(rec => rec.name === 'master-dynamics' && rec.node.context.state === 'running').length,
       tracks: audioNodes.filter(rec => rec.name === 'sf2-processor' && rec.node.context.state === 'running').length
     })`, returnByValue: true,
   });
-  expect(JSON.parse(result.result.value)).toEqual({ contexts: ["closed", "running"], masters: 1, tracks: 13 });
+  expect(JSON.parse(result.result.value)).toEqual({ contexts: ["closed", "running"], tracks: 13 });
   // The analyzer must also have been reconnected to the replacement graph.
   await expect.poll(peak).toBeGreaterThan(0.002);
 });

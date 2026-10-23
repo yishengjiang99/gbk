@@ -23,7 +23,7 @@ import {
   type BachLength,
 } from "./bach-generator.ts";
 import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
-import { applyMasterDynamicsToBuffer, DYNAMICS_MODES, isDynamicsMode, type DynamicsMode } from "./master-dynamics.ts";
+import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 import { midiFileStore } from "./midi-file-store.ts";
@@ -417,12 +417,6 @@ interface MidiReaderProps {
   ensureAudioInfrastructure: (
     opts?: { loadWorklet?: boolean }
   ) => Promise<{ ctx: AudioContext; input: AudioNode }>;
-  dynamicsMode: DynamicsMode;
-  onDynamicsModeChange: (mode: DynamicsMode) => void;
-  /** Live compressor reduction in dB, for the dynamics meter in the menu. */
-  dynamicsCompression: number;
-  /** Live limiter reduction in dB, for the dynamics hint in the menu. */
-  dynamicsLimiting: number;
   getRegionsForPreset: (presetIndex: number) => SF2Region[];
   resolvePresetIndex: (program: number, bank: number) => number | null;
   fallbackPresetIndex: number;
@@ -502,10 +496,6 @@ export default function MidiReader({
   onSelectMidiInput,
   midiInputs = [],
   ensureAudioInfrastructure,
-  dynamicsMode,
-  onDynamicsModeChange,
-  dynamicsCompression,
-  dynamicsLimiting,
   getRegionsForPreset,
   resolvePresetIndex,
   fallbackPresetIndex,
@@ -672,6 +662,7 @@ export default function MidiReader({
   const midiSendOutputRef = useRef<MIDIOutput | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const trackNodesRef = useRef<TrackNode[]>([]);
+  const masterVolumeRef = useRef(masterVolume);
   const portsAttachedRef = useRef<boolean>(false);
   const dragStateRef = useRef<{ active: boolean; startX: number; startLeft: number }>({
     active: false,
@@ -886,7 +877,9 @@ export default function MidiReader({
       const rec = trackNodesRef.current[i];
       if (!rec?.node) continue;
       const cc = getTrackCc(track.index, controls);
+      // Engine-wide CC7/CC10/CC11 -> channel controller state -> 2.01 default modulators.
       rec.node.port.postMessage({ type: "setControllers", ...cc });
+      rec.node.port.postMessage({ type: "setMasterGainDb", db: volumeToMasterGainDb(masterVolumeRef.current) });
     }
   };
 
@@ -899,9 +892,8 @@ export default function MidiReader({
       if (!rec?.gain) continue;
       const muted = !!mix?.[track.index]?.mute;
       const solo = !!mix?.[track.index]?.solo;
-      const cc = getTrackCc(track.index);
-      const ccSilent = cc.cc7Volume === 0 || cc.cc11Expression === 0;
-      const audible = (anySolo ? solo : !muted) && !ccSilent;
+      // CC7 / CC11 = 0 silence the track through the engine's default modulators; mute/solo only here.
+      const audible = anySolo ? solo : !muted;
       rec.gain.gain.setTargetAtTime(audible ? 1 : 0, rec.gain.context.currentTime, 0.01);
     }
   };
@@ -1423,6 +1415,12 @@ export default function MidiReader({
   }, [trackCcControls, song]);
 
   useEffect(() => {
+    masterVolumeRef.current = masterVolume;
+    const db = volumeToMasterGainDb(masterVolume);
+    for (const rec of trackNodesRef.current) rec.node?.port.postMessage({ type: "setMasterGainDb", db });
+  }, [masterVolume]);
+
+  useEffect(() => {
     if (!song || !portsAttachedRef.current) return;
     applyTrackMuteSolo(song, trackMixState);
   }, [trackMixState, song]);
@@ -1644,12 +1642,6 @@ export default function MidiReader({
         onProgress: (progress: number) => {
           setExportProgress(Math.max(0, Math.min(0.75, progress * 0.75)));
         },
-      });
-      // The click-time mode is captured for the entire export, even if the user
-      // changes the live control while rendering. Apply once to the summed mix.
-      setExportStage("Mastering dynamics");
-      await applyMasterDynamicsToBuffer(audioBuffer, dynamicsMode, (progress) => {
-        setExportProgress(0.75 + progress * 0.1);
       });
       setExportStage("Encoding WAV");
       const wavBuffer = await encodeWavIncremental(audioBuffer, 16384, (progress) => {
@@ -2411,45 +2403,6 @@ export default function MidiReader({
           <i className="fa-solid fa-music" aria-hidden="true" />
           <span>Sweden</span>
         </button>
-        <div className="dynamicsControls" aria-label="Master dynamics">
-          <label htmlFor="master-dynamics-mode">Dynamic compression</label>
-          <select
-            id="master-dynamics-mode"
-            className="toolbarSelect"
-            value={dynamicsMode}
-            onChange={(event) => {
-              if (isDynamicsMode(event.target.value)) onDynamicsModeChange(event.target.value);
-            }}
-          >
-            {DYNAMICS_MODES.map((mode) => (
-              <option key={mode.value} value={mode.value}>{mode.label}</option>
-            ))}
-          </select>
-          <p>{DYNAMICS_MODES.find((mode) => mode.value === dynamicsMode)?.description}</p>
-          <div className="dynamicsMeterRow">
-            <label htmlFor="compression-reduction">Reduction</label>
-            <meter
-              id="compression-reduction"
-              min={0}
-              max={12}
-              value={audioCtxState === "running" && dynamicsMode !== "off" ? dynamicsCompression : 0}
-            />
-            <output htmlFor="compression-reduction" aria-live="off">
-              {audioCtxState === "running" && dynamicsMode !== "off"
-                ? dynamicsCompression.toFixed(1)
-                : "0.0"} dB
-            </output>
-          </div>
-          <span className="dynamicsHint">
-            {dynamicsMode === "off"
-              ? "Playback + WAV export"
-              : `Playback + WAV export · Peak ceiling −1 dBFS${
-                  audioCtxState === "running" && dynamicsLimiting > 0.1
-                    ? ` · Limiting ${dynamicsLimiting.toFixed(1)} dB`
-                    : ""
-                }`}
-          </span>
-        </div>
       </NavMenuSection>
     </>
   );

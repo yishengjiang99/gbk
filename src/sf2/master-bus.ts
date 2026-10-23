@@ -129,3 +129,9 @@ export class MasterBus {
     this.outR = MasterBus.softClip(dr * this.limGain, this.ceiling);
   }
 }
+
+/** App volume knob (0...1) -> engine masterGainDb: full volume is the -3 dB default, 0 is -120 dB (silent). */
+export function volumeToMasterGainDb(volume: number): number {
+  const v = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+  return v <= 0 ? -120 : -3 + 20 * Math.log10(v);
+}

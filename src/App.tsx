@@ -14,8 +14,7 @@ import MidiReader from "./midireader";
 import ErrorBoundary from "./ErrorBoundary";
 import { MidiRecorderUI } from "./MidiRecorderUI";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
-import masterDynamicsUrl from "./master-dynamics-processor.ts?worker&url";
-import { DEFAULT_DYNAMICS_MODE, DYNAMICS_MODES, isDynamicsMode, type DynamicsMode } from "./master-dynamics.ts";
+import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
 
 // ---------------------------------------------------------------------------
 // Local interface definitions for SF2 internal structures accessed at runtime
@@ -680,15 +679,6 @@ export default function App() {
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<string>("midi");
   const [audioCtxState, setAudioCtxState] = useState<string>("off");
-  const [dynamicsMode, setDynamicsMode] = useState<DynamicsMode>(() => {
-    try {
-      const saved = window.localStorage.getItem("sf2-master-dynamics");
-      return isDynamicsMode(saved) ? saved : DEFAULT_DYNAMICS_MODE;
-    } catch {
-      return DEFAULT_DYNAMICS_MODE;
-    }
-  });
-  const [dynamicsMeter, setDynamicsMeter] = useState({ compression: 0, limiting: 0 });
   const [didAutoLoadDefault, setDidAutoLoadDefault] = useState<boolean>(false);
   const [didAutoEnableMidi, setDidAutoEnableMidi] = useState<boolean>(false);
 
@@ -698,9 +688,6 @@ export default function App() {
   const masterGainRef = useRef<GainNode | null>(null);
   const [masterVolume, setMasterVolume] = useState(1);
   const masterVolumeRef = useRef(1);
-  const compressorRef = useRef<AudioWorkletNode | null>(null);
-  const dynamicsModeRef = useRef(dynamicsMode);
-  const dynamicsLoadPromiseRef = useRef<Promise<void> | null>(null);
   const timeDomainRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const freqDomainRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -728,19 +715,15 @@ export default function App() {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     lastVizUpdateRef.current = 0;
-    if (compressorRef.current) compressorRef.current.port.onmessage = null;
     workletNodeRef.current?.disconnect();
-    compressorRef.current?.disconnect();
     analyserRef.current?.disconnect();
     masterGainRef.current?.disconnect();
     workletNodeRef.current = null;
-    compressorRef.current = null;
     analyserRef.current = null;
     masterGainRef.current = null;
     timeDomainRef.current = null;
     freqDomainRef.current = null;
     workletLoadPromiseRef.current = null;
-    dynamicsLoadPromiseRef.current = null;
     if (ctx && ctx.state !== "closed") void ctx.close().catch(() => {});
   }, []);
 
@@ -778,16 +761,6 @@ export default function App() {
   }, [sf2, selectedPreset, presets.length]);
   selectedPresetRef.current = selectedPreset;
   livePresetIndexRef.current = effectivePresetIndex;
-  dynamicsModeRef.current = dynamicsMode;
-
-  useEffect(() => {
-    compressorRef.current?.port.postMessage({ type: "setMode", mode: dynamicsMode });
-    try {
-      window.localStorage.setItem("sf2-master-dynamics", dynamicsMode);
-    } catch {
-      // Audio controls still work when storage is unavailable.
-    }
-  }, [dynamicsMode]);
 
   useEffect(() => {
     if (!programDetails) {
@@ -966,7 +939,6 @@ export default function App() {
         ctx = new AudioContext();
         audioCtxRef.current = ctx;
         setAudioReady(false);
-        setDynamicsMeter({ compression: 0, limiting: 0 });
         setAudioCtxState(ctx.state);
         const currentContext = ctx;
         ctx.onstatechange = () => {
@@ -990,38 +962,12 @@ export default function App() {
       }
 
       if (!masterGain) {
+        // Unity summing bus. Each SF2 engine runs its own master stage (gain, compressor, limiter,
+        // safety clip); the volume knob drives the engines' masterGainDb, not this node.
         masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(masterVolumeRef.current, currentTime);
+        masterGain.gain.setValueAtTime(1, currentTime);
         masterGainRef.current = masterGain;
-      }
-
-      if (!dynamicsLoadPromiseRef.current) {
-        dynamicsLoadPromiseRef.current = ctx.audioWorklet.addModule(masterDynamicsUrl).catch((err) => {
-          if (audioCtxRef.current === ctx) dynamicsLoadPromiseRef.current = null;
-          throw err;
-        });
-      }
-      await dynamicsLoadPromiseRef.current;
-      if (audioCtxRef.current !== ctx || ctx.state === "closed") {
-        throw new Error("Audio was reset while loading. Press Play to reconnect.");
-      }
-      // Check again after awaiting: concurrent callers share exactly one bus.
-      if (!compressorRef.current) {
-        const compressor = new AudioWorkletNode(ctx, "master-dynamics", {
-          numberOfInputs: 1,
-          numberOfOutputs: 1,
-          outputChannelCount: [2],
-          channelCount: 2,
-          channelCountMode: "explicit",
-          processorOptions: { mode: dynamicsModeRef.current },
-        });
-        compressor.port.onmessage = ({ data }: MessageEvent) => {
-          if (data?.type === "meter") setDynamicsMeter({ compression: data.compression, limiting: data.limiting });
-        };
-        compressorRef.current = compressor;
-        // Every synth feeds one stereo bus; the analyzer shows the final output.
-        masterGain.connect(compressor);
-        compressor.connect(analyser);
+        masterGain.connect(analyser);
         analyser.connect(ctx.destination);
       }
 
@@ -1061,6 +1007,7 @@ export default function App() {
           outputChannelCount: [2],
         });
         workletNodeRef.current = node;
+        node.port.postMessage({ type: "setMasterGainDb", db: volumeToMasterGainDb(masterVolumeRef.current) });
         node.connect(input);
       }
       return node;
@@ -1248,17 +1195,13 @@ export default function App() {
     }
   }
 
-  // Winamp volume knob: drives the app-owned master gain node only.
-  // The SF2 synth, worker scheduling, and offline render paths are untouched.
+  // Winamp volume knob: maps to the engines' masterGainDb (-3 dB default at full volume).
+  // The live keyboard engine is set here; MidiReader sets its per-track engines from the same prop.
   const applyMasterVolume = useCallback((value: number): void => {
     const next = Math.max(0, Math.min(1, value));
     masterVolumeRef.current = next;
     setMasterVolume(next);
-    const ctx = audioCtxRef.current;
-    const gain = masterGainRef.current;
-    if (ctx && gain && ctx.state !== "closed") {
-      gain.gain.setTargetAtTime(next, ctx.currentTime, 0.02);
-    }
+    workletNodeRef.current?.port.postMessage({ type: "setMasterGainDb", db: volumeToMasterGainDb(next) });
   }, []);
 
   async function onTogglePower(): Promise<void> {
@@ -1379,7 +1322,6 @@ export default function App() {
           onSelectMidiInput={setSelectedMidiInput}
           midiInputs={midiInputs}
           ensureAudioInfrastructure={ensureAudioInfrastructure}
-          dynamicsMode={dynamicsMode}
           getRegionsForPreset={getRegionsForPresetIndex}
           resolvePresetIndex={resolvePresetIndex}
           fallbackPresetIndex={effectivePresetIndex ?? 0}
@@ -1390,9 +1332,6 @@ export default function App() {
             name: p.presetName || "(unnamed)",
           }))}
           onError={(msg: string) => setAudioError(msg)}
-          onDynamicsModeChange={setDynamicsMode}
-          dynamicsCompression={dynamicsMeter.compression}
-          dynamicsLimiting={dynamicsMeter.limiting}
           sf2View={
             activeTab === "sf2" ? (
               <>
