@@ -97,7 +97,7 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await page.getByTestId("publish-confirm").click();
   await expect(page.getByTestId("publish-dialog")).toBeHidden();
   const link = await page.getByTestId("share-link").locator("a").getAttribute("href");
-  expect(link).toMatch(/\/s\/[a-z0-9]{8}$/); expect(link).toContain(privSlug!);
+  expect(link).toMatch(/\/s\/midnight-fugue-in-d-minor-dark-cello-[a-z0-9]{8}$/); expect(link).toContain(privSlug!.slice(-8));
   const anon = await browser.newContext(); const v2 = await anon.newPage();
   await v2.goto("/");
   await expect(v2.getByTestId("share-card").first()).toBeVisible();
