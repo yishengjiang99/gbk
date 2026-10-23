@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { followScroll } from "../../workstation/follow.ts";
 import { useWorkstation, workstation } from "./useWorkstation.ts";
 import { PianoRollEditor, type View } from "./PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "./AutomationLane.tsx";
@@ -10,6 +11,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
   const p = state.project;
   const agent = useAgentToolsToggle();
   const [view, setView] = useState<View>({ scrollTick: 0, pxPerTick: 0.08, lowPitch: 28, highPitch: 100 });
+  const rollPx = useRef(900);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [lanes, setLanes] = useState<LaneKind[]>([11, 1]);
   const [laneTrack, setLaneTrack] = useState<string>("");
@@ -17,7 +19,13 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
   const focus = state.proposals.find((x) => x.id === focusId && x.status === "pending") ?? pending[pending.length - 1] ?? null;
   const setFocus = useCallback((id: string | null) => setFocusId(id), []);
   const trackForLanes = p.tracks.find((t) => t.id === laneTrack) ?? p.tracks.find((t) => p.selection.trackIds.includes(t.id)) ?? p.tracks.find((t) => p.notes.some((n) => n.trackId === t.id)) ?? p.tracks[0];
-  useEffect(() => { setView((v) => ({ ...v, scrollTick: 0 })); setLaneTrack(""); }, [p.id]);
+  // Default zoom: ~4 bars of the first meter visible (not the whole song).
+  useEffect(() => {
+    const ts = p.timeSigs[0] ?? { numerator: 4, denominator: 4 };
+    const barTicks = ((p.ppq * 4) / ts.denominator) * ts.numerator;
+    setView((v) => ({ ...v, scrollTick: 0, pxPerTick: Math.max(0.005, Math.min(2, rollPx.current / (4 * barTicks))) }));
+    setLaneTrack("");
+  }, [p.id]);
   // Auto lanes: show the controllers the selected track actually uses (plus bend/pressure when present).
   useEffect(() => {
     if (!trackForLanes) return;
@@ -28,11 +36,28 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
     if (p.channelPressure.some((b) => b.trackId === trackForLanes.id)) next.push("pressure");
     setLanes(next.length ? next : [11, 1]);
   }, [p.id, trackForLanes?.id]);
-  // follow playhead
-  useEffect(() => workstation.subscribe((s) => {
-    if (!s.transport.playing) return;
-    setView((v) => { const vis = 900 / v.pxPerTick; return s.transport.positionTick > v.scrollTick + vis * 0.9 || s.transport.positionTick < v.scrollTick ? { ...v, scrollTick: Math.max(0, s.transport.positionTick - vis * 0.1) } : v; });
-  }), []);
+  // Playhead follow (page-style), rAF-driven: React only re-renders when the page flips.
+  const [follow, setFollow] = useState(true);
+  const followRef = useRef(true); followRef.current = follow;
+  const viewRef = useRef(view); viewRef.current = view;
+  useEffect(() => {
+    let raf = 0; let lastPos = -1; let wasPlaying = false;
+    const loop = () => {
+      const t = workstation.getState().transport;
+      if (t.playing && !wasPlaying) setFollow(true); // playback (re)start re-enables follow
+      wasPlaying = t.playing;
+      const moved = t.positionTick !== lastPos;
+      if (followRef.current && moved) {
+        const v = viewRef.current;
+        const next = followScroll(t.positionTick, v.scrollTick, rollPx.current / v.pxPerTick);
+        if (next !== null) setView((cur) => ({ ...cur, scrollTick: next }));
+      }
+      lastPos = t.positionTick;
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   const pos = state.transport.positionTick;
   const bb = useMemo(() => tickToBarBeat(p, pos), [p, pos]);
   const run = (f: () => unknown) => { try { const r = f(); if (r instanceof Promise) r.catch((e: Error) => alert(e.message)); } catch (e) { alert((e as Error).message); } };
@@ -48,7 +73,8 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
           <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>
           {state.transport.playing ? <button onClick={() => workstation.pause()} aria-label="Pause">⏸</button> : <button onClick={() => run(() => workstation.play())} aria-label="Play" data-testid="ws-play">▶</button>}
           <button onClick={() => workstation.stop()} aria-label="Stop">⏹</button>
-          <span className="ws-pos" data-testid="ws-pos">{bb.bar}.{Math.floor(bb.beat) + 1} · {tickToSec(p, pos).toFixed(2)}s</span>
+          <span className="ws-pos" data-testid="ws-pos" data-pos-tick={pos}>{bb.bar}.{Math.floor(bb.beat) + 1} · {tickToSec(p, pos).toFixed(2)}s</span>
+          <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
           <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
         </div>
         <span className="ws-dim">{p.ppq} PPQ · {Math.round(60e6 / (p.tempos[0]?.microPerQuarter ?? 500000))} bpm{p.tempos.length > 1 ? "*" : ""} · {p.timeSigs[0]?.numerator}/{p.timeSigs[0]?.denominator}</span>
@@ -89,7 +115,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
           })}
         </nav>
         <main className="ws-main">
-          <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={360} />
+          <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={360} onManualScroll={() => setFollow(false)} onWidth={(px) => { rollPx.current = px; }} />
           <div className="ws-lanes">
             <div className="ws-row ws-dim">Automation for <b style={{ color: trackForLanes?.color }}>{trackForLanes?.name ?? "–"}</b>
               <button onClick={() => setLanes([...lanes, 7])}>+ lane</button>
