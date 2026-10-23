@@ -66,3 +66,12 @@ conversion, NRPN bytes reproduce the offset in the engine.
 export/re-import, and the engine rendering exactly the send `gbk_get_voice_settings` reports.
 `test/e2e/workstation-voice.spec.ts` (chrome-webmcp): an agent proposes a longer release plus more reverb, runs A/B,
 the user accepts, two WAV exports differ, the tail energy rises, then undo and reload persistence are checked.
+
+
+## Offline render fidelity
+
+The headless renderer (`src/audio/offline-renderer.ts`) drives the same `Sf2SynthEngine` as the live player and
+honours programs/banks (channel 10 → bank 128), CC7/10/11/1/64/91/93, pitch bend, voice overrides and project
+effects, the full tempo map and a configurable release tail. Missing presets fall back to bank 0 with a warning
+(`INSTRUMENT_NOT_FOUND` if nothing matches). Known gap: per-track player preset overrides and orchestral auto-pan
+from the live player are not applied to the offline render.

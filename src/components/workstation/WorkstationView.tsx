@@ -5,6 +5,8 @@ import { PianoRollEditor, type View } from "./PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "./AutomationLane.tsx";
 import { AgentPanel, useAgentToolsToggle } from "./AgentPanel.tsx";
 import { SoundPanel } from "./SoundPanel.tsx";
+import { ArtifactPanel } from "./ArtifactPanel.tsx";
+import { renderJobs, safeFilename } from "../../audio/render-job.ts";
 import { tickToBarBeat, tickToSec } from "../../workstation/timing.ts";
 
 export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) {
@@ -63,7 +65,14 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
   const bb = useMemo(() => tickToBarBeat(p, pos), [p, pos]);
   const run = (f: () => unknown) => { try { const r = f(); if (r instanceof Promise) r.catch((e: Error) => alert(e.message)); } catch (e) { alert((e as Error).message); } };
   const exportMidi = () => { const { bytes, filename } = workstation.prepareMidiExport(); workstation.host.download?.(bytes, filename); };
-  const exportWav = () => run(async () => { const b = await workstation.host.renderWav!(workstation.project); workstation.host.download?.(b, `${p.name || "gbk"}.wav`); });
+  // Same headless renderer as gbk_render_wav: progress + artifact appear in the artifact panel; errors are shown, never swallowed.
+  const exportWav = () => run(async () => {
+    const j = renderJobs().submit(workstation.project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, { saveArtifact: true });
+    const done = await renderJobs().wait(j.id);
+    if (done.status !== "completed") throw new Error(`WAV export ${done.status}: ${done.error?.message ?? ""}`);
+    const r = renderJobs().result(j.id);
+    if (r) workstation.host.download?.(r.blob, safeFilename(done.projectName, "wav"));
+  });
 
   return (
     <div className="ws" data-testid="workstation">
@@ -92,7 +101,8 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
       </header>
       <div className="ws-body">
         <nav className="ws-tracks" aria-label="Tracks">
-          {p.tracks.length === 0 && <p className="ws-dim">Open the Player / Library to load a MIDI file, or generate a Bach fugue there.</p>}
+          {p.tracks.length === 0 && <p className="ws-dim">Open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
+          {p.meta?.key && <div className="ws-dim" data-testid="ws-key">Key: {p.meta.key}{p.meta.sections?.length ? ` · ${p.meta.sections.length} sections` : ""}</div>}
           {p.tracks.map((t) => {
             const ov = state.overrides[t.id];
             const count = p.notes.filter((n) => n.trackId === t.id).length;
@@ -130,6 +140,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
         <div className="ws-side">
           <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />
           <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />
+          <ArtifactPanel />
         </div>
       </div>
     </div>

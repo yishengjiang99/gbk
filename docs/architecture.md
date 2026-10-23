@@ -28,3 +28,21 @@ React UI (src/components/workstation/*)      WebMCP adapter (src/webmcp/*)
   change; `migrateProject` handles schema versions; restore never clobbers a session's edits.
 - **Rendering:** canvas piano roll + lanes, viewport culling, bar/beat LOD, memoized diff/bars, playhead on rAF without
   React re-renders; React only re-renders on controller state changes.
+
+
+## Headless rendering (src/audio)
+
+```
+Project ──structuredClone──▶ RenderJobManager (FIFO, cancel, status)
+                              │
+   soundfont-loader (cached, /gbk/ base, progress, abort, timeout)
+                              ▼
+   offline-renderer: buildRenderPlan (sample-frame schedule from tempo map; setup/program/CC/notes, mix as CC7/10/11)
+     → Sf2SynthEngine.renderRange in chunks, yielding to the event loop
+     → wav-encoder (PCM16/float32, mono/stereo, 44.1/48 kHz, RF64 for huge files) into one preallocated buffer
+     → audio-validation (header, duration, silence, clipping, non-finite) → SHA-256
+                              ▼
+   artifact-store (IndexedDB "gbk-render-artifacts", bounded range reads) ──▶ ArtifactPanel / WebMCP tools
+```
+The live player (AudioWorklet) is not involved; Export WAV, `gbk_prepare_wav_export` and `gbk_render_wav` share this
+path. Rendering runs on the main thread in yielding chunks (no worker yet).

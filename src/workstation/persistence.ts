@@ -43,6 +43,9 @@ export async function restoreLatest(c: WorkstationController): Promise<boolean> 
   if (!p) return false;
   const cur = c.project;
   // Only replace an empty or untouched (revision 0) import of the same song; never clobber edits made this session.
-  if (cur.tracks.length === 0 || (cur.revision === 0 && cur.name === p.name)) { c.load(p); return true; }
+  // An agent-composed project (created from scratch, not tied to a player song) wins over the player's untouched
+  // startup re-open of its last playlist song, otherwise a reload would silently replace the composition.
+  const agentOwned = p.meta?.owner === "agent";
+  if (cur.tracks.length === 0 || (cur.revision === 0 && (cur.name === p.name || agentOwned))) { c.load(p); return true; }
   return false;
 }

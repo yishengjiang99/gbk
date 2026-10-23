@@ -47,7 +47,7 @@ class PlayerBridge {
     if (!this.ctrl) return;
     const nm = name.replace(/\.(mid|midi)$/i, "");
     // Player re-opening its last song on startup must not clobber the edited project restored from IndexedDB.
-    if (isSessionRestore && this.ctrl.project.revision > 0 && this.ctrl.project.name === nm) return;
+    if (isSessionRestore && this.ctrl.project.revision > 0 && (this.ctrl.project.name === nm || this.ctrl.project.meta?.owner === "agent")) return;
     try {
       const p = parseSmf(buf, name.replace(/\.(mid|midi)$/i, ""));
       this.ctrl.load(p);

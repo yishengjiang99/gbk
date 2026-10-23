@@ -53,6 +53,16 @@ function framer(p: Project, sr: number) {
   };
 }
 
+/** End tick of the declared song structure (0 when none). */
+export function sectionsEnd(p: Project): number {
+  const secs = p.meta?.sections ?? [];
+  if (!secs.length) return 0;
+  const lastBar = Math.max(...secs.map((x) => x.startBar + x.bars - 1));
+  const maxTs = Math.max(...p.timeSigs.map((t) => t.numerator * 4 / t.denominator), 4);
+  const b = bars(p, Math.ceil(lastBar * maxTs * p.ppq) + 1)[lastBar - 1];
+  return b ? b.tick + b.length : 0;
+}
+
 /** End tick of the bar that contains `tick` (bar-aligned song end). */
 export function barEnd(p: Project, tick: number): number {
   if (tick <= 0) return 0;
@@ -66,9 +76,10 @@ export interface RenderPlan { tracks: TrackState[]; events: SynthEvent[]; startF
 export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number, range: { startTick?: number; endTick?: number } = {}): RenderPlan {
   const f = framer(p, sampleRate);
   const startTick = Math.max(0, range.startTick ?? 0);
-  // Default range end: the end of the bar containing the last event (a 32-bar piece renders exactly 32 bars + tail).
+  // Default range end: the last event; if the project declares a song structure, at least the end of its last
+  // section (a 32-bar composed piece renders exactly 32 bars + tail). The tail always follows the last note-off.
   const lastTick = Math.max(p.endTick, ...p.notes.map((n) => n.tick + n.duration), 0);
-  const endTick = range.endTick ?? barEnd(p, lastTick);
+  const endTick = range.endTick ?? Math.max(lastTick, sectionsEnd(p));
   const startFrame = f(startTick);
   const at = (tick: number) => Math.max(0, f(Math.max(tick, startTick)) - startFrame);
   const events: SynthEvent[] = []; let seq = 0;

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const enableVisualChrome = process.env.PW_VISUAL_CHROME === "1";
+const baseURL = process.env.PW_BASE_URL || "http://127.0.0.1:5173/gbk/";
 const chromeChannel = process.env.PW_CHROME_CHANNEL || "chrome";
 
 export default defineConfig({
@@ -10,12 +11,12 @@ export default defineConfig({
     timeout: 10_000,
   },
   use: {
-    baseURL: "http://127.0.0.1:5173/gbk/",
+    baseURL,
     trace: "on-first-retry",
   },
   webServer: {
     command: "npm run dev -- --host 127.0.0.1",
-    url: "http://127.0.0.1:5173/gbk/",
+    url: baseURL,
     reuseExistingServer: true,
     timeout: 30_000,
   },
@@ -23,13 +24,19 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /workstation-(webmcp|voice)\.spec\.ts/,
+      testIgnore: /workstation-(webmcp|voice)\.spec\.ts|autonomous-compose\.spec\.ts/,
     },
     // Real WebMCP runtime: Chrome stable with the WebMCP testing feature (exposes document.modelContext).
     {
       name: "chrome-webmcp",
       testMatch: /workstation-(webmcp|voice)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 }, launchOptions: { args: ["--enable-features=WebMCPTesting", "--autoplay-policy=no-user-gesture-required"] } },
+    },
+    // Autonomous composition e2e: real WebMCP, clean profile, NO autoplay flag (rendering must not need audio).
+    {
+      name: "chrome-webmcp-autonomous",
+      testMatch: /autonomous-compose\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 }, acceptDownloads: true, launchOptions: { args: ["--enable-features=WebMCPTesting"] } },
     },
     ...(enableVisualChrome
       ? [
