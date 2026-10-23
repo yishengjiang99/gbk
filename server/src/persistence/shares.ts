@@ -1,10 +1,11 @@
 // Shared songs in SQLite (node:sqlite, a single file under COMPOSER_DATA_DIR; no extra service).
+import { buildPreview, type PianoRollPreview } from "../../../src/agent/piano-roll-preview.ts";
 import { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-export interface ShareRow { id: string; slug: string; owner: string; title: string; project_json: string; parent_id: string | null; created_at: number; public: number; midi: Uint8Array | null; wav: Uint8Array | null; mp3: Uint8Array | null; wav_meta: string | null; project_id: string | null; updated_at: number | null }
+export interface ShareRow { id: string; slug: string; owner: string; title: string; project_json: string; parent_id: string | null; created_at: number; public: number; midi: Uint8Array | null; wav: Uint8Array | null; mp3: Uint8Array | null; wav_meta: string | null; project_id: string | null; updated_at: number | null; short_id?: string | null }
 export interface ShareView { slug: string; title: string; owner: string; createdAt: string; public: boolean; parent: { slug: string; title: string; owner: string } | null; hasMidi: boolean; hasWav: boolean; hasMp3: boolean; wav: unknown; forks: number; updatedAt: string; projectId: string | null }
 
 const SLUG = "abcdefghijkmnpqrstuvwxyz23456789";
@@ -55,7 +56,7 @@ export class ShareStore {
     if (cur) {
       this.db.prepare("UPDATE shares SET project_json = ?, updated_at = ?, title = CASE WHEN public = 1 THEN title ELSE ? END WHERE slug = ?").run(o.projectJson, Date.now(), o.title, cur.slug);
       const r = this.bySlug(cur.slug)!; this.reslug(r.id);
-      return { row: this.bySlug(r.short_id)!, created: false };
+      return { row: this.bySlug(r.short_id ?? r.slug)!, created: false };
     }
     const parent = o.parentSlug ? this.bySlug(o.parentSlug) : null;
     const id = `shr_${randomBytes(9).toString("hex")}`; const sl = shortId(); const now = Date.now();
@@ -86,6 +87,17 @@ export class ShareStore {
       : this.db.prepare("SELECT id, slug, owner, title, parent_id, created_at, public, midi IS NOT NULL AS hm, wav IS NOT NULL AS hw, mp3 IS NOT NULL AS h3, wav_meta, project_id, updated_at FROM shares WHERE public = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?").all(o.limit, o.offset)) as unknown as (ShareRow & { hm: number; hw: number; h3: number })[];
     return rows.map((r) => this.view({ ...r, midi: r.hm ? new Uint8Array(1) : null, wav: r.hw ? new Uint8Array(1) : null, mp3: r.h3 ? new Uint8Array(1) : null }));
   }
+  /** Landing "top" songs: public, ranked by public fork count, then newest. (No play counter exists.) */
+  top(limit: number): (ShareView & { preview: PianoRollPreview })[] {
+    const rows = this.db.prepare(`SELECT s.id, s.project_json, s.updated_at, s.created_at, (SELECT COUNT(*) FROM shares c WHERE c.parent_id = s.id AND c.public = 1) AS fk
+      FROM shares s WHERE s.public = 1 ORDER BY fk DESC, s.created_at DESC LIMIT ?`).all(limit) as unknown as { id: string; project_json: string; updated_at: number | null; created_at: number }[];
+    return rows.map((r) => {
+      const key = `${r.id}:${r.updated_at ?? r.created_at}`; let preview = this.previewCache.get(key);
+      if (!preview) { try { preview = buildPreview(JSON.parse(r.project_json)); } catch { preview = buildPreview({}); } this.previewCache.set(key, preview); if (this.previewCache.size > 500) this.previewCache.delete(this.previewCache.keys().next().value!); }
+      return { ...this.view(this.byId(r.id)!), preview };
+    });
+  }
+  private previewCache = new Map<string, PianoRollPreview>();
   countRecent(owner: string, sinceMs: number) { return Number((this.db.prepare("SELECT COUNT(*) AS n FROM shares WHERE owner = ? AND created_at > ?").get(owner, Date.now() - sinceMs) as { n: number }).n); }
   view(r: ShareRow): ShareView {
     const p = r.parent_id ? this.byId(r.parent_id) : null;
