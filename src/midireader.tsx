@@ -1706,7 +1706,7 @@ export default function MidiReader({
     if (isPlaying) workerRef.current.postMessage({ type: "pause" });
     disconnectTrackNodes();
     pendingRestoreSecRef.current = opts.restoreSec ?? null;
-    playerBridge.onPlayerLoadedBuffer(buf.slice(0), name);
+    playerBridge.onPlayerLoadedBuffer(buf.slice(0), name, opts.restoreSec != null);
     workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
     setSelectedMidiPath(selectedPath);
     setCurrentMidiSource(source);
@@ -1750,6 +1750,7 @@ export default function MidiReader({
     seek: (sec) => { seekToSec(sec); },
     isReady: () => sf2Ready,
     exportWav: (cb) => onExportWav(cb),
+    requestSf2: () => { if (!sf2Ready && !sf2Loading) onLoadDefaultSf2(); },
     setTrackMix: (i, m) => {
       const nextTrack: TrackCc = { cc7Volume: clampCc(m.volume), cc10Pan: clampCc(m.pan), cc11Expression: clampCc(m.expression) };
       trackCcControlsRef.current = { ...trackCcControlsRef.current, [i]: nextTrack };
@@ -1771,6 +1772,7 @@ export default function MidiReader({
       isReady: () => bridgeImplRef.current!.isReady(),
       exportWav: (cb) => bridgeImplRef.current!.exportWav(cb),
       setTrackMix: (i, m) => bridgeImplRef.current!.setTrackMix(i, m),
+      requestSf2: () => bridgeImplRef.current!.requestSf2(),
     });
     return () => playerBridge.attach(null);
   }, []);

@@ -47,7 +47,9 @@ export interface StoredPlaylistMeta {
 }
 
 const DB_NAME = "gbk-midi";
-const DB_VERSION = 1;
+/** v2 adds the workstation "projects" store; v1 stores (files, meta) are untouched by the upgrade. */
+const DB_VERSION = 2;
+const PROJECTS_STORE = "projects";
 const FILES_STORE = "files";
 const META_STORE = "meta";
 const PLAYLIST_META_KEY = "playlist";
@@ -118,6 +120,9 @@ export class MidiFileStore {
                 }
                 if (!db.objectStoreNames.contains(META_STORE)) {
                   db.createObjectStore(META_STORE, { keyPath: "key" });
+                }
+                if (!db.objectStoreNames.contains(PROJECTS_STORE)) {
+                  db.createObjectStore(PROJECTS_STORE, { keyPath: "id" });
                 }
               } catch (err) {
                 warn("schema upgrade failed", err);
@@ -216,7 +221,21 @@ export class MidiFileStore {
     const value = (record as { value?: unknown } | undefined)?.value;
     return isValidPlaylistMeta(value) ? value : null;
   }
+
+  /** Workstation project snapshots (v2 store). Resolves even on failure. */
+  async putProject(rec: StoredProjectRecord): Promise<void> {
+    await this.withStore(PROJECTS_STORE, "readwrite", (store) => requestToPromise(store.put(rec)), undefined);
+  }
+
+  /** Most recently saved project record, or null. */
+  async getLatestProject(): Promise<StoredProjectRecord | null> {
+    const all = await this.withStore(PROJECTS_STORE, "readonly", (store) => requestToPromise(store.getAll()), [] as unknown[]);
+    const list = (Array.isArray(all) ? all : []) as StoredProjectRecord[];
+    return list.filter((r) => r && typeof r.id === "string" && typeof r.savedAt === "number").sort((x, y) => y.savedAt - x.savedAt)[0] ?? null;
+  }
 }
+
+export interface StoredProjectRecord { id: string; schemaVersion: number; savedAt: number; project: unknown }
 
 /** App-wide singleton backed by the global IndexedDB. */
 export const midiFileStore = new MidiFileStore();

@@ -119,3 +119,12 @@ test("proposal becomes stale after unrelated edit", async () => {
   assert.equal(c.getProposal(p.id).status, "stale");
   await assert.rejects(c.commitProposal(p.id, { source: "user" }), (e: WorkstationError) => e.code === "STALE_REVISION");
 });
+
+import { migrateProject } from "../src/workstation/persistence.ts";
+test("project schema migration v0 -> v1, rejects newer/invalid", () => {
+  const v0 = { id: "x", ppq: 96, tracks: [], notes: [], ccs: [], programs: [], tempos: [], timeSigs: [] };
+  const m = migrateProject(v0)!;
+  assert.equal(m.schemaVersion, 1); assert.deepEqual(m.raw, []); assert.equal(m.loop.enabled, false);
+  assert.equal(migrateProject({ ...v0, schemaVersion: 99 }), null);
+  assert.equal(migrateProject({ id: 1 }), null);
+});
