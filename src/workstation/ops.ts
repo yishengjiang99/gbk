@@ -1,4 +1,4 @@
-import { computeEndTick, newId, type CCEvent, type Note, type Project, type Track, type TrackMix } from "./model.ts";
+import { TRACK_COLORS, computeEndTick, newId, type CCEvent, type Note, type Project, type Track, type TrackMix } from "./model.ts";
 
 export type Op =
   | { op: "addNotes"; notes: Omit<Note, "id">[] }
@@ -7,7 +7,7 @@ export type Op =
   | { op: "setCC"; trackId: string; channel: number; controller: number; startTick: number; endTick: number; mode: "replace" | "merge"; points: { tick: number; value: number }[] }
   | { op: "removeCC"; ids: string[] }
   | { op: "updateTrack"; trackId: string; name?: string; channel?: number; visible?: boolean; mix?: Partial<TrackMix> }
-  | { op: "addTrack"; name: string; channel: number }
+  | { op: "addTrack"; name: string; channel: number; id?: string }
   | { op: "setProgram"; trackId: string; program: number; bankMsb: number; bankLsb: number };
 
 export class WorkstationError extends Error {
@@ -22,6 +22,7 @@ const int = (v: unknown, lo: number, hi: number, what: string) => {
 export function validateOps(p: Project, ops: Op[]): string[] {
   const warnings: string[] = [];
   const trackIds = new Set(p.tracks.map((t) => t.id));
+  for (const o of ops) if (o.op === "addTrack" && o.id) trackIds.add(o.id);
   const noteIds = new Set(p.notes.map((n) => n.id));
   if (!Array.isArray(ops) || ops.length === 0) throw new WorkstationError("INVALID_ARGUMENT", "ops must be a non-empty array");
   for (const o of ops) {
@@ -89,7 +90,7 @@ export function applyOps(src: Project, ops: Op[]): Project {
         p.ccs = p.ccs.filter((c) => !(c.trackId === o.trackId && c.tick === 0 && (c.controller === 0 || c.controller === 32)));
         break;
       }
-      case "addTrack": p.tracks.push({ id: newId("trk"), name: o.name.slice(0, 128), channel: o.channel, color: "#ccc", visible: true, mix: { volume: 100, pan: 64, expression: 127, mute: false, solo: false } }); break;
+      case "addTrack": p.tracks.push({ id: o.id ?? newId("trk"), name: o.name.slice(0, 128), channel: o.channel, color: TRACK_COLORS[p.tracks.length % TRACK_COLORS.length], visible: true, mix: { volume: 100, pan: 64, expression: 127, mute: false, solo: false } }); break;
     }
   }
   p.notes.sort((a, b) => a.tick - b.tick || a.pitch - b.pitch);
