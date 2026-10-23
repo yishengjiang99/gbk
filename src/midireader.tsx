@@ -1286,6 +1286,9 @@ export default function MidiReader({
         setMidiOptions(normalized);
 
         const persisted = readPersistedMidiState();
+        // A song the user picks while startup is still fetching must win over the startup restore.
+        const startupRequest = midiSelectionRequestRef.current;
+        const userPickedDuringStartup = () => midiSelectionRequestRef.current !== startupRequest;
 
         // Restore user-added MIDI files (uploads + camera scans) from
         // IndexedDB, in the order they were added. Entries whose bytes can't
@@ -1336,7 +1339,7 @@ export default function MidiReader({
           const midiRes = await fetch(`${import.meta.env.BASE_URL}${restored.path}`);
           if (!midiRes.ok) throw new Error(`Failed to fetch ${restored.path}`);
           const buf = await midiRes.arrayBuffer();
-          loadMidiIntoTracks(buf, restored.name, {
+          if (!userPickedDuringStartup()) loadMidiIntoTracks(buf, restored.name, {
             selectedPath: restored.path,
             sourceKind: "bundled",
             persist: false,
@@ -1351,7 +1354,7 @@ export default function MidiReader({
             const record = await midiFileStore.getMidiFile(persisted.fileId);
             if (record) {
               const isScan = restoredScans.some((s) => s.id === persisted.fileId);
-              loadMidiIntoTracks(record.bytes.slice(0), persisted.name, {
+              if (!userPickedDuringStartup()) loadMidiIntoTracks(record.bytes.slice(0), persisted.name, {
                 sourceKind: persisted.kind,
                 fileId: persisted.fileId,
                 persist: false,
@@ -1365,7 +1368,7 @@ export default function MidiReader({
           } else if (persisted.dataUrl) {
             // Legacy save format (pre-IndexedDB data URL); keep it readable.
             const buf = await dataUrlToArrayBuffer(persisted.dataUrl);
-            loadMidiIntoTracks(buf, persisted.name, {
+            if (!userPickedDuringStartup()) loadMidiIntoTracks(buf, persisted.name, {
               sourceKind: persisted.kind,
               dataUrl: persisted.dataUrl,
               persist: false,
@@ -1382,7 +1385,7 @@ export default function MidiReader({
           const midiRes = await fetch(`${import.meta.env.BASE_URL}${first.path}`);
           if (!midiRes.ok) throw new Error(`Failed to fetch ${first.path}`);
           const buf = await midiRes.arrayBuffer();
-          loadMidiIntoTracks(buf, first.name, {
+          if (!userPickedDuringStartup()) loadMidiIntoTracks(buf, first.name, {
             selectedPath: first.path,
             sourceKind: "bundled",
           });
