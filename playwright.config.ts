@@ -23,12 +23,12 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /workstation-webmcp\.spec\.ts/,
+      testIgnore: /workstation-(webmcp|voice)\.spec\.ts/,
     },
     // Real WebMCP runtime: Chrome stable with the WebMCP testing feature (exposes document.modelContext).
     {
       name: "chrome-webmcp",
-      testMatch: /workstation-webmcp\.spec\.ts/,
+      testMatch: /workstation-(webmcp|voice)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 }, launchOptions: { args: ["--enable-features=WebMCPTesting", "--autoplay-policy=no-user-gesture-required"] } },
     },
     ...(enableVisualChrome

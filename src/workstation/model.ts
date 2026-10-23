@@ -15,6 +15,11 @@ export interface RawEvent { id: string; trackId: string; tick: number; bytes: nu
 export interface TrackMix { volume: number; pan: number; expression: number; mute: boolean; solo: boolean }
 export interface Track { id: string; name: string; channel: number; color: string; mix: TrackMix; visible: boolean }
 
+/** Sound design layer (GBK extension): per-track SF2 generator overrides + global effects. Optional for older projects. */
+export interface SoundSettings {
+  tracks: Record<string, import("../sf2/voice-overrides.ts").VoiceOverride[]>;
+  effects: import("../sf2/voice-overrides.ts").EffectsParams | null;
+}
 export interface Selection { trackIds: string[]; startTick: number; endTick: number; noteIds: string[] }
 export interface Loop { enabled: boolean; startTick: number; endTick: number }
 
@@ -38,6 +43,7 @@ export interface Project {
   endTick: number;
   selection: Selection;
   loop: Loop;
+  sound?: SoundSettings;
 }
 
 export const DEFAULT_MIX: TrackMix = { volume: 100, pan: 64, expression: 127, mute: false, solo: false };

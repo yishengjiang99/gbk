@@ -30,6 +30,25 @@ Edit: `gbk_propose_note_patch, gbk_propose_cc_patch, gbk_generate_cc_curve, gbk_
 gbk_preview_proposal, gbk_commit_proposal, gbk_discard_proposal, gbk_undo, gbk_redo`.
 Music: `gbk_generate_counterpoint, gbk_generate_fugue_section`. Export: `gbk_prepare_midi_export, gbk_prepare_wav_export`
 (browser-local downloads only).
+Sound: `gbk_get_voice_settings` (read), `gbk_propose_voice_patch`, `gbk_set_effects` (both proposals). See
+[sound-design.md](sound-design.md).
+
+### Sound design tools
+- `gbk_get_voice_settings {trackId, key?=60, velocity?=100}` → the track's resolved preset and, per matching zone,
+  every editable generator as `{gen, native, zone, value, unit, overridden}` with `value` in human units
+  (seconds, Hz, dB, cents, %), plus `effectiveSends.reverb|chorus = {zonePercent, ccModulatorPercent,
+  overridePercent, effectivePercent}` (zone gen 16/15 + CC91/93 modulator at the playhead + override, clamped 0–100 %),
+  the track's override list and the global effects. Zones need a loaded SoundFont (otherwise a warning).
+- `gbk_propose_voice_patch {trackId, edits:[{param, mode, value, keyLo?, keyHi?}], replace?, summary?, baseRevision?}`.
+  `mode`: `set` = absolute in the param's unit (validated against the SF2 2.01 §8.1.3 range, e.g.
+  `volEnvRelease` 0.001–100 s), `add` = delta for dB/cents/%/semitone params, `scale` = factor for seconds/Hz params.
+  Returns a proposal (range = first ~8 s of the track for A/B); the Sound panel shows the B envelope dashed plus a diff list.
+- `gbk_set_effects {enabled?, roomSize?, damping?, reverbLevel?, chorusLevel?, chorusDepthMs?, chorusRateHz?, chorusDelayMs?}`
+  → proposal. `enabled:false` is the off switch.
+- `gbk_get_capabilities` now reports `controllers[91|93].audible = true`, `effects`, and `voiceEditing`.
+
+Example agent flow: `gbk_get_voice_settings` → `gbk_propose_voice_patch {edits:[{param:"volEnvRelease",mode:"set",value:3},
+{param:"reverbSend",mode:"set",value:60}]}` → `gbk_preview_proposal` A then B → `gbk_commit_proposal` (user presses Accept).
 
 ## Testing in Chrome
 Launch Chrome with `--enable-features=WebMCPTesting` (or the WebMCP origin trial) and use the

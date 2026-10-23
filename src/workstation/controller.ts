@@ -2,7 +2,7 @@
 import { cloneProject, emptyProject, type Project, type Selection, type Loop, type TrackMix } from "./model.ts";
 import { applyOps, summarizeOps, validateOps, WorkstationError, type Op } from "./ops.ts";
 import { serializeSmf } from "./smf.ts";
-import { tickToSec } from "./timing.ts";
+import { secToTick, tickToSec } from "./timing.ts";
 
 export { WorkstationError };
 export type ProposalStatus = "pending" | "committed" | "discarded" | "stale";
@@ -34,6 +34,8 @@ export interface WorkstationHost {
   listPresets?(): { index: number; bank: number; program: number; name: string }[];
   renderWav?(project: Project, signal?: AbortSignal): Promise<Blob>;
   download?(data: Blob | Uint8Array, filename: string): void;
+  /** SoundFont zones the track currently plays (its resolved preset), for voice inspection. */
+  trackRegions?(project: Project, trackId: string): { presetName: string; presetIndex: number; regions: import("../sf2/soundfont.ts").SF2Region[] } | null;
 }
 export type ApprovalHandler = (p: Proposal) => Promise<boolean>;
 
@@ -126,6 +128,14 @@ export class WorkstationController {
       if (o.op === "setCC") { ticks.push(o.startTick, o.endTick); tracks.add(o.trackId); }
       if (o.op === "addNotes") for (const n of o.notes) { ticks.push(n.tick, n.tick + n.duration); tracks.add(n.trackId); }
       if (o.op === "updateTrack") tracks.add(o.trackId);
+      if (o.op === "setVoicePatch") {
+        // Sound edits have no time range: audition the first ~8 s of the track's notes.
+        tracks.add(o.trackId);
+        const ns = original.notes.filter((n) => n.trackId === o.trackId);
+        const t0 = ns.length ? ns[0].tick : 0;
+        ticks.push(t0, Math.max(t0 + 1, Math.min(secToTick(original, tickToSec(original, t0) + 8), ns.length ? Math.max(...ns.map((n) => n.tick + n.duration)) : t0 + original.ppq * 8)));
+      }
+      if (o.op === "setEffects" && ticks.length === 0) { const t0 = original.notes[0]?.tick ?? 0; ticks.push(t0, Math.max(t0 + 1, secToTick(original, tickToSec(original, t0) + 8))); }
       if (o.op === "removeNotes" || o.op === "updateNotes") {
         const ids = new Set(o.op === "removeNotes" ? o.ids : o.updates.map((u) => u.id));
         for (const n of original.notes) if (ids.has(n.id)) { ticks.push(n.tick, n.tick + n.duration); tracks.add(n.trackId); }
@@ -211,7 +221,7 @@ export class WorkstationController {
   // ---- export --------------------------------------------------------------
   prepareMidiExport(): { bytes: Uint8Array; filename: string } {
     const safe = this.project.name.replace(/[^\w\- .]/g, "_").slice(0, 80) || "gbk";
-    return { bytes: serializeSmf(this.project), filename: `${safe}.mid` };
+    return { bytes: serializeSmf(this.project, { soundNrpn: true }), filename: `${safe}.mid` };
   }
   durationSec() { return tickToSec(this.project, this.project.endTick); }
 }

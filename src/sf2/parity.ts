@@ -23,6 +23,7 @@ export function renderScenario(s: Scenario, read: (path: string) => Uint8Array):
   const sr = s.sampleRate ?? 44100, frames = s.frames ?? 44100;
   const engine = new Sf2SynthEngine(sr, { maxVoices: s.maxVoices ?? 64 });
   engine.effectsEnabled = s.effects ?? false;
+  engine.sendCcModulators = false;   // GBK-only extension, absent in sf2player-swift
   if (s.masterGainDb !== undefined) engine.masterGainDb = s.masterGainDb;
   if (s.masterDynamics !== undefined) engine.masterDynamicsEnabled = s.masterDynamics;
   if (s.programs) engine.loadPrograms(sf);

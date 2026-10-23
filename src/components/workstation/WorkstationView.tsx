@@ -4,6 +4,7 @@ import { useWorkstation, workstation } from "./useWorkstation.ts";
 import { PianoRollEditor, type View } from "./PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "./AutomationLane.tsx";
 import { AgentPanel, useAgentToolsToggle } from "./AgentPanel.tsx";
+import { SoundPanel } from "./SoundPanel.tsx";
 import { tickToBarBeat, tickToSec } from "../../workstation/timing.ts";
 
 export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) {
@@ -126,7 +127,10 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
             ))}
           </div>
         </main>
-        <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />
+        <div className="ws-side">
+          <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />
+          <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />
+        </div>
       </div>
     </div>
   );

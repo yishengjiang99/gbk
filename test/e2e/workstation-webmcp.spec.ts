@@ -45,7 +45,7 @@ test("acceptance: real WebMCP tools drive the GBK workstation end to end", async
 
   // Inspect
   const caps = await tool(page, "gbk_get_capabilities");
-  expect(caps.data.controllers["91"].audible).toBe(false);
+  expect(caps.data.controllers["91"].audible).toBe(true);
   const sum = await tool(page, "gbk_get_project_summary");
   expect(sum.ok).toBe(true);
   const tracks = (await tool(page, "gbk_list_tracks")).data as any[];

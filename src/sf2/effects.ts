@@ -40,6 +40,20 @@ export class SF2Effects {
     this.buf = new Float32Array(o);
   }
 
+  /** GBK extension (not in the Swift port): global parameters. Not real-time critical; allocation-free. */
+  setParams(p: { roomSize?: number; damping?: number; reverbLevel?: number; chorusLevel?: number; chorusDepthMs?: number; chorusRateHz?: number; chorusDelayMs?: number }): void {
+    const c = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
+    if (Number.isFinite(p.roomSize)) this.roomFeedback = f(0.7 + 0.28 * c(p.roomSize!, 0, 1));
+    if (Number.isFinite(p.damping)) this.damp = f(0.4 * c(p.damping!, 0, 1));
+    if (Number.isFinite(p.reverbLevel)) this.reverbWet = f(0.7 * c(p.reverbLevel!, 0, 1));
+    if (Number.isFinite(p.chorusLevel)) this.chorusWet = c(p.chorusLevel!, 0, 1);
+    if (Number.isFinite(p.chorusRateHz)) this.chorusRateHz = c(p.chorusRateHz!, 0.01, 10);
+    // Delay line is 50 ms: keep base + depth inside it.
+    if (Number.isFinite(p.chorusDelayMs)) this.chorusBaseSec = c(p.chorusDelayMs!, 1, 30) / 1000;
+    if (Number.isFinite(p.chorusDepthMs)) this.chorusDepthSec = c(p.chorusDepthMs!, 0, 10) / 1000;
+    if (this.chorusDepthSec > this.chorusBaseSec - 0.0005) this.chorusDepthSec = Math.max(0, this.chorusBaseSec - 0.0005);
+  }
+
   clear(): void { this.buf.fill(0); this.combStore.fill(0); }
 
   private comb(k: number, x: number): number {

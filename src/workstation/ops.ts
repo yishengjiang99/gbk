@@ -1,3 +1,4 @@
+import { validateOverride, normalizeEffects, EFFECTS_RANGES, type VoiceOverride, type EffectsParams } from "../sf2/voice-overrides.ts";
 import { TRACK_COLORS, computeEndTick, newId, type CCEvent, type Note, type Project, type Track, type TrackMix } from "./model.ts";
 
 export type Op =
@@ -8,7 +9,10 @@ export type Op =
   | { op: "removeCC"; ids: string[] }
   | { op: "updateTrack"; trackId: string; name?: string; channel?: number; visible?: boolean; mix?: Partial<TrackMix> }
   | { op: "addTrack"; name: string; channel: number; id?: string }
-  | { op: "setProgram"; trackId: string; program: number; bankMsb: number; bankLsb: number };
+  | { op: "setProgram"; trackId: string; program: number; bankMsb: number; bankLsb: number }
+  /** merge: replaces entries with the same (gen, keyLo, keyHi) and keeps the rest; replace: the list becomes `overrides`. */
+  | { op: "setVoicePatch"; trackId: string; overrides: VoiceOverride[]; mode: "merge" | "replace" }
+  | { op: "setEffects"; params: Partial<EffectsParams> };
 
 export class WorkstationError extends Error {
   constructor(public code: string, message: string, public details?: unknown) { super(message); }
@@ -55,6 +59,19 @@ export function validateOps(p: Project, ops: Op[]): string[] {
       case "setProgram":
         if (!trackIds.has(o.trackId)) throw new WorkstationError("INVALID_ARGUMENT", `unknown track ${o.trackId}`);
         int(o.program, 0, 127, "program"); int(o.bankMsb, 0, 127, "bankMsb"); int(o.bankLsb, 0, 127, "bankLsb"); break;
+      case "setVoicePatch":
+        if (!trackIds.has(o.trackId)) throw new WorkstationError("INVALID_ARGUMENT", `unknown track ${o.trackId}`);
+        if (!Array.isArray(o.overrides) || o.overrides.length > 128) throw new WorkstationError("INVALID_ARGUMENT", "overrides must be an array of <= 128 entries");
+        for (const v of o.overrides) { const err = validateOverride(v); if (err) throw new WorkstationError("INVALID_ARGUMENT", err); }
+        break;
+      case "setEffects":
+        for (const [k, v] of Object.entries(o.params ?? {})) {
+          if (k === "enabled") { if (typeof v !== "boolean") throw new WorkstationError("INVALID_ARGUMENT", "enabled must be boolean"); continue; }
+          const r = EFFECTS_RANGES[k as keyof typeof EFFECTS_RANGES];
+          if (!r) throw new WorkstationError("INVALID_ARGUMENT", `unknown effects parameter ${k}`);
+          if (typeof v !== "number" || !(v >= r[0] && v <= r[1])) throw new WorkstationError("INVALID_ARGUMENT", `${k} must be in [${r[0]}, ${r[1]}]`);
+        }
+        break;
       default: throw new WorkstationError("INVALID_ARGUMENT", `unknown op ${(o as { op: string }).op}`);
     }
   }
@@ -90,6 +107,19 @@ export function applyOps(src: Project, ops: Op[]): Project {
         p.ccs = p.ccs.filter((c) => !(c.trackId === o.trackId && c.tick === 0 && (c.controller === 0 || c.controller === 32)));
         break;
       }
+      case "setVoicePatch": {
+        const sound = p.sound ?? (p.sound = { tracks: {}, effects: null });
+        const key = (v: VoiceOverride) => `${v.gen}:${v.keyLo ?? ""}:${v.keyHi ?? ""}`;
+        const clean = o.overrides.map((v) => ({ gen: v.gen, mode: v.mode, value: v.value, ...(v.keyLo !== undefined ? { keyLo: v.keyLo } : {}), ...(v.keyHi !== undefined ? { keyHi: v.keyHi } : {}) }));
+        const next = o.mode === "replace" ? clean : [...(sound.tracks[o.trackId] ?? []).filter((v) => !clean.some((c) => key(c) === key(v))), ...clean];
+        if (next.length) sound.tracks[o.trackId] = next; else delete sound.tracks[o.trackId];
+        break;
+      }
+      case "setEffects": {
+        const sound = p.sound ?? (p.sound = { tracks: {}, effects: null });
+        sound.effects = normalizeEffects({ ...(sound.effects ?? {}), ...o.params });
+        break;
+      }
       case "addTrack": p.tracks.push({ id: o.id ?? newId("trk"), name: o.name.slice(0, 128), channel: o.channel, color: TRACK_COLORS[p.tracks.length % TRACK_COLORS.length], visible: true, mix: { volume: 100, pan: 64, expression: 127, mute: false, solo: false } }); break;
     }
   }
@@ -109,6 +139,8 @@ export function summarizeOps(ops: Op[]): string {
       case "updateTrack": return `update track ${o.trackId}`;
       case "addTrack": return `add track "${o.name}"`;
       case "setProgram": return `set program ${o.program} (bank ${o.bankMsb}/${o.bankLsb}) on ${o.trackId}`;
+      case "setVoicePatch": return `${o.mode} ${o.overrides.length} voice override(s) on ${o.trackId}`;
+      case "setEffects": return `set effects ${Object.keys(o.params).join(", ")}`;
     }
   }).join("; ");
 }
