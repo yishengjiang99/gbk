@@ -2,7 +2,7 @@
 // project JSON is untrusted). Rebuilds a clean Project from known fields only; throws on anything malformed.
 import type { Project } from "../workstation/model.ts";
 
-export const SHARE_LIMITS = { projectJsonBytes: 6 * 1024 * 1024, tracks: 64, notes: 200_000, events: 200_000, raw: 2000, titleChars: 120, midiBytes: 2 * 1024 * 1024, wavBytes: 40 * 1024 * 1024 } as const;
+export const SHARE_LIMITS = { projectJsonBytes: 6 * 1024 * 1024, tracks: 64, notes: 200_000, events: 200_000, raw: 2000, titleChars: 120, midiBytes: 2 * 1024 * 1024, mp3Bytes: 15 * 1024 * 1024, wavBytes: 40 * 1024 * 1024 } as const;
 export class ShareValidationError extends Error { code = "INVALID_PROJECT"; }
 
 const bad = (m: string): never => { throw new ShareValidationError(m); };

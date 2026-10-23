@@ -8,11 +8,12 @@ import { sanitizeSharedProject, SHARE_LIMITS, ShareValidationError } from "../..
 import { currentSession, guardWrite } from "./agent.ts";
 
 const RIFF = (b: Uint8Array) => b.length > 44 && String.fromCharCode(...b.subarray(0, 4)) === "RIFF" && String.fromCharCode(...b.subarray(8, 12)) === "WAVE";
+const MP3 = (b: Uint8Array) => b.length > 4 && ((b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0));
 const MTHD = (b: Uint8Array) => b.length > 14 && String.fromCharCode(...b.subarray(0, 4)) === "MThd";
 
 export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: ShareStore, uploadLimiter: RateLimiter) {
   const origin = cfg.publicOrigin;
-  app.addContentTypeParser(["audio/wav", "audio/midi", "application/octet-stream"], { parseAs: "buffer", bodyLimit: SHARE_LIMITS.wavBytes }, (_req, body, done) => done(null, body));
+  app.addContentTypeParser(["audio/wav", "audio/midi", "audio/mpeg", "application/octet-stream"], { parseAs: "buffer", bodyLimit: SHARE_LIMITS.wavBytes }, (_req, body, done) => done(null, body));
 
   app.post("/api/shares", { bodyLimit: SHARE_LIMITS.projectJsonBytes + 4096 }, async (req, reply) => {
     const s = currentSession(req, sessions);
@@ -40,7 +41,8 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (!Buffer.isBuffer(buf)) return reply.code(415).send({ code: "BAD_TYPE", message: "send raw bytes" });
     if (kind === "wav") { if (!RIFF(buf)) return reply.code(422).send({ code: "INVALID_WAV", message: "not a RIFF/WAVE file" }); }
     else if (kind === "midi") { if (buf.length > SHARE_LIMITS.midiBytes || !MTHD(buf)) return reply.code(422).send({ code: "INVALID_MIDI", message: "not a Standard MIDI File or too large" }); }
-    else return reply.code(404).send({ code: "NOT_FOUND", message: "kind must be wav or midi" });
+    else if (kind === "mp3") { if (buf.length > SHARE_LIMITS.mp3Bytes || !MP3(buf)) return reply.code(422).send({ code: "INVALID_MP3", message: "not an MP3 file or too large" }); }
+    else return reply.code(404).send({ code: "NOT_FOUND", message: "kind must be wav, mp3 or midi" });
     const metaHdr = req.headers["x-gbk-wav-meta"];
     let meta: unknown = null; if (typeof metaHdr === "string") { try { meta = JSON.parse(metaHdr.slice(0, 2000)); } catch { meta = null; } }
     store.setMedia(slug, kind, new Uint8Array(buf), kind === "wav" ? { bytes: buf.length, ...(meta && typeof meta === "object" ? meta : {}) } : undefined);
@@ -68,9 +70,9 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
   app.get("/api/shares/:slug/media/:kind", async (req, reply) => {
     const { slug, kind } = req.params as { slug: string; kind: string };
     const row = visible(req, slug);
-    const bytes = row ? (kind === "wav" ? row.wav : kind === "midi" ? row.midi : null) : null;
+    const bytes = row ? (kind === "wav" ? row.wav : kind === "midi" ? row.midi : kind === "mp3" ? row.mp3 : null) : null;
     if (!row || !bytes) return reply.code(404).send({ code: "NOT_FOUND", message: "no such media" });
-    reply.header("content-type", kind === "wav" ? "audio/wav" : "audio/midi").header("x-content-type-options", "nosniff").header("content-disposition", `inline; filename="${row.slug}.${kind === "wav" ? "wav" : "mid"}"`).header("cache-control", "public, max-age=300");
+    reply.header("content-type", kind === "wav" ? "audio/wav" : kind === "mp3" ? "audio/mpeg" : "audio/midi").header("x-content-type-options", "nosniff").header("content-disposition", `inline; filename="${row.slug}.${kind === "midi" ? "mid" : kind}"`).header("cache-control", "public, max-age=300");
     return reply.send(Buffer.from(bytes));
   });
   app.patch("/api/shares/:slug", async (req, reply) => {

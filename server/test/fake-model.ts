@@ -62,6 +62,7 @@ export function startFakeModel(port = 0, opts: { failFirst?: number; usage?: boo
   const server: Server = createServer((req, res) => {
     let body = ""; req.on("data", (c) => (body += c));
     req.on("end", () => {
+      if (req.url === "/healthz") { res.writeHead(200).end("ok"); return; }
       if (req.url !== "/v1/chat/completions" || req.headers.authorization !== "Bearer fake-key") { res.writeHead(401).end('{"error":{"message":"bad key"}}'); return; }
       if (fails > 0) { fails--; res.writeHead(429, { "retry-after": "0" }).end('{"error":{"message":"slow down"}}'); return; }
       const j = JSON.parse(body); requests.push({ messages: j.messages, tools: j.tools ?? [] });

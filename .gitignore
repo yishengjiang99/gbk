@@ -13,3 +13,5 @@ webmcp-origin-trial.local.json
 # Song catalog: lossless WAVs live in GitHub Releases (song-<dir>), the gallery is generated at build time
 songs/*/song.wav
 public/songs/
+server/dist/
+composer-data/
