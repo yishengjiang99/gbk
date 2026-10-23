@@ -105,3 +105,39 @@
 /* Page background matches the compose theme full height (no seam where .xp's 100vh box ends). */
 html:has(.xp), html:has(.xp) body, html:has(.ws), html:has(.ws) body { background: #161b24; }
 .xp { min-height: 100dvh; }
+
+/* ---- Studio fits the viewport: zero vertical scrolling (page and panels). Overflow flows sideways instead. ---- */
+html:has(.ws), html:has(.ws) body { height: 100%; overflow: hidden; }
+.ws { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+.ws-header { position: relative; flex: 0 0 auto; }
+.ws-body { flex: 1 1 0; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr); }
+.ws-tracks { max-height: none; height: 100%; overflow-y: hidden; }
+.ws-main { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.ws-roll-slot { flex: 1 1 0; min-height: 120px; overflow: hidden; }
+.ws-lanes { flex: 0 0 auto; } .ws-lane-pager { display: inline-flex; gap: 4px; align-items: center; margin-left: auto; }
+.ws-side { display: flex; flex-direction: column; min-height: 0; height: 100%; max-height: none; overflow: hidden; }
+.ws-tabs { display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid #353d4d; flex: 0 0 auto; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ws-tabs button { white-space: nowrap; } .ws-tabs button.on { background: #2f6fd6; border-color: #6aa6ff; color: #fff; }
+.ws-tabbody { flex: 1 1 0; min-height: 0; overflow: hidden; position: relative; }
+/* Multi-column flow: content taller than the panel continues in the next column (horizontal scroll, never vertical). */
+.ws-flow { overflow-x: auto; overflow-y: hidden; column-width: 260px; column-gap: 10px; column-fill: auto; }
+.ws-flow > * > *, .ws-track { break-inside: avoid; }
+.ws-flow .ws-agent { max-height: none; overflow: visible; }
+.ws-tabfill { height: 100%; }
+.ws-tab-composer .cmp { height: 100%; min-height: 0; border-bottom: 0; overflow: hidden; }
+.ws-tab-composer .cmp > * { flex: 0 0 auto; }
+.ws-tab-composer .cmp-messages { display: block; flex: 1 1 0; min-height: 40px; max-height: none; overflow-x: auto; overflow-y: hidden; column-width: 300px; column-gap: 10px; column-fill: auto; }
+.ws-tab-composer .cmp-messages > * { break-inside: avoid; margin-bottom: 6px; }
+.ws-tab-composer .cmp-input textarea { resize: none; }
+.ws-tab-composer .cmp-share, .ws-tab-composer .cmp-settings { max-height: 40%; overflow-x: auto; overflow-y: hidden; }
+@media (max-width: 900px) {
+  .ws-header { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: none; }
+  .ws-header > * { flex: 0 0 auto; }
+  .ws-header button[aria-label]::after { display: none; } /* hover tooltips would hang below the clipped header strip */
+  .ws-body, .ws-body:has(.cmp) { display: flex; flex-direction: column; }
+  .ws-main { flex: 1 1 0; height: auto; }
+  .ws-side { flex: 0 0 38%; height: auto; border-left: 0; border-top: 1px solid #353d4d; }
+  .ws-tracks { border-right: 0; max-height: none; }
+  .ws-tabbody > .ws-tracks { display: contents; }
+}
+.ws-tracks.ws-flow { column-width: 180px; }

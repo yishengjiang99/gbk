@@ -173,3 +173,26 @@ test("theme: landing background is uniform full height; Keys track picker is dar
   expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(26, 32, 41)");
   await page.getByTestId("live-keyboard").screenshot({ path: `${SHOTS}/keys-track-picker.png` });
 });
+
+test("studio fits the viewport: no vertical scrolling of the page or any panel", async ({ page }) => {
+  for (const [w, h] of [[1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
+    await page.getByTestId("keys-toggle").click(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
+    for (const t of ["tracks", "composer", "agent", "sound", "files"]) {
+      const tab = page.getByTestId(`tab-${t}`); if (await tab.count()) await tab.click();
+      const r = await page.evaluate(() => {
+        const bad: string[] = [];
+        for (const e of document.querySelectorAll(".ws, .ws *")) {
+          if (e.closest("[hidden]") || e.tagName === "TEXTAREA" || e.tagName === "SELECT") continue;
+          const c = getComputedStyle(e);
+          if (c.overflowY !== "visible" && e.scrollHeight > e.clientHeight + 2 && e.clientHeight > 0) bad.push(`${e.tagName}.${e.className} ${e.scrollHeight}/${e.clientHeight}`);
+        }
+        return { doc: document.scrollingElement!.scrollHeight, inner: innerHeight, bad };
+      });
+      expect(r.doc, `${w}x${h} ${t}: page`).toBeLessThanOrEqual(r.inner);
+      expect(r.bad, `${w}x${h} ${t}: panels`).toEqual([]);
+    }
+    await page.mouse.wheel(0, 2000); expect(await page.evaluate(() => scrollY)).toBe(0);
+  }
+});

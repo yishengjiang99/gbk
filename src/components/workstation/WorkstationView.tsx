@@ -1,4 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+/** Live content-box size of an element (the studio is a fixed 100dvh layout; children size from it). */
+function useBox<T extends HTMLElement>() {
+  const [box, setBox] = useState({ w: 0, h: 0 }); const ro = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: T | null) => {
+    ro.current?.disconnect(); ro.current = null;
+    if (!el) { setBox({ w: 0, h: 0 }); return; }
+    const m = () => setBox((o) => (o.w === el.clientWidth && o.h === el.clientHeight ? o : { w: el.clientWidth, h: el.clientHeight }));
+    ro.current = new ResizeObserver(m); ro.current.observe(el); m();
+  }, []);
+  return [ref, box] as const;
+}
+function useMedia(q: string) {
+  const [m, setM] = useState(() => typeof matchMedia === "function" && matchMedia(q).matches);
+  useEffect(() => { const mq = matchMedia(q); const f = () => setM(mq.matches); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); }, [q]);
+  return m;
+}
+const LANE_H = 48, LANE_BLOCK = LANE_H + 40, ROLL_MIN = 120;
 import { followScroll } from "../../workstation/follow.ts";
 import { useWorkstation, workstation } from "./useWorkstation.ts";
 import { PianoRollEditor, type View } from "./PianoRollEditor.tsx";
@@ -44,6 +62,20 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   // Playhead follow (page-style), rAF-driven: React only re-renders when the page flips.
   const [follow, setFollow] = useState(true);
   const [keysOn, setKeysOn] = useState(false);
+  const narrow = useMedia("(max-width: 900px)");
+  const [mainRef, mainBox] = useBox<HTMLElement>();
+  const [rollRef, rollBox] = useBox<HTMLDivElement>();
+  const [keysRef, keysBox] = useBox<HTMLDivElement>();
+  const tabs = useMemo(() => [...(narrow ? ["Tracks"] : []), ...(composer ? ["Composer"] : []), "Agent", "Sound", "Files"], [narrow, composer]);
+  const [tab, setTab] = useState<string | null>(null);
+  const want = tab ?? (composer ? "Composer" : "Agent");
+  const activeTab = tabs.includes(want) ? want : tabs[0];
+  const pendingCount = state.proposals.filter((x) => x.status === "pending").length;
+  const lastPending = useRef(pendingCount);
+  useEffect(() => { if (pendingCount > lastPending.current && !composer) setTab("Agent"); lastPending.current = pendingCount; }, [pendingCount]);
+  // Lanes get what is left after the roll's minimum + Keys; extra lanes page instead of scrolling.
+  const laneRoom = Math.max(0, Math.floor((mainBox.h - ROLL_MIN - (keysOn ? keysBox.h : 0) - 32) / LANE_BLOCK)); const laneFit = Math.max(1, laneRoom);
+  const [lanePage, setLanePage] = useState(0);
   const followRef = useRef(true); followRef.current = follow;
   const viewRef = useRef(view); viewRef.current = view;
   useEffect(() => {
@@ -106,7 +138,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
         <button className="ws-player-btn" onClick={onOpenPlayer} data-testid="open-player">Player / Library</button>
       </header>
       <div className="ws-body">
-        <nav className="ws-tracks" aria-label="Tracks">
+        {!narrow && <nav className="ws-tracks ws-flow" aria-label="Tracks">
           {p.tracks.length === 0 && <p className="ws-dim">Open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
           {p.meta?.key && <div className="ws-dim" data-testid="ws-key">Key: {p.meta.key}{p.meta.sections?.length ? ` · ${p.meta.sections.length} sections` : ""}</div>}
           {p.tracks.map((t) => {
@@ -130,25 +162,67 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
               </div>
             );
           })}
-        </nav>
-        <main className="ws-main">
-          <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={360} onManualScroll={() => setFollow(false)} onWidth={(px) => { rollPx.current = px; }} />
-          {keysOn && <LiveKeyboard workstation={workstation} />}
+        </nav>}
+        <main className="ws-main" ref={mainRef}>
+          <div className="ws-roll-slot" ref={rollRef}>
+            <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={Math.max(ROLL_MIN, Math.floor(rollBox.h))} onManualScroll={() => setFollow(false)} onWidth={(px) => { rollPx.current = px; }} />
+          </div>
+          {keysOn && <div ref={keysRef}><LiveKeyboard workstation={workstation} /></div>}
           <div className="ws-lanes">
-            <div className="ws-row ws-dim">Automation for <b style={{ color: trackForLanes?.color }}>{trackForLanes?.name ?? "–"}</b>
-              <button onClick={() => setLanes([...lanes, 7])}>+ lane</button>
-            </div>
-            {trackForLanes && lanes.map((l, i) => (
-              <AutomationLane key={i} project={p} proposal={focus} view={view} trackId={trackForLanes.id} lane={l}
-                onChangeLane={(nl) => setLanes(lanes.map((x, j) => (j === i ? nl : x)))} onRemove={() => setLanes(lanes.filter((_, j) => j !== i))} />
-            ))}
+            {(() => {
+              const pages = Math.max(1, Math.ceil(lanes.length / laneFit)); const pg = Math.min(lanePage, pages - 1);
+              return (<>
+                <div className="ws-row ws-dim">Automation for <b style={{ color: trackForLanes?.color }}>{trackForLanes?.name ?? "–"}</b>
+                  <button onClick={() => { setLanes([...lanes, 7]); setLanePage(Math.floor(lanes.length / laneFit)); }}>+ lane</button>
+                  {pages > 1 && <span className="ws-lane-pager" data-testid="lane-pager">
+                    <button aria-label="Previous lanes" disabled={pg === 0} onClick={() => setLanePage(pg - 1)}>‹</button>
+                    lanes {pg * laneFit + 1}–{Math.min(lanes.length, (pg + 1) * laneFit)} of {lanes.length}
+                    <button aria-label="Next lanes" disabled={pg >= pages - 1} onClick={() => setLanePage(pg + 1)}>›</button></span>}
+                </div>
+                {!laneRoom && lanes.length > 0 && <span className="ws-dim" data-testid="lanes-no-room"> · {lanes.length} lane{lanes.length === 1 ? "" : "s"} hidden: close Keys for room</span>}
+                {trackForLanes && laneRoom > 0 && lanes.map((l, i) => (i < pg * laneFit || i >= (pg + 1) * laneFit) ? null : (
+                  <AutomationLane key={i} project={p} proposal={focus} view={view} trackId={trackForLanes.id} lane={l} height={LANE_H}
+                    onChangeLane={(nl) => setLanes(lanes.map((x, j) => (j === i ? nl : x)))} onRemove={() => setLanes(lanes.filter((_, j) => j !== i))} />
+                ))}
+              </>);
+            })()}
           </div>
         </main>
         <div className="ws-side">
-          {composer && <ComposerPanel project={p} readOnly={workstation.readOnlyReason} />}
-          <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />
-          <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />
-          <ArtifactPanel />
+          <div className="ws-tabs" role="tablist" aria-label="Panels">
+            {tabs.map((t) => <button key={t} role="tab" aria-selected={t === activeTab} className={t === activeTab ? "on" : ""} data-testid={`tab-${t.toLowerCase()}`} onClick={() => setTab(t)}>{t}{t === "Agent" && pendingCount ? ` (${pendingCount})` : ""}</button>)}
+          </div>
+          <div className={`ws-tabbody ${activeTab === "Composer" ? "ws-tab-composer" : "ws-flow"}`} role="tabpanel" aria-label={activeTab}>
+            {activeTab === "Tracks" && <nav className="ws-tracks" aria-label="Tracks">
+          {p.tracks.length === 0 && <p className="ws-dim">Open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
+          {p.meta?.key && <div className="ws-dim" data-testid="ws-key">Key: {p.meta.key}{p.meta.sections?.length ? ` · ${p.meta.sections.length} sections` : ""}</div>}
+          {p.tracks.map((t) => {
+            const ov = state.overrides[t.id];
+            const count = p.notes.filter((n) => n.trackId === t.id).length;
+            return (
+              <div key={t.id} className={`ws-track ${trackForLanes?.id === t.id ? "active" : ""}`} data-testid={`track-${t.name}`}>
+                <div className="ws-row">
+                  <span className="ws-swatch" style={{ background: t.color }} />
+                  <button className="ws-link" onClick={() => workstation.setSelection({ trackIds: [t.id] })} title={t.name}>{t.name}</button>
+                  <span className="ws-dim">ch{t.channel + 1} · {count}</span>
+                </div>
+                <div className="ws-row">
+                  <label><input type="checkbox" checked={t.visible} onChange={(e) => workstation.edit([{ op: "updateTrack", trackId: t.id, visible: e.target.checked }], { label: "toggle visibility" })} />show</label>
+                  <label><input type="checkbox" checked={t.mix.mute} onChange={(e) => workstation.setTrackMixDefault(t.id, { mute: e.target.checked })} />M</label>
+                  <label><input type="checkbox" checked={t.mix.solo} onChange={(e) => workstation.setTrackMixDefault(t.id, { solo: e.target.checked })} />S</label>
+                </div>
+                <label className="ws-knob">vol <input type="range" min={0} max={127} value={ov?.volume ?? t.mix.volume} onChange={(e) => workstation.setTrackMixDefault(t.id, { volume: +e.target.value })} /></label>
+                <label className="ws-knob">pan <input type="range" min={0} max={127} value={ov?.pan ?? t.mix.pan} onChange={(e) => workstation.setTrackMixDefault(t.id, { pan: +e.target.value })} /></label>
+                {ov && <button className="ws-link" onClick={() => workstation.setOverride(t.id, null)}>clear live override</button>}
+              </div>
+            );
+          })}
+            </nav>}
+            {composer && <div hidden={activeTab !== "Composer"} className="ws-tabfill"><ComposerPanel project={p} readOnly={workstation.readOnlyReason} /></div>}
+            {activeTab === "Agent" && <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />}
+            {activeTab === "Sound" && <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />}
+            {activeTab === "Files" && <ArtifactPanel />}
+          </div>
         </div>
       </div>
     </div>
