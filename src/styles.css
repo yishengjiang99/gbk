@@ -2251,3 +2251,14 @@ tbody tr.selected {
     padding: 0.6rem 0;
   }
 }
+
+/* Autonomous composition + render artifacts */
+.ws-session { border: 1px solid #e0c080; background: rgba(224,192,128,0.08); padding: 6px; border-radius: 6px; font-size: 12px; margin: 6px 0; }
+.ws-artifacts { margin-top: 10px; font-size: 12px; }
+.ws-job { border: 1px solid #333a46; border-radius: 6px; padding: 6px; margin: 4px 0; }
+.ws-job.failed { border-color: #e57373; }
+.ws-progress { height: 6px; background: #23262e; border-radius: 3px; overflow: hidden; margin: 4px 0; }
+.ws-progress > div { height: 100%; background: #4fc3f7; transition: width 0.2s; }
+.ws-artifact-list { list-style: none; padding: 0; margin: 0; }
+.ws-artifact-list li { border-bottom: 1px solid #2a2e37; padding: 6px 0; }
+.ws-artifact-list a { color: #80d8ff; margin-right: 8px; }

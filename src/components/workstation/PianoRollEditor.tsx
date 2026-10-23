@@ -88,6 +88,20 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
         }
         g.setLineDash([]);
       }
+      // song structure: section bands + labels, tempo / meter change markers (from the project model)
+      const SEC_COLORS = ["rgba(79,195,247,0.10)", "rgba(255,183,77,0.10)", "rgba(129,199,132,0.10)", "rgba(186,104,200,0.10)"];
+      (project.meta?.sections ?? []).forEach((sec, i) => {
+        const b0 = barsMemo[sec.startBar - 1], b1 = barsMemo[sec.startBar - 1 + sec.bars];
+        if (!b0) return;
+        const t0 = b0.tick, t1 = b1 ? b1.tick : b0.tick + b0.length * sec.bars;
+        if (t1 < view.scrollTick || t0 > endTick) return;
+        g.fillStyle = SEC_COLORS[i % SEC_COLORS.length]; g.fillRect(x(t0), 12, (t1 - t0) * view.pxPerTick, height - 12);
+        g.fillStyle = "#e0c080"; g.fillRect(x(t0), 0, 2, height);
+        g.fillStyle = "#ffd180"; g.fillText(`§ ${sec.name}${sec.energy !== undefined ? ` (${Math.round(sec.energy * 100)}%)` : ""}`, x(t0) + 4, 22);
+      });
+      g.fillStyle = "#80d8ff";
+      for (const t of project.tempos) if (t.tick > 0 && t.tick >= view.scrollTick && t.tick <= endTick) { g.fillRect(x(t.tick), height - 14, 1, 14); g.fillText(`♩=${Math.round(60e6 / t.microPerQuarter)}`, x(t.tick) + 3, height - 4); }
+      for (const t of project.timeSigs) if (t.tick > 0 && t.tick >= view.scrollTick && t.tick <= endTick) g.fillText(`${t.numerator}/${t.denominator}`, x(t.tick) + 3, height - 16);
       // keyboard
       for (let p = view.lowPitch; p <= view.highPitch; p++) {
         g.fillStyle = [1, 3, 6, 8, 10].includes(p % 12) ? "#222" : "#ddd"; g.fillRect(0, y(p), KEY_W - 2, rowH - 0.5);

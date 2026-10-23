@@ -47,6 +47,15 @@ export function AgentPanel({ state, focusProposal, setFocus }: { state: Workstat
       <div className="ws-kv"><b>Last tool</b><span data-testid="last-tool">{lastAgent ? `${lastAgent.action} ${lastAgent.ok ? "✓" : "✗"} ${lastAgent.detail ?? ""}` : "–"}</span></div>
       <div className="ws-kv"><b>Last action</b><span>{last ? `${last.source}: ${last.action}` : "–"}</span></div>
       <div className="ws-kv"><b>Selection</b><span>{state.project.selection.endTick > state.project.selection.startTick ? `ticks ${state.project.selection.startTick}–${state.project.selection.endTick}, ${state.project.selection.noteIds.length} notes` : "none"}</span></div>
+      {state.session && (
+        <div className="ws-session" data-testid="agent-session" role="status">
+          <b>Autonomous session</b> on agent project <i>{state.project.id === state.session.projectId ? state.project.name : state.session.projectId}</i>: the agent's edits to this new project apply without per-change approval (still undoable). Your other projects still need Accept.
+          <div className="ws-row">
+            <button onClick={() => workstation.endSession()} data-testid="end-session">End session</button>
+            <button onClick={() => { if (confirm("Undo all of the agent's work on this project?")) workstation.discardAutonomousWork(); }}>Discard agent work</button>
+          </div>
+        </div>
+      )}
       <div className="ws-kv"><b>Revision</b><span data-testid="revision">{state.project.revision}</span></div>
       {state.previewing && <div className="ws-kv"><b>Previewing</b><span>{state.previewing}</span></div>}
       <div className="ws-row">
