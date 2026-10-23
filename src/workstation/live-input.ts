@@ -34,6 +34,11 @@ export function isTypingTarget(el: ElementLike | null | undefined): boolean {
   return !!el.closest?.("[contenteditable=''],[contenteditable='true'],[data-no-live-keys]");
 }
 
+/** The workstation's selected track (first of selection.trackIds), else the first track. Shared by the Keys panel, lanes and Sound panel. */
+export function selectedTrackId(p: { tracks: { id: string }[]; selection: { trackIds: string[] } }): string | null {
+  return p.tracks.find((t) => p.selection.trackIds.includes(t.id))?.id ?? p.tracks[0]?.id ?? null;
+}
+
 export type MidiMsg =
   | { type: "noteOn"; channel: number; note: number; velocity: number }
   | { type: "noteOff"; channel: number; note: number }
@@ -92,10 +97,7 @@ export class LiveInputSession {
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   private emit() { for (const l of this.listeners) l(); }
   /** Selected track (first of the selection), else the first track. */
-  get trackId(): string | null {
-    const p = this.c.project;
-    return p.tracks.find((t) => p.selection.trackIds.includes(t.id))?.id ?? p.tracks[0]?.id ?? null;
-  }
+  get trackId(): string | null { return selectedTrackId(this.c.project); }
   get recording(): boolean { return this.armed && this.c.getState().transport.playing; }
   snapshot(): LiveSnapshot { return { octave: this.octave, velocity: this.velocity, armed: this.armed, recording: this.recording, active: [...this.active.keys()].sort((a, b) => a - b), trackId: this.trackId, lastTake: this.lastTake }; }
 

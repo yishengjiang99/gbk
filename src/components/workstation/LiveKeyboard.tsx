@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useReducer } from "react";
 import type { WorkstationController } from "../../workstation/controller.ts";
 import { LiveInputSession, keyAction, isTypingTarget, KEY_NOTE_OFFSETS } from "../../workstation/live-input.ts";
+import { loadSoundFont } from "../../audio/soundfont-loader.ts";
+import { useWorkstation } from "./useWorkstation.ts";
 import { MidiInputManager } from "../../workstation/midi-input.ts";
 import { Sf2LiveSink } from "../../workstation/live-sink.ts";
 
@@ -26,8 +28,11 @@ export function LiveKeyboard({ workstation }: { workstation: WorkstationControll
   const { session, midi, sink } = useMemo(() => liveRig(workstation), [workstation]);
   const [, bump] = useReducer((x: number) => x + 1, 0);
   useEffect(() => { const a = session.subscribe(bump), b = midi.subscribe(bump); return () => { a(); b(); }; }, [session, midi]);
+  const ws = useWorkstation(); // re-render on selection / program / mix changes (the shared workstation state)
   const s = session.snapshot();
-  useEffect(() => { sink.refresh(s.trackId); }, [s.trackId]);
+  // No track selected: select the first one in the workstation itself (same state the track list + piano roll use).
+  useEffect(() => { const p = ws.project; if (p.tracks.length && !p.tracks.some((t) => p.selection.trackIds.includes(t.id))) workstation.setSelection({ trackIds: [p.tracks[0].id] }); }, [ws.project.id, ws.project.tracks.length]);
+  useEffect(() => { void loadSoundFont().then(bump, () => undefined); }, []);
   // Computer keyboard: only while the panel is open, never while typing.
   useEffect(() => {
     const held = new Map<string, number>();
@@ -47,13 +52,20 @@ export function LiveKeyboard({ workstation }: { workstation: WorkstationControll
 
   const base = (s.octave + 1) * 12;
   const notes = Array.from({ length: 25 }, (_, i) => base + i).filter((n) => n <= 127);
-  const track = workstation.project.tracks.find((t) => t.id === s.trackId);
+  const track = ws.project.tracks.find((t) => t.id === s.trackId);
+  const inst = sink.describe(s.trackId);
   const press = (n: number) => (e: React.PointerEvent) => { e.preventDefault(); (e.target as Element).setPointerCapture?.(e.pointerId); void sink.prepare().catch(() => undefined); session.noteOn(n); };
   const release = (n: number) => () => session.noteOff(n);
   return (
     <div className="ws-keys" data-testid="live-keyboard">
       <div className="ws-row ws-dim">
-        <span>Playing <b style={{ color: track?.color }}>{track?.name ?? "no track"}</b></span>
+        {ws.project.tracks.length === 0
+          ? <span className="ws-warn" data-testid="live-no-track">No tracks yet: add a track to play (the keyboard plays the selected track).</span>
+          : <label>Track <select aria-label="Keyboard track" data-testid="live-track" value={s.trackId ?? ""} onChange={(e) => workstation.setSelection({ trackIds: [e.target.value] })}>
+              {ws.project.tracks.map((t) => <option key={t.id} value={t.id}>{t.name} (ch{t.channel + 1})</option>)}
+            </select></label>}
+        {track && <span data-testid="live-instrument" data-preset-index={inst?.presetIndex ?? ""}>
+          <b style={{ color: track.color }}>{track.name}</b>: {inst ? `${inst.presetName} (${inst.bank}:${inst.program})` : "loading SoundFont…"}</span>}
         <button onClick={() => session.shiftOctave(-1)} aria-label="Octave down">Z ◀</button>
         <span data-testid="live-octave">C{s.octave}</span>
         <button onClick={() => session.shiftOctave(1)} aria-label="Octave up">▶ X</button>
