@@ -41,13 +41,18 @@ class PlayerBridge {
   private suppressNextImport = false;
   /** Set when an edited project was restored from IndexedDB; the player's startup re-load of the same song must not clobber it. */
   restored = false;
+  /** True while the page was opened on a share link; automatic startup loads are ignored. */
+  holdStartupLoads = false;
   ctrl: WorkstationController | null = null;
 
   attach(h: PlayerHandle | null) { this.handle = h; this.ctrl?.attachDriver(this.ctrl ? driverFor(this.ctrl) : null); }
   /** Player loaded a song the user picked (playlist/upload/Bach/sheet). Mirror it into the workstation. */
-  onPlayerLoadedBuffer(buf: ArrayBuffer, name: string, isSessionRestore = false) {
+  onPlayerLoadedBuffer(buf: ArrayBuffer, name: string, isSessionRestore = false, isStartup = false) {
     if (this.suppressNextImport) { this.suppressNextImport = false; return; }
     if (!this.ctrl) return;
+    // A /s/<slug> link is being (or has been) opened: the player's automatic startup song (default or last-played)
+    // must never replace the shared song. Only an explicit user pick in the player may.
+    if ((isStartup || isSessionRestore) && (this.holdStartupLoads || this.ctrl.project.meta?.sharedFrom)) return;
     const nm = name.replace(/\.(mid|midi)$/i, "");
     // Player re-opening its last song on startup must not clobber the edited project restored from IndexedDB.
     if (isSessionRestore && this.ctrl.project.revision > 0 && (this.ctrl.project.name === nm || this.ctrl.project.meta?.owner === "agent")) return;

@@ -1,0 +1,15 @@
+# Optional container build of the agent API (the grepawk host itself uses systemd; see docs/compose-deploy.md).
+FROM node:22-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY . .
+RUN npm run build:server
+FROM node:22-slim
+WORKDIR /app
+RUN npm init -y >/dev/null && npm i --omit=dev fastify@5 ws@8 && mkdir -p /data && chown node /data
+COPY --from=build /app/server/dist/index.mjs server/dist/index.mjs
+USER node
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 COMPOSER_DATA_DIR=/data
+EXPOSE 8080
+CMD ["node", "--disable-warning=ExperimentalWarning", "server/dist/index.mjs"]

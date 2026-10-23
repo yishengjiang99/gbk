@@ -26,7 +26,10 @@ function webMcpOriginTrial(): Plugin {
 
 export default defineConfig({
   plugins: [react(), webMcpOriginTrial()],
-  base: "/gbk/",
+  // "/" for compose.grepawk.com (default), "/gbk/" for the GitHub Pages build (GBK_BASE_PATH=/gbk/).
+  base: process.env.GBK_BASE_PATH ?? "/",
+  // Local dev / e2e only: proxy same-origin /api (+ WebSocket) to a Composer agent server, like nginx does in production.
+  ...(process.env.GBK_DEV_API_PROXY ? { server: { proxy: { "/api": { target: process.env.GBK_DEV_API_PROXY, ws: true, changeOrigin: false } } }, preview: { proxy: { "/api": { target: process.env.GBK_DEV_API_PROXY, ws: true, changeOrigin: false } } } } : {}),
   build: {
     rollupOptions: {
       input: {

@@ -227,6 +227,12 @@ export class MidiFileStore {
     await this.withStore(PROJECTS_STORE, "readwrite", (store) => requestToPromise(store.put(rec)), undefined);
   }
 
+  /** Every saved project record (for user-controlled export / migration). */
+  async listProjects(): Promise<StoredProjectRecord[]> {
+    const all = await this.withStore(PROJECTS_STORE, "readonly", (store) => requestToPromise(store.getAll()), [] as unknown[]);
+    return ((Array.isArray(all) ? all : []) as StoredProjectRecord[]).filter((r) => r && typeof r.id === "string");
+  }
+
   /** Most recently saved project record, or null. */
   async getLatestProject(): Promise<StoredProjectRecord | null> {
     const all = await this.withStore(PROJECTS_STORE, "readonly", (store) => requestToPromise(store.getAll()), [] as unknown[]);

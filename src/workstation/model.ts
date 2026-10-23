@@ -18,7 +18,9 @@ export interface Track { id: string; name: string; channel: number; color: strin
 /** Semantic arrangement section (1-based bars, inclusive start, `bars` long). */
 export interface Section { name: string; startBar: number; bars: number; energy?: number }
 /** Composition metadata (GBK extension, optional for older projects). owner=agent marks a project created by an agent. */
-export interface ProjectMeta { key?: string; sections?: Section[]; descriptors?: Record<string, string>; owner?: "user" | "agent"; createdAt?: number; style?: string; seed?: number }
+export interface ProjectMeta { key?: string; sections?: Section[]; descriptors?: Record<string, string>; owner?: "user" | "agent"; createdAt?: number; style?: string; seed?: number;
+  /** Loaded from a shared link (read-only until forked). */ sharedFrom?: { slug: string; title: string; owner: string; parentSlug?: string | null };
+  /** Slug of the shared song this project was forked from (recorded as parent_id when shared again). */ forkOf?: string }
 
 /** Sound design layer (GBK extension): per-track SF2 generator overrides + global effects. Optional for older projects. */
 export interface SoundSettings {

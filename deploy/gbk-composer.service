@@ -1,0 +1,25 @@
+[Unit]
+Description=GBK Composer agent API (compose.grepawk.com)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/gbk-composer/current
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/dist/index.mjs
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8792
+Environment=COMPOSER_DATA_DIR=/var/lib/gbk-composer
+EnvironmentFile=/etc/gbk-composer.env
+Restart=on-failure
+RestartSec=3
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/gbk-composer
+
+[Install]
+WantedBy=multi-user.target

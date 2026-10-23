@@ -45,6 +45,8 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          # GitHub Pages serves the repo under /gbk/ (compose.grepawk.com builds with GBK_BASE_PATH=/).
+          GBK_BASE_PATH: /gbk/
           # Optional WebMCP origin-trial token for https://yishengjiang99.github.io (see docs/webmcp.md). Empty = no meta tag.
           GBK_WEBMCP_ORIGIN_TRIAL_TOKEN: ${{ vars.GBK_WEBMCP_ORIGIN_TRIAL_TOKEN || secrets.GBK_WEBMCP_ORIGIN_TRIAL_TOKEN }}
       - name: Setup Pages

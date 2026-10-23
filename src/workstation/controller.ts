@@ -3,6 +3,8 @@ import { cloneProject, emptyProject, type Project, type Selection, type Loop, ty
 import { applyOps, summarizeOps, validateOps, WorkstationError, type Op } from "./ops.ts";
 import { serializeSmf } from "./smf.ts";
 import { secToTick, tickToSec } from "./timing.ts";
+import { newId } from "./model.ts";
+const newSharedId = () => newId("prj");
 
 export { WorkstationError };
 export type ProposalStatus = "pending" | "committed" | "discarded" | "stale";
@@ -84,6 +86,7 @@ export class WorkstationController {
 
   // ---- project lifecycle ---------------------------------------------------
   load(project: Project) {
+    this.readOnlyReason = null;
     if (this.session && this.session.projectId !== project.id) this.endSession("project switched");
     this.undoStack = []; this.redoStack = [];
     this.set({ project, proposals: [], overrides: {}, transport: { ...this.state.transport, playing: false, positionTick: 0 } });
@@ -155,7 +158,21 @@ export class WorkstationController {
     if (baseRevision !== undefined && baseRevision !== this.state.project.revision)
       throw new WorkstationError("STALE_REVISION", `baseRevision ${baseRevision} != current ${this.state.project.revision}`, { currentRevision: this.state.project.revision });
   }
+  /** Non-null while a shared song is open read-only (Fork to edit). Every mutation path refuses with READ_ONLY. */
+  readOnlyReason: string | null = null;
+  private assertWritable() { if (this.readOnlyReason) throw new WorkstationError("READ_ONLY", this.readOnlyReason); }
+  /** Open a shared (untrusted, already validated) song as a NEW local, read-only project. Never replaces the id of an existing project. */
+  loadShared(p: Project, reason = "This shared song is read-only. Press Fork to make your own editable copy.") {
+    this.load({ ...p, id: newSharedId(), revision: 0 }); this.readOnlyReason = reason; this.set({});
+  }
+  /** Fork: make the open shared song an editable project of this user, remembering its lineage. */
+  fork(): Project {
+    const src = this.project; const slug = src.meta?.sharedFrom?.slug;
+    const p: Project = { ...cloneProject(src), id: newSharedId(), revision: 0, name: src.name.endsWith("(fork)") ? src.name : `${src.name} (fork)`, meta: { ...(src.meta ?? {}), owner: "user", sharedFrom: undefined, ...(slug ? { forkOf: slug } : {}) } };
+    this.readOnlyReason = null; this.load(p); this.log("user", `fork${slug ? ` of ${slug}` : ""}`, true); return p;
+  }
   private commitProject(next: Project, label: string) {
+    this.assertWritable();
     const before = this.state.project;
     next.revision = before.revision + 1;
     this.undoStack.push({ label, before, after: next });
@@ -196,6 +213,7 @@ export class WorkstationController {
 
   // ---- proposals -----------------------------------------------------------
   propose(ops: Op[], opts: { baseRevision?: number; source?: "user" | "agent"; summary?: string } = {}): Proposal {
+    this.assertWritable();
     this.checkRev(opts.baseRevision);
     const original = this.project;
     const warnings = validateOps(original, ops);

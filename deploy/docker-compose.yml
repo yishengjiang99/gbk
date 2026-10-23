@@ -1,0 +1,15 @@
+# Optional self-contained stack (TLS terminated in front of `web`, e.g. by the host nginx/certbot).
+services:
+  agent:
+    build: { context: .., dockerfile: deploy/Dockerfile.agent }
+    env_file: /etc/gbk-composer.env
+    volumes: [composer-data:/data]
+    restart: unless-stopped
+    expose: ["8080"]
+  web:
+    build: { context: .., dockerfile: deploy/Dockerfile.frontend }
+    depends_on: [agent]
+    ports: ["127.0.0.1:8793:80"]
+    restart: unless-stopped
+volumes:
+  composer-data: {}

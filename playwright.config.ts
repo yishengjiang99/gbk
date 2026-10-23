@@ -15,7 +15,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1",
+    command: "GBK_BASE_PATH=${GBK_BASE_PATH:-/gbk/} npm run dev -- --host 127.0.0.1",
     url: baseURL,
     reuseExistingServer: true,
     timeout: 30_000,
@@ -24,7 +24,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /workstation-(webmcp|voice)\.spec\.ts|autonomous-compose\.spec\.ts|song-video\.spec\.ts/,
+      testIgnore: /workstation-(webmcp|voice)\.spec\.ts|autonomous-compose\.spec\.ts|song-video\.spec\.ts|composer\.spec\.ts/,
     },
     // Real WebMCP runtime: Chrome stable with the WebMCP testing feature (exposes document.modelContext).
     {

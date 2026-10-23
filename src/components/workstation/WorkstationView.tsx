@@ -8,10 +8,11 @@ import { LiveKeyboard } from "./LiveKeyboard.tsx";
 import { selectedTrackId } from "../../workstation/live-input.ts";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
+import { ComposerPanel } from "../composer/ComposerPanel.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
 import { tickToBarBeat, tickToSec } from "../../workstation/timing.ts";
 
-export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) {
+export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: { onOpenPlayer: () => void; composer?: boolean; onExplore?: () => void }) {
   const state = useWorkstation();
   const p = state.project;
   const agent = useAgentToolsToggle();
@@ -79,7 +80,9 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
   return (
     <div className="ws" data-testid="workstation">
       <header className="ws-header">
-        <strong className="ws-title">GBK Workstation</strong>
+        <strong className="ws-title">{composer ? "GBK Composer" : "GBK Workstation"}</strong>
+        {composer && onExplore && <button onClick={onExplore} data-testid="nav-explore">Explore</button>}
+        {workstation.readOnlyReason && <span className="ws-pill off" data-testid="readonly-pill" title={workstation.readOnlyReason}>read-only · <button className="ws-link" onClick={() => workstation.fork()}>Fork</button></span>}
         <span className="ws-name" title={p.name}>{p.name}</span>
         <div className="ws-transport" role="toolbar" aria-label="Transport">
           <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>
@@ -142,6 +145,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
           </div>
         </main>
         <div className="ws-side">
+          {composer && <ComposerPanel project={p} readOnly={workstation.readOnlyReason} />}
           <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />
           <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />
           <ArtifactPanel />

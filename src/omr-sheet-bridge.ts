@@ -25,7 +25,8 @@ import type {
 } from "./sheet-music-reader.ts";
 
 /** Base URL the OMR model files are served from. Override for CDN hosting. */
-export const OMR_MODEL_BASE_URL = "/omr-models/";
+const VITE_BASE = (() => { try { return (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? "/"; } catch { return "/"; } })();
+export const OMR_MODEL_BASE_URL = `${VITE_BASE}omr-models/`;
 
 /**
  * Same-origin base URL for the self-hosted onnxruntime-web WASM runtime
@@ -34,7 +35,7 @@ export const OMR_MODEL_BASE_URL = "/omr-models/";
  * the bundled JS version). Served lazily: nothing under this path is
  * requested until the first scan constructs the OMR worker.
  */
-const ORT_WASM_BASE = "/ort-runtime/";
+const ORT_WASM_BASE = `${VITE_BASE}ort-runtime/`;
 
 /** Upper bound for one transcription (model download + SegNet + decode). */
 const TRANSCRIBE_TIMEOUT_MS = 600_000;

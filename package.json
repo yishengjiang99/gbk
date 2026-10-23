@@ -14,24 +14,35 @@
     "test:e2e": "playwright test",
     "experiment:midi-clock": "node --import tsx/esm scripts/midi-clock-experiment.ts",
     "test:e2e:sweden:chrome": "PW_VISUAL_CHROME=1 PW_KEEP_CHROME_OPEN=1 playwright test test/e2e/sheet-music-scan.spec.ts --project=chrome-headed --grep \"sweden sheet photo transcribes close to the baseline MIDI\"",
-    "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.test.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.test.json && tsc --noEmit -p server/tsconfig.json",
     "test:e2e:ocr-fixture": "playwright test --config test/e2e/ocr-fixture.config.ts",
     "song:publish": "node --import tsx/esm scripts/song.ts publish",
     "song:video": "node --import tsx/esm scripts/song.ts video",
     "song:release": "node --import tsx/esm scripts/song.ts release",
-    "gen:songs": "node --import tsx/esm scripts/build-songs.ts"
+    "gen:songs": "node --import tsx/esm scripts/build-songs.ts",
+    "build:pages": "GBK_BASE_PATH=/gbk/ npm run build",
+    "build:compose": "GBK_BASE_PATH=/ npm run build",
+    "build:server": "esbuild server/src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=server/dist/index.mjs --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "start:server": "node --disable-warning=ExperimentalWarning server/dist/index.mjs",
+    "dev:server": "node --disable-warning=ExperimentalWarning --import tsx/esm server/src/index.ts",
+    "test:server": "node --disable-warning=ExperimentalWarning --import tsx/esm --test server/test/*.test.ts",
+    "test:e2e:composer": "playwright test --config test/e2e/composer.config.ts"
   },
   "dependencies": {
+    "fastify": "^5.12.7",
     "onnxruntime-web": "^1.30.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.28.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^5.4.11"
