@@ -1,3 +1,4 @@
+import { controllerStateAt, ctlToSynth, type CtlPlayEvent, type MixBase } from "./workstation/controller-events.ts";
 interface ParsedTempoEvent {
   seq: number;
   tick: number;
@@ -47,7 +48,17 @@ interface ParsedProgramEvent {
   channel: number;
 }
 
+interface ParsedCtlEvent {
+  seq: number;
+  tick: number;
+  type: "pitchBend" | "channelPressure" | "polyPressure";
+  channel: number;
+  note?: number;
+  value: number;
+}
+
 type ParsedTrackEvent =
+  | ParsedCtlEvent
   | ParsedTempoEvent
   | ParsedTimeSigEvent
   | ParsedNoteOnEvent
@@ -87,7 +98,7 @@ interface PlayProgramEvent {
   seq: number;
 }
 
-export type PlayEvent = PlayNoteOnEvent | PlayNoteOffEvent | PlayProgramEvent;
+export type PlayEvent = PlayNoteOnEvent | PlayNoteOffEvent | PlayProgramEvent | CtlPlayEvent;
 
 export interface NoteRecord {
   note: number;
@@ -135,6 +146,7 @@ interface WorkerTrackState {
   waitingForPreset: boolean;
   presetIndex: number | null;
   port: MessagePort | null;
+  channels: number[];
 }
 
 interface LoadMidiMsg {
@@ -181,7 +193,11 @@ type InboundMsg =
   | PlayMsg
   | PauseMsg
   | SeekMsg
-  | SetDebugPlaybackMsg;
+  | SetDebugPlaybackMsg
+  | SetMixBaseMsg;
+
+/** Mixer defaults (base layer) used when rebuilding controller state on seek/loop. */
+interface SetMixBaseMsg { type: "setMixBase"; trackIndex: number; cc7: number; cc10: number; cc11: number }
 
 interface WorkerGlobalCtx {
   postMessage(data: unknown): void;
@@ -281,6 +297,12 @@ function parseTrackBytes(trackU8: Uint8Array): ParsedTrack {
       events.push({ seq: seq++, tick, type: "cc", cc: d1 & 0x7f, value: d2 & 0x7f, channel });
     } else if (cmd === 0xc0) {
       events.push({ seq: seq++, tick, type: "program", program: d1 & 0x7f, channel });
+    } else if (cmd === 0xe0) {
+      events.push({ seq: seq++, tick, type: "pitchBend", channel, value: ((d2 & 0x7f) << 7) | (d1 & 0x7f) });
+    } else if (cmd === 0xd0) {
+      events.push({ seq: seq++, tick, type: "channelPressure", channel, value: d1 & 0x7f });
+    } else if (cmd === 0xa0) {
+      events.push({ seq: seq++, tick, type: "polyPressure", channel, note: d1 & 0x7f, value: d2 & 0x7f });
     }
   }
 
@@ -360,6 +382,12 @@ export function parseMidiBuffer(buffer: ArrayBuffer): Song {
       if (e.type === "cc") {
         if (e.cc === 0) bankMsb[e.channel] = e.value;
         if (e.cc === 32) bankLsb[e.channel] = e.value;
+        // Bank select is folded into the following program event; every other CC is timed + routed.
+        if (e.cc !== 0 && e.cc !== 32) playEvents.push({ sec, type: "cc", channel: e.channel, controller: e.cc, value: e.value, seq: e.seq });
+        continue;
+      }
+      if (e.type === "pitchBend" || e.type === "channelPressure" || e.type === "polyPressure") {
+        playEvents.push({ sec, type: e.type, channel: e.channel, note: e.note, value: e.value, seq: e.seq });
         continue;
       }
       if (e.type === "program") {
@@ -455,6 +483,18 @@ function postPlaybackDebug(data: Record<string, unknown>): void {
   });
 }
 
+const mixBase = new Map<number, MixBase>();
+
+/** Rebuild authored controller state (CC/bend/pressure) for every track at `sec` (seek/loop/start). */
+function restoreControllers(sec: number): void {
+  if (!song) return;
+  for (let i = 0; i < song.tracks.length; i += 1) {
+    const state = trackState[i];
+    if (!state?.port) continue;
+    for (const ev of controllerStateAt(song.tracks[i].playEvents, sec, mixBase.get(i))) state.port.postMessage(ctlToSynth(ev));
+  }
+}
+
 function clearTimer(): void {
   if (timer != null) clearInterval(timer);
   timer = null;
@@ -464,10 +504,15 @@ function stopNotes(): void {
   for (const state of trackState) {
     if (!state?.port) continue;
     for (const key of state.active) {
-      const note = Number(key.split(":")[1]);
-      state.port.postMessage({ type: "noteOff", note });
+      const [ch, note] = key.split(":").map(Number);
+      state.port.postMessage({ type: "noteOff", channel: ch, note });
     }
     state.active.clear();
+    // Release sustain/sostenuto so pedal-held voices never hang after pause/stop/seek.
+    for (const ch of state.channels) {
+      state.port.postMessage({ type: "controlChange", channel: ch, controller: 64, value: 0 });
+      state.port.postMessage({ type: "controlChange", channel: ch, controller: 66, value: 0 });
+    }
   }
 }
 
@@ -528,7 +573,7 @@ function runTick(): void {
           break;
         }
       } else if (ev.type === "noteOn") {
-        state.port.postMessage({ type: "noteOn", note: ev.note, velocity: ev.velocity });
+        state.port.postMessage({ type: "noteOn", channel: ev.channel, note: ev.note, velocity: ev.velocity });
         postPlaybackDebug({
           kind: "noteOn",
           trackIndex: i,
@@ -537,8 +582,11 @@ function runTick(): void {
           velocity: ev.velocity,
         });
         state.active.add(`${ev.channel}:${ev.note}`);
+      } else if (ev.type === "cc" || ev.type === "pitchBend" || ev.type === "channelPressure" || ev.type === "polyPressure") {
+        // Timed controller -> same track worklet, same MIDI channel -> engine controller/modulator state.
+        state.port.postMessage(ctlToSynth(ev));
       } else if (ev.type === "noteOff") {
-        state.port.postMessage({ type: "noteOff", note: ev.note });
+        state.port.postMessage({ type: "noteOff", channel: ev.channel, note: ev.note });
         state.active.delete(`${ev.channel}:${ev.note}`);
       }
       state.nextEventIndex += 1;
@@ -577,6 +625,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
         waitingForPreset: false,
         presetIndex: null,
         port: ports.get(t.index) ?? null,
+        channels: [...new Set(t.playEvents.map((e) => e.channel))],
       }));
       workerGlobal.postMessage({ type: "songLoaded", song });
     } catch (err) {
@@ -592,6 +641,11 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
     for (let i = 0; i < trackState.length; i += 1) {
       trackState[i].port = ports.get(i) ?? null;
     }
+    return;
+  }
+
+  if (msg.type === "setMixBase") {
+    mixBase.set(msg.trackIndex, { cc7: msg.cc7, cc10: msg.cc10, cc11: msg.cc11 });
     return;
   }
 
@@ -616,6 +670,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
       state.active.clear();
       state.waitingForPreset = false;
     }
+    restoreControllers(sec);
     lastTickEmit = sec;
     clearTimer();
     timer = setInterval(runTick, 5);
@@ -641,6 +696,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
       state.active.clear();
       state.waitingForPreset = false;
     }
+    restoreControllers(sec);
     startSec = sec;
     startPerf = performance.now();
     lastTickEmit = sec;

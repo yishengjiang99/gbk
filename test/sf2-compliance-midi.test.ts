@@ -24,18 +24,18 @@ test("test_MIDI02_sustainPedal", () => {
 
 test("test_MIDI03_sostenuto", () => {
   const r = new SpecRender(held());
-  r.noteOn(60); r.cc(67, 127); r.noteOn(62); r.noteOff(60); r.noteOff(62);
+  r.noteOn(60); r.cc(66, 127); r.noteOn(62); r.noteOff(60); r.noteOff(62);
   assert.deepEqual(voices(r).map((v) => v.note), [60, 62]);
   assert.deepEqual(releasing(r), [false, true]);
   r.cc(64, 127); r.cc(64, 0);
   assert.equal(releasing(r)[0], false);
-  r.cc(67, 0);
+  r.cc(66, 0);
   assert.equal(releasing(r)[0], true);
 });
 
 test("test_MIDI04_softPedal", () => {
   const r = new SpecRender(held([[Gen.initialFilterFc, 9000]]));
-  r.noteOn(60); r.cc(66, 127); r.noteOn(62);
+  r.noteOn(60); r.cc(67, 127); r.noteOn(62);
   const v = voices(r);
   near(v[1].initialFc, v[0].initialFc - Sf2SynthEngine.softPedalFcCents, 1e-9);
   near(A.db(v[1].baseGain / v[0].baseGain), -Sf2SynthEngine.softPedalAttenuationCb / 10, 0.01);
@@ -48,7 +48,7 @@ test("test_MIDI05_allSoundOffAllNotesOff", () => {
   r.cc(64, 0);
   assert.deepEqual(releasing(r), [true, true]);
   r = new SpecRender(held());
-  r.noteOn(60); r.cc(64, 127); r.cc(67, 127); r.cc(120, 0);
+  r.noteOn(60); r.cc(64, 127); r.cc(66, 127); r.cc(120, 0);
   assert.equal(r.render(1).l[0], 0);
   assert.equal(r.engine.voiceCount, 0);
 });
