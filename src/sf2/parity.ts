@@ -8,7 +8,7 @@ export interface ScenarioEvent {
   controller?: number; value?: number; program?: number; preset?: number;
 }
 export interface Scenario {
-  font: string; sampleRate?: number; frames?: number; effects?: boolean; strict?: boolean; programs?: boolean; maxVoices?: number;
+  font: string; sampleRate?: number; frames?: number; effects?: boolean; masterGainDb?: number; masterDynamics?: boolean; strict?: boolean; programs?: boolean; maxVoices?: number;
   tracks?: { trackIndex?: number; preset?: number; gain?: number; pan?: number }[];
   events?: ScenarioEvent[];
 }
@@ -22,6 +22,8 @@ export function renderScenario(s: Scenario, read: (path: string) => Uint8Array):
   const sr = s.sampleRate ?? 44100, frames = s.frames ?? 44100;
   const engine = new Sf2SynthEngine(sr, { maxVoices: s.maxVoices ?? 64 });
   engine.effectsEnabled = s.effects ?? false;
+  if (s.masterGainDb !== undefined) engine.masterGainDb = s.masterGainDb;
+  if (s.masterDynamics !== undefined) engine.masterDynamicsEnabled = s.masterDynamics;
   if (s.programs) engine.loadPrograms(sf);
   const tracks: TrackState[] = (s.tracks ?? []).map((t) => ({
     trackIndex: t.trackIndex ?? 0, regions: t.preset !== undefined ? sf!.regionList(t.preset) : undefined, pan: t.pan, gain: t.gain,

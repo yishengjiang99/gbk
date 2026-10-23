@@ -1,0 +1,3068 @@
+[
+{
+"name": "prog0",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 0,
+"program": 0
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 91,
+"value": 40
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 93,
+"value": 0
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 0,
+"note": 48,
+"velocity": 30
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 0,
+"note": 55,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 0,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 0,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 0,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 0,
+"note": 48
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 0,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 0,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 0,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 0,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 0,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 0,
+"note": 55
+}
+]
+},
+{
+"name": "prog1",
+"font": "GU",
+"frames": 30000,
+"effects": false,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 1,
+"program": 1
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 91,
+"value": 41
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 93,
+"value": 1
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 1,
+"note": 49,
+"velocity": 31
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 1,
+"note": 56,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 1,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 1,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 1,
+"note": 49
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 1,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 1,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 1,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 1,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 1,
+"note": 56
+}
+]
+},
+{
+"name": "prog19",
+"font": "GU",
+"frames": 30000,
+"effects": false,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 1,
+"program": 19
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 91,
+"value": 59
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 93,
+"value": 19
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 1,
+"note": 67,
+"velocity": 49
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 1,
+"note": 74,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 1,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 1,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 1,
+"note": 67
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 1,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 1,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 1,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 1,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 1,
+"note": 74
+}
+]
+},
+{
+"name": "prog24",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 6,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 6,
+"program": 24
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 6,
+"controller": 91,
+"value": 64
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 6,
+"controller": 93,
+"value": 24
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 6,
+"note": 48,
+"velocity": 54
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 6,
+"note": 55,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 6,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 6,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 6,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 6,
+"note": 48
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 6,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 6,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 6,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 6,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 6,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 6,
+"note": 55
+}
+]
+},
+{
+"name": "prog33",
+"font": "GU",
+"frames": 30000,
+"effects": false,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 6,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 6,
+"program": 33
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 6,
+"controller": 91,
+"value": 73
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 6,
+"controller": 93,
+"value": 33
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 6,
+"note": 57,
+"velocity": 63
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 6,
+"note": 64,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 6,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 6,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 6,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 6,
+"note": 57
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 6,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 6,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 6,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 6,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 6,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 6,
+"note": 64
+}
+]
+},
+{
+"name": "prog40",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 4,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 4,
+"program": 40
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 4,
+"controller": 91,
+"value": 80
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 4,
+"controller": 93,
+"value": 40
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 4,
+"note": 64,
+"velocity": 70
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 4,
+"note": 71,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 4,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 4,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 4,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 4,
+"note": 64
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 4,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 4,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 4,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 4,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 4,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 4,
+"note": 71
+}
+]
+},
+{
+"name": "prog48",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 3,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 3,
+"program": 48
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 3,
+"controller": 91,
+"value": 88
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 3,
+"controller": 93,
+"value": 48
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 3,
+"note": 48,
+"velocity": 78
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 3,
+"note": 55,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 3,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 3,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 3,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 3,
+"note": 48
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 3,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 3,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 3,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 3,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 3,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 3,
+"note": 55
+}
+]
+},
+{
+"name": "prog56",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 2,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 2,
+"program": 56
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 2,
+"controller": 91,
+"value": 96
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 2,
+"controller": 93,
+"value": 6
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 2,
+"note": 56,
+"velocity": 86
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 2,
+"note": 63,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 2,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 2,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 2,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 2,
+"note": 56
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 2,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 2,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 2,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 2,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 2,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 2,
+"note": 63
+}
+]
+},
+{
+"name": "prog61",
+"font": "GU",
+"frames": 30000,
+"effects": false,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 7,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 7,
+"program": 61
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 7,
+"controller": 91,
+"value": 41
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 7,
+"controller": 93,
+"value": 11
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 7,
+"note": 61,
+"velocity": 91
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 7,
+"note": 68,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 7,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 7,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 7,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 7,
+"note": 61
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 7,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 7,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 7,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 7,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 7,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 7,
+"note": 68
+}
+]
+},
+{
+"name": "prog73",
+"font": "GU",
+"frames": 30000,
+"effects": false,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 1,
+"program": 73
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 91,
+"value": 53
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 93,
+"value": 23
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 1,
+"note": 49,
+"velocity": 103
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 1,
+"note": 56,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 1,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 1,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 1,
+"note": 49
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 1,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 1,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 1,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 1,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 1,
+"note": 56
+}
+]
+},
+{
+"name": "prog81",
+"font": "GU",
+"frames": 30000,
+"effects": false,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 0,
+"program": 81
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 91,
+"value": 61
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 93,
+"value": 31
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 0,
+"note": 57,
+"velocity": 111
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 0,
+"note": 64,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 0,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 0,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 0,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 0,
+"note": 57
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 0,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 0,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 0,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 0,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 0,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 0,
+"note": 64
+}
+]
+},
+{
+"name": "prog88",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 7,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 7,
+"program": 88
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 7,
+"controller": 91,
+"value": 68
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 7,
+"controller": 93,
+"value": 38
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 7,
+"note": 64,
+"velocity": 118
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 7,
+"note": 71,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 7,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 7,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 7,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 7,
+"note": 64
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 7,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 7,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 7,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 7,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 7,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 7,
+"note": 71
+}
+]
+},
+{
+"name": "prog104",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 5,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 5,
+"program": 104
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 5,
+"controller": 91,
+"value": 84
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 5,
+"controller": 93,
+"value": 4
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 5,
+"note": 56,
+"velocity": 37
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 5,
+"note": 63,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 5,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 5,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 5,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 5,
+"note": 56
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 5,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 5,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 5,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 5,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 5,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 5,
+"note": 63
+}
+]
+},
+{
+"name": "prog118",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 1,
+"program": 118
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 91,
+"value": 98
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 93,
+"value": 18
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 1,
+"note": 70,
+"velocity": 51
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 1,
+"note": 77,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 1,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 1,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 1,
+"note": 70
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 1,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 1,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 1,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 1,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 1,
+"note": 77
+}
+]
+},
+{
+"name": "prog127",
+"font": "GU",
+"frames": 30000,
+"effects": false,
+"programs": true,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 0,
+"value": 0
+},
+{
+"frame": 0,
+"type": "programChange",
+"channel": 1,
+"program": 127
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 91,
+"value": 47
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 1,
+"controller": 93,
+"value": 27
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 1,
+"note": 55,
+"velocity": 60
+},
+{
+"frame": 4000,
+"type": "noteOn",
+"channel": 1,
+"note": 62,
+"velocity": 90
+},
+{
+"frame": 8000,
+"type": "controlChange",
+"channel": 1,
+"controller": 1,
+"value": 100
+},
+{
+"frame": 12000,
+"type": "pitchBend",
+"channel": 1,
+"velocity": 12000
+},
+{
+"frame": 16000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 127
+},
+{
+"frame": 18000,
+"type": "noteOff",
+"channel": 1,
+"note": 55
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 1,
+"controller": 7,
+"value": 80
+},
+{
+"frame": 22000,
+"type": "controlChange",
+"channel": 1,
+"controller": 10,
+"value": 20
+},
+{
+"frame": 24000,
+"type": "controlChange",
+"channel": 1,
+"controller": 11,
+"value": 90
+},
+{
+"frame": 26000,
+"type": "channelPressure",
+"channel": 1,
+"value": 70
+},
+{
+"frame": 30000,
+"type": "controlChange",
+"channel": 1,
+"controller": 64,
+"value": 0
+},
+{
+"frame": 32000,
+"type": "noteOff",
+"channel": 1,
+"note": 62
+}
+]
+},
+{
+"name": "drums",
+"font": "GU",
+"frames": 30000,
+"effects": true,
+"programs": true,
+"events": [
+{
+"frame": 0,
+"type": "programChange",
+"channel": 9,
+"program": 0
+},
+{
+"frame": 0,
+"type": "noteOn",
+"channel": 9,
+"note": 35,
+"velocity": 60
+},
+{
+"frame": 800,
+"type": "noteOff",
+"channel": 9,
+"note": 35
+},
+{
+"frame": 1500,
+"type": "noteOn",
+"channel": 9,
+"note": 36,
+"velocity": 61
+},
+{
+"frame": 2300,
+"type": "noteOff",
+"channel": 9,
+"note": 36
+},
+{
+"frame": 3000,
+"type": "noteOn",
+"channel": 9,
+"note": 37,
+"velocity": 62
+},
+{
+"frame": 3800,
+"type": "noteOff",
+"channel": 9,
+"note": 37
+},
+{
+"frame": 4500,
+"type": "noteOn",
+"channel": 9,
+"note": 38,
+"velocity": 63
+},
+{
+"frame": 5300,
+"type": "noteOff",
+"channel": 9,
+"note": 38
+},
+{
+"frame": 6000,
+"type": "noteOn",
+"channel": 9,
+"note": 39,
+"velocity": 64
+},
+{
+"frame": 6800,
+"type": "noteOff",
+"channel": 9,
+"note": 39
+},
+{
+"frame": 7500,
+"type": "noteOn",
+"channel": 9,
+"note": 40,
+"velocity": 65
+},
+{
+"frame": 8300,
+"type": "noteOff",
+"channel": 9,
+"note": 40
+},
+{
+"frame": 9000,
+"type": "noteOn",
+"channel": 9,
+"note": 41,
+"velocity": 66
+},
+{
+"frame": 9800,
+"type": "noteOff",
+"channel": 9,
+"note": 41
+},
+{
+"frame": 10500,
+"type": "noteOn",
+"channel": 9,
+"note": 42,
+"velocity": 67
+},
+{
+"frame": 11300,
+"type": "noteOff",
+"channel": 9,
+"note": 42
+},
+{
+"frame": 12000,
+"type": "noteOn",
+"channel": 9,
+"note": 43,
+"velocity": 68
+},
+{
+"frame": 12800,
+"type": "noteOff",
+"channel": 9,
+"note": 43
+},
+{
+"frame": 13500,
+"type": "noteOn",
+"channel": 9,
+"note": 44,
+"velocity": 69
+},
+{
+"frame": 14300,
+"type": "noteOff",
+"channel": 9,
+"note": 44
+},
+{
+"frame": 15000,
+"type": "noteOn",
+"channel": 9,
+"note": 45,
+"velocity": 70
+},
+{
+"frame": 15800,
+"type": "noteOff",
+"channel": 9,
+"note": 45
+},
+{
+"frame": 16500,
+"type": "noteOn",
+"channel": 9,
+"note": 46,
+"velocity": 71
+},
+{
+"frame": 17300,
+"type": "noteOff",
+"channel": 9,
+"note": 46
+},
+{
+"frame": 18000,
+"type": "noteOn",
+"channel": 9,
+"note": 47,
+"velocity": 72
+},
+{
+"frame": 18800,
+"type": "noteOff",
+"channel": 9,
+"note": 47
+},
+{
+"frame": 19500,
+"type": "noteOn",
+"channel": 9,
+"note": 48,
+"velocity": 73
+},
+{
+"frame": 20300,
+"type": "noteOff",
+"channel": 9,
+"note": 48
+},
+{
+"frame": 21000,
+"type": "noteOn",
+"channel": 9,
+"note": 49,
+"velocity": 74
+},
+{
+"frame": 21800,
+"type": "noteOff",
+"channel": 9,
+"note": 49
+},
+{
+"frame": 22500,
+"type": "noteOn",
+"channel": 9,
+"note": 50,
+"velocity": 75
+},
+{
+"frame": 23300,
+"type": "noteOff",
+"channel": 9,
+"note": 50
+},
+{
+"frame": 24000,
+"type": "noteOn",
+"channel": 9,
+"note": 51,
+"velocity": 76
+},
+{
+"frame": 24800,
+"type": "noteOff",
+"channel": 9,
+"note": 51
+},
+{
+"frame": 25500,
+"type": "noteOn",
+"channel": 9,
+"note": 52,
+"velocity": 77
+},
+{
+"frame": 26300,
+"type": "noteOff",
+"channel": 9,
+"note": 52
+},
+{
+"frame": 27000,
+"type": "noteOn",
+"channel": 9,
+"note": 53,
+"velocity": 78
+},
+{
+"frame": 27800,
+"type": "noteOff",
+"channel": 9,
+"note": 53
+},
+{
+"frame": 28500,
+"type": "noteOn",
+"channel": 9,
+"note": 54,
+"velocity": 79
+},
+{
+"frame": 29300,
+"type": "noteOff",
+"channel": 9,
+"note": 54
+},
+{
+"frame": 30000,
+"type": "noteOn",
+"channel": 9,
+"note": 55,
+"velocity": 80
+},
+{
+"frame": 30800,
+"type": "noteOff",
+"channel": 9,
+"note": 55
+},
+{
+"frame": 31500,
+"type": "noteOn",
+"channel": 9,
+"note": 56,
+"velocity": 81
+},
+{
+"frame": 32300,
+"type": "noteOff",
+"channel": 9,
+"note": 56
+},
+{
+"frame": 33000,
+"type": "noteOn",
+"channel": 9,
+"note": 57,
+"velocity": 82
+},
+{
+"frame": 33800,
+"type": "noteOff",
+"channel": 9,
+"note": 57
+},
+{
+"frame": 34500,
+"type": "noteOn",
+"channel": 9,
+"note": 58,
+"velocity": 83
+},
+{
+"frame": 35300,
+"type": "noteOff",
+"channel": 9,
+"note": 58
+},
+{
+"frame": 36000,
+"type": "noteOn",
+"channel": 9,
+"note": 59,
+"velocity": 84
+},
+{
+"frame": 36800,
+"type": "noteOff",
+"channel": 9,
+"note": 59
+},
+{
+"frame": 37500,
+"type": "noteOn",
+"channel": 9,
+"note": 60,
+"velocity": 85
+},
+{
+"frame": 38300,
+"type": "noteOff",
+"channel": 9,
+"note": 60
+},
+{
+"frame": 39000,
+"type": "noteOn",
+"channel": 9,
+"note": 61,
+"velocity": 86
+},
+{
+"frame": 39800,
+"type": "noteOff",
+"channel": 9,
+"note": 61
+},
+{
+"frame": 40500,
+"type": "noteOn",
+"channel": 9,
+"note": 62,
+"velocity": 87
+},
+{
+"frame": 41300,
+"type": "noteOff",
+"channel": 9,
+"note": 62
+},
+{
+"frame": 42000,
+"type": "noteOn",
+"channel": 9,
+"note": 63,
+"velocity": 88
+},
+{
+"frame": 42800,
+"type": "noteOff",
+"channel": 9,
+"note": 63
+},
+{
+"frame": 43500,
+"type": "noteOn",
+"channel": 9,
+"note": 64,
+"velocity": 89
+},
+{
+"frame": 44300,
+"type": "noteOff",
+"channel": 9,
+"note": 64
+},
+{
+"frame": 45000,
+"type": "noteOn",
+"channel": 9,
+"note": 65,
+"velocity": 90
+},
+{
+"frame": 45800,
+"type": "noteOff",
+"channel": 9,
+"note": 65
+},
+{
+"frame": 46500,
+"type": "noteOn",
+"channel": 9,
+"note": 66,
+"velocity": 91
+},
+{
+"frame": 47300,
+"type": "noteOff",
+"channel": 9,
+"note": 66
+},
+{
+"frame": 48000,
+"type": "noteOn",
+"channel": 9,
+"note": 67,
+"velocity": 92
+},
+{
+"frame": 48800,
+"type": "noteOff",
+"channel": 9,
+"note": 67
+},
+{
+"frame": 49500,
+"type": "noteOn",
+"channel": 9,
+"note": 68,
+"velocity": 93
+},
+{
+"frame": 50300,
+"type": "noteOff",
+"channel": 9,
+"note": 68
+},
+{
+"frame": 51000,
+"type": "noteOn",
+"channel": 9,
+"note": 69,
+"velocity": 94
+},
+{
+"frame": 51800,
+"type": "noteOff",
+"channel": 9,
+"note": 69
+},
+{
+"frame": 52500,
+"type": "noteOn",
+"channel": 9,
+"note": 70,
+"velocity": 95
+},
+{
+"frame": 53300,
+"type": "noteOff",
+"channel": 9,
+"note": 70
+},
+{
+"frame": 54000,
+"type": "noteOn",
+"channel": 9,
+"note": 71,
+"velocity": 96
+},
+{
+"frame": 54800,
+"type": "noteOff",
+"channel": 9,
+"note": 71
+},
+{
+"frame": 55500,
+"type": "noteOn",
+"channel": 9,
+"note": 72,
+"velocity": 97
+},
+{
+"frame": 56300,
+"type": "noteOff",
+"channel": 9,
+"note": 72
+},
+{
+"frame": 57000,
+"type": "noteOn",
+"channel": 9,
+"note": 73,
+"velocity": 98
+},
+{
+"frame": 57800,
+"type": "noteOff",
+"channel": 9,
+"note": 73
+},
+{
+"frame": 58500,
+"type": "noteOn",
+"channel": 9,
+"note": 74,
+"velocity": 99
+},
+{
+"frame": 59300,
+"type": "noteOff",
+"channel": 9,
+"note": 74
+},
+{
+"frame": 60000,
+"type": "noteOn",
+"channel": 9,
+"note": 75,
+"velocity": 100
+},
+{
+"frame": 60800,
+"type": "noteOff",
+"channel": 9,
+"note": 75
+},
+{
+"frame": 61500,
+"type": "noteOn",
+"channel": 9,
+"note": 76,
+"velocity": 101
+},
+{
+"frame": 62300,
+"type": "noteOff",
+"channel": 9,
+"note": 76
+},
+{
+"frame": 63000,
+"type": "noteOn",
+"channel": 9,
+"note": 77,
+"velocity": 102
+},
+{
+"frame": 63800,
+"type": "noteOff",
+"channel": 9,
+"note": 77
+},
+{
+"frame": 64500,
+"type": "noteOn",
+"channel": 9,
+"note": 78,
+"velocity": 103
+},
+{
+"frame": 65300,
+"type": "noteOff",
+"channel": 9,
+"note": 78
+},
+{
+"frame": 66000,
+"type": "noteOn",
+"channel": 9,
+"note": 79,
+"velocity": 104
+},
+{
+"frame": 66800,
+"type": "noteOff",
+"channel": 9,
+"note": 79
+},
+{
+"frame": 67500,
+"type": "noteOn",
+"channel": 9,
+"note": 80,
+"velocity": 105
+},
+{
+"frame": 68300,
+"type": "noteOff",
+"channel": 9,
+"note": 80
+},
+{
+"frame": 69000,
+"type": "noteOn",
+"channel": 9,
+"note": 81,
+"velocity": 106
+},
+{
+"frame": 69800,
+"type": "noteOff",
+"channel": 9,
+"note": 81
+}
+]
+},
+{
+"name": "loud0_12",
+"font": "GU",
+"frames": 60000,
+"effects": true,
+"programs": true,
+"masterGainDb": 12,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "programChange",
+"channel": 0,
+"program": 0
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 91,
+"value": 100
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 0,
+"note": 36,
+"velocity": 127
+},
+{
+"frame": 210,
+"type": "noteOn",
+"channel": 0,
+"note": 39,
+"velocity": 127
+},
+{
+"frame": 410,
+"type": "noteOn",
+"channel": 0,
+"note": 42,
+"velocity": 127
+},
+{
+"frame": 610,
+"type": "noteOn",
+"channel": 0,
+"note": 45,
+"velocity": 127
+},
+{
+"frame": 810,
+"type": "noteOn",
+"channel": 0,
+"note": 48,
+"velocity": 127
+},
+{
+"frame": 1010,
+"type": "noteOn",
+"channel": 0,
+"note": 51,
+"velocity": 127
+},
+{
+"frame": 1210,
+"type": "noteOn",
+"channel": 0,
+"note": 54,
+"velocity": 127
+},
+{
+"frame": 1410,
+"type": "noteOn",
+"channel": 0,
+"note": 57,
+"velocity": 127
+},
+{
+"frame": 1610,
+"type": "noteOn",
+"channel": 0,
+"note": 60,
+"velocity": 127
+},
+{
+"frame": 1810,
+"type": "noteOn",
+"channel": 0,
+"note": 63,
+"velocity": 127
+},
+{
+"frame": 2010,
+"type": "noteOn",
+"channel": 0,
+"note": 66,
+"velocity": 127
+},
+{
+"frame": 2210,
+"type": "noteOn",
+"channel": 0,
+"note": 69,
+"velocity": 127
+},
+{
+"frame": 2410,
+"type": "noteOn",
+"channel": 0,
+"note": 72,
+"velocity": 127
+},
+{
+"frame": 2610,
+"type": "noteOn",
+"channel": 0,
+"note": 75,
+"velocity": 127
+},
+{
+"frame": 2810,
+"type": "noteOn",
+"channel": 0,
+"note": 78,
+"velocity": 127
+},
+{
+"frame": 3010,
+"type": "noteOn",
+"channel": 0,
+"note": 81,
+"velocity": 127
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 0,
+"controller": 123,
+"value": 0
+},
+{
+"frame": 30000,
+"type": "noteOn",
+"channel": 0,
+"note": 40,
+"velocity": 127
+},
+{
+"frame": 30001,
+"type": "noteOn",
+"channel": 0,
+"note": 52,
+"velocity": 127
+},
+{
+"frame": 30002,
+"type": "noteOn",
+"channel": 0,
+"note": 64,
+"velocity": 127
+},
+{
+"frame": 30003,
+"type": "noteOn",
+"channel": 0,
+"note": 76,
+"velocity": 127
+}
+]
+},
+{
+"name": "loud61_18",
+"font": "GU",
+"frames": 60000,
+"effects": true,
+"programs": true,
+"masterGainDb": 18,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "programChange",
+"channel": 0,
+"program": 61
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 91,
+"value": 100
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 0,
+"note": 36,
+"velocity": 127
+},
+{
+"frame": 210,
+"type": "noteOn",
+"channel": 0,
+"note": 39,
+"velocity": 127
+},
+{
+"frame": 410,
+"type": "noteOn",
+"channel": 0,
+"note": 42,
+"velocity": 127
+},
+{
+"frame": 610,
+"type": "noteOn",
+"channel": 0,
+"note": 45,
+"velocity": 127
+},
+{
+"frame": 810,
+"type": "noteOn",
+"channel": 0,
+"note": 48,
+"velocity": 127
+},
+{
+"frame": 1010,
+"type": "noteOn",
+"channel": 0,
+"note": 51,
+"velocity": 127
+},
+{
+"frame": 1210,
+"type": "noteOn",
+"channel": 0,
+"note": 54,
+"velocity": 127
+},
+{
+"frame": 1410,
+"type": "noteOn",
+"channel": 0,
+"note": 57,
+"velocity": 127
+},
+{
+"frame": 1610,
+"type": "noteOn",
+"channel": 0,
+"note": 60,
+"velocity": 127
+},
+{
+"frame": 1810,
+"type": "noteOn",
+"channel": 0,
+"note": 63,
+"velocity": 127
+},
+{
+"frame": 2010,
+"type": "noteOn",
+"channel": 0,
+"note": 66,
+"velocity": 127
+},
+{
+"frame": 2210,
+"type": "noteOn",
+"channel": 0,
+"note": 69,
+"velocity": 127
+},
+{
+"frame": 2410,
+"type": "noteOn",
+"channel": 0,
+"note": 72,
+"velocity": 127
+},
+{
+"frame": 2610,
+"type": "noteOn",
+"channel": 0,
+"note": 75,
+"velocity": 127
+},
+{
+"frame": 2810,
+"type": "noteOn",
+"channel": 0,
+"note": 78,
+"velocity": 127
+},
+{
+"frame": 3010,
+"type": "noteOn",
+"channel": 0,
+"note": 81,
+"velocity": 127
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 0,
+"controller": 123,
+"value": 0
+},
+{
+"frame": 30000,
+"type": "noteOn",
+"channel": 0,
+"note": 40,
+"velocity": 127
+},
+{
+"frame": 30001,
+"type": "noteOn",
+"channel": 0,
+"note": 52,
+"velocity": 127
+},
+{
+"frame": 30002,
+"type": "noteOn",
+"channel": 0,
+"note": 64,
+"velocity": 127
+},
+{
+"frame": 30003,
+"type": "noteOn",
+"channel": 0,
+"note": 76,
+"velocity": 127
+}
+]
+},
+{
+"name": "loud19_30",
+"font": "GU",
+"frames": 60000,
+"effects": true,
+"programs": true,
+"masterGainDb": 30,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "programChange",
+"channel": 0,
+"program": 19
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 91,
+"value": 100
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 0,
+"note": 36,
+"velocity": 127
+},
+{
+"frame": 210,
+"type": "noteOn",
+"channel": 0,
+"note": 39,
+"velocity": 127
+},
+{
+"frame": 410,
+"type": "noteOn",
+"channel": 0,
+"note": 42,
+"velocity": 127
+},
+{
+"frame": 610,
+"type": "noteOn",
+"channel": 0,
+"note": 45,
+"velocity": 127
+},
+{
+"frame": 810,
+"type": "noteOn",
+"channel": 0,
+"note": 48,
+"velocity": 127
+},
+{
+"frame": 1010,
+"type": "noteOn",
+"channel": 0,
+"note": 51,
+"velocity": 127
+},
+{
+"frame": 1210,
+"type": "noteOn",
+"channel": 0,
+"note": 54,
+"velocity": 127
+},
+{
+"frame": 1410,
+"type": "noteOn",
+"channel": 0,
+"note": 57,
+"velocity": 127
+},
+{
+"frame": 1610,
+"type": "noteOn",
+"channel": 0,
+"note": 60,
+"velocity": 127
+},
+{
+"frame": 1810,
+"type": "noteOn",
+"channel": 0,
+"note": 63,
+"velocity": 127
+},
+{
+"frame": 2010,
+"type": "noteOn",
+"channel": 0,
+"note": 66,
+"velocity": 127
+},
+{
+"frame": 2210,
+"type": "noteOn",
+"channel": 0,
+"note": 69,
+"velocity": 127
+},
+{
+"frame": 2410,
+"type": "noteOn",
+"channel": 0,
+"note": 72,
+"velocity": 127
+},
+{
+"frame": 2610,
+"type": "noteOn",
+"channel": 0,
+"note": 75,
+"velocity": 127
+},
+{
+"frame": 2810,
+"type": "noteOn",
+"channel": 0,
+"note": 78,
+"velocity": 127
+},
+{
+"frame": 3010,
+"type": "noteOn",
+"channel": 0,
+"note": 81,
+"velocity": 127
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 0,
+"controller": 123,
+"value": 0
+},
+{
+"frame": 30000,
+"type": "noteOn",
+"channel": 0,
+"note": 40,
+"velocity": 127
+},
+{
+"frame": 30001,
+"type": "noteOn",
+"channel": 0,
+"note": 52,
+"velocity": 127
+},
+{
+"frame": 30002,
+"type": "noteOn",
+"channel": 0,
+"note": 64,
+"velocity": 127
+},
+{
+"frame": 30003,
+"type": "noteOn",
+"channel": 0,
+"note": 76,
+"velocity": 127
+}
+]
+},
+{
+"name": "loud_off",
+"font": "GU",
+"frames": 60000,
+"effects": true,
+"programs": true,
+"masterGainDb": 0,
+"tracks": [],
+"events": [
+{
+"frame": 0,
+"type": "programChange",
+"channel": 0,
+"program": 0
+},
+{
+"frame": 0,
+"type": "controlChange",
+"channel": 0,
+"controller": 91,
+"value": 100
+},
+{
+"frame": 10,
+"type": "noteOn",
+"channel": 0,
+"note": 36,
+"velocity": 127
+},
+{
+"frame": 210,
+"type": "noteOn",
+"channel": 0,
+"note": 39,
+"velocity": 127
+},
+{
+"frame": 410,
+"type": "noteOn",
+"channel": 0,
+"note": 42,
+"velocity": 127
+},
+{
+"frame": 610,
+"type": "noteOn",
+"channel": 0,
+"note": 45,
+"velocity": 127
+},
+{
+"frame": 810,
+"type": "noteOn",
+"channel": 0,
+"note": 48,
+"velocity": 127
+},
+{
+"frame": 1010,
+"type": "noteOn",
+"channel": 0,
+"note": 51,
+"velocity": 127
+},
+{
+"frame": 1210,
+"type": "noteOn",
+"channel": 0,
+"note": 54,
+"velocity": 127
+},
+{
+"frame": 1410,
+"type": "noteOn",
+"channel": 0,
+"note": 57,
+"velocity": 127
+},
+{
+"frame": 1610,
+"type": "noteOn",
+"channel": 0,
+"note": 60,
+"velocity": 127
+},
+{
+"frame": 1810,
+"type": "noteOn",
+"channel": 0,
+"note": 63,
+"velocity": 127
+},
+{
+"frame": 2010,
+"type": "noteOn",
+"channel": 0,
+"note": 66,
+"velocity": 127
+},
+{
+"frame": 2210,
+"type": "noteOn",
+"channel": 0,
+"note": 69,
+"velocity": 127
+},
+{
+"frame": 2410,
+"type": "noteOn",
+"channel": 0,
+"note": 72,
+"velocity": 127
+},
+{
+"frame": 2610,
+"type": "noteOn",
+"channel": 0,
+"note": 75,
+"velocity": 127
+},
+{
+"frame": 2810,
+"type": "noteOn",
+"channel": 0,
+"note": 78,
+"velocity": 127
+},
+{
+"frame": 3010,
+"type": "noteOn",
+"channel": 0,
+"note": 81,
+"velocity": 127
+},
+{
+"frame": 20000,
+"type": "controlChange",
+"channel": 0,
+"controller": 123,
+"value": 0
+},
+{
+"frame": 30000,
+"type": "noteOn",
+"channel": 0,
+"note": 40,
+"velocity": 127
+},
+{
+"frame": 30001,
+"type": "noteOn",
+"channel": 0,
+"note": 52,
+"velocity": 127
+},
+{
+"frame": 30002,
+"type": "noteOn",
+"channel": 0,
+"note": 64,
+"velocity": 127
+},
+{
+"frame": 30003,
+"type": "noteOn",
+"channel": 0,
+"note": 76,
+"velocity": 127
+}
+],
+"masterDynamics": false
+}
+]
