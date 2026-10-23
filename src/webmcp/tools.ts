@@ -8,11 +8,14 @@ import { generateCurve, type CurveShape } from "../workstation/curves.ts";
 import { serializeSmf } from "../workstation/smf.ts";
 
 export type JsonSchema = Record<string, unknown>;
+/** Non-text MCP content (e.g. a small WAV as audio). Never JSON-stringified into a text result. */
+export type ToolContent = { type: "audio" | "image"; mimeType: string; data: string };
+type RunOut = { data: unknown; warnings?: string[]; content?: ToolContent[] };
 export interface ToolDef {
   name: string; description: string; inputSchema: JsonSchema; readOnly: boolean;
-  run(args: Record<string, unknown>, signal: AbortSignal): Promise<{ data: unknown; warnings?: string[] }> | { data: unknown; warnings?: string[] };
+  run(args: Record<string, unknown>, signal: AbortSignal): Promise<RunOut> | RunOut;
 }
-export interface ToolResult { ok: boolean; projectId: string; revision: number; data?: unknown; warnings: string[]; error?: { code: string; message: string; details?: unknown } }
+export interface ToolResult { ok: boolean; projectId: string; revision: number; data?: unknown; warnings: string[]; error?: { code: string; message: string; details?: unknown }; content?: ToolContent[] }
 
 // ---- schema helpers ------------------------------------------------------------
 const obj = (properties: Record<string, JsonSchema>, required: string[] = []): JsonSchema => ({ type: "object", properties, required, additionalProperties: false });
@@ -192,14 +195,14 @@ export function buildCoreTools(c: WorkstationController): ToolDef[] {
     { name: "gbk_redo", readOnly: false, description: "Redo (same history as the user).", inputSchema: obj({}), run: () => ({ data: { redone: c.redo() } }) },
     { name: "gbk_prepare_midi_export", readOnly: false, description: "Build a Standard MIDI File (tempo/meter, timed CC, bend/pressure, programs, raw events) and offer it as a browser-local download.", inputSchema: obj({ download: { type: "boolean" } }),
       run: (a) => { const { bytes, filename } = c.prepareMidiExport(); if (a.download !== false) c.host.download?.(bytes, filename); return { data: { filename, bytes: bytes.length, downloaded: a.download !== false && !!c.host.download } }; } },
-    { name: "gbk_prepare_wav_export", readOnly: false, description: "Offline-render the project with the SF2 engine (same automation as playback) and offer a browser-local WAV download.", inputSchema: obj({ download: { type: "boolean" } }),
+    { name: "gbk_prepare_wav_export", readOnly: false, description: "Offline-render the project with the headless SF2 renderer (same engine as gbk_render_wav; no audio unlock needed). Offers a browser download unless download is false (legacy behavior); prefer gbk_render_wav for artifacts and byte transfer.", inputSchema: obj({ download: { type: "boolean" } }),
       run: async (a, signal) => {
-        if (!c.host.renderWav) throw new WorkstationError("AUDIO_NOT_READY", "Load a SoundFont first");
+        if (!c.host.renderWav) throw new WorkstationError("UNSUPPORTED", "no renderer in this runtime");
         const blob = await c.host.renderWav(c.project, signal);
         if (signal.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
         const filename = `${c.project.name.replace(/[^\w\- .]/g, "_").slice(0, 80) || "gbk"}.wav`;
-        if (a.download !== false) c.host.download?.(blob, filename);
-        return { data: { filename, bytes: blob.size } };
+        const requested = a.download !== false && !!c.host.download && c.host.download(blob, filename) !== false;
+        return { data: { filename, bytes: blob.size, downloadRequested: requested } };
       } },
   ];
 }
@@ -223,7 +226,7 @@ export async function runTool(c: WorkstationController, tool: ToolDef, args: unk
     const r = await tool.run(input, signal);
     if (signal.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
     c.log("agent", tool.name, true);
-    return { ok: true, projectId: c.project.id, revision: c.project.revision, data: r.data, warnings: r.warnings ?? [] };
+    return { ok: true, projectId: c.project.id, revision: c.project.revision, data: r.data, warnings: r.warnings ?? [], ...(r.content ? { content: r.content } : {}) };
   } catch (e) {
     const code = e instanceof WorkstationError ? e.code : "INTERNAL_ERROR";
     const message = e instanceof Error ? e.message : String(e);
