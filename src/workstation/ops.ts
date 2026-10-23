@@ -7,7 +7,8 @@ export type Op =
   | { op: "setCC"; trackId: string; channel: number; controller: number; startTick: number; endTick: number; mode: "replace" | "merge"; points: { tick: number; value: number }[] }
   | { op: "removeCC"; ids: string[] }
   | { op: "updateTrack"; trackId: string; name?: string; channel?: number; visible?: boolean; mix?: Partial<TrackMix> }
-  | { op: "addTrack"; name: string; channel: number };
+  | { op: "addTrack"; name: string; channel: number }
+  | { op: "setProgram"; trackId: string; program: number; bankMsb: number; bankLsb: number };
 
 export class WorkstationError extends Error {
   constructor(public code: string, message: string, public details?: unknown) { super(message); }
@@ -50,6 +51,9 @@ export function validateOps(p: Project, ops: Op[]): string[] {
         if (o.mix) for (const k of ["volume", "pan", "expression"] as const) if (o.mix[k] !== undefined) int(o.mix[k], 0, 127, k);
         break;
       case "addTrack": int(o.channel, 0, 15, "channel"); break;
+      case "setProgram":
+        if (!trackIds.has(o.trackId)) throw new WorkstationError("INVALID_ARGUMENT", `unknown track ${o.trackId}`);
+        int(o.program, 0, 127, "program"); int(o.bankMsb, 0, 127, "bankMsb"); int(o.bankLsb, 0, 127, "bankLsb"); break;
       default: throw new WorkstationError("INVALID_ARGUMENT", `unknown op ${(o as { op: string }).op}`);
     }
   }
@@ -77,6 +81,14 @@ export function applyOps(src: Project, ops: Op[]): Project {
         ...t, ...(o.name !== undefined ? { name: o.name.slice(0, 128) } : {}), ...(o.channel !== undefined ? { channel: o.channel } : {}),
         ...(o.visible !== undefined ? { visible: o.visible } : {}), mix: { ...t.mix, ...(o.mix ?? {}) },
       }); break;
+      case "setProgram": {
+        const tr = p.tracks.find((t) => t.id === o.trackId)!;
+        p.programs = p.programs.filter((g) => !(g.trackId === o.trackId && g.tick === 0));
+        p.programs.unshift({ id: newId("pg"), trackId: o.trackId, channel: tr.channel, tick: 0, program: o.program, bankMsb: o.bankMsb, bankLsb: o.bankLsb });
+        // keep bank-select CCs consistent at tick 0
+        p.ccs = p.ccs.filter((c) => !(c.trackId === o.trackId && c.tick === 0 && (c.controller === 0 || c.controller === 32)));
+        break;
+      }
       case "addTrack": p.tracks.push({ id: newId("trk"), name: o.name.slice(0, 128), channel: o.channel, color: "#ccc", visible: true, mix: { volume: 100, pan: 64, expression: 127, mute: false, solo: false } }); break;
     }
   }
@@ -95,6 +107,7 @@ export function summarizeOps(ops: Op[]): string {
       case "removeCC": return `remove ${o.ids.length} CC event(s)`;
       case "updateTrack": return `update track ${o.trackId}`;
       case "addTrack": return `add track "${o.name}"`;
+      case "setProgram": return `set program ${o.program} (bank ${o.bankMsb}/${o.bankLsb}) on ${o.trackId}`;
     }
   }).join("; ");
 }
