@@ -25,7 +25,7 @@ test("share -> open link (public, no login) -> fork lineage -> unshare -> delete
     assert.equal((await fetch(`${s.base}/api/shares`, { method: "POST", headers: { "content-type": "application/json", origin: "http://composer.test" }, body: JSON.stringify({ project: c.project }) })).status, 401);
     const r = await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: "Alice's fugue", project: c.project }) });
     assert.equal(r.status, 200); const sh = await r.json();
-    assert.match(sh.url, /^http:\/\/composer\.test\/s\/[a-z0-9]{8}$/);
+    assert.match(sh.url, /^http:\/\/composer\.test\/s\/alice-s-fugue-[a-z0-9]{8}$/);
     const wav = new Uint8Array(100); wav.set([..."RIFF"].map((x) => x.charCodeAt(0)), 0); wav.set([..."WAVE"].map((x) => x.charCodeAt(0)), 8);
     assert.equal((await fetch(`${s.base}/api/shares/${sh.slug}/media/wav`, { method: "PUT", headers: { ...H(alice), "content-type": "audio/wav", "x-gbk-wav-meta": JSON.stringify({ durationSeconds: 12.5 }) }, body: wav })).status, 200);
     assert.equal((await fetch(`${s.base}/api/shares/${sh.slug}/media/wav`, { method: "PUT", headers: { ...H(bob), "content-type": "audio/wav" }, body: wav })).status, 404, "not bob's share");
@@ -103,14 +103,18 @@ test("auto-save is PRIVATE: invisible to others/anonymous until the owner publis
     const pubd = await (await fetch(`${s.base}/api/shares/${a1.slug}`, { method: "PATCH", headers: H(alice), body: JSON.stringify({ public: true, title: sug.title }) })).json();
     assert.equal(pubd.public, true); assert.equal(pubd.title, "Nocturne in D Minor");
     const anon = await (await fetch(`${s.base}/api/shares/${a1.slug}`)).json(); assert.equal(anon.title, "Nocturne in D Minor");
-    assert.ok((await (await fetch(`${s.base}/api/shares`)).json()).shares.some((x: { slug: string }) => x.slug === a1.slug));
+    // publishing with a title moves the slug to "<kebab-title>-<id>"; the pre-publish slug still resolves
+    assert.equal(pubd.slug, `nocturne-in-d-minor-${a1.slug.slice(-8)}`); assert.match(pubd.url, /\/s\/nocturne-in-d-minor-[a-z0-9]{8}$/);
+    assert.equal((await (await fetch(`${s.base}/api/shares/${pubd.slug}`)).json()).title, "Nocturne in D Minor");
+    assert.equal((await (await fetch(`${s.base}/api/shares/${a1.slug.slice(-8)}`)).json()).slug, pubd.slug, "bare short id (legacy link) resolves to canonical");
+    assert.ok((await (await fetch(`${s.base}/api/shares`)).json()).shares.some((x: { slug: string }) => x.slug === pubd.slug));
     // further auto-saves never un-publish nor rename a published song
     const a3 = await (await fetch(`${s.base}/api/songs/autosave`, { method: "PUT", headers: H(alice), body: JSON.stringify({ project: { ...c.project, name: "renamed locally", revision: 99 } }) })).json();
     assert.equal(a3.public, true); assert.equal(a3.title, "Nocturne in D Minor");
     // bob forks it: his auto-saved fork is private to him and records the parent
     const fork = new WorkstationController(); fork.loadShared(sanitizeSharedProject(anon.project)); fork.fork();
     const f = await (await fetch(`${s.base}/api/songs/autosave`, { method: "PUT", headers: H(bob), body: JSON.stringify({ project: fork.project, parentSlug: a1.slug }) })).json();
-    assert.equal(f.public, false); assert.equal(f.owner, "bob"); assert.equal(f.parent.slug, a1.slug);
+    assert.equal(f.public, false); assert.equal(f.owner, "bob"); assert.equal(f.parent.slug, pubd.slug);
     assert.equal((await fetch(`${s.base}/api/shares/${f.slug}`)).status, 404, "fork private to the forker");
     assert.equal((await fetch(`${s.base}/api/shares/${f.slug}`, { headers: H(alice) })).status, 404);
     assert.equal((await (await fetch(`${s.base}/api/shares/${a1.slug}`)).json()).forks, 0, "private forks are not counted publicly");
