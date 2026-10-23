@@ -146,7 +146,7 @@ test("dispatchEvent noteOff puts matching voice into release", () => {
   assert.equal(engine.voices.length, 1);
   engine.dispatchEvent({ type: "noteOff", note: 60 });
   // Voice should now be in release stage
-  assert.equal(engine.voices[0].volEnv.stage, "release");
+  assert.equal(engine.voices[0].volEnvStage, "release");
 });
 
 test("dispatchEvent noteOff does not affect voices for different notes", () => {
@@ -154,7 +154,7 @@ test("dispatchEvent noteOff does not affect voices for different notes", () => {
   engine.dispatchEvent({ type: "setPreset", regions: [makeRegion()] });
   engine.dispatchEvent({ type: "noteOn", note: 60, velocity: 100 });
   engine.dispatchEvent({ type: "noteOff", note: 64 }); // different note
-  assert.notEqual(engine.voices[0].volEnv.stage, "release");
+  assert.notEqual(engine.voices[0].volEnvStage, "release");
 });
 
 // ---------------------------------------------------------------------------
@@ -286,5 +286,5 @@ test("chokeExclusive releases voices with the same exclusive class", () => {
   // Start a second note with same exclusive class — should choke the first
   engine.dispatchEvent({ type: "noteOn", note: 62, velocity: 100 });
   // The first voice should now be in release
-  assert.equal(engine.voices[0].volEnv.stage, "release");
+  assert.equal(engine.voices[0].volEnvStage, "release");
 });
