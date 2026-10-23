@@ -1,3 +1,4 @@
+import { controllerStateAt, ctlToBytes, type CtlPlayEvent } from "./workstation/controller-events.ts";
 export interface MidiOutputNote {
   note: number;
   velocity: number;
@@ -14,6 +15,8 @@ export interface MidiOutputPlayEvent {
   velocity?: number;
   program?: number;
   bank?: number;
+  controller?: number;
+  value?: number;
 }
 
 export interface MidiOutputSong {
@@ -42,6 +45,12 @@ export function buildMidiSendEvents(song: MidiOutputSong, startSec: number): Mid
         });
       }
     }
+  }
+
+  // Controller state (CC/bend/pressure) at the start point so MIDI out matches realtime/offline.
+  if (startSec > 0) for (const track of song.tracks) for (const ev of controllerStateAt(track.playEvents as never, startSec)) {
+    if (ev.seq < -1000) continue; // skip reset + mixer-default base layer for external devices
+    events.push({ sec: startSec, order: -0.5, bytes: ctlToBytes(ev) });
   }
 
   for (const [channel, programEvent] of latestProgramByChannel) {
@@ -73,6 +82,8 @@ export function buildMidiSendEvents(song: MidiOutputSong, startSec: number): Mid
         events.push({ sec: event.sec, order: 2, bytes: [0xc0 | channel, (event.program ?? 0) & 0x7f] });
       } else if (event.type === "noteOff") {
         events.push({ sec: event.sec, order: 3, bytes: [0x80 | channel, (event.note ?? 0) & 0x7f, 64] });
+      } else if (event.type === "cc" || event.type === "pitchBend" || event.type === "channelPressure" || event.type === "polyPressure") {
+        events.push({ sec: event.sec, order: 5, bytes: ctlToBytes({ ...(event as CtlPlayEvent), channel, seq: 0 }) });
       } else if (event.type === "noteOn") {
         events.push({ sec: event.sec, order: 4, bytes: [0x90 | channel, (event.note ?? 0) & 0x7f, (event.velocity ?? 0) & 0x7f] });
       }

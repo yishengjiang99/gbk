@@ -1,3 +1,4 @@
+import { ctlToSynth, type CtlPlayEvent } from "./workstation/controller-events.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { NavMenuSection } from "./toolbar-menu.tsx";
@@ -43,6 +44,8 @@ interface NoteRecord {
 
 interface PlayEvent {
   type: string;
+  controller?: number;
+  value?: number;
   sec: number;
   seq?: number;
   channel?: number;
@@ -879,6 +882,8 @@ export default function MidiReader({
       const cc = getTrackCc(track.index, controls);
       // Engine-wide CC7/CC10/CC11 -> channel controller state -> 2.01 default modulators.
       rec.node.port.postMessage({ type: "setControllers", ...cc });
+      // Base layer for seek/loop controller restoration (authored automation replays on top).
+      workerRef.current?.postMessage({ type: "setMixBase", trackIndex: i, cc7: cc.cc7Volume, cc10: cc.cc10Pan, cc11: cc.cc11Expression });
       rec.node.port.postMessage({ type: "setMasterGainDb", db: volumeToMasterGainDb(masterVolumeRef.current) });
     }
   };
@@ -1621,6 +1626,9 @@ export default function MidiReader({
               channel: ev.channel,
               note: ev.note,
             });
+          } else if (ev.type === "cc" || ev.type === "pitchBend" || ev.type === "channelPressure" || ev.type === "polyPressure") {
+            // Same authored automation as realtime playback (worker), via the engine's controller path.
+            events.push({ frame, seq: ev.seq ?? 0, trackIndex: track.index, ...ctlToSynth(ev as unknown as CtlPlayEvent) } as never);
           } else if (ev.type === "program" && overridePreset == null) {
             const pIdx = resolvePresetRef.current(ev.program ?? 0, ev.bank ?? 0) ?? fallbackPresetRef.current;
             events.push({

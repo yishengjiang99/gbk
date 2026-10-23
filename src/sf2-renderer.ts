@@ -760,7 +760,7 @@ export class Sf2SynthEngine {
     v.regModLfoVol = reg.modLfoToVolumeCb ?? 0;
     v.regChorus = reg.chorusSend ?? 0; v.regReverb = reg.reverbSend ?? 0;
     // MIDI-04 soft pedal at note-on: +60 cB, -600 cents cutoff (engine choice).
-    if (this.ccs[Math.max(0, Math.min(15, v.channel)) * 128 + 66] >= 64) {
+    if (this.ccs[Math.max(0, Math.min(15, v.channel)) * 128 + 67] >= 64) {   // CC67 soft pedal (MIDI 1.0)
       v.regAtten += Sf2SynthEngine.softPedalAttenuationCb; v.regFc -= Sf2SynthEngine.softPedalFcCents;
     }
     v.baseRate0 = v.baseRate;
@@ -863,7 +863,7 @@ export class Sf2SynthEngine {
       case 64:
         if (value < 64 && old >= 64) this.releaseDeferred(channel);   // MIDI-02
         break;
-      case 67:                                                          // MIDI-03
+      case 66:                                                          // MIDI-03 CC66 sostenuto (MIDI 1.0)
         if (value >= 64 && !ch.sostenuto) {
           ch.sostenuto = true;
           for (let i = 0; i < this.count; i++) {
