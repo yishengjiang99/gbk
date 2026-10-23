@@ -144,6 +144,7 @@ export function bindController(c: WorkstationController) {
     const blob = data instanceof Blob ? data : new Blob([data as BlobPart], { type: "audio/midi" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    return true;
   };
 }
