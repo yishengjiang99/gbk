@@ -8,15 +8,22 @@ import { parseWavHeader, validateWav } from "../../src/audio/audio-validation.ts
 import { parseSmf } from "../../src/workstation/smf.ts";
 
 const SHOTS = process.env.GBK_SHOTS ?? "/workspace/shots";
+// chrome-shim-autonomous: plain Chrome (no launch flags) driving window.gbkTools instead of document.modelContext.
+const SHIM = process.env.GBK_SHIM === "1";
+const toolNames = (page: Page): Promise<string[]> => page.evaluate(async (shim) => {
+  const list = shim ? await (window as any).gbkTools?.list() : await (document as any).modelContext?.getTools();
+  return (list ?? []).map((t: any) => t.name);
+}, SHIM);
 type R = { ok: boolean; revision: number; projectId: string; data: any; warnings: string[]; error?: { code: string; message: string } };
 
 async function tool(page: Page, name: string, args: object = {}): Promise<R> {
-  const out = await page.evaluate(async ([n, a]) => {
+  const out = await page.evaluate(async ([n, a, shim]) => {
+    if (shim) return await (window as any).gbkTools.call(n, a); // no-flag Chrome: in-page shim
     const mc = (document as any).modelContext;
     const t = (await mc.getTools()).find((x: any) => x.name === n);
     if (!t) throw new Error(`tool ${n} not registered`);
     return await mc.executeTool(t, a);
-  }, [name, args] as const);
+  }, [name, args, SHIM] as const);
   return JSON.parse(out as string);
 }
 
@@ -32,14 +39,15 @@ async function freshPage(page: Page) {
   page.on("pageerror", (e) => console.log("pageerror", e.message));
   await page.goto("/gbk/");
   await expect(page.getByTestId("workstation")).toBeVisible();
-  await expect.poll(async () => page.evaluate(async () => ((await (document as any).modelContext?.getTools()) ?? []).length), { timeout: 20_000 }).toBeGreaterThan(40);
+  await expect.poll(async () => (await toolNames(page)).length, { timeout: 20_000 }).toBeGreaterThan(40);
 }
 
 test("Midnight Invention: compose from scratch and render a validated WAV with no human interaction", async ({ page }) => {
   test.setTimeout(600_000);
   mkdirSync(SHOTS, { recursive: true });
   await freshPage(page);
-  const names: string[] = await page.evaluate(async () => (await (document as any).modelContext.getTools()).map((t: any) => t.name));
+  const names = await toolNames(page);
+  if (SHIM) expect(await page.evaluate(() => [!!(document as any).modelContext, !!(navigator as any).modelContext, (window as any).gbkTools.mode])).toEqual([false, false, "shim"]);
   expect(names).toEqual(expect.arrayContaining(["gbk_create_project", "gbk_create_track", "gbk_set_tempo_map", "gbk_set_time_signature_map", "gbk_set_song_structure", "gbk_generate_arrangement", "gbk_render_wav", "gbk_get_render_status", "gbk_list_render_artifacts", "gbk_get_render_artifact", "gbk_download_render_artifact", "gbk_read_wav_bytes"]));
 
   const proj = await tool(page, "gbk_create_project", { name: "Midnight Invention", tempo: 108, timeSignature: [4, 4], key: "C minor", ppq: 480, replaceCurrent: false });
@@ -133,7 +141,7 @@ test("Midnight Invention: compose from scratch and render a validated WAV with n
   await page.waitForTimeout(1500); // autosave debounce (800 ms)
   await page.reload();
   await expect(page.getByTestId("workstation")).toBeVisible();
-  await expect.poll(async () => page.evaluate(async () => ((await (document as any).modelContext?.getTools()) ?? []).length), { timeout: 20_000 }).toBeGreaterThan(40);
+  await expect.poll(async () => (await toolNames(page)).length, { timeout: 20_000 }).toBeGreaterThan(40);
   const after = await tool(page, "gbk_list_render_artifacts", {});
   expect(after.data.artifacts.some((a: any) => a.artifactId === r.data.artifactId)).toBe(true);
   await expect.poll(async () => (await tool(page, "gbk_get_project_summary")).data.noteCount, { timeout: 20_000 }).toBe(summary.noteCount);

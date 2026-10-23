@@ -1,12 +1,19 @@
 import { test, expect } from "@playwright/test";
-// Bundled Playwright Chromium has no WebMCP: the workstation must work and say so.
-test("no-WebMCP fallback: workstation renders, tools toggle disabled, manual editing works", async ({ page }) => {
+// Bundled Playwright Chromium has no WebMCP: the workstation must work and fall back to the in-page shim.
+test("no-WebMCP fallback: workstation renders, shim tools on by default, manual editing works", async ({ page }) => {
   await page.goto("/gbk/");
   await expect(page.getByTestId("workstation")).toBeVisible();
   const has = await page.evaluate(() => !!(document as any).modelContext || !!(navigator as any).modelContext);
   test.skip(has, "this browser exposes WebMCP");
-  await expect(page.getByTestId("agent-toggle")).toBeDisabled();
-  await expect(page.getByTestId("webmcp-status")).toHaveText(/unavailable/);
+  await expect(page.getByTestId("agent-toggle")).toBeEnabled();
+  await expect(page.getByTestId("agent-toggle")).toBeChecked();
+  await expect(page.getByTestId("agent-mode")).toHaveAttribute("data-mode", "shim");
+  await expect(page.getByTestId("webmcp-status")).toHaveText(/shim.*on/);
+  await page.getByTestId("agent-toggle").uncheck();
+  await expect(page.getByTestId("webmcp-status")).toHaveText(/shim.*off/);
+  expect(await page.evaluate(async () => (await (window as any).gbkTools.list()).length)).toBe(0);
+  await page.getByTestId("agent-toggle").check();
+  await expect(page.getByTestId("webmcp-status")).toHaveText(/shim.*on/);
   await page.getByTestId("open-player").click();
   await expect(page.getByTestId("player-modal")).toHaveClass(/open/);
   await page.getByText(/habanera/i).first().click();

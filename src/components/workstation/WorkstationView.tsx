@@ -94,8 +94,8 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
         <button disabled={!state.canRedo} onClick={() => workstation.redo()}>Redo</button>
         <button onClick={exportMidi} data-testid="export-midi">Export MIDI</button>
         <button onClick={exportWav} data-testid="export-wav">Export WAV</button>
-        <label className={`ws-pill ${agent.on && agent.available ? "on" : "off"}`} title={agent.available ? "Expose gbk_* tools to in-browser agents via WebMCP" : "WebMCP not available in this browser"}>
-          <input type="checkbox" data-testid="agent-toggle" checked={agent.on} disabled={!agent.available} onChange={(e) => agent.setOn(e.target.checked)} /> Enable Agent Tools {agent.available ? "" : "(unavailable)"}
+        <label className={`ws-pill ${agent.on && agent.available ? "on" : "off"}`} data-testid="agent-mode" data-mode={agent.mode} title={agent.mode === "webmcp" ? "Expose gbk_* tools to in-browser agents via WebMCP (document.modelContext)" : "WebMCP not in this browser: tools are exposed in-page as window.gbkTools (shim)"}>
+          <input type="checkbox" data-testid="agent-toggle" checked={agent.on} disabled={!agent.available} onChange={(e) => agent.setOn(e.target.checked)} /> Enable Agent Tools {agent.mode === "shim" ? "(shim)" : ""}
         </label>
         <button className="ws-player-btn" onClick={onOpenPlayer} data-testid="open-player">Player / Library</button>
       </header>

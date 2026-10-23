@@ -38,6 +38,13 @@ export default defineConfig({
       testMatch: /autonomous-compose\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 }, acceptDownloads: true, launchOptions: { args: ["--enable-features=WebMCPTesting"] } },
     },
+    // Same autonomous flow in Chrome with NO launch flags: tools come from the in-page shim (window.gbkTools).
+    // Run with GBK_SHIM=1 so the spec drives gbkTools.call instead of document.modelContext.
+    {
+      name: "chrome-shim-autonomous",
+      testMatch: /autonomous-compose\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 }, acceptDownloads: true },
+    },
     ...(enableVisualChrome
       ? [
           {
