@@ -8,13 +8,14 @@ const KEY_W = 36;
 export const LANE_CHOICES = [1, 7, 10, 11, 64, 71, 74, 91, 93] as const;
 const SWITCHES = new Set([64, 65, 66, 67, 68, 69]);
 const NAMES: Record<number, string> = { 1: "Mod", 7: "Volume", 10: "Pan", 11: "Expression", 64: "Sustain", 71: "Resonance", 74: "Brightness", 91: "Reverb (stored only)", 93: "Chorus (stored only)" };
-export type LaneKind = number | "bend";
+export type LaneKind = number | "bend" | "pressure";
 
 interface Pt { id: string; tick: number; value: number }
 interface Props { project: Project; proposal: Proposal | null; view: View; trackId: string; lane: LaneKind; onChangeLane: (l: LaneKind) => void; onRemove: () => void; width?: number }
 
 function points(p: Project, trackId: string, lane: LaneKind): Pt[] {
   if (lane === "bend") return p.pitchBends.filter((b) => b.trackId === trackId);
+  if (lane === "pressure") return p.channelPressure.filter((b) => b.trackId === trackId);
   return p.ccs.filter((c) => c.trackId === trackId && c.controller === lane);
 }
 
@@ -79,7 +80,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
 
   const commitPoint = (tick: number, value: number) => {
     if (!track) return;
-    if (lane === "bend") return; // bend editing: drawn via pointer only (uses notes API in future)
+    if (typeof lane !== "number") return; // bend/pressure editing: drawn via pointer only (uses notes API in future)
     workstation.edit([{ op: "setCC", trackId, channel: track.channel, controller: lane, startTick: tick, endTick: tick, mode: "merge", points: [{ tick, value }] }], { label: `CC${lane} point` });
   };
   const hit = (px: number, py: number) => pts.find((p) => Math.abs(x(p.tick) - px) < 5 && Math.abs(yv(p.value) - py) < 6);
@@ -120,9 +121,10 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
   return (
     <div className="ws-lane" data-testid={`lane-${lane}`}>
       <div className="ws-lane-head">
-        <select aria-label="Automation controller" value={String(lane)} onChange={(e) => onChangeLane(e.target.value === "bend" ? "bend" : Number(e.target.value))}>
+        <select aria-label="Automation controller" value={String(lane)} onChange={(e) => onChangeLane(e.target.value === "bend" || e.target.value === "pressure" ? e.target.value : Number(e.target.value))}>
           {LANE_CHOICES.map((c) => <option key={c} value={c}>CC{c} {NAMES[c]}</option>)}
           <option value="bend">Pitch bend (14-bit)</option>
+          <option value="pressure">Channel pressure</option>
           {typeof lane === "number" && !LANE_CHOICES.includes(lane as never) && <option value={lane}>CC{lane}</option>}
         </select>
         <input aria-label="Custom CC number" type="number" min={0} max={127} placeholder="CC#" style={{ width: 52 }} onKeyDown={(e) => { if (e.key === "Enter") { const v = Number((e.target as HTMLInputElement).value); if (v >= 0 && v <= 127) onChangeLane(v); } }} />
@@ -131,7 +133,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
         <button onClick={onRemove} aria-label="Remove lane">×</button>
       </div>
       <canvas ref={cv} style={{ width: "100%", height: H, display: "block", touchAction: "none" }} tabIndex={0}
-        aria-label={`Automation lane ${lane === "bend" ? "pitch bend" : `CC${lane}`}. Click adds a point, drag moves, alt-click deletes, shift-drag draws, Enter/arrows edit at playhead.`}
+        aria-label={`Automation lane ${typeof lane === "number" ? `CC${lane}` : lane}. Click adds a point, drag moves, alt-click deletes, shift-drag draws, Enter/arrows edit at playhead.`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onKeyDown={onKey} onContextMenu={(e) => e.preventDefault()} />
     </div>
   );

@@ -17,7 +17,17 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
   const focus = state.proposals.find((x) => x.id === focusId && x.status === "pending") ?? pending[pending.length - 1] ?? null;
   const setFocus = useCallback((id: string | null) => setFocusId(id), []);
   const trackForLanes = p.tracks.find((t) => t.id === laneTrack) ?? p.tracks.find((t) => p.selection.trackIds.includes(t.id)) ?? p.tracks.find((t) => p.notes.some((n) => n.trackId === t.id)) ?? p.tracks[0];
-  useEffect(() => { setView((v) => ({ ...v, scrollTick: 0 })); }, [p.id]);
+  useEffect(() => { setView((v) => ({ ...v, scrollTick: 0 })); setLaneTrack(""); }, [p.id]);
+  // Auto lanes: show the controllers the selected track actually uses (plus bend/pressure when present).
+  useEffect(() => {
+    if (!trackForLanes) return;
+    const counts = new Map<number, number>();
+    for (const c of p.ccs) if (c.trackId === trackForLanes.id && c.controller !== 0 && c.controller !== 32) counts.set(c.controller, (counts.get(c.controller) ?? 0) + 1);
+    const next: LaneKind[] = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k);
+    if (p.pitchBends.some((b) => b.trackId === trackForLanes.id)) next.push("bend");
+    if (p.channelPressure.some((b) => b.trackId === trackForLanes.id)) next.push("pressure");
+    setLanes(next.length ? next : [11, 1]);
+  }, [p.id, trackForLanes?.id]);
   // follow playhead
   useEffect(() => workstation.subscribe((s) => {
     if (!s.transport.playing) return;
