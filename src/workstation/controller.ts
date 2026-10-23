@@ -27,6 +27,12 @@ export interface WorkstationState {
   canUndo: boolean; canRedo: boolean; activity: ActivityEntry[]; agentToolsEnabled: boolean;
   previewing: string | null;
 }
+/** App-provided capabilities (SoundFont presets, offline render, downloads). All optional. */
+export interface WorkstationHost {
+  listPresets?(): { index: number; bank: number; program: number; name: string }[];
+  renderWav?(project: Project, signal?: AbortSignal): Promise<Blob>;
+  download?(data: Blob | Uint8Array, filename: string): void;
+}
 export type ApprovalHandler = (p: Proposal) => Promise<boolean>;
 
 interface HistoryEntry { label: string; before: Project; after: Project }
@@ -39,6 +45,7 @@ export class WorkstationController {
   private driver: TransportDriver | null = null;
   private seq = 0;
   approvalHandler: ApprovalHandler | null = null;
+  host: WorkstationHost = {};
   maxHistory = 200;
 
   constructor(project: Project = emptyProject()) {
