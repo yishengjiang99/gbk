@@ -34,6 +34,7 @@ export default function Root() {
     navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50);
   }, []);
   const explore = composer === true && route.view === "explore";
+  useEffect(() => { document.documentElement.classList.toggle("studio-fit", !explore); return () => document.documentElement.classList.remove("studio-fit"); }, [explore]);
   return (
     <>
       {explore && <ExplorePage onCompose={compose} onOpen={(slug, fork) => navigate(`s/${slug}${fork ? "?fork=1" : ""}`)} />}

@@ -107,7 +107,8 @@ html:has(.xp), html:has(.xp) body, html:has(.ws), html:has(.ws) body { backgroun
 .xp { min-height: 100dvh; }
 
 /* ---- Studio fits the viewport: zero vertical scrolling (page and panels). Overflow flows sideways instead. ---- */
-html:has(.ws), html:has(.ws) body { height: 100%; overflow: hidden; }
+/* Only while the studio is the visible view (Root sets html.studio-fit); landing/Explore scroll normally. */
+html.studio-fit, html.studio-fit body { height: 100%; overflow: hidden; }
 .ws { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
 .ws-header { position: relative; flex: 0 0 auto; }
 .ws-body { flex: 1 1 0; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr); }
