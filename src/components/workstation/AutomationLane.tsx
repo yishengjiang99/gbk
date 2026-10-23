@@ -20,8 +20,8 @@ function points(p: Project, trackId: string, lane: LaneKind): Pt[] {
   return p.ccs.filter((c) => c.trackId === trackId && c.controller === lane);
 }
 
-export function AutomationLane({ project, proposal, view, trackId, lane, onChangeLane, onRemove }: Props) {
-  const H = 72;
+export function AutomationLane({ project, proposal, view, trackId, lane, onChangeLane, onRemove, height = 72 }: Props & { height?: number }) {
+  const H = height;
   const cv = useRef<HTMLCanvasElement | null>(null);
   const [width, setWidth] = useState(800);
   const [live, setLive] = useState<number | null>(null);
