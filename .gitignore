@@ -6,3 +6,6 @@ playwright-report
 # homr ONNX weights staged for the Pages deploy (fetched, not committed)
 public/omr-models/
 public/ort-runtime/
+
+# WebMCP origin-trial token (origin-bound, register your own; see docs/webmcp.md)
+webmcp-origin-trial.local.json

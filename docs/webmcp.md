@@ -4,13 +4,49 @@ GBK exposes its workstation to in-browser agents via the WebMCP **imperative API
 (`document.modelContext.registerTool`, falling back to `navigator.modelContext`). There is no HTTP/SSE MCP server,
 no cross-origin exposure (`exposedTo` is never set), and no arbitrary JS/DOM/filesystem/network tool.
 
-- Off by default. Toggle **Enable Agent Tools** in the workstation header; a status pill shows `WebMCP: on / off / unavailable`.
-- Feature detected; GBK works fully without WebMCP.
+- Toggle **Enable Agent Tools** in the workstation header; the status pill shows `WebMCP on/off` (real API) or
+  `Agent tools (shim: window.gbkTools) on/off` (fallback). With the real API it is off by default; in shim mode it is
+  on by default (the shim is page-local) unless the user unchecked it (persisted in `localStorage["gbk.agentTools"]`).
+- Feature detected; GBK works fully without WebMCP. See **Modes** below.
 - Registration is a module-level singleton bound to one `AbortController`; re-render/HMR re-registration aborts the old set first.
 - `execute(input, {signal})` honors cancellation and always reads live `WorkstationController` state.
 - Every tool returns JSON text: `{ ok, projectId, revision, data, warnings }` or `{ ok:false, error:{code,message} }`.
   Codes: `STALE_REVISION, INVALID_RANGE, INVALID_ARGUMENT, UNSUPPORTED_CC, AUDIO_NOT_READY, USER_APPROVAL_REQUIRED, OPERATION_CANCELLED`.
 - Read tools carry `readOnlyHint: true` and `untrustedContentHint: true` (track names/metadata come from files).
+
+## Modes: real WebMCP, origin trial, in-page shim
+| Browser | `document.modelContext` | How an agent calls tools |
+| --- | --- | --- |
+| Chrome with `--enable-features=WebMCPTesting` | yes | WebMCP host/extension, or `document.modelContext.executeTool` |
+| Chrome on an origin with a valid WebMCP origin-trial token | yes | same as above, no launch flags |
+| Any other browser (normal Chrome, no flags) | no | **shim**: `await gbkTools.call(name, args)` from the page (CDP / Playwright `page.evaluate`, DevTools console, a desktop agent's browser) |
+
+`window.gbkTools` is installed in both modes once agent tools are enabled (in real-WebMCP mode the toggle starts off, so it appears after the user enables it) and is backed by the same registry:
+- `gbkTools.mode` → `"webmcp"` or `"shim"`
+- `await gbkTools.list()` → `[{name, description, inputSchema, annotations}]` (47 `gbk_*` tools; empty while the toggle is off)
+- `await gbkTools.call(name, args)` → exactly what the real tool's `execute()` returns (the JSON-string envelope;
+  `JSON.parse` it). Unknown/unregistered names reject.
+
+When the real API exists the adapter registers on it **and** on the local registry; it never replaces or polyfills
+`document.modelContext`, so WebMCP feature detection by other code stays honest. Example (no flags):
+```js
+const r = JSON.parse(await page.evaluate(() => gbkTools.call("gbk_create_project", { name: "Demo", tempo: 100, replaceCurrent: true })));
+```
+E2E: `GBK_SHIM=1 npx playwright test --project=chrome-shim-autonomous` (Chrome stable, no launch flags).
+
+### Origin trial (real WebMCP without flags)
+No token is committed: tokens are bound to one origin and must be registered by the site owner.
+1. Open <https://developer.chrome.com/origintrials>, find the **WebMCP** trial, click *Register*.
+2. Web origin: `https://yishengjiang99.github.io` (GitHub Pages serves `/gbk/` from that origin). Leave third-party
+   matching off. Accept the terms and copy the token. (Optionally register `http://localhost:5173` for dev.)
+3. CI: add a repository **variable** (or secret) `GBK_WEBMCP_ORIGIN_TRIAL_TOKEN` (Settings → Secrets and variables →
+   Actions). `deploy.yml` passes it to `npm run build`. Tokens are public by design (they ship in the HTML), so a variable is fine.
+4. Local: `GBK_WEBMCP_ORIGIN_TRIAL_TOKEN=... npm run build`, or put `{"token": "..."}` in the gitignored
+   `webmcp-origin-trial.local.json`. Multiple tokens may be comma-separated.
+5. The Vite plugin in `vite.config.ts` injects `<meta http-equiv="origin-trial" content="…">` into each HTML entry.
+   Verify: view source of the deployed page, then in Chrome `!!document.modelContext` is `true` and the pill reads `WebMCP`.
+6. Tokens expire with the trial; renew on the same page and update the variable. If the token is missing or invalid the
+   page silently falls back to the shim.
 
 ## Edit model
 Agents never mutate directly (except mix/instrument/selection/transport, which are undoable or non-destructive).
@@ -111,6 +147,6 @@ E2E: `PW_BASE_URL=http://127.0.0.1:5173/gbk/ npx playwright test --project=chrom
 (Chrome with `--enable-features=WebMCPTesting`, no autoplay flag, clean profile).
 
 ## Testing in Chrome
-Launch Chrome with `--enable-features=WebMCPTesting` (or the WebMCP origin trial) and use the
+Launch Chrome with `--enable-features=WebMCPTesting` (or the WebMCP origin trial, or use the shim above) and use the
 [Model Context Tool Inspector / webmcp-extension](https://github.com/GoogleChromeLabs/webmcp-extension), or
 `await document.modelContext.getTools()` / `executeTool()` from the console.

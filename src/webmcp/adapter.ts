@@ -2,6 +2,7 @@
 // Registration is owned by a module-level singleton so React re-renders / HMR never double-register.
 import type { WorkstationController } from "../workstation/controller.ts";
 import { runTool, type ToolDef, type ToolResult } from "./tools.ts";
+import { getShimModelContext, installGbkTools, ShimModelContext } from "./shim.ts";
 
 /**
  * Content types the WebMCP host returns natively. Chrome's current WebMCP (WebMCPTesting) serializes every tool
@@ -43,25 +44,38 @@ export function getModelContext(scope: { document?: unknown; navigator?: unknown
 export interface Registration { tools: string[]; unregister(): void }
 let current: { abort: AbortController; tools: string[] } | null = null;
 
+/** "webmcp" when the browser exposes the real API, otherwise "shim" (in-page fallback, window.gbkTools). */
+export function agentToolsMode(scope?: { document?: unknown; navigator?: unknown }): "webmcp" | "shim" {
+  return getModelContext(scope) ? "webmcp" : "shim";
+}
+
+/**
+ * Registers every tool on the real ModelContext when present, and always on a page-local registry that backs
+ * window.gbkTools = { list(), call(name, args) }. Without the real API (normal Chrome, no flags / origin trial) the
+ * page-local registry is the only one: shim mode.
+ */
 export async function registerWebMcpTools(c: WorkstationController, tools: ToolDef[], mc: ModelContextLike | null = getModelContext()): Promise<Registration | null> {
-  if (!mc) return null;
   unregisterWebMcpTools();
+  const local: ShimModelContext = getShimModelContext();
+  installGbkTools(mc ? "webmcp" : "shim", local);
+  const targets: Array<ModelContextLike | ShimModelContext> = mc ? [mc, local] : [local];
   const abort = new AbortController();
-  current = { abort, tools: tools.map((t) => t.name) };
-  for (const t of tools) {
-    await mc.registerTool({
+  const mine = { abort, tools: tools.map((t) => t.name) };
+  current = mine; // capture now: a later registration (StrictMode/HMR) may replace `current` while we await
+  for (const t of tools) for (const target of targets) {
+    await target.registerTool({
       name: t.name, description: t.description, inputSchema: t.inputSchema,
       annotations: { readOnlyHint: t.readOnly, untrustedContentHint: t.readOnly, consequentialHint: false },
       // Always read live controller state at call time (never captured React state).
       execute: async (input, client) => {
         const signal = client?.signal ?? new AbortController().signal;
-        return toHostResult(await runTool(c, t, input, signal), hostContentTypes(mc));
+        return toHostResult(await runTool(c, t, input, signal), hostContentTypes(mc ?? target));
       },
     }, { signal: abort.signal });
   }
+  if (current !== mine) return { tools: mine.tools, unregister: () => {} }; // superseded mid-registration
   c.setAgentToolsEnabled(true);
-  const mine = current;
-  return { tools: current.tools, unregister: () => { if (current === mine) { unregisterWebMcpTools(); c.setAgentToolsEnabled(false); } } };
+  return { tools: mine.tools, unregister: () => { if (current === mine) { unregisterWebMcpTools(); c.setAgentToolsEnabled(false); } } };
 }
 
 export function unregisterWebMcpTools() {
