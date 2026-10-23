@@ -113,6 +113,10 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   expect((await ws(v2)).readOnly).toBeNull();
   await v2.screenshot({ path: `${SHOTS}/composer-e2e-forked.png` });
   await page.goto("/"); await expect(page.getByTestId("share-card").first()).toBeVisible();
+  const top = page.getByTestId("top-card").first(); await expect(top).toBeVisible();
+  expect(await top.getByTestId("card-pianoroll").locator("rect").count()).toBeGreaterThan(0);
+  await expect(top.getByTestId("top-link")).toHaveAttribute("href", /\/s\/[a-z0-9-]+-[a-z0-9]{8}$/);
+  await expect(page.getByTestId("launch-video")).toHaveAttribute("preload", "metadata");
   await page.screenshot({ path: `${SHOTS}/composer-e2e-explore.png` });
   await anon.close();
 });

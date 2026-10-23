@@ -14,6 +14,10 @@ async function ok<T>(r: Response): Promise<T> { const b = await r.json().catch((
 export async function listShares(offset = 0, limit = 12, mine = false): Promise<ShareInfo[]> {
   return (await ok<{ shares: ShareInfo[] }>(await fetch(`${apiBase()}/shares?limit=${limit}&offset=${offset}${mine ? "&mine=1" : ""}`, { credentials: "same-origin" }))).shares;
 }
+export type TopShare = ShareInfo & { preview: import("./piano-roll-preview.ts").PianoRollPreview };
+export async function topShares(limit = 10): Promise<TopShare[]> {
+  return (await ok<{ shares: TopShare[] }>(await fetch(`${apiBase()}/shares/top?limit=${limit}`, { credentials: "same-origin" }))).shares;
+}
 export async function getShare(slug: string): Promise<ShareInfo & { project: unknown }> {
   return ok(await fetch(`${apiBase()}/shares/${encodeURIComponent(slug)}`, { credentials: "same-origin" }));
 }

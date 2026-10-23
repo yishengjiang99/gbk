@@ -60,6 +60,12 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     return { shares: store.list({ owner: q.mine ? (s?.user ?? "\u0000none") : undefined, limit, offset }) };
   });
 
+  app.get("/api/shares/top", async (req, reply) => {
+    const limit = Math.min(10, Math.max(1, Number((req.query as { limit?: string }).limit) || 10));
+    reply.header("cache-control", "no-cache");
+    return { rank: "forks", shares: store.top(limit) };
+  });
+
   const visible = (req: FastifyRequest, slug: string) => {
     const row = store.bySlug(slug); if (!row) return null;
     if (row.public) return row;
