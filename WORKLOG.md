@@ -21,3 +21,10 @@ No legacy mode is kept. Matrix: docs/SF2_COMPLIANCE.md (same IDs as the Swift ma
   pitch bend, channel pressure, effects on for even programs; drum kit): 41/129 exact. Bug found: modulation
   envelope convex attack used (1-x)^2 instead of the 8.2.4 convex curve; fixed by reusing modCurve(2, x).
   After fix: 119/129 bit-exact, rest differ by <= 1e-9 (libm ulp differences: V8 fdlibm vs glibc).
+
+## Master bus (user request, added 2026-10-22)
+- src/sf2/master-bus.ts provides masterGain (-3 dB), then a stereo-linked compressor (-6 dBFS, 4:1, 6 dB knee, 5/100 ms), then a lookahead brickwall limiter (-0.3 dBFS ceiling, 50 ms release, 1.5 ms lookahead = 66 frames at 44.1 kHz), then a safety soft clip (<= ceiling < 1).
+- The engine exposes `masterGainDb`, `masterDynamicsEnabled` (default true) and `master.setParams()`. It is applied in renderRange and renderScheduled. renderRangeWithSends (the G-11 measurement API) is pre-master.
+- The compliance tests' SpecRender sets dynamics off and gain 0 dB. test/master-bus.test.ts covers the bound, quiet passthrough, attack/release within 2%, recovery, and NaN/Inf/denormals.
+- Note: the gbk app still runs its own src/master-dynamics.ts after the engine, so app playback now goes through two dynamics stages. This is not changed here; the user decides.
+- The int16 writers in midireader.tsx already clamp to +/-1.

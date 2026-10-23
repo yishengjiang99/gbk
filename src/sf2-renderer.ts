@@ -8,6 +8,8 @@ import {
 } from "./sf2/modulator.ts";
 import { Gen, clampGen, valueRange, roundHalfAway } from "./sf2/geninfo.ts";
 import { SF2Effects } from "./sf2/effects.ts";
+import { MasterBus, MASTER_GAIN_DEFAULT_DB } from "./sf2/master-bus.ts";
+export { MasterBus, MASTER_BUS_DEFAULTS, MASTER_GAIN_DEFAULT_DB, type MasterBusParams } from "./sf2/master-bus.ts";
 
 export type EnvStage = "idle" | "delay" | "attack" | "hold" | "decay" | "sustain" | "release";
 const STAGES: EnvStage[] = ["idle", "delay", "attack", "hold", "decay", "sustain", "release"];
@@ -138,7 +140,7 @@ class VolEnv {
   }
 }
 
-class ModEnv {
+export class ModEnv {
   stage = IDLE;
   level = 0; t = 0;
   delay = 0; attack = 0.01; hold = 0; decay = 0.1; sustain = 0; releaseSec = 0.001;
@@ -363,6 +365,7 @@ export class Sf2SynthEngine {
     this.chans = Array.from({ length: 16 }, () => new ChannelRT());
     this.inputs = { velocity: 0, key: 0, cc: this.ccs, ccBase: 0, pitchWheel: 8192, pitchWheelSensitivity: 2, channelPressure: 0, polyPressure: 0 };
     this.fx = new SF2Effects(outSr);
+    this.master = new MasterBus(outSr);
     this.resetChannels();
   }
 
@@ -461,7 +464,7 @@ export class Sf2SynthEngine {
     this.freeCount = this.capacity;
   }
 
-  resetEffects(): void { this.fx.clear(); }
+  resetEffects(): void { this.fx.clear(); this.master.reset(); }
 
   /** Releases every voice (note-off semantics). */
   releaseAll(): void {
@@ -933,6 +936,22 @@ export class Sf2SynthEngine {
     this.frameL = sumL; this.frameR = sumR;
   }
 
+  /** Master output stage (non-normative; see docs/SF2_COMPLIANCE.md "Master bus"). */
+  readonly master: MasterBus;
+  /** Master-bus dynamics (compressor, limiter, safety clip). The default is on. masterGainDb applies either way. */
+  masterDynamicsEnabled = true;
+  private masterGainLin = Math.pow(10, MASTER_GAIN_DEFAULT_DB / 20);
+  private masterGainDbValue = MASTER_GAIN_DEFAULT_DB;
+  /** Master gain in dB. The default is -3 dB. */
+  get masterGainDb(): number { return this.masterGainDbValue; }
+  set masterGainDb(db: number) { this.masterGainDbValue = db; this.masterGainLin = Math.pow(10, db / 20); }
+
+  private applyMaster(): void {
+    const l = this.frameL * this.masterGainLin, r = this.frameR * this.masterGainLin;
+    if (this.masterDynamicsEnabled) { this.master.process(l, r); this.frameL = this.master.outL; this.frameR = this.master.outR; }
+    else { this.frameL = l; this.frameR = r; }
+  }
+
   private mixSends(): void {
     if (this.effectsEnabled) {
       this.fx.process(this.revL, this.revR, this.choL, this.choR);
@@ -947,6 +966,7 @@ export class Sf2SynthEngine {
     for (let i = 0; i < n; i++) {
       this.renderFrame();
       this.mixSends();
+      this.applyMaster();
       outL[i] = this.frameL;
       outR[i] = this.frameR;
     }
@@ -975,6 +995,7 @@ export class Sf2SynthEngine {
       }
       this.renderFrame();
       this.mixSends();
+      this.applyMaster();
       outL[i] = this.frameL;
       outR[i] = this.frameR;
       renderedSamples += 1;

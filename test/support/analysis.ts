@@ -80,6 +80,9 @@ export class SpecRender {
   constructor(b: SF2Builder, preset = 0, readonly sampleRate = 44100, maxVoices = 64) {
     this.sf = new SF2SoundFont(b.build(), STRICT);
     this.engine = new Sf2SynthEngine(sampleRate, { maxVoices });
+    // Compliance measurements are of the SF2 synthesis model, so they bypass the non-normative master bus.
+    this.engine.masterDynamicsEnabled = false;
+    this.engine.masterGainDb = 0;
     this.engine.setTrackStates([{ trackIndex: 0, regions: this.sf.regionList(preset) }]);
   }
   noteOn(key = 60, velocity = 127, channel = 0): void { this.engine.dispatchEvent({ type: "noteOn", note: key, velocity, trackIndex: 0, channel }); }
