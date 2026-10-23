@@ -7,6 +7,7 @@ export type Op =
   | { op: "updateNotes"; updates: { id: string; tick?: number; duration?: number; pitch?: number; velocity?: number }[] }
   | { op: "setCC"; trackId: string; channel: number; controller: number; startTick: number; endTick: number; mode: "replace" | "merge"; points: { tick: number; value: number }[] }
   | { op: "removeCC"; ids: string[] }
+  | { op: "addPitchBends"; trackId: string; channel: number; events: { tick: number; value: number }[] }
   | { op: "updateTrack"; trackId: string; name?: string; channel?: number; visible?: boolean; mix?: Partial<TrackMix> }
   | { op: "addTrack"; name: string; channel: number; id?: string; role?: TrackRole; mix?: Partial<TrackMix>; program?: number; bankMsb?: number; bankLsb?: number }
   | { op: "setTempoMap"; events: TempoEvent[] }
@@ -56,6 +57,10 @@ export function validateOps(p: Project, ops: Op[]): string[] {
         if ([120, 121, 123].includes(o.controller)) warnings.push(`CC${o.controller} is a channel-mode message`);
         break;
       case "removeCC": break;
+      case "addPitchBends":
+        if (!trackIds.has(o.trackId)) throw new WorkstationError("INVALID_ARGUMENT", `unknown track ${o.trackId}`);
+        int(o.channel, 0, 15, "channel"); for (const e of o.events) { int(e.tick, 0, 1e9, "tick"); int(e.value, 0, 16383, "value"); }
+        break;
       case "updateTrack":
         if (!trackIds.has(o.trackId)) throw new WorkstationError("INVALID_ARGUMENT", `unknown track ${o.trackId}`);
         if (o.channel !== undefined) int(o.channel, 0, 15, "channel");
@@ -144,6 +149,7 @@ export function applyOps(src: Project, ops: Op[]): Project {
         break;
       }
       case "removeCC": { const s = new Set(o.ids); p.ccs = p.ccs.filter((c) => !s.has(c.id)); break; }
+      case "addPitchBends": for (const e of o.events) p.pitchBends.push({ id: newId("pb"), trackId: o.trackId, channel: o.channel, tick: e.tick, value: e.value }); p.pitchBends.sort((a, b) => a.tick - b.tick); break;
       case "updateTrack": p.tracks = p.tracks.map((t): Track => t.id !== o.trackId ? t : {
         ...t, ...(o.name !== undefined ? { name: o.name.slice(0, 128) } : {}), ...(o.channel !== undefined ? { channel: o.channel } : {}),
         ...(o.visible !== undefined ? { visible: o.visible } : {}), mix: { ...t.mix, ...(o.mix ?? {}) },
@@ -194,6 +200,7 @@ export function summarizeOps(ops: Op[]): string {
       case "updateNotes": return `modify ${o.updates.length} note(s)`;
       case "setCC": return `${o.mode} CC${o.controller} ch${o.channel + 1} ticks ${o.startTick}-${o.endTick} (${o.points.length} pts)`;
       case "removeCC": return `remove ${o.ids.length} CC event(s)`;
+      case "addPitchBends": return `add ${o.events.length} pitch bend(s) on ${o.trackId}`;
       case "updateTrack": return `update track ${o.trackId}`;
       case "addTrack": return `add track "${o.name}"`;
       case "setTempoMap": return `set tempo map (${o.events.length} event(s))`;

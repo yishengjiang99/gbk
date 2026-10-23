@@ -4,6 +4,7 @@ import { useWorkstation, workstation } from "./useWorkstation.ts";
 import { PianoRollEditor, type View } from "./PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "./AutomationLane.tsx";
 import { AgentPanel, useAgentToolsToggle } from "./AgentPanel.tsx";
+import { LiveKeyboard } from "./LiveKeyboard.tsx";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
@@ -41,6 +42,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
   }, [p.id, trackForLanes?.id]);
   // Playhead follow (page-style), rAF-driven: React only re-renders when the page flips.
   const [follow, setFollow] = useState(true);
+  const [keysOn, setKeysOn] = useState(false);
   const followRef = useRef(true); followRef.current = follow;
   const viewRef = useRef(view); viewRef.current = view;
   useEffect(() => {
@@ -84,6 +86,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
           {state.transport.playing ? <button onClick={() => workstation.pause()} aria-label="Pause">⏸</button> : <button onClick={() => run(() => workstation.play())} aria-label="Play" data-testid="ws-play">▶</button>}
           <button onClick={() => workstation.stop()} aria-label="Stop">⏹</button>
           <span className="ws-pos" data-testid="ws-pos" data-pos-tick={pos}>{bb.bar}.{Math.floor(bb.beat) + 1} · {tickToSec(p, pos).toFixed(2)}s</span>
+          <button onClick={() => setKeysOn(!keysOn)} aria-pressed={keysOn} data-testid="keys-toggle" title="Piano keyboard (on-screen, computer keys A-K, Web MIDI)">🎹 Keys</button>
           <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
           <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
         </div>
@@ -127,6 +130,7 @@ export function WorkstationView({ onOpenPlayer }: { onOpenPlayer: () => void }) 
         </nav>
         <main className="ws-main">
           <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={360} onManualScroll={() => setFollow(false)} onWidth={(px) => { rollPx.current = px; }} />
+          {keysOn && <LiveKeyboard workstation={workstation} />}
           <div className="ws-lanes">
             <div className="ws-row ws-dim">Automation for <b style={{ color: trackForLanes?.color }}>{trackForLanes?.name ?? "–"}</b>
               <button onClick={() => setLanes([...lanes, 7])}>+ lane</button>
