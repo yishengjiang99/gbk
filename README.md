@@ -156,3 +156,7 @@ recorder live under **Player / Library** (a modal; the audio engine stays mounte
 
 Docs: [architecture](docs/architecture.md) · [WebMCP tools](docs/webmcp.md) · [controller pipeline](docs/controller-pipeline.md) ·
 [demo walkthrough](docs/demo-walkthrough.md).
+
+## Songs
+Songs made with GBK's agent tools are published in [`songs/`](songs/) and shown at
+<https://yishengjiang99.github.io/gbk/songs/>. Publish one with `npm run song:publish -- songs/recipes/<name>.json`; see [docs/songs.md](docs/songs.md).

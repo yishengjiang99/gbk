@@ -24,7 +24,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /workstation-(webmcp|voice)\.spec\.ts|autonomous-compose\.spec\.ts/,
+      testIgnore: /workstation-(webmcp|voice)\.spec\.ts|autonomous-compose\.spec\.ts|song-video\.spec\.ts/,
     },
     // Real WebMCP runtime: Chrome stable with the WebMCP testing feature (exposes document.modelContext).
     {
@@ -44,6 +44,12 @@ export default defineConfig({
       name: "chrome-shim-autonomous",
       testMatch: /autonomous-compose\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 }, acceptDownloads: true },
+    },
+    // Song video renderer + gallery (Chrome stable, no flags; needs ffmpeg/ffprobe and a published song folder).
+    {
+      name: "chrome-song",
+      testMatch: /song-video\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 } },
     },
     ...(enableVisualChrome
       ? [
