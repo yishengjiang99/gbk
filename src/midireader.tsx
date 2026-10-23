@@ -76,7 +76,8 @@ interface Song {
 }
 
 type TrackCc = { cc7Volume: number; cc10Pan: number; cc11Expression: number };
-type TrackMix = { mute: boolean; solo: boolean };
+/** fader: workstation mix volume as a linear gain ((volume/100)^2, same law as the offline renderer). */
+type TrackMix = { mute: boolean; solo: boolean; fader?: number };
 type PresetOption = { index: number; bank: number; program: number; name: string };
 type MidiOption = { name: string; path: string };
 type MidiOutputOption = { id: string; name: string };
@@ -877,7 +878,8 @@ export default function MidiReader({
       const solo = !!mix?.[track.index]?.solo;
       // CC7 / CC11 = 0 silence the track through the engine's default modulators; mute/solo only here.
       const audible = anySolo ? solo : !muted;
-      rec.gain.gain.setTargetAtTime(audible ? 1 : 0, rec.gain.context.currentTime, 0.01);
+      const fader = mix?.[track.index]?.fader ?? 1;
+      rec.gain.gain.setTargetAtTime(audible ? fader : 0, rec.gain.context.currentTime, 0.01);
     }
   };
 
@@ -1655,12 +1657,14 @@ export default function MidiReader({
       return { presetIndex, presetName: presetOptionMapRef.current.get(presetIndex)?.name ?? `#${presetIndex}`, regions };
     },
     setTrackMix: (i, m) => {
-      const nextTrack: TrackCc = { cc7Volume: clampCc(m.volume), cc10Pan: clampCc(m.pan), cc11Expression: clampCc(m.expression) };
+      // Workstation volume is a fader on the track's gain node (works on top of the song's own CC7 automation, which
+      // would otherwise overwrite a CC7 base value); CC7 base stays at the GM default 100.
+      const nextTrack: TrackCc = { cc7Volume: 100, cc10Pan: clampCc(m.pan), cc11Expression: clampCc(m.expression) };
       trackCcControlsRef.current = { ...trackCcControlsRef.current, [i]: nextTrack };
       setTrackCcControls(trackCcControlsRef.current);
       trackNodesRef.current[i]?.node?.port.postMessage({ type: "setControllers", ...nextTrack });
       workerRef.current?.postMessage({ type: "setMixBase", trackIndex: i, cc7: nextTrack.cc7Volume, cc10: nextTrack.cc10Pan, cc11: nextTrack.cc11Expression });
-      const mixAll = { ...trackMixStateRef.current, [i]: { mute: m.mute, solo: m.solo } };
+      const mixAll = { ...trackMixStateRef.current, [i]: { mute: m.mute, solo: m.solo, fader: (Math.max(0, Math.min(127, m.volume)) / 100) ** 2 } };
       trackMixStateRef.current = mixAll;
       setTrackMixState(mixAll);
       applyTrackMuteSolo(song, mixAll);

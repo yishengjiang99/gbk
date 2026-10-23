@@ -107,7 +107,7 @@ test("auto-pan: orchestra seating matches the live StereoPannerNode law; autoPan
   assert.equal(resolveOrchestraPan("Violin", "Violin"), -0.75);
   assert.deepEqual(stereoPanGains(0), { ll: 1, rl: Math.cos(Math.PI / 2), lr: 0, rr: 1 });
   const p = song({ name: "Violin", program: 40 });
-  const panned = await render(p, { normalize: "off" }), centre = await render(p, { normalize: "off", autoPan: false });
+  const panned = await render(p, { normalize: "off", autoPan: true }), centre = await render(p, { normalize: "off" }); // autoPan is opt-in
   assert.equal(panned.instruments[0].pan, -0.75); assert.equal(centre.instruments[0].pan, 0);
   const a = pcm(panned.bytes).s, c = pcm(centre.bytes).s;
   const lrP = rmsDb(a, 44100, 0, 7, 0) - rmsDb(a, 44100, 0, 7, 1), lrC = rmsDb(c, 44100, 0, 7, 0) - rmsDb(c, 44100, 0, 7, 1);

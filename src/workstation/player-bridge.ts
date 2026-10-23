@@ -6,6 +6,7 @@ import { secToTick, tickToSec } from "./timing.ts";
 import type { Project, TrackMix } from "./model.ts";
 import type { SF2Region } from "../sf2/soundfont.ts";
 import { renderProjectOffline, setLivePresetOverridesProvider } from "../audio/offline-renderer.ts";
+import { bindRendererSoundFont } from "../audio/renderer-host.ts";
 import { normalizeEffects, type EffectsParams, type VoiceOverride } from "../sf2/voice-overrides.ts";
 
 export interface PlayerHandle {
@@ -146,10 +147,7 @@ export function bindController(c: WorkstationController) {
     project.tracks.forEach((t, i) => { const ov = h.getTrackPresetOverride!(i + 1); if (ov != null) out[t.id] = ov; });
     return Object.keys(out).length ? out : undefined;
   });
-  c.host.trackRegions = (project, trackId) => {
-    const i = project.tracks.findIndex((t) => t.id === trackId);
-    return i < 0 ? null : playerBridge.handle?.getTrackRegions?.(i + 1) ?? null;
-  };
+  bindRendererSoundFont(c);
   c.host.download = (data, filename) => {
     const blob = data instanceof Blob ? data : new Blob([data as BlobPart], { type: "audio/midi" });
     const url = URL.createObjectURL(blob);

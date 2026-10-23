@@ -8,7 +8,7 @@ import type { View } from "./PianoRollEditor.tsx";
 const KEY_W = 36;
 export const LANE_CHOICES = [1, 7, 10, 11, 64, 71, 74, 91, 93] as const;
 const SWITCHES = new Set([64, 65, 66, 67, 68, 69]);
-const NAMES: Record<number, string> = { 1: "Mod", 7: "Volume", 10: "Pan", 11: "Expression", 64: "Sustain", 71: "Resonance", 74: "Brightness", 91: "Reverb (stored only)", 93: "Chorus (stored only)" };
+const NAMES: Record<number, string> = { 1: "Mod", 7: "Volume", 10: "Pan", 11: "Expression", 64: "Sustain", 71: "Resonance", 74: "Brightness", 91: "Reverb send", 93: "Chorus send" };
 export type LaneKind = number | "bend" | "pressure";
 
 interface Pt { id: string; tick: number; value: number }

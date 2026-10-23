@@ -4,7 +4,7 @@ import { Sf2SynthEngine, type SynthEvent, type TrackState } from "../sf2-rendere
 import type { Project } from "../workstation/model.ts";
 import { bars, tempoSegments, type TempoSeg } from "../workstation/timing.ts";
 import { normalizeEffects } from "../sf2/voice-overrides.ts";
-import type { SF2SoundFont } from "../sf2/soundfont.ts";
+import type { SF2SoundFont, SF2Region } from "../sf2/soundfont.ts";
 import { loadSoundFont, resolveInstrument, type LoadedSoundFont, type ResolvedInstrument } from "./soundfont-loader.ts";
 import { encodeChunk, wavDataBytes, wavHeader, type WavFormat } from "./wav-encoder.ts";
 import { StatsAccumulator, validateWav, type AudioStats, type WavInfo } from "./audio-validation.ts";
@@ -28,7 +28,7 @@ export interface OfflineRenderOptions {
   normalize?: boolean | NormalizeMode;
   /** Integrated loudness target for normalize "loudness". Default -16 LUFS. */
   targetLufs?: number;
-  /** Orchestra-seating auto-pan per track, as in live playback (StereoPannerNode after each track). Default true. */
+  /** Orchestra-seating auto-pan for tracks WITHOUT an explicit pan (mix pan != centre or CC10 automation). Default false. */
   autoPan?: boolean;
   /** Player per-track preset overrides (trackId -> SoundFont preset index); pinned like the live player (the track's
    *  program changes are ignored). Defaults to the live player's overrides when the player has this project loaded. */
@@ -58,7 +58,7 @@ export interface RenderResult {
   /** Loudness measurement and the whole-file gain that was applied. */
   loudness: LoudnessReport;
 }
-export interface InstrumentReport { trackId: string; trackName: string; channel: number; presetName: string; bank: number; program: number; substituted: boolean; muted: boolean; pan: number; presetOverride: boolean }
+export interface InstrumentReport { trackId: string; trackName: string; channel: number; presetName: string; bank: number; program: number; substituted: boolean; muted: boolean; pan: number; panSource: "auto" | "mix" | "cc10" | "centre"; volume: number; faderDb: number; presetOverride: boolean }
 
 const CLS = { setup: 0, program: 1, cc: 2, ctl: 3, noteOff: 4, noteOn: 5 } as const;
 
@@ -93,6 +93,8 @@ export interface RenderPlan {
   tracks: TrackState[]; events: SynthEvent[]; startFrame: number; musicFrames: number; instruments: InstrumentReport[]; warnings: string[]; audibleNotes: number;
   /** Post-engine stereo pan per track (live StereoPannerNode), by track index. */
   pans: number[];
+  /** Post-engine track fader gain (mix volume), by track index. */
+  faders: number[];
 }
 export interface PlanOptions { startTick?: number; endTick?: number; autoPan?: boolean; presetOverrides?: Record<string, number> }
 
@@ -108,7 +110,7 @@ export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number
   const at = (tick: number) => Math.max(0, f(Math.max(tick, startTick)) - startFrame);
   const events: SynthEvent[] = []; let seq = 0;
   const push = (frame: number, cls: number, e: SynthEvent) => { e.frame = frame; e.seq = cls * 1e8 + seq++; events.push(e); };
-  const warnings: string[] = []; const instruments: InstrumentReport[] = []; const tracks: TrackState[] = []; const pans: number[] = [];
+  const warnings: string[] = []; const instruments: InstrumentReport[] = []; const tracks: TrackState[] = []; const pans: number[] = []; const faders: number[] = [];
   const anySolo = p.tracks.some((t) => t.mix.solo);
   let audibleNotes = 0;
   const effects = p.sound?.effects;
@@ -132,9 +134,17 @@ export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number
       ? { regions: sf.regionList(ovIdx!), presetName: sf.presets[ovIdx!].presetName, bank: sf.presets[ovIdx!].bank, program: sf.presets[ovIdx!].preset, substituted: false }
       : res(initial?.program ?? 0, initial?.bankMsb ?? 0, ch0);
     tracks.push({ trackIndex: ti, regions: inst.regions, pan: 0, gain: muted ? 0 : 1 });
-    const pan = range.autoPan === false ? 0 : resolveOrchestraPan(t.name, inst.presetName) ?? 0;
-    pans.push(pan);
-    instruments.push({ trackId: t.id, trackName: t.name, channel: t.channel, presetName: inst.presetName, bank: inst.bank, program: inst.program, substituted: inst.substituted, muted, pan, presetOverride: pinned });
+    // Explicit pan = a non-centre mix pan (gbk_set_track_mix / pan slider) or authored CC10 automation. Auto-pan
+    // (opt-in) only seats tracks without one, so it never overrides a pan the user or agent chose.
+    const explicitPan = t.mix.pan !== 64 || p.ccs.some((c) => c.trackId === t.id && c.controller === 10);
+    const auto = range.autoPan === true && !explicitPan ? resolveOrchestraPan(t.name, inst.presetName) ?? 0 : 0;
+    pans.push(auto);
+    // Track fader: the mix volume is a post-engine gain relative to the GM default 100 (same square law as the SF2
+    // CC7 default modulator), so it works on top of authored CC7 automation instead of being replaced by it.
+    const fader = muted ? 0 : (t.mix.volume / 100) ** 2;
+    faders.push(fader);
+    const mixPan = Math.max(-1, Math.min(1, (t.mix.pan - 64) / 63));
+    instruments.push({ trackId: t.id, trackName: t.name, channel: t.channel, presetName: inst.presetName, bank: inst.bank, program: inst.program, substituted: inst.substituted, muted, pan: +(auto || mixPan).toFixed(3), panSource: auto ? "auto" : explicitPan ? (t.mix.pan !== 64 ? "mix" : "cc10") : "centre", volume: t.mix.volume, faderDb: fader > 0 ? +(20 * Math.log10(fader)).toFixed(2) : -Infinity, presetOverride: pinned });
     // A pinned player override ignores the track's program changes (same as the live player).
     if (!pinned) for (const g of progs) if (g.tick > startTick && g.tick < endTick) push(at(g.tick), CLS.program, { type: "setPreset", trackIndex: ti, regions: res(g.program, g.bankMsb, g.channel).regions });
     const ov = p.sound?.tracks[t.id];
@@ -143,7 +153,7 @@ export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number
     const chans = new Set<number>([t.channel]);
     for (const n of p.notes) if (n.trackId === t.id) chans.add(n.channel);
     for (const ch of chans) {
-      push(0, CLS.setup, { type: "controlChange", trackIndex: ti, channel: ch, controller: 7, value: t.mix.volume });
+      push(0, CLS.setup, { type: "controlChange", trackIndex: ti, channel: ch, controller: 7, value: 100 }); // GM default; mix volume = fader
       push(0, CLS.setup, { type: "controlChange", trackIndex: ti, channel: ch, controller: 10, value: t.mix.pan });
       push(0, CLS.setup, { type: "controlChange", trackIndex: ti, channel: ch, controller: 11, value: t.mix.expression });
     }
@@ -172,7 +182,7 @@ export function buildRenderPlan(p: Project, sf: SF2SoundFont, sampleRate: number
   if (p.raw.some((r) => r.kind === "sysex")) warnings.push("SysEx events are kept in the project/MIDI export but have no effect on the SF2 render");
   events.sort((a, b) => a.frame! - b.frame! || a.seq! - b.seq!);
   const lastEvent = events.length ? events[events.length - 1].frame! : 0;
-  return { tracks, events, startFrame, musicFrames: Math.max(lastEvent, f(endTick) - startFrame, 0), instruments, warnings, audibleNotes, pans };
+  return { tracks, events, startFrame, musicFrames: Math.max(lastEvent, f(endTick) - startFrame, 0), instruments, warnings, audibleNotes, pans, faders };
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -194,7 +204,7 @@ async function runEngine(plan: RenderPlan, sr: number, totalFrames: number, chun
   const voices = plan.tracks.filter((t) => (t.gain ?? 1) > 0 && hasNotes.has(t.trackIndex)).map((t) => {
     const engine = new Sf2SynthEngine(sr); // live per-track node default (64 voices)
     engine.setTrackStates([t]);
-    return { ti: t.trackIndex, engine, events: [] as SynthEvent[], ei: 0, L: new Float32Array(chunkFrames), R: new Float32Array(chunkFrames), g: stereoPanGains(plan.pans[t.trackIndex] ?? 0) };
+    return { ti: t.trackIndex, engine, events: [] as SynthEvent[], ei: 0, L: new Float32Array(chunkFrames), R: new Float32Array(chunkFrames), g: scalePan(stereoPanGains(plan.pans[t.trackIndex] ?? 0), plan.faders[t.trackIndex] ?? 1) };
   });
   const byTrack = new Map(voices.map((v) => [v.ti, v]));
   for (const e of plan.events) {
@@ -222,6 +232,27 @@ async function runEngine(plan: RenderPlan, sr: number, totalFrames: number, chun
     if (((cursor / chunkFrames) & 7) === 7) await yieldToEventLoop();
   }
 }
+
+/**
+ * The preset a track renders with, resolved exactly as buildRenderPlan does (player-pinned override, else the
+ * track's program at tick 0 through resolveInstrument: bank/program -> preset, channel 10 -> bank 128, bank-0
+ * fallback). Voice settings, the preset list and the Sound panel use this so they always match the render.
+ */
+export function resolveTrackPreset(p: Project, trackId: string, sf: SF2SoundFont): { presetName: string; presetIndex: number; bank: number; program: number; regions: SF2Region[]; pinned: boolean; substituted: boolean } | null {
+  const t = p.tracks.find((x) => x.id === trackId); if (!t) return null;
+  const ov = liveOverrides?.(p)?.[t.id];
+  if (ov != null && ov >= 0 && ov < sf.presets.length) {
+    const h = sf.presets[ov];
+    return { presetName: h.presetName, presetIndex: ov, bank: h.bank, program: h.preset, regions: sf.regionList(ov), pinned: true, substituted: false };
+  }
+  const g = p.programs.filter((x) => x.trackId === t.id && x.tick <= 0).sort((a, b) => a.tick - b.tick).pop();
+  try {
+    const r = resolveInstrument(sf, g?.program ?? 0, g?.bankMsb ?? 0, g?.channel ?? t.channel);
+    return { presetName: r.presetName, presetIndex: r.presetIndex, bank: r.bank, program: r.program, regions: r.regions, pinned: false, substituted: r.substituted };
+  } catch { return null; }
+}
+
+const scalePan = (g: ReturnType<typeof stereoPanGains>, k: number) => ({ ll: g.ll * k, rl: g.rl * k, lr: g.lr * k, rr: g.rr * k });
 
 /** Live-player state provider (registered by the player bridge): per-track preset overrides for a project. */
 let liveOverrides: ((p: Project) => Record<string, number> | undefined) | null = null;
