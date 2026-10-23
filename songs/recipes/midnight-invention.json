@@ -1,0 +1,20 @@
+{
+  "title": "Midnight Invention",
+  "slug": "midnight-invention",
+  "composer": "GBK autonomous composer (WebMCP tools)",
+  "description": "A four-voice baroque invention in C minor for string trio and harpsichord: a quiet introduction, a theme, a dense development and a decrescendo coda.",
+  "steps": [
+    { "tool": "gbk_create_project", "args": { "name": "Midnight Invention", "tempo": 108, "timeSignature": [4, 4], "key": "C minor", "ppq": 480, "replaceCurrent": true } },
+    { "tool": "gbk_create_track", "args": { "name": "Violin", "program": 40, "role": "melody", "pan": 40 } },
+    { "tool": "gbk_create_track", "args": { "name": "Viola", "program": 41, "role": "harmony", "pan": 56 } },
+    { "tool": "gbk_create_track", "args": { "name": "Cello", "program": 42, "role": "bass", "pan": 84 } },
+    { "tool": "gbk_create_track", "args": { "name": "Harpsichord", "program": 6, "role": "accompaniment", "pan": 64, "volume": 92 } },
+    { "tool": "gbk_set_tempo_map", "args": { "events": [{ "bar": 1, "bpm": 108 }] } },
+    { "tool": "gbk_set_time_signature_map", "args": { "events": [{ "bar": 1, "numerator": 4, "denominator": 4 }] } },
+    { "tool": "gbk_set_song_structure", "args": { "sections": [{ "name": "Introduction", "startBar": 1, "bars": 4, "energy": 0.3 }, { "name": "Theme", "startBar": 5, "bars": 12, "energy": 0.7 }, { "name": "Development", "startBar": 17, "bars": 12, "energy": 0.95 }, { "name": "Coda", "startBar": 29, "bars": 4, "energy": 0.5 }] } },
+    { "tool": "gbk_generate_arrangement", "args": { "style": "baroque", "key": "C minor", "tempo": 108, "bars": 32, "seed": 12345, "voices": 4, "complexity": 4, "instrumentation": ["violin", "viola", "cello", "harpsichord"], "features": { "counterpoint": true, "dynamicExpression": true, "articulation": true, "cadences": true } } },
+    { "tool": "gbk_generate_cc_curve", "args": { "trackIds": ["$track[0]", "$track[1]", "$track[2]"], "controller": 11, "shape": "decrescendo", "from": 110, "to": 45, "range": { "unit": "bars", "start": 29, "end": 32 } } },
+    { "tool": "gbk_commit_proposal", "args": { "proposalId": "$proposal" } }
+  ],
+  "render": { "sampleRate": 44100, "channels": 2, "format": "pcm16", "tailSeconds": 3 }
+}
