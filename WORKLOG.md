@@ -28,3 +28,16 @@ No legacy mode is kept. Matrix: docs/SF2_COMPLIANCE.md (same IDs as the Swift ma
 - The compliance tests' SpecRender sets dynamics off and gain 0 dB. test/master-bus.test.ts covers the bound, quiet passthrough, attack/release within 2%, recovery, and NaN/Inf/denormals.
 - Note: the gbk app still runs its own src/master-dynamics.ts after the engine, so app playback now goes through two dynamics stages. This is not changed here; the user decides.
 - The int16 writers in midireader.tsx already clamp to +/-1.
+
+## Compliance tests, matrix and parity (2026-10-22)
+- Test files:
+  - test/sf2-compliance-{p,z,g,m,midi}.test.ts: every Swift row test is ported with the same name.
+  - test/sf2-fuzz.test.ts: P-99, 10k iterations, SplitMix64 with the same seed as Swift.
+  - test/sf2-compliance-matrix.test.ts: asserts 80 pass and 3 n/a, and that every named test exists.
+- docs/SF2_COMPLIANCE.md uses the same IDs as Swift and carries a non-normative master-bus note.
+- Red evidence: the new test files were run against bda70eb in a worktree. 7 of 8 files fail at import (the 2.01 modules don't exist there). The matrix test passes there because it reads only docs and test names.
+  - This is a weak red: the implementation was ported before the tests, as noted above. The tests were not written one by one against a failing implementation.
+- Cross-engine parity: test/sf2-cross-engine-parity.test.ts runs 20 GU scenarios plus 4 builder banks x fx on/off, and needs SF2_PARITY_SWIFT_BIN.
+  - Tolerance is 1e-6. The worst value observed in the test set is 1.4e-14. The scratch sweep of 135 scenarios gave worst 2.3e-10, with 121 bit-exact.
+- `npm test` (with the Swift bin): 253/253. `npm run build`: OK.
+- Not done: FluidSynth diff script (fluidsynth isn't installable on the box without sudo); macOS libm parity.

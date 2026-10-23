@@ -67,6 +67,15 @@ See `docs/midi-clock-follower.md` (clock-domain conversion, sync-lost timeout, t
   - SF2 file parser and region builder.
   - Produces regions consumable by `sf2-processor`.
 
+- `src/sf2-renderer.ts` + `src/sf2/*` (SoundFont 2.01 engine)
+  - `Sf2SynthEngine`: a SoundFont 2.01 compliant synthesis model, ported from sf2player-swift `.spec`. There is no legacy mode.
+    Coverage is in docs/SF2_COMPLIANCE.md (80 pass, 3 n/a), and each row is backed by `test/sf2-compliance-*.test.ts`.
+  - Master bus (non-normative, after the voices and fx): `masterGainDb` (default -3 dB), a compressor
+    (-6 dBFS, 4:1, 6 dB knee, 5/100 ms), a lookahead brickwall limiter (-0.3 dBFS), and a safety soft clip.
+    Output never reaches ±1.0. Turn it off with `engine.masterDynamicsEnabled = false`, and tune it with
+    `engine.master.setParams({...})`. It adds 1.5 ms of latency. The WAV writers clamp to ±1 before int16.
+  - Cross-engine parity vs Swift: `SF2_PARITY_SWIFT_BIN=… npm test`. See `test/sf2-cross-engine-parity.test.ts`.
+
 - `src/midi-driver.js`
   - Web MIDI input handling for live controller events.
   - Supports note on/off, bank select, and program change callbacks.
