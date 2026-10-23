@@ -16,6 +16,8 @@ async function signIn(page: Page, code = "e2e-code") {
 }
 
 test("compose a fugue through the server agent, render a valid WAV, follow-up edit, share + fork", async ({ page, browser }) => {
+  // The full flow shares one server user/conversation; run it once (desktop). Mobile has its own test below.
+  test.skip(test.info().project.name !== "chrome-no-webmcp", "full flow runs on desktop Chrome only");
   mkdirSync(SHOTS, { recursive: true });
   page.on("pageerror", (e) => console.log("pageerror", e.message));
   await page.goto("/");
