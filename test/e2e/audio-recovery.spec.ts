@@ -17,7 +17,7 @@ test("playback rebuilds the master bus and track nodes after the audio context c
       constructor(ctx, name, opts) { super(ctx, name, opts); window.audioNodes.push({ node: this, name }); }
     };
   ` });
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await openAppMenu(page);
   await expect(page.getByRole("button", { name: "Export WAV", exact: true })).toBeEnabled();
   await closeAppMenu(page);

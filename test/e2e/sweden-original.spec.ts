@@ -4,7 +4,7 @@ import path from "node:path";
 import { openAppMenu } from "./app-menu.ts";
 
 test("original Sweden transcription matches the Python MIDI and survives reload", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await openAppMenu(page);
   await page.getByRole("button", { name: "Show Sweden sheet music" }).click();
   // The Sheet Music overlay opens automatically.

@@ -1,3 +1,4 @@
+import { playerBridge } from "./workstation/player-bridge.ts";
 import { ctlToSynth, type CtlPlayEvent } from "./workstation/controller-events.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -1541,7 +1542,7 @@ export default function MidiReader({
     }
   }, [playRequested, sf2Ready, sf2Error, sf2Loading]);
 
-  async function onExportWav() {
+  async function onExportWav(onBlob?: (b: Blob) => void) {
     if (!song || !sf2Ready || isExporting) return;
     setIsExporting(true);
     setExportProgress(0);
@@ -1658,6 +1659,7 @@ export default function MidiReader({
       setExportProgress(1);
       setExportStage("Saving");
       const blob = new Blob([wavBuffer], { type: "audio/wav" });
+      if (onBlob) { onBlob(blob); return; }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1704,6 +1706,7 @@ export default function MidiReader({
     if (isPlaying) workerRef.current.postMessage({ type: "pause" });
     disconnectTrackNodes();
     pendingRestoreSecRef.current = opts.restoreSec ?? null;
+    playerBridge.onPlayerLoadedBuffer(buf.slice(0), name);
     workerRef.current.postMessage({ type: "loadMidi", midiData: buf }, [buf]);
     setSelectedMidiPath(selectedPath);
     setCurrentMidiSource(source);
@@ -1737,6 +1740,44 @@ export default function MidiReader({
       });
     }
   }
+
+  // Workstation bridge: latest-closure handle (no stale React state), registered once.
+  const bridgeImplRef = useRef<import("./workstation/player-bridge.ts").PlayerHandle | null>(null);
+  bridgeImplRef.current = {
+    loadBuffer: (buf, name, o) => loadMidiIntoTracks(buf, name, { autoplay: o.autoplay, restoreSec: o.restoreSec, persist: false }),
+    unlockAudio: async () => { const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false }); await ctx.resume(); },
+    pause: () => workerRef.current?.postMessage({ type: "pause" }),
+    seek: (sec) => { seekToSec(sec); },
+    isReady: () => sf2Ready,
+    exportWav: (cb) => onExportWav(cb),
+    setTrackMix: (i, m) => {
+      const nextTrack: TrackCc = { cc7Volume: clampCc(m.volume), cc10Pan: clampCc(m.pan), cc11Expression: clampCc(m.expression) };
+      trackCcControlsRef.current = { ...trackCcControlsRef.current, [i]: nextTrack };
+      setTrackCcControls(trackCcControlsRef.current);
+      trackNodesRef.current[i]?.node?.port.postMessage({ type: "setControllers", ...nextTrack });
+      workerRef.current?.postMessage({ type: "setMixBase", trackIndex: i, cc7: nextTrack.cc7Volume, cc10: nextTrack.cc10Pan, cc11: nextTrack.cc11Expression });
+      const mixAll = { ...trackMixStateRef.current, [i]: { mute: m.mute, solo: m.solo } };
+      trackMixStateRef.current = mixAll;
+      setTrackMixState(mixAll);
+      applyTrackMuteSolo(song, mixAll);
+    },
+  };
+  useEffect(() => {
+    playerBridge.attach({
+      loadBuffer: (...a) => bridgeImplRef.current!.loadBuffer(...a),
+      unlockAudio: () => bridgeImplRef.current!.unlockAudio(),
+      pause: () => bridgeImplRef.current!.pause(),
+      seek: (s) => bridgeImplRef.current!.seek(s),
+      isReady: () => bridgeImplRef.current!.isReady(),
+      exportWav: (cb) => bridgeImplRef.current!.exportWav(cb),
+      setTrackMix: (i, m) => bridgeImplRef.current!.setTrackMix(i, m),
+    });
+    return () => playerBridge.attach(null);
+  }, []);
+  useEffect(() => { if (song) playerBridge.onSongLoaded(); }, [song]);
+  useEffect(() => { playerBridge.onPlaying(isPlaying); }, [isPlaying]);
+  useEffect(() => { playerBridge.onReady(); }, [sf2Ready]);
+  useEffect(() => { playerBridge.onTime(songTime); }, [songTime]);
 
   async function onUploadMidi(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -2391,7 +2432,7 @@ export default function MidiReader({
         <button
           type="button"
           className="toolbarActionBtn"
-          onClick={onExportWav}
+          onClick={() => void onExportWav()}
           disabled={!song || !sf2Ready || isExporting}
           aria-label="Export WAV"
           title="Generate offline WAV export"

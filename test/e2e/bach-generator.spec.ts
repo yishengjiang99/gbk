@@ -13,7 +13,7 @@ test("generated Bach playback primes presets before opening note-ons", async ({ 
   await page.addInitScript(() => {
     window.localStorage.setItem("sf2-e2e-debug", "1");
   });
-  await page.goto("/");
+  await page.goto("/gbk/?player=1");
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await waitForSf2Ready(page);
