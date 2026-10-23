@@ -5,6 +5,7 @@ import { parseSmf, serializeSmf } from "./smf.ts";
 import { secToTick, tickToSec } from "./timing.ts";
 import type { Project, TrackMix } from "./model.ts";
 import type { SF2Region } from "../sf2/soundfont.ts";
+import { renderProjectOffline } from "../audio/offline-renderer.ts";
 import { normalizeEffects, type EffectsParams, type VoiceOverride } from "../sf2/voice-overrides.ts";
 
 export interface PlayerHandle {
@@ -127,17 +128,8 @@ export function bindController(c: WorkstationController) {
     if (playerBridge.loadedProjectId === s.project.id) playerBridge.applyMix();
   });
   c.attachDriver(driverFor(c));
-  c.host.renderWav = async (project) => {
-    const h = playerBridge.handle;
-    if (!h) throw new Error("player not mounted");
-    if (!h.isReady() && !(await driverFor(c).prepare!())) throw Object.assign(new Error("Load a SoundFont first"), { code: "AUDIO_NOT_READY" });
-    if (!playerBridge.inSync(project)) await playerBridge.loadProject(project, false, 0);
-    await new Promise((r) => setTimeout(r, 0));
-    let blob: Blob | null = null;
-    await playerBridge.handle!.exportWav((b) => { blob = b; });
-    if (!blob) throw new Error("WAV export failed");
-    return blob;
-  };
+  // Headless: no player, no AudioContext, no unlock. Same renderer as the player's Export WAV and gbk_render_wav.
+  c.host.renderWav = async (project, signal) => (await renderProjectOffline(project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, signal)).blob;
   c.host.trackRegions = (project, trackId) => {
     const i = project.tracks.findIndex((t) => t.id === trackId);
     return i < 0 ? null : playerBridge.handle?.getTrackRegions?.(i + 1) ?? null;
