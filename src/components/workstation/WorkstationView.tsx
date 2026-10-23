@@ -23,6 +23,7 @@ import { PianoRollEditor, type View } from "./PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "./AutomationLane.tsx";
 import { AgentPanel, useAgentToolsToggle } from "./AgentPanel.tsx";
 import { LiveKeyboard } from "./LiveKeyboard.tsx";
+import { FloatingWindow } from "./FloatingWindow.tsx";
 import { selectedTrackId } from "../../workstation/live-input.ts";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
@@ -65,7 +66,6 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const narrow = useMedia("(max-width: 900px)");
   const [mainRef, mainBox] = useBox<HTMLElement>();
   const [rollRef, rollBox] = useBox<HTMLDivElement>();
-  const [keysRef, keysBox] = useBox<HTMLDivElement>();
   const tabs = useMemo(() => [...(narrow ? ["Tracks"] : []), ...(composer ? ["Composer"] : []), "Agent", "Sound", "Files"], [narrow, composer]);
   const [tab, setTab] = useState<string | null>(null);
   const want = tab ?? (composer ? "Composer" : "Agent");
@@ -74,7 +74,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const lastPending = useRef(pendingCount);
   useEffect(() => { if (pendingCount > lastPending.current && !composer) setTab("Agent"); lastPending.current = pendingCount; }, [pendingCount]);
   // Lanes get what is left after the roll's minimum + Keys; extra lanes page instead of scrolling.
-  const laneRoom = Math.max(0, Math.floor((mainBox.h - ROLL_MIN - (keysOn ? keysBox.h : 0) - 32) / LANE_BLOCK)); const laneFit = Math.max(1, laneRoom);
+  const laneRoom = Math.max(0, Math.floor((mainBox.h - ROLL_MIN - 32) / LANE_BLOCK)); const laneFit = Math.max(1, laneRoom);
   const [lanePage, setLanePage] = useState(0);
   const followRef = useRef(true); followRef.current = follow;
   const viewRef = useRef(view); viewRef.current = view;
@@ -137,6 +137,9 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
         </label>
         <button className="ws-player-btn" onClick={onOpenPlayer} data-testid="open-player">Player / Library</button>
       </header>
+      {keysOn && <FloatingWindow title="🎹 Keys" storageKey="gbk.keysWindowPos" testId="keys-window" onClose={() => setKeysOn(false)}>
+        {() => <LiveKeyboard workstation={workstation} />}
+      </FloatingWindow>}
       <div className="ws-body">
         {!narrow && <nav className="ws-tracks ws-flow" aria-label="Tracks">
           {p.tracks.length === 0 && <p className="ws-dim">Open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
@@ -167,7 +170,6 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           <div className="ws-roll-slot" ref={rollRef}>
             <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={Math.max(ROLL_MIN, Math.floor(rollBox.h))} onManualScroll={() => setFollow(false)} onWidth={(px) => { rollPx.current = px; }} />
           </div>
-          {keysOn && <div ref={keysRef}><LiveKeyboard workstation={workstation} /></div>}
           <div className="ws-lanes">
             {(() => {
               const pages = Math.max(1, Math.ceil(lanes.length / laneFit)); const pg = Math.min(lanePage, pages - 1);

@@ -145,3 +145,11 @@ html.studio-fit, html.studio-fit body { height: 100%; overflow: hidden; }
 /* The legacy player's mobile rule (styles.css: html, body, #root { height:100%; overflow:hidden } under max-width)
    must not apply to the landing/Explore page: it scrolls normally on phones too. */
 html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-x: clip; overflow-y: visible; }
+
+/* Floating Keys window: non-blocking (no backdrop), draggable by its title bar. */
+.ws-float { position: fixed; z-index: 40; width: min(760px, calc(100vw - 8px)); background: #1f2531; border: 1px solid #465063; border-radius: 8px; box-shadow: 0 10px 30px #0009; overflow: hidden; }
+.ws-float-bar { display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: #2b3241; cursor: move; touch-action: none; user-select: none; }
+.ws-float-title { flex: 1; font-weight: 600; color: #93c5ff; }
+.ws-float-body { max-height: calc(100dvh - 40px); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ws-float .ws-keys { border-top: 0; }
+.ws-float button[aria-label]::after { display: none; } /* hover tooltips would hang below the clipped keyboard strip */
