@@ -83,7 +83,8 @@ orchestral auto-pan are applied (see below).
   return was 0.35 on half the input, about 24 dB quieter, so CC91 and gen16 sends could not be heard. This applies to
   live playback and offline renders alike (same engine).
 - **Topology parity.** Offline renders use one engine per audible track (own reverb/chorus and master stage), then
-  the live StereoPannerNode law (orchestra auto-pan, `autoPan:false` to disable), then a sum, which is exactly the
+  the StereoPannerNode law (orchestra auto-pan is opt-in, `autoPan:true`, and only seats tracks without an explicit
+  pan: a non-centre mix pan or CC10 automation), then a sum, which is exactly the
   live per-track AudioWorklet graph. Player-pinned per-track presets are applied and pin the track (program changes
   ignored), as in the player.
 - **Loudness.** Default `normalize: "loudness"`: BS.1770-4 integrated loudness (K-weighting, gated) to **-16 LUFS**,
@@ -92,3 +93,15 @@ orchestral auto-pan are applied (see below).
   The result's `loudness` field reports input/output LUFS, true peak, the gain and which limit applied.
 - **Tail.** `tailSeconds` (default 3) follows the last note-off, so releases and the reverb tail are rendered and
   decay inside it. Renders are deterministic: identical input gives an identical SHA-256.
+
+### Track volume, master volume and preset parity
+
+- **Track volume** (workstation slider / `gbk_set_track_mix volume`) is a fader: a post-engine gain of
+  `(volume/100)^2` (the SF2 CC7 square law; 100 = 0 dB, 50 = -12 dB). It applies live (track gain node) and offline,
+  and works on top of authored CC7 automation. Before, it was only a CC7 base value, so any CC7 event in the song
+  replaced it. The render report lists `volume` and `faderDb` per track.
+- **Master volume** is the live monitor level (engine `masterGainDb`) and is not baked into renders. Note that the
+  default `normalize: "loudness"` sets the whole file to -16 LUFS, so changing every track's volume together
+  does not change the file's loudness; relative balance does change. Use `normalize: "off"` to hear absolute levels.
+- **Preset parity.** `gbk_get_voice_settings`, `gbk_list_presets` and the Sound panel resolve presets with the
+  renderer's SoundFont and bank/program mapping (`resolveTrackPreset`, loaded on demand), not the player's slots.

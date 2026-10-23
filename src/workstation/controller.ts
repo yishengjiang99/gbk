@@ -32,6 +32,8 @@ export interface WorkstationState {
 /** App-provided capabilities (SoundFont presets, offline render, downloads). All optional. */
 export interface WorkstationHost {
   listPresets?(): { index: number; bank: number; program: number; name: string }[];
+  /** Load the renderer SoundFont if it is not loaded yet (voice/preset tools call this first). */
+  ensureSoundFont?(): Promise<void>;
   renderWav?(project: Project, signal?: AbortSignal, normalize?: "loudness" | "peak" | "off"): Promise<Blob>;
   download?(data: Blob | Uint8Array, filename: string): void | boolean;
   /** Persist a project snapshot (IndexedDB) before switching projects. */

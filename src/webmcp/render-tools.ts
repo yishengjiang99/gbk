@@ -47,7 +47,7 @@ export function buildRenderTools(c: WorkstationController): ToolDef[] {
       inputSchema: obj({ sampleRate: { type: "integer", enum: [44100, 48000] }, channels: { type: "integer", enum: [1, 2] }, format: { type: "string", enum: ["pcm16", "float32"] }, tailSeconds: { type: "number", minimum: 0, maximum: 30 },
         normalize: { anyOf: [{ type: "string", enum: ["loudness", "peak", "off"] }, { type: "boolean" }], description: "whole-file level (true = peak, false = off), one gain for the entire file (dynamics preserved): loudness (default) = -16 LUFS integrated capped at -1 dBTP; peak = -1 dBTP; off = raw engine output" },
         targetLufs: { type: "number", minimum: -40, maximum: -5, description: "integrated loudness target for normalize=loudness (default -16)" },
-        autoPan: { type: "boolean", description: "orchestra-seating auto-pan per track, as in live playback (default true)" },
+        autoPan: { type: "boolean", description: "orchestra-seating auto-pan, only for tracks without an explicit pan (mix pan or CC10); default false" },
         saveArtifact: { type: "boolean" }, download: { type: "boolean" }, output: { type: "string", enum: ["artifact", "audio", "bytes"] }, waitSeconds: { type: "number", minimum: 0, maximum: 600, description: "how long this call waits for completion (default 300)" },
         allowSilence: { type: "boolean" }, silenceThresholdDbFS: { type: "number", minimum: -140, maximum: 0 }, includeMidi: { type: "boolean", description: "also save the MIDI export as an artifact (default true)" } }),
       run: async (a, signal) => {

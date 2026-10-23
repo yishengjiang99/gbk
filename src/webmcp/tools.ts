@@ -129,7 +129,7 @@ export function buildCoreTools(c: WorkstationController): ToolDef[] {
     { name: "gbk_get_transport", readOnly: true, description: "Playback state and position (ticks, seconds, bar/beat).", inputSchema: obj({}),
       run: () => { const t = c.getState().transport; return { data: { ...t, positionSec: +tickToSec(P(), t.positionTick).toFixed(3), ...tickToBarBeat(P(), t.positionTick) } }; } },
     { name: "gbk_list_presets", readOnly: true, description: "SoundFont presets available for gbk_set_instrument.", inputSchema: obj({ query: str(), limit: int(1, 500) }),
-      run: (a) => { const all = c.host.listPresets?.() ?? []; const q = ((a.query as string) ?? "").toLowerCase(); return { data: all.filter((x) => !q || x.name.toLowerCase().includes(q)).slice(0, (a.limit as number) ?? 200), warnings: all.length ? [] : ["no SoundFont loaded"] }; } },
+      run: async (a) => { await c.host.ensureSoundFont?.(); const all = c.host.listPresets?.() ?? []; const q = ((a.query as string) ?? "").toLowerCase(); return { data: all.filter((x) => !q || x.name.toLowerCase().includes(q)).slice(0, (a.limit as number) ?? 200), warnings: all.length ? [] : ["no SoundFont loaded"] }; } },
     { name: "gbk_set_transport", readOnly: false, description: "play | pause | stop | seek | loop. Audio may require a user click first (AUDIO_NOT_READY).", inputSchema: obj({ action: { type: "string", enum: ["play", "pause", "stop", "seek", "loop"] }, position: obj({ unit: UNIT, value: { type: "number", minimum: 0 } }, ["unit", "value"]), loopRange: RANGE, loopEnabled: { type: "boolean" } }, ["action"]),
       run: async (a) => {
         const p = P();
@@ -141,7 +141,7 @@ export function buildCoreTools(c: WorkstationController): ToolDef[] {
         }
         return { data: c.getState().transport };
       } },
-    { name: "gbk_set_track_mix", readOnly: false, description: "Set track mix. mode=default edits the persisted mix (undoable, base layer under authored CC automation); mode=override is a temporary live override (not saved); mode=clear_override removes it. Never rewrites authored CC events.", inputSchema: obj({ trackId: str(), mode: { type: "string", enum: ["default", "override", "clear_override"] }, volume: int(0, 127), pan: int(0, 127, "0=left 64=center 127=right"), expression: int(0, 127), mute: { type: "boolean" }, solo: { type: "boolean" }, baseRevision: BASE_REV }, ["trackId"]),
+    { name: "gbk_set_track_mix", readOnly: false, description: "Set track mix. mode=default edits the persisted mix (undoable; volume is a post-engine fader (v/100)^2 applied live and in renders, on top of authored CC7; pan/expression are the base layer under authored CC automation); mode=override is a temporary live override (not saved); mode=clear_override removes it. Never rewrites authored CC events.", inputSchema: obj({ trackId: str(), mode: { type: "string", enum: ["default", "override", "clear_override"] }, volume: int(0, 127), pan: int(0, 127, "0=left 64=center 127=right"), expression: int(0, 127), mute: { type: "boolean" }, solo: { type: "boolean" }, baseRevision: BASE_REV }, ["trackId"]),
       run: (a) => {
         const t = trackOf(P(), a.trackId as string);
         const mix = Object.fromEntries(["volume", "pan", "expression", "mute", "solo"].filter((k) => a[k] !== undefined).map((k) => [k, a[k]]));

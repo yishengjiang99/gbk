@@ -18,11 +18,12 @@ export function buildSoundTools(c: WorkstationController): ToolDef[] {
     { name: "gbk_get_voice_settings", readOnly: true,
       description: "Effective SoundFont voice settings of a track's preset for a key/velocity: per zone, the generators (zone + overrides) in human units (seconds, Hz, dB, cents, %), the effective reverb/chorus send (zone gen16/15 + CC91/93 default modulators + overrides), current overrides and global effects.",
       inputSchema: obj({ trackId: str(), key: int(0, 127, "MIDI key (default 60)"), velocity: int(1, 127, "default 100") }, ["trackId"]),
-      run: (a) => {
+      run: async (a) => {
         const t = track(a.trackId as string);
+        await c.host.ensureSoundFont?.();
         const host = c.host.trackRegions?.(P(), t.id) ?? null;
         const rep = voiceReport(P(), t.id, host, (a.key as number) ?? 60, (a.velocity as number) ?? 100, c.getState().transport.positionTick);
-        return { data: rep, warnings: host ? (rep.zones.length ? [] : ["no zone of this preset covers that key/velocity"]) : ["SoundFont/track zones not available (load a SoundFont and play the project once); overrides and effects shown only"] };
+        return { data: rep, warnings: host ? (rep.zones.length ? [] : ["no zone of this preset covers that key/velocity"]) : ["SoundFont not available (renderer SoundFont failed to load); overrides and effects shown only"] };
       } },
     { name: "gbk_propose_voice_patch", readOnly: false,
       description: `Stage SF2 voice overrides for a track (layered on the SoundFont zones; applied at note-on, realtime ones also to sounding notes). Each edit: param, mode set (absolute, in the param unit) | add (delta; dB/cents/%/semitones params) | scale (factor for seconds/Hz params), optional keyLo/keyHi. Ranges follow SF2 2.01 8.1.3. Params: ${PARAM_DOC}. Returns a proposal: preview A/B, then commit (user approves).`,

@@ -1,7 +1,7 @@
 // Sound / Voice panel: effective SF2 voice of the selected track (envelope graph, filter, LFOs, sends) and the
 // global effects. Manual edits go through the same controller ops (setVoicePatch / setEffects) as the agent tools,
 // so they are undoable and persisted; a focused sound proposal is drawn as a dashed "B" overlay with a diff list.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Project } from "../../workstation/model.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import { workstation } from "./useWorkstation.ts";
@@ -54,6 +54,9 @@ function envPath(g: Gens, w: number, h: number): string {
 
 export function SoundPanel({ project, trackId, proposal }: { project: Project; trackId: string | undefined; proposal: Proposal | null }) {
   const [drag, setDrag] = useState<Record<string, number>>({});
+  // Same SoundFont + mapping as the renderer: load it on demand, then re-render with real zones.
+  const [, setSfReady] = useState(0);
+  useEffect(() => { let live = true; void workstation.host.ensureSoundFont?.().then(() => { if (live) setSfReady((x) => x + 1); }).catch(() => {}); return () => { live = false; }; }, []);
   const soundProposal = proposal && proposal.ops.some((o) => (o.op === "setVoicePatch" && o.trackId === trackId) || o.op === "setEffects") ? proposal : null;
   const rep = trackId ? report(project, trackId) : null; // zones may arrive after the player loads: no memo
   const repB = trackId && soundProposal ? report(soundProposal.candidate, trackId) : null;
