@@ -22,6 +22,9 @@ export interface LoadOptions {
 
 const cache = new Map<string, Promise<LoadedSoundFont>>();
 let active: LoadedSoundFont | null = null;
+let lastLoaded: LoadedSoundFont | null = null;
+/** Synchronously available font (user-selected, else the last successfully loaded one), or null. */
+export function peekSoundFont(): LoadedSoundFont | null { return active ?? lastLoaded; }
 
 /** Parse + validate SF2 bytes. Throws SOUNDFONT_INVALID. */
 export function parseSoundFont(bytes: Uint8Array, url = "memory", label = url): LoadedSoundFont {
@@ -70,6 +73,7 @@ export async function loadSoundFont(o: LoadOptions = {}): Promise<LoadedSoundFon
   if (!p) {
     p = fetchSoundFont(url, o);
     cache.set(url, p);
+    p.then((x) => { lastLoaded = x; }, () => undefined);
     p.catch(() => { if (cache.get(url) === p) cache.delete(url); }); // failures (and cancellations) are retryable
   }
   // A cancelled caller stops waiting even if the shared download continues for other callers.
@@ -87,9 +91,10 @@ export function setActiveSoundFont(sf: SF2SoundFont | null, label = "user SoundF
 export function getActiveSoundFont(): LoadedSoundFont | null { return active; }
 /** Seed the URL cache with an already-parsed font (avoids a second 31 MB download in the app). */
 export function primeSoundFontCache(url: string, sf: SF2SoundFont, label = url) {
-  cache.set(url, Promise.resolve({ sf, url, label, bytes: 0, presetCount: sf.presets.length }));
+  const x = { sf, url, label, bytes: 0, presetCount: sf.presets.length };
+  cache.set(url, Promise.resolve(x)); lastLoaded = x;
 }
-export function clearSoundFontCache() { cache.clear(); active = null; }
+export function clearSoundFontCache() { cache.clear(); active = null; lastLoaded = null; }
 
 export interface ResolvedInstrument {
   requested: { bank: number; program: number; channel: number };

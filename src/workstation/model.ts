@@ -13,7 +13,12 @@ export interface TimeSigEvent { tick: number; numerator: number; denominator: nu
 export interface RawEvent { id: string; trackId: string; tick: number; bytes: number[]; kind: "meta" | "sysex" | "other" }
 
 export interface TrackMix { volume: number; pan: number; expression: number; mute: boolean; solo: boolean }
-export interface Track { id: string; name: string; channel: number; color: string; mix: TrackMix; visible: boolean }
+export type TrackRole = "melody" | "harmony" | "bass" | "counterpoint" | "accompaniment" | "percussion" | "pad" | "other";
+export interface Track { id: string; name: string; channel: number; color: string; mix: TrackMix; visible: boolean; role?: TrackRole }
+/** Semantic arrangement section (1-based bars, inclusive start, `bars` long). */
+export interface Section { name: string; startBar: number; bars: number; energy?: number }
+/** Composition metadata (GBK extension, optional for older projects). owner=agent marks a project created by an agent. */
+export interface ProjectMeta { key?: string; sections?: Section[]; descriptors?: Record<string, string>; owner?: "user" | "agent"; createdAt?: number; style?: string; seed?: number }
 
 /** Sound design layer (GBK extension): per-track SF2 generator overrides + global effects. Optional for older projects. */
 export interface SoundSettings {
@@ -44,6 +49,7 @@ export interface Project {
   selection: Selection;
   loop: Loop;
   sound?: SoundSettings;
+  meta?: ProjectMeta;
 }
 
 export const DEFAULT_MIX: TrackMix = { volume: 100, pan: 64, expression: 127, mute: false, solo: false };

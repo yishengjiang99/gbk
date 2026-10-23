@@ -1,3 +1,5 @@
+import { parseKey } from "../music/keys.ts";
+import { barBeatToTick } from "./timing.ts";
 import { overridesToNrpn } from "../sf2/voice-overrides.ts";
 // Standard MIDI File <-> Project. Lossless for notes, timed CC, bend, pressure, program/bank,
 // tempo/meter, and keeps unsupported events (sysex, other meta) as raw bytes for re-export.
@@ -103,6 +105,12 @@ export function serializeSmf(p: Project, opts: { soundNrpn?: boolean } = {}): Ui
   const conductor: Ev[] = [];
   for (const t of p.tempos) conductor.push({ tick: t.tick, order: 0, seq: seq++, bytes: [0xff, 0x51, 3, (t.microPerQuarter >> 16) & 255, (t.microPerQuarter >> 8) & 255, t.microPerQuarter & 255] });
   for (const t of p.timeSigs) conductor.push({ tick: t.tick, order: 0, seq: seq++, bytes: [0xff, 0x58, 4, t.numerator, Math.round(Math.log2(t.denominator)), 24, 8] });
+  // GBK composition metadata: key signature + section markers (FF 06) in the conductor track.
+  if (p.meta?.key) { try { const k = parseKey(p.meta.key); conductor.push({ tick: 0, order: 0, seq: seq++, bytes: [0xff, 0x59, 2, k.sf & 0xff, k.mode === "minor" ? 1 : 0] }); } catch { /* free-form key text */ } }
+  for (const sec of p.meta?.sections ?? []) {
+    const nm = Array.from(new TextEncoder().encode(sec.name));
+    conductor.push({ tick: barBeatToTick(p, sec.startBar), order: 0, seq: seq++, bytes: [0xff, 0x06, ...encVlq(nm.length), ...nm] });
+  }
   chunks.push(encodeTrack(conductor));
   for (const tr of p.tracks) {
     const evs: Ev[] = [];

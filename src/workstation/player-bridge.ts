@@ -130,6 +130,12 @@ export function bindController(c: WorkstationController) {
   c.attachDriver(driverFor(c));
   // Headless: no player, no AudioContext, no unlock. Same renderer as the player's Export WAV and gbk_render_wav.
   c.host.renderWav = async (project, signal) => (await renderProjectOffline(project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, signal)).blob;
+  c.host.checkpoint = async (project) => {
+    if (typeof indexedDB === "undefined") throw new Error("IndexedDB unavailable");
+    const { midiFileStore } = await import("../midi-file-store.ts");
+    const { PROJECT_SCHEMA_VERSION } = await import("./model.ts");
+    await midiFileStore.putProject({ id: project.id, schemaVersion: PROJECT_SCHEMA_VERSION, savedAt: Date.now(), project });
+  };
   c.host.trackRegions = (project, trackId) => {
     const i = project.tracks.findIndex((t) => t.id === trackId);
     return i < 0 ? null : playerBridge.handle?.getTrackRegions?.(i + 1) ?? null;
