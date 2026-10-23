@@ -41,3 +41,13 @@ export function renderScenario(s: Scenario, read: (path: string) => Uint8Array):
   if (cursor < frames) engine.renderRange(left.subarray(cursor), right.subarray(cursor));
   return { left, right };
 }
+
+/** Same text format as sf2-parity-render's PARITY_DUMP (debugging cross-engine differences). */
+export function dumpRegions(sf: SF2SoundFont, p: number): string {
+  return sf.regionList(p).map((r) => {
+    const m = (r.modulators ?? []).map((x) => `${x.src}:${x.dest}:${x.amount}:${x.amtSrc}:${x.transform}`).join(",");
+    const ve = r.volEnv, me = r.modEnv;
+    return `key ${r.keyRange[0]}-${r.keyRange[1]} vel ${r.velRange[0]}-${r.velRange[1]} len ${r.sample.dataL.length} rate ${r.sample.sampleRate} loop ${r.sample.loopStart}-${r.sample.loopEnd} modes ${r.sampleModes} root ${r.overridingRootKey ?? r.originalKey} ct ${r.coarseTune} ft ${r.fineTune} st ${r.scaleTuning} att ${r.initialAttenuationCb} pan ${r.pan} ve ${ve.delayTc},${ve.attackTc},${ve.holdTc},${ve.decayTc},${ve.sustainCb},${ve.releaseTc} me ${me.delayTc},${me.attackTc},${me.holdTc},${me.decayTc},${fmt(me.sustain)},${me.releaseTc} fc ${r.initialFilterFcCents} q ${r.initialFilterQCb} meFc ${r.modEnvToFilterFcCents} mlFc ${r.modLfoToFilterFcCents} ml ${r.modLfoDelayTc},${r.modLfoFreqCents},${r.modLfoToPitchCents} vl ${r.vibLfoDelayTc},${r.vibLfoFreqCents},${r.vibLfoToPitchCents} ex ${r.exclusiveClass} mePitch ${r.modEnvToPitchCents ?? 0} mlVol ${r.modLfoToVolumeCb ?? 0} kn ${r.keynumToVolEnvHold ?? 0},${r.keynumToVolEnvDecay ?? 0},${r.keynumToModEnvHold ?? 0},${r.keynumToModEnvDecay ?? 0} ov ${r.keynumOverride ?? -1},${r.velocityOverride ?? -1} send ${r.chorusSend ?? 0},${r.reverbSend ?? 0} mods ${m}`;
+  }).join("\n");
+}
+function fmt(x: number): string { return Number.isInteger(x) ? x.toFixed(1) : String(x); }

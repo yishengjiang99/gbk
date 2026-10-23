@@ -4,7 +4,7 @@
 // scratch buffers are preallocated and reused.
 import type { SF2Region, SF2SoundFont, SF2VolEnv, SF2ModEnv } from "./sf2/soundfont.ts";
 import {
-  type SF2Modulator, type ModInputs, DEFAULT_MODS_204, PITCH_DEST, SLOT_COUNT, modValue,
+  type SF2Modulator, type ModInputs, DEFAULT_MODS_204, PITCH_DEST, SLOT_COUNT, modValue, modCurve,
 } from "./sf2/modulator.ts";
 import { Gen, clampGen, valueRange, roundHalfAway } from "./sf2/geninfo.ts";
 import { SF2Effects } from "./sf2/effects.ts";
@@ -138,14 +138,6 @@ class VolEnv {
   }
 }
 
-/** SF2 convex curve on 0...1 (modulation envelope attack). */
-function convex(x: number): number {
-  const y = 1 - x;
-  if (y <= 0) return 1;
-  if (y >= 1) return 0;
-  return 1 - Math.min(1, -(20.0 / 96.0) * Math.log10(y * y));
-}
-
 class ModEnv {
   stage = IDLE;
   level = 0; t = 0;
@@ -182,7 +174,7 @@ class ModEnv {
       case ATTACK:
         this.t += dt;
         if (this.attack <= 0 || this.t >= this.attack) { this.level = 1; this.stage = this.hold > 0 ? HOLD : DECAY; this.t = 0; return 1; }
-        this.level = convex(this.t / this.attack);
+        this.level = modCurve(2, this.t / this.attack);
         return this.level;
       case HOLD:
         this.t += dt;

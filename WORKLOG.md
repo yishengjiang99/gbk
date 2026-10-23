@@ -17,3 +17,7 @@ No legacy mode is kept. Matrix: docs/SF2_COMPLIANCE.md (same IDs as the Swift ma
   behaviour). Red for each JS test group is shown by running it against the pre-port engine (bda70eb);
   see "Red runs" below.
 - First cross-engine check (GeneralUser GS piano C4 v100, 1 s + 1 s release): JS == Swift bit for bit.
+- Cross-engine sweep 1 (129 scenarios: GeneralUser GS programs 0-127 via programChange + CCs 0/1/7/10/11/64/91/93,
+  pitch bend, channel pressure, effects on for even programs; drum kit): 41/129 exact. Bug found: modulation
+  envelope convex attack used (1-x)^2 instead of the 8.2.4 convex curve; fixed by reusing modCurve(2, x).
+  After fix: 119/129 bit-exact, rest differ by <= 1e-9 (libm ulp differences: V8 fdlibm vs glibc).
