@@ -301,7 +301,7 @@ function readSampleMono(data: Float32Array, pos: number): number {
 interface TrackRT { present: boolean; list: SF2Region[] | null; cc7: number; cc10: number; cc11: number; pan: number; gain: number }
 function resetTrack(t: TrackRT): void { t.present = false; t.list = null; t.cc7 = 100; t.cc10 = 64; t.cc11 = 127; t.pan = 0; t.gain = 1; }
 
-class ChannelRT {
+export class ChannelRT {
   bend = 8192; pws = 2; rpnMsb = 127; rpnLsb = 127; pressure = 0;
   list: SF2Region[] | null = null; program = 0;
   paramIsNRPN = false; nrpnActive = false; nrpnSelect = -1; nrpnAccum = 0; sostenuto = false;
@@ -479,6 +479,10 @@ export class Sf2SynthEngine {
     return regions.filter((r) => note >= r.keyRange[0] && note <= r.keyRange[1] && velocity >= r.velRange[0] && velocity <= r.velRange[1]);
   }
 
+  /** Tests / inspection only: SoundFont NRPN offset (N-04) for a channel and generator. */
+  debugNrpn(channel: number, gen: number): number { return this.nrpn[channel * 64 + gen]; }
+  /** Tests / inspection only: a channel's real-time state. */
+  debugChannel(channel: number): Readonly<ChannelRT> { return this.chans[channel]; }
   /** Tests / inspection only: the i-th sounding voice's internal state. */
   debugVoice(i: number): Sf2Voice | undefined { return i < this.count ? this.pool[this.order[i]] : undefined; }
 
