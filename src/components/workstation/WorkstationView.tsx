@@ -109,11 +109,21 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
     if (r) workstation.host.download?.(r.blob, safeFilename(done.projectName, "wav"));
   });
 
+  // New project: always a blank, user-owned project. Unsaved edits (revision > 0) need a confirm first;
+  // the previous project stays checkpointed locally when the host supports it.
+  const newProject = () => run(async () => {
+    const cur = workstation.project;
+    const hasContent = cur.tracks.length > 0 || cur.notes.length > 0;
+    if (hasContent && cur.revision > 0 && !workstation.readOnlyReason && !confirm("Start a new project? Unsaved changes to the current project may be lost.")) return;
+    await workstation.createProject({ name: "Untitled", owner: "user", replaceCurrent: !workstation.host.checkpoint });
+  });
+
   return (
     <div className="ws" data-testid="workstation">
       <header className="ws-header">
         <strong className="ws-title">{composer ? "GBK Composer" : "GBK Workstation"}</strong>
         {composer && onExplore && <button onClick={onExplore} data-testid="nav-explore">Explore</button>}
+        <button className="ws-new" onClick={newProject} data-testid="new-project" title="Start a new, empty project">＋ New project</button>
         {workstation.readOnlyReason && <span className="ws-pill off" data-testid="readonly-pill" title={workstation.readOnlyReason}>read-only · <button className="ws-link" onClick={() => workstation.fork()}>Fork</button></span>}
         <span className="ws-name" title={p.name}>{p.name}</span>
         <div className="ws-transport" role="toolbar" aria-label="Transport">
