@@ -1,0 +1,86 @@
+# Prepared 2026-10-24 for yishengjiang99/gbk.
+#
+# Why: gbk's only existing workflow (deploy.yml) deploys GitHub Pages only.
+# compose.grepawk.com has only ever deployed via deploy/deploy.sh over SSH,
+# and SSH egress from the Muse VM is reset by the egress proxy — which is
+# currently blocking TWO landed features from reaching compose:
+#   - SoundFont picker + FluidR3 GM (main 10248d7)
+#   - GBK Composer remote MCP server / ChatGPT plugin backend (main 55c17f4)
+# A GitHub runner is not behind that proxy, so this workflow removes the
+# VM's SSH route from the path permanently (same pattern as finalcut's
+# deploy-grepawk.yml, which deploys to the same host with DEPLOY_SSH_KEY).
+#
+# Required repo secret (set once, from a machine holding the key):
+#   DEPLOY_SSH_KEY — the ~/.ssh/grepawk private key
+#     gh secret set DEPLOY_SSH_KEY -R yishengjiang99/gbk < ~/.ssh/grepawk
+#
+# Trigger is manual-only (workflow_dispatch) on purpose: gbk main is moving
+# fast with parallel agents. Switch to push-to-main only when that settles.
+#
+# NOTE: deploy/deploy.sh installs the release and stages the nginx vhost as
+# .new with a manual review step (see docs/compose-deploy.md in the repo) —
+# this workflow does not auto-install the vhost. The FluidR3 sync below
+# mirrors gbk-deploy-bundle/RUN-ME.sh (sha256-checked, idempotent).
+
+name: Deploy compose.grepawk.com
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-compose
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/grepawk
+          chmod 600 ~/.ssh/grepawk
+          ssh-keyscan -H compose.grepawk.com >> ~/.ssh/known_hosts
+
+      - name: Deploy release (repo's own deploy.sh)
+        env:
+          DEPLOY_HOST: root@compose.grepawk.com
+        run: |
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/grepawk"
+          # deploy.sh uses plain scp/ssh; point them at the key via ssh config
+          printf 'Host compose.grepawk.com\n  IdentityFile ~/.ssh/grepawk\n' >> ~/.ssh/config
+          bash deploy/deploy.sh
+
+      - name: Sync FluidR3 GM SoundFont (sha-checked)
+        run: |
+          # Fetched at build time per soundfonts/catalog.json pin;
+          # skip gracefully if the build did not stage it.
+          SF2=$(find . -name 'FluidR3_GM.sf2' | head -1)
+          if [ -z "$SF2" ]; then echo "FluidR3_GM.sf2 not present; skipping"; exit 0; fi
+          LOCAL_SHA=$(sha256sum "$SF2" | cut -d' ' -f1)
+          REMOTE_SHA=$(ssh -i ~/.ssh/grepawk root@compose.grepawk.com \
+            "sha256sum /var/www/gbk-composer/soundfonts/FluidR3_GM.sf2 2>/dev/null | cut -d' ' -f1" || true)
+          if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+            scp -i ~/.ssh/grepawk "$SF2" root@compose.grepawk.com:/tmp/FluidR3_GM.sf2
+            ssh -i ~/.ssh/grepawk root@compose.grepawk.com \
+              "mkdir -p /var/www/gbk-composer/soundfonts && install -m0644 -o www-data -g www-data /tmp/FluidR3_GM.sf2 /var/www/gbk-composer/soundfonts/FluidR3_GM.sf2 && rm /tmp/FluidR3_GM.sf2"
+            echo "FluidR3_GM.sf2 synced"
+          else
+            echo "FluidR3_GM.sf2 already current"
+          fi
+
+      - name: Verify
+        run: |
+          curl -fsS https://compose.grepawk.com/api/health
+          echo
+          curl -fsS https://compose.grepawk.com/static/soundfont-manifest.json | head -c 400
+          echo
