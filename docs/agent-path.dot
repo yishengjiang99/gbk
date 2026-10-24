@@ -1,0 +1,74 @@
+digraph GbkAgentPath {
+  graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.3", ranksep="0.55", splines=true];
+  node [shape=box, style="rounded,filled", fontsize=10, fontname="Helvetica", margin="0.08,0.05"];
+  edge [fontsize=9, fontname="Helvetica", color="#44546a"];
+
+  subgraph cluster_agents {
+    label="Agent callers";
+    style="rounded,filled";
+    color="#b7d7f0";
+    fillcolor="#eef6fc";
+    fontsize=12;
+
+    webmcp_host [label="In-browser agent or WebMCP host", fillcolor="#d9ebfa"];
+    page_caller [label="Page caller\nCDP, Playwright, DevTools or extension", fillcolor="#d9ebfa"];
+    composer_user [label="User prompt in Composer UI", fillcolor="#d9ebfa"];
+  }
+
+  subgraph cluster_server {
+    label="Server Composer, compose.grepawk.com only";
+    style="rounded,filled";
+    color="#e6cf8a";
+    fillcolor="#fff8e1";
+    fontsize=12;
+
+    runtime [label="AgentRuntime and model\nserver/src/agent/runtime.ts", fillcolor="#ffedb5"];
+    catalog [label="ToolCatalog and shared policy\n40 of 47 tools, forced arguments\nserver and src/agent/tool-policy.ts", fillcolor="#ffedb5"];
+    websocket [label="Authenticated WebSocket\n/api/agent/ws, protocol version 1", fillcolor="#ffedb5"];
+  }
+
+  subgraph cluster_browser {
+    label="Open browser tab, where every tool executes";
+    style="rounded,filled";
+    color="#9ccc9c";
+    fillcolor="#effaf0";
+    fontsize=12;
+
+    bridge [label="BrowserToolBridge\npolicy, session, project and consent checks\ndedupe, deadlines, serialized mutations", fillcolor="#d7f0d8"];
+    adapter [label="WebMCP adapter or shim registry\ndocument.modelContext.registerTool\nor window.gbkTools", fillcolor="#d7f0d8"];
+    run_tool [label="runTool\nschema validation, cancellation\nuniform JSON result envelope", fillcolor="#d7f0d8"];
+    controller [label="WorkstationController\nlive project, revision, history\nproposals, transport and mix state", fillcolor="#d7f0d8"];
+  }
+
+  subgraph cluster_results {
+    label="Controller outcomes";
+    style="rounded,filled";
+    color="#c3a6d9";
+    fillcolor="#f6f0fb";
+    fontsize=12;
+
+    proposal [label="Proposal\npreview A or B\nAccept or Reject, one undo step", fillcolor="#e8dcf5"];
+    direct [label="Direct action\ntransport, mix, instrument, selection\nundoable or non-persistent", fillcolor="#e8dcf5"];
+    session [label="Autonomous session\nagent-owned project only\nimmediate, still undoable", fillcolor="#e8dcf5"];
+    audio_artifacts [label="Audio and artifacts\nplayer bridge, offline WAV renderer\nMIDI export, IndexedDB artifacts", fillcolor="#e8dcf5"];
+    guardrails [label="Guardrails\nno arbitrary JavaScript, DOM, filesystem or network tool\nlive audio needs an audio-ready page", fillcolor="#f3d7d7"];
+  }
+
+  webmcp_host -> adapter [label="discover and executeTool"];
+  page_caller -> adapter [label="gbkTools.list and gbkTools.call"];
+  composer_user -> websocket [label="user_message"];
+  websocket -> runtime [label="hello and project_state"];
+  runtime -> catalog [label="model tool call"];
+  catalog -> websocket [label="validated tool_call"];
+  websocket -> bridge;
+  bridge -> run_tool [label="canonical registry call"];
+  adapter -> run_tool;
+  run_tool -> controller;
+  bridge -> runtime [label="tool_result, returned as untrusted data", style=dashed];
+
+  controller -> proposal;
+  controller -> direct;
+  controller -> session;
+  controller -> audio_artifacts;
+  controller -> guardrails [style=dotted];
+}

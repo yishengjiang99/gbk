@@ -1,0 +1,98 @@
+digraph GbkAudioPath {
+  graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.3", ranksep="0.55", splines=true];
+  node [shape=box, style="rounded,filled", fontsize=10, fontname="Helvetica", margin="0.08,0.05"];
+  edge [fontsize=9, fontname="Helvetica", color="#44546a"];
+
+  subgraph cluster_inputs {
+    label="Inputs";
+    style="rounded,filled";
+    color="#b7d7f0";
+    fillcolor="#eef6fc";
+    fontsize=12;
+
+    smf_src [label="MIDI sources\nBundled or uploaded .mid files\nWorkstation SMF, Bach generator\nOMR or camera scans, recorder takes", fillcolor="#d9ebfa"];
+    live_ws [label="Workstation live input\nWeb MIDI, on-screen keys, QWERTY\nmidi-input.ts, live-input.ts", fillcolor="#d9ebfa"];
+    live_app [label="Player live input\nWeb MIDI, embedded bridge, QWERTY\nmidi-driver.ts, App.tsx", fillcolor="#d9ebfa"];
+    sf2 [label="SoundFont .sf2\nSF2SoundFont in src/sf2/soundfont.ts\nsf2-parser.ts compatibility wrapper", fillcolor="#d9ebfa"];
+  }
+
+  subgraph cluster_routing {
+    label="Routing";
+    style="rounded,filled";
+    color="#e6cf8a";
+    fillcolor="#fff8e1";
+    fontsize=12;
+
+    bridge [label="Workstation bridge\nserializeSmf\nproject track i to player track i+1\nsrc/workstation/player-bridge.ts", fillcolor="#ffedb5"];
+    timer [label="MIDI timer worker\nSMF parse, tempo map, timed playEvents\n5 ms tick, 30 ms lookahead\nsrc/midi-timer.worker.ts", fillcolor="#ffedb5"];
+    preset [label="Preset resolution\nprogram and bank to preset index\npreset index to merged regions\nApp.tsx, soundfont.ts", fillcolor="#ffedb5"];
+    live_sink_route [label="LiveInputSession to Sf2LiveSink\nomni input to selected track\nengine channel 0, resolveTrackPreset", fillcolor="#ffedb5"];
+    app_live_route [label="App live callbacks\nnotes, bank state, program change\nother CC, bend and pressure not forwarded", fillcolor="#ffedb5"];
+  }
+
+  subgraph cluster_engine {
+    label="Synth engine, one Sf2SynthEngine per worklet or offline track";
+    style="rounded,filled";
+    color="#9ccc9c";
+    fillcolor="#effaf0";
+    fontsize=12;
+
+    dispatch [label="Sf2Processor and dispatchEvent\nsetPreset, note, CC, bend, pressure\nsf2-processor.ts, sf2-renderer.ts", fillcolor="#d7f0d8"];
+    ctl_state [label="Per-channel state\n16 channels x CC 0 to 127\nbend, pressure, RPN and NRPN", fillcolor="#d7f0d8"];
+    region_match [label="Region match\nchannel, track or global preset list\nkey range and velocity range", fillcolor="#d7f0d8"];
+    modulators [label="SF2 modulators\nvelocity, key, CC, bend, pressure\nNRPN and voice overrides", fillcolor="#d7f0d8"];
+    voices [label="Voice pool, 64 by default\nsample playback, pitch, DAHDSR\ntriangle LFOs, two-pole low-pass", fillcolor="#d7f0d8"];
+    sends [label="Per-voice sends\nchorus generator 15, reverb generator 16", fillcolor="#d7f0d8"];
+    fx [label="SF2Effects\nFreeverb-style reverb\nmodulated-delay chorus", fillcolor="#d7f0d8"];
+    master [label="MasterBus, inside each engine\ngain, compressor, lookahead limiter\nsafety soft clip", fillcolor="#d7f0d8"];
+  }
+
+  subgraph cluster_output {
+    label="Web Audio, offline output and side paths";
+    style="rounded,filled";
+    color="#c3a6d9";
+    fillcolor="#f6f0fb";
+    fontsize=12;
+
+    track_graph [label="Per-track player graph\nAudioWorkletNode to StereoPannerNode\nto GainNode track fader", fillcolor="#e8dcf5"];
+    app_bus [label="Shared app graph\nunity GainNode to AnalyserNode\nfftSize 2048, smoothing 0.82", fillcolor="#e8dcf5"];
+    live_graph [label="Workstation live graph\nAudioWorkletNode to GainNode\nto StereoPannerNode, separate context", fillcolor="#e8dcf5"];
+    destination [label="AudioContext.destination", shape=ellipse, fillcolor="#e8dcf5"];
+    offline [label="Offline render\none engine per audible track\nStereoPanner law and fader, sum\nloudness and true peak, WAV, SHA-256", fillcolor="#e8dcf5"];
+    midi_out [label="External MIDI output\nmidi-output.ts to Web MIDI output\nno Web Audio sound", fillcolor="#e8dcf5"];
+    raw_preview [label="Raw sample preview\nAudioBufferSourceNode\nbypasses the SF2 synth", fillcolor="#e8dcf5"];
+  }
+
+  smf_src -> bridge [label="workstation project"];
+  smf_src -> timer [label="loadMidi"];
+  bridge -> timer [label="serialized SMF"];
+  sf2 -> preset [label="presets and samples"];
+  timer -> preset [label="programChangeRequest"];
+  preset -> dispatch [label="setTrackPreset, then setPreset regions"];
+  timer -> dispatch [label="direct MessagePort events, no timestamps"];
+  timer -> midi_out [label="same parsed song", style=dashed];
+
+  live_ws -> live_sink_route;
+  live_sink_route -> dispatch [label="notes, CC, pitch bend"];
+  live_app -> app_live_route;
+  app_live_route -> dispatch [label="setPreset, noteOn, noteOff"];
+
+  dispatch -> ctl_state;
+  dispatch -> region_match;
+  ctl_state -> modulators [label="CC, bend, pressure", style=dashed, color="#2e7d32"];
+  modulators -> voices [label="generator sums", style=dashed, color="#2e7d32"];
+  region_match -> voices [label="one voice per matching region"];
+  voices -> sends [label="post-filter, post-pan"];
+  voices -> master [label="dry stereo"];
+  sends -> fx;
+  fx -> master [label="wet return"];
+
+  master -> track_graph;
+  track_graph -> app_bus;
+  master -> app_bus [label="single app live synth"];
+  master -> live_graph;
+  master -> offline [label="headless engines"];
+  app_bus -> destination;
+  live_graph -> destination;
+  raw_preview -> destination [style=dotted];
+}
