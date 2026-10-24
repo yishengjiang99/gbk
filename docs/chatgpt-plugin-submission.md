@@ -126,6 +126,16 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 | `gbk_publish_composition` | false | true | false | Makes the composition publicly viewable on a share page (open world). Called only on explicit user request; not destructive because it deletes nothing. |
 | `gbk_show_composition_ui` | true | false | false | Renders a read-only player for the user's composition; no changes. |
 
+### Review details: how reviewers sign in
+
+GBK normally uses Google sign-in only. For app review there is one username/password account, `openai-reviewer`. The owner enters the password in the portal's **Review details** form; it is never in the package or the repo.
+1. In ChatGPT, connect GBK Composer. The OAuth page at `https://compose.grepawk.com/oauth/authorize` asks the user to sign in.
+2. Click **Reviewer sign-in**, enter `openai-reviewer` and the password, and submit. You return to the same authorization request.
+3. Approve the consent screen. ChatGPT is now connected as the reviewer account, which has the same daily AI and render limits as any new account.
+4. Rendering runs in the browser. For test cases that render, open `https://compose.grepawk.com/studio` in a browser tab, sign in there through **Reviewer sign-in** in the AI Composer panel, and keep the tab open.
+
+Server settings: `REVIEWER_LOGIN_ENABLED=1` and `REVIEWER_PASSWORD_HASH` (an scrypt hash) in `/etc/gbk-composer.env`. To turn reviewer login off, unset `REVIEWER_LOGIN_ENABLED` and restart `gbk-composer`; the link then disappears and the endpoints return 404. Failed attempts are limited to 5 per IP every 15 minutes.
+
 ### Domain verification
 
 OpenAI's portal shows a challenge token. The server returns it as plain text at
