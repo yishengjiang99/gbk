@@ -28,6 +28,7 @@ digraph GbkAudioPath {
     preset [label="Preset resolution\nprogram and bank to preset index\npreset index to merged regions\nApp.tsx, soundfont.ts", fillcolor="#ffedb5"];
     live_sink_route [label="LiveInputSession to Sf2LiveSink\nomni input to selected track\nengine channel 0, resolveTrackPreset", fillcolor="#ffedb5"];
     app_live_route [label="App live callbacks\nnotes, bank state, program change\nall CC, bend and pressure forwarded", fillcolor="#ffedb5"];
+    ingress [label="Unified synth ingress\nsynthEvent wire shapes, SynthIngress sink\nBankSelectTracker CC0/CC32 bank folding\nsrc/synth-ingress.ts", fillcolor="#ffe1a8"];
   }
 
   subgraph cluster_synth_voices {
@@ -62,7 +63,7 @@ digraph GbkAudioPath {
     fontsize=12;
 
     fx [label="SF2Effects\nFreeverb-style reverb\nmodulated-delay chorus", fillcolor="#e2f2d8"];
-    master [label="MasterBus, inside each engine\ngain, compressor, lookahead limiter\nsafety soft clip", fillcolor="#e2f2d8"];
+    master [label="MasterBus, inside each engine\ngain, compressor, lookahead limiter\nsafety soft clip, then track stage:\norchestra pan and track fader", fillcolor="#e2f2d8"];
   }
 
   subgraph cluster_output {
@@ -72,9 +73,9 @@ digraph GbkAudioPath {
     fillcolor="#f6f0fb";
     fontsize=12;
 
-    track_graph [label="Per-track player graph\nAudioWorkletNode to StereoPannerNode\nto GainNode track fader", fillcolor="#e8dcf5"];
-    app_bus [label="Shared app graph\nunity GainNode to AnalyserNode\nfftSize 2048, smoothing 0.82", fillcolor="#e8dcf5"];
-    live_graph [label="Workstation live graph\nAudioWorkletNode to GainNode\nto StereoPannerNode, separate context", fillcolor="#e8dcf5"];
+    track_graph [label="Per-track player graph\nAudioWorkletNode straight to the\nshared AnalyserNode (pan and fader\nrun in the engine track stage)", fillcolor="#e8dcf5"];
+    app_bus [label="Shared app summing point\nAnalyserNode\nfftSize 2048, smoothing 0.82", fillcolor="#e8dcf5"];
+    live_graph [label="Workstation live graph\nAudioWorkletNode to destination\nseparate interactive context", fillcolor="#e8dcf5"];
     destination [label="AudioContext.destination", shape=ellipse, fillcolor="#e8dcf5"];
     offline [label="Offline render\none engine per audible track\nStereoPanner law and fader, sum\nloudness and true peak, WAV, SHA-256", fillcolor="#e8dcf5"];
     midi_out [label="External MIDI output\nmidi-output.ts to Web MIDI output\nno Web Audio sound", fillcolor="#e8dcf5"];
@@ -87,13 +88,14 @@ digraph GbkAudioPath {
   sf2 -> preset [label="presets and samples"];
   timer -> preset [label="programChangeRequest"];
   preset -> dispatch [label="setTrackPreset, then setPreset regions"];
-  timer -> dispatch [label="direct MessagePort events, no timestamps"];
+  timer -> ingress [label="per-track ingress over MessagePort, no timestamps"];
+  ingress -> dispatch [label="note, CC, bend, pressure events"];
   timer -> midi_out [label="same parsed song", style=dashed];
 
   live_ws -> live_sink_route;
-  live_sink_route -> dispatch [label="notes, CC, pitch bend"];
+  live_sink_route -> dispatch [label="notes, CC, pitch bend (shared wire shapes)"];
   live_app -> app_live_route;
-  app_live_route -> dispatch [label="setPreset, noteOn, noteOff"];
+  app_live_route -> dispatch [label="setPreset, noteOn, noteOff, CC, bend, pressure"];
 
   dispatch -> ctl_state;
   dispatch -> region_match;

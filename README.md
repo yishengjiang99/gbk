@@ -95,12 +95,16 @@ The player path is the shared path for songs and workstation projects:
   SMF at 480 PPQ and 120 BPM.
 - `parseMidiBuffer(...)` in `src/midi-timer.worker.ts` parses each SMF track, builds one global tempo
   map, and converts ticks to seconds. SMPTE time division is rejected. CC0 and CC32 are tracked per
-  channel and folded into the bank of the following program event. Other timed note, CC, program,
-  pitch-bend and pressure events keep their MIDI channel.
+  channel and folded into the bank of the following program event by `BankSelectTracker` in
+  `src/synth-ingress.ts`, the one bank-folding implementation every adapter shares (the raw-MIDI
+  handler in `src/midi-driver.ts` uses the same tracker). Other timed note, CC, program, pitch-bend
+  and pressure events keep their MIDI channel.
 - Playback uses `setInterval(runTick, 5)` and a 30 ms lookahead. Events are posted to the transferred
-  `MessagePort` for their player track without an audio timestamp, so the worklet applies an event
-  when it receives it. Live file playback is therefore not sample-accurate. The offline renderer is
-  frame-accurate.
+  `MessagePort` for their player track through that track's unified ingress (`SynthIngress` in
+  `src/synth-ingress.ts`: one definition of the note, CC, bend, pressure and preset wire shapes for
+  the scheduler, the workstation live sink and the player live handlers), without an audio
+  timestamp, so the worklet applies an event when it receives it. Live file playback is therefore
+  not sample-accurate. The offline renderer is frame-accurate.
 - A program event does not directly select worklet regions unless a track override is active. The
   worker pauses that track's dispatch, emits `programChangeRequest` to the main thread, and waits.
   The main thread resolves program and bank to a preset index, obtains regions, and returns
@@ -179,9 +183,10 @@ The older player and SF2 Explorer live path is narrower:
 
 `Sf2Processor` in `src/sf2-processor.ts` owns one `Sf2SynthEngine` at the worklet sample rate.
 `setOfflineTracks` installs track states and raises the voice limit to at least 64.
-`setMasterGainDb` sets the engine master gain. `setSequence` stores a scheduled event list. Every
-other port message goes to `engine.dispatchEvent(msg)`, and `process(...)` calls
-`engine.renderScheduled(...)` for each audio quantum.
+`setMasterGainDb` sets the engine master gain; `setTrackPan` and `setTrackFader` set the engine's
+track-stage pan and fader. `setSequence` stores a scheduled event list. Every other port message
+goes to `engine.dispatchEvent(msg)`, and `process(...)` calls `engine.renderScheduled(...)` for
+each audio quantum.
 
 At note-on:
 
@@ -258,8 +263,8 @@ absolute overrides, key-ranged overrides and global effects parameters are proje
 | CC0, bank select MSB | The SMF worker and the raw live-MIDI handlers fold CC0 with CC32 into the bank for the following program change. The direct engine `programChange` path reads stored CC0 as its bank, except channel 10 is forced to bank 128. CC0 is not a valid SF2 modulator source. |
 | CC32, bank select LSB | Folded with CC0 by the SMF worker and raw live-MIDI handlers. The direct engine program path and the offline instrument resolver use bank MSB; the resolver warns when the LSB names a different available preset. CC32 is not a valid SF2 modulator source. |
 | CC1, modulation | Default modulator source for vibrato LFO to pitch, generator 6, amount 50. It can also be used by a preset-defined modulator. |
-| CC7, channel volume | Default modulator to initial attenuation, generator 48, amount 960 cB, with a concave curve. At 127 its default-modulator attenuation contribution is 0; lower values add up to 960 cB. Authored CC7 is channel automation. Workstation track volume is a separate post-engine fader, described below. |
-| CC10, pan | Default modulator to pan, generator 17, amount 1000. The result is combined with region pan and track pan, then clamped. Voice pan uses `gL = (1 - pan) * 0.5` and `gR = (1 + pan) * 0.5`. This is separate from the external `StereoPannerNode` used for orchestra seating or offline track pan. |
+| CC7, channel volume | Default modulator to initial attenuation, generator 48, amount 960 cB, with a concave curve. At 127 its default-modulator attenuation contribution is 0; lower values add up to 960 cB. Authored CC7 is channel automation. Workstation track volume is a separate track-stage fader inside the engine, described below. |
+| CC10, pan | Default modulator to pan, generator 17, amount 1000. The result is combined with region pan and track pan, then clamped. Voice pan uses `gL = (1 - pan) * 0.5` and `gR = (1 + pan) * 0.5`. This is separate from the engine's track stage, which applies the orchestra-seating pan after the master bus (and from offline track pan). |
 | CC11, expression | Default modulator to initial attenuation, generator 48, amount 960 cB, with a concave curve. It stacks with CC7 in the same generator sum. |
 | CC64, sustain pedal | Values at or above 64 defer key-off. When the value crosses below 64, deferred voices release unless sostenuto is holding them. |
 | CC66, sostenuto | At or above 64, voices that are key-down at that moment are marked sostenuto. Below 64, the marks clear and deferred voices can release. |
@@ -289,9 +294,9 @@ The workstation mix has three layers. Persisted track mix defaults are the base 
 undoable. Authored timed CC automation plays on top of the base values for pan and expression.
 Temporary live overrides are not persisted. For pan and expression, an override supplies the
 current base value until authored automation for that controller reaches the engine. Volume is the
-exception in the current code: the workstation volume is applied as the post-engine track fader
-`(volume / 100)^2`, while the CC7 base sent to the engine is held at the GM default 100. Authored
-CC7 automation still enters the engine normally.
+exception in the current code: the workstation volume is applied as the engine's track-stage fader
+`(volume / 100)^2`, after the master bus, while the CC7 base sent to the engine is held at the GM
+default 100. Authored CC7 automation still enters the engine normally.
 
 ### Effects, channel strip, master bus and output
 
@@ -323,24 +328,29 @@ The master stage in `src/sf2/master-bus.ts` runs inside each engine after voices
 4. A safety soft clip that is unity below 0.9 times the ceiling and then follows a tanh knee. The
    ceiling is below 1, so engine output stays below +1.0 and -1.0.
 
+After the master bus, each engine applies its track stage: the orchestra-seating pan (resolved
+from track name, instrument name and preset name in `src/audio/orchestra-pan.ts`, applied with
+that module's `stereoPanGains` matrix, the stereo-input StereoPanner law) and the track fader
+(the `(volume / 100)^2` law, with mute and solo, approaching its target with the same 10 ms
+one-pole the node's `setTargetAtTime` used). The stage is set with the `setTrackPan` and
+`setTrackFader` worklet messages. Its defaults are identity, so offline renders are unaffected;
+the offline renderer applies the same pan law and fader itself, after its engines.
+
 The live Web Audio graphs are:
 
 - File and workstation playback, one graph per player track:
-  `AudioWorkletNode("sf2-processor")` -> `StereoPannerNode` -> `GainNode` -> the app unity
-  `GainNode` -> `AnalyserNode` -> `AudioContext.destination`. The `StereoPannerNode` value is the
-  orchestra-seating pan from `src/audio/orchestra-pan.ts`, resolved from track name, instrument name
-  and preset name. The track `GainNode` is the fader and mute or solo stage, with law
-  `(volume / 100)^2` and a 10 ms target-time constant for mute and solo changes.
-- Player live input: one `AudioWorkletNode("sf2-processor")` -> the app unity `GainNode` ->
-  `AnalyserNode` -> `AudioContext.destination`.
-- Workstation live input: `AudioWorkletNode("sf2-processor")` -> `GainNode` -> `StereoPannerNode` ->
-  the destination of a separate `AudioContext` created with `latencyHint: "interactive"`. Its gain
-  and pan are the selected track's effective mix. It does not pass through the app analyser or the
-  app summing bus.
+  `AudioWorkletNode("sf2-processor")` -> `AnalyserNode` -> `AudioContext.destination`. There are
+  no per-track pan or gain nodes and no summing gain node: pan and fader run in the engine's
+  track stage, and the track worklets sum at the analyser's input.
+- Player live input: one `AudioWorkletNode("sf2-processor")` -> `AnalyserNode` ->
+  `AudioContext.destination`.
+- Workstation live input: `AudioWorkletNode("sf2-processor")` -> the destination of a separate
+  `AudioContext` created with `latencyHint: "interactive"`. Its fader and pan are the selected
+  track's effective mix, applied by the same in-engine track stage. It does not pass through the
+  app analyser.
 
-The node named `masterGain` in `src/App.tsx` is a unity summing bus, not the volume control. The
-app volume control maps to each engine's `masterGainDb` through `volumeToMasterGainDb`; full volume
-is -3 dB and zero volume is -120 dB. The shared analyser has `fftSize = 2048` and
+The app volume control maps to each engine's `masterGainDb` through `volumeToMasterGainDb`; full
+volume is -3 dB and zero volume is -120 dB. The shared analyser has `fftSize = 2048` and
 `smoothingTimeConstant = 0.82`; `src/App.tsx` reads its time-domain and frequency arrays for the
 analyser UI.
 
