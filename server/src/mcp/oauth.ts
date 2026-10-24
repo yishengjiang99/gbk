@@ -12,6 +12,8 @@
 //
 // Account linking: /oauth/authorize requires the website's existing GBK session (invite-code login). The
 // GBK user from that session becomes the token subject — the OAuth client never chooses the user.
+// Consent: approval is a CSRF-protected POST against a single-use, server-side consent transaction that
+// binds user + client + redirect URI + scopes + PKCE challenge + resource. GET never mints a code.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Config } from "../config.ts";
@@ -123,23 +125,49 @@ export function oauthRoutes(app: FastifyInstance, cfg: Config, sessions: Session
 <p><a href="${back.replace(/&/g, "&amp;")}">${back.replace(/&/g, "&amp;")}</a></p>
 <p>The app requesting access will receive only the scopes you approve, and only for your own compositions.</p></body>`);
     }
-    if (q.confirm !== "1") {
-      const approve = new URL(`${issuer}/oauth/authorize`);
-      for (const [k, v] of Object.entries(q)) if (v !== undefined) approve.searchParams.set(k, v);
-      approve.searchParams.set("confirm", "1");
-      return reply.type("text/html").send(`<!doctype html><meta charset="utf-8"><title>Authorize GBK Composer access</title>
+    // Consent is a CSRF-protected, server-side transaction — this GET only renders the approval form.
+    // The code is minted exclusively by the POST below, from the parameters stored in the transaction
+    // (client, redirect URI, scopes, PKCE challenge, resource), never from request input. A cross-site
+    // GET therefore can never authorize a client for a signed-in user (no confirm=1 shortcut exists).
+    const txnId = b64url(randomBytes(24));
+    const csrf = b64url(randomBytes(24));
+    store.putConsent({ id: txnId, csrf_hash: hashToken(csrf), user, client_id: clientId, redirect_uri: redirectUri,
+      scope: scope.join(" "), code_challenge: q.code_challenge, resource: q.resource ?? resource, state: q.state ?? "",
+      expires_at: Date.now() + cfg.mcp.consentTtlSec * 1000 });
+    return reply.type("text/html").send(`<!doctype html><meta charset="utf-8"><title>Authorize GBK Composer access</title>
 <body style="font-family:system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem">
 <h1>Authorize access to GBK Composer</h1>
 <p>Signed in as <strong>${user.replace(/[<>&"]/g, "")}</strong>. The client <strong>${clientId.replace(/[<>&"]/g, "")}</strong> requests these scopes:</p>
 <ul>${scope.map((s) => `<li>${s}</li>`).join("")}</ul>
 <p>It will be able to act only on your own compositions and renders. You can revoke access at any time via POST /oauth/revoke.</p>
-<p><a href="${approve.toString().replace(/&/g, "&amp;")}" style="font-size:1.1rem">Approve and connect</a></p></body>`);
-    }
+<form method="POST" action="/oauth/authorize">
+<input type="hidden" name="txn" value="${txnId}">
+<input type="hidden" name="csrf" value="${csrf}">
+<p><button type="submit" name="decision" value="approve" style="font-size:1.1rem">Approve and connect</button>
+<button type="submit" name="decision" value="deny">Deny</button></p></form></body>`);
+  });
+
+  // ---- Authorization consent submission: the ONLY place an authorization code is minted ------------
+  app.post("/oauth/authorize", { bodyLimit: 16 * 1024 }, async (req, reply) => {
+    const b = (req.body ?? {}) as { txn?: unknown; csrf?: unknown; decision?: unknown };
+    const user = sessionUser(req);
+    if (!user) return err(reply, 401, "login_required", "sign in to GBK before approving an OAuth connection");
+    // Single-use: any POST attempt consumes the transaction, so a captured form cannot be replayed.
+    const row = typeof b.txn === "string" ? store.takeConsent(b.txn) : null;
+    if (!row) return err(reply, 400, "invalid_request", "consent transaction is unknown or already used; restart the authorization from the client");
+    if (row.expires_at <= Date.now()) return err(reply, 400, "invalid_request", "consent transaction expired; restart the authorization from the client");
+    if (row.user !== user) return err(reply, 403, "access_denied", "this consent request belongs to a different GBK account");
+    const csrf = typeof b.csrf === "string" ? b.csrf : "";
+    const got = Buffer.from(hashToken(csrf), "hex"); const exp = Buffer.from(row.csrf_hash, "hex");
+    if (!csrf || got.length !== exp.length || !timingSafeEqual(got, exp)) return err(reply, 400, "invalid_request", "invalid consent CSRF token");
+    const state: Record<string, string> = row.state ? { state: row.state } : {};
+    if (b.decision === "deny") return redirectWith(reply, row.redirect_uri, { error: "access_denied", error_description: "the user denied the authorization request", iss: issuer, ...state });
+    if (b.decision !== "approve") return err(reply, 400, "invalid_request", "decision must be approve or deny");
     const code = b64url(randomBytes(24));
-    store.putCode({ code_hash: hashToken(code), client_id: clientId, user, redirect_uri: redirectUri, scope: scope.join(" "),
-      code_challenge: q.code_challenge, resource: q.resource ?? resource, expires_at: Date.now() + cfg.mcp.authCodeTtlSec * 1000 });
-    req.log.info({ evt: "oauth_code_issued", user, clientId });
-    return redirectWith(reply, redirectUri, { code, iss: issuer, ...(q.state ? { state: q.state } : {}) });
+    store.putCode({ code_hash: hashToken(code), client_id: row.client_id, user, redirect_uri: row.redirect_uri, scope: row.scope,
+      code_challenge: row.code_challenge, resource: row.resource, expires_at: Date.now() + cfg.mcp.authCodeTtlSec * 1000 });
+    req.log.info({ evt: "oauth_code_issued", user, clientId: row.client_id });
+    return redirectWith(reply, row.redirect_uri, { code, iss: issuer, ...state });
   });
 
   // ---- Token endpoint ---------------------------------------------------------------------

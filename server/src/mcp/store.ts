@@ -27,6 +27,7 @@ export interface ArtifactRow {
 }
 export interface OAuthClientRow { client_id: string; client_name: string; redirect_uris: string; grant_types: string; created_at: number; cimd: number }
 export interface OAuthCodeRow { code_hash: string; client_id: string; user: string; redirect_uri: string; scope: string; code_challenge: string; resource: string; expires_at: number }
+export interface OAuthConsentRow { id: string; csrf_hash: string; user: string; client_id: string; redirect_uri: string; scope: string; code_challenge: string; resource: string; state: string; expires_at: number }
 export interface OAuthTokenRow { token_hash: string; kind: "access" | "refresh"; client_id: string; user: string; scope: string; resource: string; expires_at: number; family: string; revoked: number }
 
 export class McpStore {
@@ -67,6 +68,10 @@ export class McpStore {
       CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
         code_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL, user TEXT NOT NULL, redirect_uri TEXT NOT NULL,
         scope TEXT NOT NULL, code_challenge TEXT NOT NULL, resource TEXT NOT NULL, expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS mcp_oauth_consents (
+        id TEXT PRIMARY KEY, csrf_hash TEXT NOT NULL, user TEXT NOT NULL, client_id TEXT NOT NULL,
+        redirect_uri TEXT NOT NULL, scope TEXT NOT NULL, code_challenge TEXT NOT NULL, resource TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
         token_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, client_id TEXT NOT NULL, user TEXT NOT NULL,
         scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at INTEGER NOT NULL, family TEXT NOT NULL,
@@ -213,6 +218,16 @@ export class McpStore {
   takeCode(codeHash: string): OAuthCodeRow | null {
     const row = (this.db.prepare("SELECT * FROM mcp_oauth_codes WHERE code_hash=?").get(codeHash) as unknown as OAuthCodeRow) ?? null;
     if (row) this.db.prepare("DELETE FROM mcp_oauth_codes WHERE code_hash=?").run(codeHash);
+    return row;
+  }
+  putConsent(c: OAuthConsentRow) {
+    this.db.prepare("INSERT INTO mcp_oauth_consents (id, csrf_hash, user, client_id, redirect_uri, scope, code_challenge, resource, state, expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .run(c.id, c.csrf_hash, c.user, c.client_id, c.redirect_uri, c.scope, c.code_challenge, c.resource, c.state, c.expires_at);
+  }
+  /** Single-use like takeCode: ANY consent POST consumes the transaction, success or failure. */
+  takeConsent(id: string): OAuthConsentRow | null {
+    const row = (this.db.prepare("SELECT * FROM mcp_oauth_consents WHERE id=?").get(id) as unknown as OAuthConsentRow) ?? null;
+    if (row) this.db.prepare("DELETE FROM mcp_oauth_consents WHERE id=?").run(id);
     return row;
   }
   putToken(t: Omit<OAuthTokenRow, "token_hash" | "revoked"> & { token: string }) {

@@ -17,7 +17,7 @@ export interface Config {
     artifactUrlTtlSec: number; artifactRetentionDays: number;
     /** Hosts allowed to act as CIMD client_id documents (SSRF guard). */
     cimdHosts: string[];
-    accessTokenTtlSec: number; refreshTokenTtlSec: number; authCodeTtlSec: number;
+    accessTokenTtlSec: number; refreshTokenTtlSec: number; authCodeTtlSec: number; consentTtlSec: number;
   };
 }
 
@@ -60,6 +60,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       accessTokenTtlSec: num(env.MCP_ACCESS_TOKEN_TTL_SEC, 3600),
       refreshTokenTtlSec: num(env.MCP_REFRESH_TOKEN_TTL_SEC, 30 * 86400),
       authCodeTtlSec: num(env.MCP_AUTH_CODE_TTL_SEC, 600),
+      consentTtlSec: num(env.MCP_CONSENT_TTL_SEC, 600),
     },
   };
 }

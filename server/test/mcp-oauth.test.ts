@@ -24,17 +24,33 @@ async function register(s: { base: string }, scope?: string) {
   return client.client_id;
 }
 
-async function authorizeCode(s: { base: string }, cookie: string, clientId: string, scope: string) {
-  const { challenge } = pkceFor(clientId); void challenge;
-  const v = verifiers.get(clientId)!;
-  const q = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: REDIRECT, code_challenge: v.challenge, code_challenge_method: "S256", resource: "http://composer.test/mcp", scope, state: "st-1", confirm: "1" });
+async function consentForm(s: { base: string }, cookie: string, clientId: string, scope: string, extra: Record<string, string> = {}) {
+  const v = pkceFor(clientId);
+  const q = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: REDIRECT, code_challenge: v.challenge, code_challenge_method: "S256", resource: "http://composer.test/mcp", scope, state: "st-1", ...extra });
   const r = await fetch(`${s.base}/oauth/authorize?${q}`, { headers: { cookie }, redirect: "manual" });
-  assert.equal(r.status, 302, `authorize should redirect, got ${r.status}`);
+  assert.equal(r.status, 200, `GET authorize must render the consent form, got ${r.status}`);
+  assert.equal(r.headers.get("location"), null, "GET authorize must never redirect with a code");
+  const html = await r.text();
+  const txn = /name="txn" value="([^"]+)"/.exec(html)?.[1];
+  const csrf = /name="csrf" value="([^"]+)"/.exec(html)?.[1];
+  assert.ok(txn && csrf, "consent form carries txn + csrf hidden fields");
+  return { txn: txn!, csrf: csrf!, verifier: v.verifier };
+}
+
+async function postConsent(s: { base: string }, cookie: string, fields: Record<string, string>) {
+  return fetch(`${s.base}/oauth/authorize`, { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields), redirect: "manual" });
+}
+
+async function authorizeCode(s: { base: string }, cookie: string, clientId: string, scope: string) {
+  const { txn, csrf, verifier } = await consentForm(s, cookie, clientId, scope);
+  const r = await postConsent(s, cookie, { txn, csrf, decision: "approve" });
+  assert.equal(r.status, 302, `consent POST should redirect, got ${r.status}`);
   const loc = new URL(r.headers.get("location")!);
   assert.equal(loc.searchParams.get("iss"), "http://composer.test", "RFC 9207 iss on every authorization response");
   assert.equal(loc.searchParams.get("state"), "st-1");
   const code = loc.searchParams.get("code"); assert.ok(code);
-  return { code: code!, verifier: v.verifier };
+  return { code: code!, verifier };
 }
 const verifiers = new Map<string, { verifier: string; challenge: string }>();
 function pkceFor(clientId: string) { if (!verifiers.has(clientId)) verifiers.set(clientId, pkce()); return verifiers.get(clientId)!; }
@@ -50,7 +66,7 @@ test("full OAuth flow: DCR -> consent (linked GBK session) -> PKCE exchange -> B
     const clientId = await register(s);
     const alice = await login(s.base, "code-a");
     // Without a GBK session, authorize asks the user to sign in (account linking), never issues a code.
-    const anon = await fetch(`${s.base}/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_challenge=${pkceFor(clientId).challenge}&code_challenge_method=S256&confirm=1`, { redirect: "manual" });
+    const anon = await fetch(`${s.base}/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_challenge=${pkceFor(clientId).challenge}&code_challenge_method=S256`, { redirect: "manual" });
     assert.equal(anon.status, 200);
     assert.match(await anon.text(), /Sign in to GBK/);
 
@@ -124,4 +140,51 @@ test("CIMD: unallowlisted client_id URLs are rejected without being fetched; bad
 
 test("production config refuses MCP_TEST_AUTH (fail closed)", () => {
   assert.throws(() => loadConfig({ NODE_ENV: "production", MCP_TEST_AUTH: "1", SESSION_SECRET: "x".repeat(40), COMPOSER_PUBLIC_ORIGIN: "https://compose.grepawk.com" } as NodeJS.ProcessEnv), /MCP_TEST_AUTH/);
+});
+
+test("consent cannot be bypassed: GET never mints a code, approval is a single-use CSRF POST bound to the transaction", async () => {
+  const s = await startServer(model());
+  try {
+    const clientId = await register(s);
+    const alice = await login(s.base, "code-a");
+    const bob = await login(s.base, "code-b");
+    const scope = "gbk:compositions.read";
+
+    // The old confirm=1 GET shortcut is gone: a signed-in user following an attacker-crafted
+    // authorize link only ever sees the consent form — no redirect, no code.
+    const form = await consentForm(s, alice.cookie, clientId, scope, { confirm: "1" });
+
+    // Wrong CSRF token: rejected, and the attempt consumes the transaction.
+    const badCsrf = await postConsent(s, alice.cookie, { txn: form.txn, csrf: "forged", decision: "approve" });
+    assert.equal(badCsrf.status, 400);
+    const replayAfterBad = await postConsent(s, alice.cookie, { txn: form.txn, csrf: form.csrf, decision: "approve" });
+    assert.equal(replayAfterBad.status, 400, "any POST attempt consumes the consent transaction");
+
+    // Another signed-in user cannot approve Alice's transaction.
+    const form2 = await consentForm(s, alice.cookie, clientId, scope);
+    const crossUser = await postConsent(s, bob.cookie, { txn: form2.txn, csrf: form2.csrf, decision: "approve" });
+    assert.equal(crossUser.status, 403);
+
+    // Tampered POST fields cannot widen the grant: the code is minted from the stored transaction,
+    // so a forged scope in the body is ignored and the token carries the consented scope only.
+    const form3 = await consentForm(s, alice.cookie, clientId, scope);
+    const ok = await postConsent(s, alice.cookie, { txn: form3.txn, csrf: form3.csrf, decision: "approve", scope: "gbk:shares.publish" });
+    assert.equal(ok.status, 302);
+    const code = new URL(ok.headers.get("location")!).searchParams.get("code")!;
+    const tokRes = await exchange(s, clientId, code, form3.verifier);
+    assert.equal(tokRes.status, 200);
+    assert.equal((await tokRes.json()).scope, scope, "token scope comes from the consent transaction, never from POST input");
+
+    // A successful approval is single-use too.
+    const replay = await postConsent(s, alice.cookie, { txn: form3.txn, csrf: form3.csrf, decision: "approve" });
+    assert.equal(replay.status, 400);
+
+    // Deny redirects with access_denied (+ iss/state) and mints nothing.
+    const form4 = await consentForm(s, alice.cookie, clientId, scope);
+    const denied = await postConsent(s, alice.cookie, { txn: form4.txn, csrf: form4.csrf, decision: "deny" });
+    assert.equal(denied.status, 302);
+    const dloc = new URL(denied.headers.get("location")!);
+    assert.equal(dloc.searchParams.get("error"), "access_denied");
+    assert.equal(dloc.searchParams.get("code"), null);
+  } finally { await s.app.close(); }
 });
