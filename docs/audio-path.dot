@@ -30,25 +30,43 @@ digraph GbkAudioPath {
     app_live_route [label="App live callbacks\nnotes, bank state, program change\nother CC, bend and pressure not forwarded", fillcolor="#ffedb5"];
   }
 
-  subgraph cluster_engine {
-    label="Synth engine, one Sf2SynthEngine per worklet or offline track";
+  subgraph cluster_synth_voices {
+    label="Synth voices";
     style="rounded,filled";
     color="#9ccc9c";
     fillcolor="#effaf0";
     fontsize=12;
 
     dispatch [label="Sf2Processor and dispatchEvent\nsetPreset, note, CC, bend, pressure\nsf2-processor.ts, sf2-renderer.ts", fillcolor="#d7f0d8"];
-    ctl_state [label="Per-channel state\n16 channels x CC 0 to 127\nbend, pressure, RPN and NRPN", fillcolor="#d7f0d8"];
     region_match [label="Region match\nchannel, track or global preset list\nkey range and velocity range", fillcolor="#d7f0d8"];
     modulators [label="SF2 modulators\nvelocity, key, CC, bend, pressure\nNRPN and voice overrides", fillcolor="#d7f0d8"];
     voices [label="Voice pool, 64 by default\nsample playback, pitch, DAHDSR\ntriangle LFOs, two-pole low-pass", fillcolor="#d7f0d8"];
-    sends [label="Per-voice sends\nchorus generator 15, reverb generator 16", fillcolor="#d7f0d8"];
-    fx [label="SF2Effects\nFreeverb-style reverb\nmodulated-delay chorus", fillcolor="#d7f0d8"];
-    master [label="MasterBus, inside each engine\ngain, compressor, lookahead limiter\nsafety soft clip", fillcolor="#d7f0d8"];
+  }
+
+  subgraph cluster_channel_strip {
+    label="Channel strip and controllers";
+    style="rounded,filled";
+    color="#8fbc8f";
+    fillcolor="#f2f8f2";
+    fontsize=12;
+
+    ctl_state [label="Per-channel state\n16 channels x CC 0 to 127\nbend, pressure, RPN and NRPN", fillcolor="#dcefe0"];
+    sends [label="Per-voice sends\nchorus generator 15, reverb generator 16", fillcolor="#dcefe0"];
+  }
+
+  subgraph cluster_master {
+    label="Effects and master";
+    style="rounded,filled";
+    color="#7fb069";
+    fillcolor="#f4fbf1";
+    fontsize=12;
+
+    fx [label="SF2Effects\nFreeverb-style reverb\nmodulated-delay chorus", fillcolor="#e2f2d8"];
+    master [label="MasterBus, inside each engine\ngain, compressor, lookahead limiter\nsafety soft clip", fillcolor="#e2f2d8"];
   }
 
   subgraph cluster_output {
-    label="Web Audio, offline output and side paths";
+    label="Output";
     style="rounded,filled";
     color="#c3a6d9";
     fillcolor="#f6f0fb";
