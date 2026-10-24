@@ -1,3 +1,5 @@
+// Simulated Studio tabs render like the real browser: through an OfflineAudioContext (test stand-in under Node).
+import "../../test/support/offline-audio-context.ts";
 import WebSocket from "ws";
 import { buildApp } from "../src/app.ts";
 import type { ModelClient } from "../src/agent/model-client.ts";
