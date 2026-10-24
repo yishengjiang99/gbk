@@ -35,13 +35,13 @@ human account owner have not been performed by preparing this packet.
 >
 > Instruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.
 >
-> No account is needed. To hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes; audio is rendered in your own browser, never on GBK's server. GBK exports a Standard MIDI file directly, and a private GBK Studio link lets you play and export WAV in your browser.
+> No account is needed. To hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. Press Render and the WAV is synthesized right in your browser with the GBK SoundFont engine, plays in the chat, and can be downloaded; GBK also exports a Standard MIDI file. Audio is never rendered on GBK's server, and no Studio tab is needed.
 >
 > Each composition is private and opened only with the access key returned to your chat. GBK publishes a public share page only when you ask it to.
 
 **Description (manifest)**
 
-> Compose and edit structured MIDI music in five styles, shape dynamics with CC automation, preview and render it in your browser (in-chat player or GBK Studio), and download MIDI. No account needed.
+> Compose and edit structured MIDI music in five styles, shape dynamics with CC automation, preview it in a piano-roll player, render and play WAV in your browser right in the chat, and download MIDI. No account needed.
 
 **Keywords:** music, composition, midi, fugue, orchestration
 
@@ -59,15 +59,15 @@ programming and experimentation.
 
 ## Test prompts
 
-These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked by `server/test/mcp-listing.test.ts`). Rendering needs a signed-in GBK Studio tab open in the browser; without one the render tool returns a studio link.
+These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked by `server/test/mcp-listing.test.ts`). Rendering runs in the user's browser: the in-chat player's Render button needs no Studio tab or extra sign-in (a connected Studio tab also works for `gbk_render_composition`).
 
 1. > Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.
 
    Expected: A new private composition (style baroque, organ, D minor, 16 bars) is created and the interactive player with piano roll is shown.
 
-2. > Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then render WAV and MIDI.
+2. > Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.
 
-   Expected: A jazz composition is created, a `walking_bass` part is generated via `gbk_edit_composition`, and with a Studio tab connected the render returns WAV and MIDI download links (otherwise `studio_required` + studioUrl).
+   Expected: A jazz composition is created, a `walking_bass` part is generated via `gbk_edit_composition`, and the in-chat player is shown (`gbk_show_composition_ui`). Pressing Render synthesizes the WAV in the browser (progress %, Stop), plays it, and saves WAV + MIDI download links. If the model calls `gbk_render_composition` with no Studio tab, it gets `studio_required` and points the user to the player's Render button.
 
 3. > In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo.
 
@@ -83,10 +83,10 @@ The test cases and release notes below are also in `plugin.json` under `extensio
    - Prompt: "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll."
    - Tools: gbk_create_composition, gbk_show_composition_ui
    - Expected: A new private composition (baroque, D minor, 16 bars, organ voices) is created and the GBK player shows its piano roll, tracks and CC11 lane.
-2. **Compose, add a part with a targeted edit, and render in the user's browser Studio tab.**
-   - Prompt: "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then render WAV and MIDI."
-   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_render_composition
-   - Expected: A jazz composition is created and a walking_bass part generated. With a signed-in GBK Studio tab open, the render completes with validated WAV and MIDI download links; with no tab, the tool returns status studio_required and a link to open the studio, and the assistant asks the user to open it.
+2. **Compose, add a part with a targeted edit, and render it in the in-chat player (no Studio tab).**
+   - Prompt: "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat."
+   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_show_composition_ui (player calls gbk_widget_render_start / gbk_widget_render_finish); gbk_render_composition only with a Studio tab
+   - Expected: A jazz composition is created and a walking_bass part generated; the GBK in-chat player is shown. Pressing Render in the player synthesizes the WAV in the user's browser with progress and Stop, plays it in the chat, and saves validated WAV and MIDI download links. If the model calls gbk_render_composition with no Studio tab connected, it returns status studio_required and the assistant points the user to the in-chat player's Render button.
 3. **Edit only a passage of the most recent composition.**
    - Prompt: "In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo."
    - Tools: gbk_list_compositions, gbk_get_composition, gbk_edit_composition
@@ -120,6 +120,7 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 | `gbk_list_compositions` | true | false | false | Lists the user's own compositions; no changes. |
 | `gbk_edit_composition` | false | false | false | Writes a new revision of the user's private composition; earlier revisions are kept, so nothing is lost, and nothing becomes public. |
 | `gbk_render_composition` | false | false | false | Creates a render job: a server-exported MIDI file, plus WAV rendered in the user's own browser (Studio tab or in-chat player). It changes no content and publishes nothing. |
+| `gbk_widget_render_start` / `gbk_widget_render_finish` | false | false | false | App-only (`ui.visibility: ["app"]`), called by the in-chat player's Render button: create the user's own render job and publish the WAV their browser rendered (server verifies SHA-256 and the WAV header) plus a server-built MIDI file; nothing is published publicly. |
 | `gbk_get_render_status` | true | false | false | Reads render job status; no changes. |
 | `gbk_cancel_render` | false | false | false | Stops the user's own queued or running render job; no composition data is deleted and nothing is published. |
 | `gbk_get_artifacts` | true | false | false | Returns signed download links to the user's own files; no changes. |

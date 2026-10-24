@@ -37,6 +37,14 @@ export function resolveSoundFontPath(cfg: Config): string {
   throw new McpError("NOT_FOUND", `bundled SoundFont not found; set GBK_SOUNDFONT_PATH (tried: ${candidates.join(", ")})`);
 }
 
+/** A built in-chat player asset (scripts/build-widget.mjs -> server/dist/widget/), next to the bundle or in the checkout. */
+export function resolveWidgetAsset(file: string): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [join(here, "widget", file), join(process.cwd(), "server", "dist", "widget", file), join(here, "..", "..", "dist", "widget", file)];
+  for (const c of candidates) if (existsSync(c)) return c;
+  throw new McpError("NOT_FOUND", `widget asset ${file} not built (run node scripts/build-widget.mjs)`);
+}
+
 /** What the render service needs from the browser bridge: the account's live Studio tab, if any. */
 export interface StudioLink {
   ready: boolean;
@@ -116,6 +124,38 @@ export class RenderService {
     return this.store.getJob(job.id, owner)!;
   }
 
+  /**
+   * Start a render that the ChatGPT in-chat player (MCP Apps widget, ui.ts) performs in the user's browser - no Studio
+   * tab or sign-in needed there. Same job row, capability token, snapshot/upload endpoints and validation as the Studio
+   * path; the widget reports completion with finishWidget(). The server still never synthesizes audio.
+   */
+  submitWidget(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, perDay?: number) {
+    const limit = perDay ?? this.rendersPerDay(owner);
+    if (this.store.countJobsSince(owner, 86_400_000) >= limit) throw new McpError("QUOTA_EXCEEDED", `daily render limit reached (${limit})`);
+    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, executor: "widget", rendererVersion: RENDERER_VERSION } });
+    const token = randomBytes(24).toString("base64url");
+    mkdirSync(this.store.artifactsDir, { recursive: true });
+    const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config, tokenHash: hash(token), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
+    writeFileSync(a.partPath, new Uint8Array(0));
+    this.active.set(job.id, a);
+    this.store.patchJob(job.id, { status: "running", progress: 0 });
+    a.timer = setTimeout(() => this.failJob(job.id, "RENDER_TIMEOUT", `the in-chat player did not finish within ${this.cfg.mcp.renderTimeoutMs} ms; no artifact was published`), this.cfg.mcp.renderTimeoutMs);
+    a.timer.unref?.();
+    const base = `${this.cfg.publicOrigin}/api/mcp/render-jobs/${job.id}`;
+    const options = { sampleRate: config.sampleRate, channels: config.channels, format: config.format, normalize: config.normalize, targetLufs: config.targetLufs, tailSeconds: config.tailSeconds ?? 3, maxSeconds: this.cfg.mcp.maxRenderSeconds };
+    this.log({ evt: "mcp_widget_render_started", user: owner, jobId: job.id, compositionId: row.id, revision: row.revision });
+    return { job: this.store.getJob(job.id, owner)!, token, snapshotUrl: `${base}/snapshot`, uploadUrl: `${base}/wav`, chunkBytes: UPLOAD_CHUNK_BYTES, options };
+  }
+
+  /** The in-chat player's report for a widget job: verify + publish the uploaded WAV (and server-side MIDI), or fail it. */
+  finishWidget(owner: string, jobId: string, token: string, result: { ok: true; meta: Record<string, unknown> } | { ok: false; code: string; message: string }): RenderJobRow {
+    const a = this.auth(jobId, token);
+    if (a.owner !== owner) throw new McpError("NOT_FOUND", "no such active render job");
+    if (!result.ok) { this.failJob(jobId, result.code === "OPERATION_CANCELLED" ? "OPERATION_CANCELLED" : (result.code || "RENDER_FAILED"), result.message.slice(0, 500)); return this.status(owner, jobId); }
+    try { this.completeJob(a, result.meta); } catch (e) { this.failJob(jobId, (e as McpError).code ?? "RENDER_FAILED", (e as Error).message); }
+    return this.status(owner, jobId);
+  }
+
   // ---- endpoints the Studio tab calls (capability token = proof it was handed this job) ----
   private auth(jobId: string, token: unknown): Active {
     const a = this.active.get(jobId);
@@ -178,7 +218,8 @@ export class RenderService {
     const write = (rel: string, bytes: Uint8Array) => { const tmp = join(dir, `${rel}.tmp`); writeFileSync(tmp, bytes); renameSync(tmp, join(dir, rel)); };
     const base = { job_id: a.jobId, composition_id: a.row.id, owner: a.owner, revision: a.row.revision };
     const wavRel = `${a.jobId}.wav`;
-    const provenance = { rendererVersion: RENDERER_VERSION, sourceRevision: a.row.revision, soundFont: meta.soundFont, renderMs: meta.renderMs, executor: this.executor };
+    const executor = (JSON.parse(this.store.getJobAny(a.jobId)?.config_json ?? "{}") as { executor?: string }).executor ?? this.executor;
+    const provenance = { rendererVersion: RENDERER_VERSION, sourceRevision: a.row.revision, soundFont: meta.soundFont, renderMs: meta.renderMs, executor };
     const fname = a.row.title.replace(/[^\w\- .]/g, "_").slice(0, 60) || "gbk";
     const rows: Parameters<McpStore["addArtifacts"]>[0] = [{ ...base, kind: "wav", filename: `${fname}.wav`, mime_type: "audio/wav", size_bytes: wavBytes.length, sha256: sha, rel_path: wavRel,
       meta_json: JSON.stringify({ validated: true, sampleRate: info.sampleRate, channels: info.channels, format: info.format, durationSeconds: info.durationSeconds,

@@ -2,7 +2,8 @@
 //
 // Public surface = a small, user-goal-focused tool layer over CompositionService / RenderService. The
 // canonical gbk_* registry stays the musical engine underneath (via the service); it is NOT mirrored 1:1
-// here, so ChatGPT/Codex get deterministic operations, durable revisions and artifacts. Rendering is delegated to the user's
+// here, so ChatGPT/Codex get deterministic operations, durable revisions and artifacts. Rendering runs in the in-chat player
+// (gbk_widget_render_*, ui.ts) or is delegated to the user's
 // connected Studio tab over the browser bridge (browser-render.ts); the server never synthesizes audio.
 //
 // Every tool returns structuredContent plus a JSON text fallback, uses typed domain errors, and enforces
@@ -18,7 +19,7 @@ import { RenderService, DEFAULT_RENDER_CONFIG, type RenderConfig } from "./brows
 import { requireScope, type Principal, type Scope } from "./auth.ts";
 import { McpError, toMcpError } from "./errors.ts";
 import { signArtifactUrl } from "./urls.ts";
-import { COMPOSER_UI_HTML, COMPOSER_UI_URI } from "./ui.ts";
+import { composerUiHtml, COMPOSER_UI_URI } from "./ui.ts";
 import { MCP_SERVER_VERSION } from "./service-meta.ts";
 import { guestCapability, guestOwner, resolveGuestCapability, GUEST_EDIT_SCOPES } from "./guest.ts";
 
@@ -144,7 +145,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- compositions ----------------------------------------------------------------------------------
   server.registerTool("gbk_create_composition", {
-    title: "Create a composition", description: "Use this when the user asks for a new piece of music. Creates a private, durable GBK composition with the deterministic, seeded arrangement engine (style, key, tempo, meter, bars or duration, instrumentation, voices, sections). Returns the composition id, revision, structure summary and Studio URL. Works without sign-in: then it also returns a private accessToken (edit) and readAccessToken that every follow-up call for this project must pass. No browser tab is required to compose. Rendering is a separate step (gbk_render_composition) that runs in the user's connected Studio tab.",
+    title: "Create a composition", description: "Use this when the user asks for a new piece of music. Creates a private, durable GBK composition with the deterministic, seeded arrangement engine (style, key, tempo, meter, bars or duration, instrumentation, voices, sections). Returns the composition id, revision, structure summary and Studio URL. Works without sign-in: then it also returns a private accessToken (edit) and readAccessToken that every follow-up call for this project must pass. No browser tab is required to compose. Rendering is a separate step: the in-chat player (gbk_show_composition_ui, Render button) renders audio in the user's browser with no Studio tab or sign-in, or gbk_render_composition uses a connected Studio tab.",
     inputSchema: {
       title: z.string().min(1).max(128),
       style: z.enum(["baroque", "classical", "pop", "jazz", "ambient"]).optional().describe("baroque uses the Bach fugue generator + continuo"),
@@ -194,7 +195,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- rendering --------------------------------------------------------------------------------------
   server.registerTool("gbk_render_composition", {
-    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV plus a Standard MIDI File. The server never synthesizes audio. Without sign-in (accessToken): MIDI is exported immediately and status is browser_render with a browserRender handoff (in-chat player via gbk_show_composition_ui, or a read-only Studio link) where audio renders in the user's browser. Signed-in: synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required with an open-the-studio-to-render link (studioUrl) — ask the user to open it, then call again. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
+    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV plus a Standard MIDI File. The server never synthesizes audio. Without sign-in (accessToken): MIDI is exported immediately and status is browser_render with a browserRender handoff (in-chat player via gbk_show_composition_ui, or a read-only Studio link) where audio renders in the user's browser. Signed-in: synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required. Then prefer the in-chat player: call gbk_show_composition_ui and tell the user to press Render in the player (it renders, plays and saves the WAV in their browser, no Studio tab or sign-in needed); opening studioUrl and calling again also works. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
       sampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(), channels: z.union([z.literal(1), z.literal(2)]).optional(),
       format: z.enum(["pcm16", "float32"]).optional(), normalize: z.enum(["loudness", "peak", "off"]).optional(),
@@ -224,7 +225,8 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     }
     const sub = renders.submit(user, { ...row, revision: rowRev }, snapshot, config);
     if ("studioRequired" in sub) return { status: "studio_required", compositionId: a.compositionId, revision: rowRev, studioUrl: sub.studioUrl,
-      message: `Rendering runs in your browser, and no GBK Studio tab is connected for this account. Open the studio to render: ${sub.studioUrl} — keep it open (signed in), then call gbk_render_composition again.` };
+      inChatPlayer: { tool: "gbk_show_composition_ui", compositionId: a.compositionId },
+      message: `Rendering runs in your browser and no GBK Studio tab is connected. Easiest: show the in-chat player (gbk_show_composition_ui) and press Render there - it renders, plays and saves the WAV right in this chat. Alternatively open the studio (${sub.studioUrl}), keep it open signed in, and call gbk_render_composition again.` };
     const job = sub.job;
     let final = job;
     if (a.waitSeconds) final = await renders.waitFor(user, job.id, a.waitSeconds * 1000);
@@ -260,7 +262,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- studio / publishing -------------------------------------------------------------------------------
   server.registerTool("gbk_open_workstation", {
-    title: "Open in GBK Studio", description: "Use this when the user wants to open or keep editing a composition in GBK Studio, or needs a Studio tab for rendering. Returns an authenticated deep link that opens this exact composition revision in GBK Studio (private by default; Fork inside Studio to edit a copy there).",
+    title: "Open in GBK Studio", description: "Use this when the user wants to open or keep editing a composition in GBK Studio. (For audio, the in-chat player from gbk_show_composition_ui renders without a Studio tab.) Returns an authenticated deep link that opens this exact composition revision in GBK Studio (private by default; Fork inside Studio to edit a copy there).",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN }, annotations: annotations(true, true),
   }, async (a) => run("gbk_open_workstation", "gbk:compositions.read", a as Record<string, unknown>, async (p) => service.openWorkstation(p!.user, a.compositionId)));
 
@@ -290,14 +292,18 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   server.registerResource("gbk-composer-player", COMPOSER_UI_URI, {
     title: "GBK Composer player", description: "Interactive player and piano roll for a GBK composition.",
     mimeType: "text/html;profile=mcp-app",
-  }, async () => ({ contents: [{ uri: COMPOSER_UI_URI, mimeType: "text/html;profile=mcp-app", text: COMPOSER_UI_HTML,
-    _meta: { ui: { prefersBorder: true, csp: { resourceDomains: [publicOrigin], connectDomains: [publicOrigin] } } } }] }));
+  }, async () => ({ contents: [{ uri: COMPOSER_UI_URI, mimeType: "text/html;profile=mcp-app", text: composerUiHtml(publicOrigin),
+    // resourceDomains: renderer script, SF2 AudioWorklet module, signed WAV playback; connectDomains: SoundFont, snapshot
+    // and WAV upload (CORS, capability token). The widget renders audio in the user's browser, never on the server.
+    _meta: { ui: { prefersBorder: true, csp: { resourceDomains: [publicOrigin], connectDomains: [publicOrigin] } },
+      "openai/widgetCSP": { resource_domains: [publicOrigin], connect_domains: [publicOrigin] }, "openai/widgetPrefersBorder": true,
+      "openai/widgetDescription": "GBK player: piano roll, tracks, and a Render button that synthesizes the WAV in the user's browser, plays it and offers downloads." } }] }));
 
   server.registerTool("gbk_show_composition_ui", {
-    title: "Show the composition player", description: "Use this when the user wants to listen to, see, or download a composition. Shows the interactive GBK player (playback, seekable piano roll, track list, CC lanes, WAV/MIDI downloads, Studio link) for a composition inside the host. Call after creating/rendering when the user wants to listen or see the piano roll. Tools remain fully usable without this UI.",
+    title: "Show the composition player", description: "Use this when the user wants to listen to, see, or download a composition, especially when no GBK Studio tab is connected. Shows the interactive in-chat GBK player (piano roll, track list, CC lanes, Studio link) with a Render button that synthesizes the WAV in the user's own browser (SoundFont engine; no Studio tab or sign-in), then plays it and offers WAV/MIDI downloads; the WAV is also saved as an artifact. Tell the user to press Render in the player if no WAV exists yet. Tools remain fully usable without this UI.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN },
     annotations: annotations(true, true),
-    _meta: { ui: { resourceUri: COMPOSER_UI_URI }, "openai/outputTemplate": COMPOSER_UI_URI },
+    _meta: { ui: { resourceUri: COMPOSER_UI_URI }, "openai/outputTemplate": COMPOSER_UI_URI, "openai/widgetAccessible": true },
   }, async (a) => run("gbk_show_composition_ui", "gbk:compositions.read", a as Record<string, unknown>, async (p) => {
     const user = p!.user;
     const { row, project } = service.getProject(user, a.compositionId);
@@ -322,6 +328,40 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
       projectUrl: opened.url,
       ...(p!.via === "guest" || user.startsWith("guest:") ? { browserRender: browserRenderFor(user, row.id, row.revision) } : {}),
     };
+  }));
+
+  // ---- in-chat player rendering (called by the widget, not the model) -----------------------------------------
+  const appOnly = { ui: { visibility: ["app"] }, "openai/widgetAccessible": true, "openai/visibility": "private" };
+  server.registerTool("gbk_widget_render_start", {
+    title: "Start an in-chat player render", description: "Called by the GBK in-chat player when the user presses Render: creates a render job whose audio is synthesized in the user's browser, and returns the snapshot and upload endpoints. Not for the model.",
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, revision: z.number().int().min(0).optional() },
+    annotations: annotations(false), _meta: appOnly,
+  }, async (a) => {
+    const r = await run("gbk_widget_render_start", "gbk:renders.create", a as Record<string, unknown>, async (p) => {
+      const user = p!.user;
+      const got = service.getProject(user, a.compositionId);
+      let snapshot = got.project; let rev = got.row.revision;
+      if (a.revision !== undefined && a.revision !== rev) {
+        const old = store.getRevision(a.compositionId, user, a.revision);
+        if (!old) throw new McpError("NOT_FOUND", `revision ${a.revision} not found for this composition`);
+        snapshot = JSON.parse(old.project_json); rev = a.revision;
+      }
+      const s = renders.submitWidget(user, { ...got.row, revision: rev }, snapshot, { ...DEFAULT_RENDER_CONFIG }, p!.via === "guest" ? cfg.mcp.guestRendersPerDay : undefined);
+      return { jobId: s.job.id, compositionId: a.compositionId, revision: rev, token: s.token, snapshotUrl: s.snapshotUrl, uploadUrl: s.uploadUrl, chunkBytes: s.chunkBytes, options: s.options };
+    });
+    return r;
+  });
+
+  server.registerTool("gbk_widget_render_finish", {
+    title: "Finish an in-chat player render", description: "Called by the GBK in-chat player after it uploaded the browser-rendered WAV (or failed/stopped): the server verifies SHA-256, WAV header and validation, then publishes WAV + MIDI artifacts. Not for the model.",
+    inputSchema: { accessToken: ACCESS_TOKEN, jobId: z.string().min(1).max(128), token: z.string().min(16).max(128), ok: z.boolean(),
+      meta: z.record(z.string(), z.unknown()).optional(), errorCode: z.string().max(64).optional(), errorMessage: z.string().max(2000).optional() },
+    annotations: annotations(false, true), _meta: appOnly,
+  }, async (a) => run("gbk_widget_render_finish", "gbk:renders.create", { jobId: a.jobId, ok: a.ok, ...(a.accessToken ? { accessToken: a.accessToken } : {}) } as Record<string, unknown>, async (p) => {
+    const job = renders.finishWidget(p!.user, a.jobId, a.token, a.ok ? { ok: true, meta: a.meta ?? {} } : { ok: false, code: a.errorCode ?? "RENDER_FAILED", message: a.errorMessage ?? "the in-chat player reported a failure" });
+    const view = renders.jobView(p!.user, job);
+    const wav = view.artifacts.find((x) => x.kind === "wav"); const midi = view.artifacts.find((x) => x.kind === "midi");
+    return { ...view, ...(wav || midi ? { latest: { ...(wav ? { wav: { downloadUrl: wav.downloadUrl, sizeBytes: wav.sizeBytes, sha256: wav.sha256 } } : {}), ...(midi ? { midi: { downloadUrl: midi.downloadUrl, sizeBytes: midi.sizeBytes, sha256: midi.sha256 } } : {}) } } : {}) };
   }));
 
   return server;

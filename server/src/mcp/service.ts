@@ -126,7 +126,7 @@ export class CompositionService {
       ...(this.cfg.mcp.guestEnabled ? { guestLimits: { maxSeconds: this.cfg.mcp.guestMaxSeconds, maxBars: this.cfg.mcp.guestMaxBars, maxNotesOrControllers: this.cfg.mcp.guestMaxEvents,
         maxRevisions: this.cfg.mcp.guestMaxRevisions, renderRequestsPerProjectPerDay: this.cfg.mcp.guestRendersPerDay, artifactRetentionDays: this.cfg.mcp.artifactRetentionDays,
         rendering: "browser only: MIDI is exported immediately; audio renders in the in-chat player or the Studio tab opened from the private link" } } : {}),
-      limits: { maxCompositionsPerUser: this.cfg.mcp.maxCompositions, maxRendersPerDay: this.cfg.mcp.maxRendersPerDay, renderExecutor: "browser (connected GBK Studio tab)" },
+      limits: { maxCompositionsPerUser: this.cfg.mcp.maxCompositions, maxRendersPerDay: this.cfg.mcp.maxRendersPerDay, renderExecutor: "browser (in-chat player via gbk_show_composition_ui, or a connected GBK Studio tab)" },
       deterministic: "same project snapshot + renderer version + SoundFont + seed + render config => byte-identical WAV (SHA-256 recorded per artifact)",
       unsupported: ["arbitrary JavaScript/filesystem/shell access", "per-preset effect types beyond the built-in reverb/chorus", "SMPTE time division"],
     };

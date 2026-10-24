@@ -11,7 +11,9 @@ import { McpStore } from "../src/mcp/store.ts";
 import { CompositionService } from "../src/mcp/service.ts";
 import { RenderService, DEFAULT_RENDER_CONFIG } from "../src/mcp/browser-render.ts";
 import { ShareStore } from "../src/persistence/shares.ts";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { renderProjectOffline } from "../../src/audio/offline-renderer.ts";
+import { parseSoundFont } from "../../src/audio/soundfont-loader.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -50,7 +52,8 @@ test("A: composition with no tab; render asks to open the studio, then renders i
     const none = await alice.call<{ status: string; studioUrl: string; message: string }>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 5 });
     assert.equal(none.status, "studio_required");
     assert.equal(none.studioUrl, "http://composer.test/studio");
-    assert.match(none.message, /Open the studio to render/);
+    assert.match(none.message, /in-chat player \(gbk_show_composition_ui\)/);
+    assert.match(none.message, /open the studio/);
     const tab = await openStudio(s, "code-a");
     const r = await alice.call<Rendered>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 120, tailSeconds: 1 });
     assert.equal(r.status, "completed", JSON.stringify(r));
@@ -265,4 +268,88 @@ test("G: queued jobs left by a restart fail explicitly; terminal states are fina
   ]));
   assert.equal(st3.listArtifacts("cmp_x", "alice").length, 0, "no partial artifact batch survives a failed publication");
   st3.close();
+});
+
+test("W: in-chat player render - no Studio tab: widget tools hand out a token, browser renders, uploads over CORS, server verifies and publishes", async () => {
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
+  try {
+    assert.equal(s.hub.registry.size, 0, "no Studio tab");
+    const alice = asUser(s, "alice"); await alice.initialize();
+    const c = await fugue(alice);
+    const ui = await alice.call<{ compositionId: string; revision: number }>("gbk_show_composition_ui", { compositionId: c.compositionId });
+    type Start = { jobId: string; token: string; snapshotUrl: string; uploadUrl: string; chunkBytes: number; revision: number; options: Parameters<typeof renderProjectOffline>[1] };
+    const st = await alice.call<Start>("gbk_widget_render_start", { compositionId: c.compositionId, revision: ui.revision });
+    assert.equal(st.revision, c.revision);
+    const local = (u: string) => u.replace("http://composer.test", s.base);
+    const sandbox = { origin: "https://web-sandbox.oaiusercontent.com" };
+    const pre = await fetch(local(st.uploadUrl), { method: "OPTIONS", headers: { ...sandbox, "access-control-request-method": "PUT", "access-control-request-headers": "x-gbk-render-token, content-type" } });
+    assert.equal(pre.status, 204); assert.equal(pre.headers.get("access-control-allow-origin"), "*");
+    assert.match(pre.headers.get("access-control-allow-headers") ?? "", /x-gbk-render-token/);
+    assert.equal((await fetch(local(st.snapshotUrl), { headers: { "x-gbk-render-token": "wrong-token-xxxxxxxx" } })).status, 404);
+    const snapRes = await fetch(local(st.snapshotUrl), { headers: { ...sandbox, "x-gbk-render-token": st.token } });
+    assert.equal(snapRes.headers.get("access-control-allow-origin"), "*");
+    const { project } = await snapRes.json() as { project: Parameters<typeof renderProjectOffline>[0] };
+    const sf = parseSoundFont(new Uint8Array(readFileSync(new URL("../../public/static/GeneralUser-GS.sf2", import.meta.url))), "test-sf", "GeneralUser-GS.sf2");
+    const r = await renderProjectOffline(project, { ...st.options, tailSeconds: 1 }, undefined, undefined, { soundFont: sf });
+    for (let off = 0; off < r.bytes.length; off += st.chunkBytes) {
+      const up = await fetch(`${local(st.uploadUrl)}?offset=${off}`, { method: "PUT", headers: { ...sandbox, "x-gbk-render-token": st.token, "content-type": "application/octet-stream" }, body: r.bytes.subarray(off, off + st.chunkBytes) as BodyInit });
+      assert.equal(up.status, 200, await up.text());
+    }
+    const fin = await alice.call<Rendered & { latest: { wav: { downloadUrl: string; sha256: string } } }>("gbk_widget_render_finish", { jobId: st.jobId, token: st.token, ok: true,
+      meta: { sha256: r.sha256, byteLength: r.byteLength, validated: r.validated, durationSeconds: r.durationSeconds, soundFont: r.soundFont, renderMs: r.renderMs } });
+    assert.equal(fin.status, "completed", JSON.stringify(fin));
+    assert.equal(fin.latest.wav.sha256, r.sha256);
+    const wav = fin.artifacts.find((a) => a.kind === "wav")!;
+    assert.equal((wav.meta as { executor?: string }).executor, "widget");
+    assert.ok(fin.artifacts.some((a) => a.kind === "midi"), "server-side MIDI export published too");
+    const dl = new Uint8Array(await (await fetch(local(fin.latest.wav.downloadUrl))).arrayBuffer());
+    assert.equal(sha(dl), r.sha256);
+    // A replayed/forged finish cannot touch the job again; a failed report fails the job without artifacts.
+    await assert.rejects(alice.call("gbk_widget_render_finish", { jobId: st.jobId, token: st.token, ok: true, meta: {} }));
+    const st2 = await alice.call<Start>("gbk_widget_render_start", { compositionId: c.compositionId });
+    const bad = await alice.call<{ status: string; error: { code: string } }>("gbk_widget_render_finish", { jobId: st2.jobId, token: st2.token, ok: false, errorCode: "OPERATION_CANCELLED", errorMessage: "user pressed Stop" });
+    assert.equal(bad.status, "failed"); assert.equal(bad.error.code, "OPERATION_CANCELLED");
+    // Another account cannot use alice's job even with the token.
+    const bob = asUser(s, "bob"); await bob.initialize();
+    const st3 = await alice.call<Start>("gbk_widget_render_start", { compositionId: c.compositionId });
+    await assert.rejects(bob.call("gbk_widget_render_finish", { jobId: st3.jobId, token: st3.token, ok: false }));
+  } finally { await s.app.close(); }
+});
+
+test("W: widget assets are served cross-origin (renderer bundle, SF2 worklet, SoundFont) and the player declares its CSP", async () => {
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
+  try {
+    for (const f of ["gbk-widget-render.js", "sf2-processor.js"]) {
+      const r = await fetch(`${s.base}/api/mcp/widget/${f}`);
+      assert.equal(r.status, 200, f); assert.equal(r.headers.get("access-control-allow-origin"), "*"); assert.match(r.headers.get("content-type") ?? "", /javascript/);
+    }
+    const sf = await fetch(`${s.base}/api/mcp/widget/soundfont.sf2`, { method: "HEAD" });
+    assert.equal(sf.status, 200); assert.equal(sf.headers.get("access-control-allow-origin"), "*"); assert.ok(Number(sf.headers.get("content-length")) > 1_000_000);
+    assert.equal((await fetch(`${s.base}/api/mcp/widget/..%2Fpackage.json`)).status, 404);
+    const c = new McpClient(s.base); await c.initialize();
+    const res = (await c.send("resources/read", { uri: "ui://gbk/composer-v2.html" })).rpc?.result as { contents: { text: string; _meta: Record<string, { connect_domains?: string[] }> }[] };
+    assert.match(res.contents[0].text, /var ORIGIN="http:\/\/composer.test"/);
+    assert.deepEqual(res.contents[0]._meta["openai/widgetCSP"].connect_domains, ["http://composer.test"]);
+  } finally { await s.app.close(); }
+});
+
+test("W: account-free project - the in-chat player renders with the project's edit accessToken; a read token cannot start a job", async () => {
+  const s = await startServer(model());
+  try {
+    const g = new McpClient(s.base); await g.initialize();
+    const c = await g.call<{ compositionId: string; revision: number; accessToken: string; readAccessToken: string }>("gbk_create_composition", { title: "Guest widget", style: "classical", bars: 4, seed: 9, idempotencyKey: "guest-widget-0001" });
+    const ui = await g.call<{ browserRender?: { snapshotUrl: string; readAccessToken: string } }>("gbk_show_composition_ui", { compositionId: c.compositionId, accessToken: c.accessToken });
+    assert.ok(ui.browserRender?.readAccessToken, "guest player gets the read-only local-render fallback");
+    await assert.rejects(g.call("gbk_widget_render_start", { compositionId: c.compositionId, accessToken: c.readAccessToken }));
+    await assert.rejects(g.call("gbk_widget_render_start", { compositionId: c.compositionId }), "composition id alone grants nothing");
+    const st = await g.call<{ jobId: string; token: string; snapshotUrl: string; uploadUrl: string; options: Parameters<typeof renderProjectOffline>[1] }>("gbk_widget_render_start", { compositionId: c.compositionId, accessToken: c.accessToken });
+    const local = (u: string) => u.replace("http://composer.test", s.base);
+    const { project } = await (await fetch(local(st.snapshotUrl), { headers: { "x-gbk-render-token": st.token } })).json() as { project: Parameters<typeof renderProjectOffline>[0] };
+    const sf = parseSoundFont(new Uint8Array(readFileSync(new URL("../../public/static/GeneralUser-GS.sf2", import.meta.url))), "test-sf", "GeneralUser-GS.sf2");
+    const r = await renderProjectOffline(project, { ...st.options, tailSeconds: 1 }, undefined, undefined, { soundFont: sf });
+    assert.equal((await fetch(`${local(st.uploadUrl)}?offset=0`, { method: "PUT", headers: { "x-gbk-render-token": st.token, "content-type": "application/octet-stream" }, body: r.bytes as BodyInit })).status, 200);
+    const fin = await g.call<{ status: string; latest: { wav: { sha256: string } } }>("gbk_widget_render_finish", { accessToken: c.accessToken, jobId: st.jobId, token: st.token, ok: true,
+      meta: { sha256: r.sha256, byteLength: r.byteLength, validated: r.validated } });
+    assert.equal(fin.status, "completed"); assert.equal(fin.latest.wav.sha256, r.sha256);
+  } finally { await s.app.close(); }
 });

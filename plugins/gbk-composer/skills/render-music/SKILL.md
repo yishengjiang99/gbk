@@ -66,11 +66,13 @@ Never claim a WAV exists unless a `wav` artifact is listed.
    user asked for something else.
 2. **Submit the render.** Call `gbk_render_composition` with the
    `compositionId` (the render pins that saved revision). Keep the returned
-   `jobId`. Account-free projects get `browser_render` (see above). For
-   signed-in users rendering runs in their GBK Studio browser tab: if the result
-   is `status: "studio_required"`, give the user the `studioUrl` ("open the
-   studio to render"), ask them to keep it open while signed in, then submit
-   again. No job exists until then.
+   `jobId`. Account-free projects get `browser_render` (see above): call
+   `gbk_show_composition_ui` (pass the accessToken) and tell the user to press
+   **Render** in the in-chat player. For signed-in users with no GBK Studio tab
+   connected, the result is `status: "studio_required"`: likewise show the
+   in-chat player and have the user press **Render**: it renders, plays and
+   saves the WAV (and MIDI) right in the chat with no Studio tab. Opening the
+   `studioUrl` signed in and submitting again also works.
 3. **Poll appropriately.** If the job is not complete, poll
    `gbk_get_render_status` with increasing waits (use `waitSeconds` /
    backoff rather than rapid repeated calls) until it reaches `completed`

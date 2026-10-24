@@ -28,6 +28,7 @@ import { verifyArtifactSignature } from "./urls.ts";
 import { oauthRoutes } from "./oauth.ts";
 import { resolveGuestCapability } from "./guest.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
+import { resolveSoundFontPath, resolveWidgetAsset } from "./browser-render.ts";
 
 export interface McpDeps {
   store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics;
@@ -176,11 +177,18 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
   app.get("/api/mcp/artifacts/:id", serveArtifact); // Fastify auto-exposes HEAD for this GET route
 
   // ---- Studio-tab render handoff (browser-render.ts): capability-token endpoints the tab calls ----------
+  // The in-chat player (ChatGPT widget sandbox, a different origin) calls these too: CORS without credentials - the
+  // capability token in x-gbk-render-token is the only authority, so "*" grants nothing a cookie would.
+  const cors = (reply: import("fastify").FastifyReply) => reply.header("access-control-allow-origin", "*").header("access-control-allow-methods", "GET, PUT, OPTIONS")
+    .header("access-control-allow-headers", "x-gbk-render-token, content-type").header("access-control-max-age", "600");
+  app.options("/api/mcp/render-jobs/:id/:what", async (_req, reply) => cors(reply).code(204).send());
   app.get("/api/mcp/render-jobs/:id/snapshot", async (req, reply) => {
+    cors(reply);
     try { reply.header("cache-control", "no-store"); return deps.renders.snapshotFor((req.params as { id: string }).id, (req.headers["x-gbk-render-token"] ?? (req.query as { token?: string }).token)); }
     catch (e) { return reply.code(404).send({ code: "NOT_FOUND", message: (e as Error).message }); }
   });
   app.put("/api/mcp/render-jobs/:id/wav", { bodyLimit: 9 * 1024 * 1024 }, async (req, reply) => {
+    cors(reply);
     const buf = req.body as Buffer;
     if (!Buffer.isBuffer(buf)) return reply.code(415).send({ code: "BAD_TYPE", message: "send raw bytes (application/octet-stream)" });
     try { return deps.renders.acceptChunk((req.params as { id: string }).id, req.headers["x-gbk-render-token"], Number((req.query as { offset?: string }).offset ?? 0), new Uint8Array(buf)); }
@@ -201,6 +209,21 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
       return { compositionId: row.id, revision: row.revision, title: row.title, project: JSON.parse(row.project_json) };
     } catch (e) { return reply.code(404).send({ code: "NOT_FOUND", message: (e as Error).message }); }
   } });
+  // ---- in-chat player assets (scripts/build-widget.mjs): renderer bundle, SF2 worklet, the bundled SoundFont ----
+  // Public, static, no user data. CORS + CORP so the sandboxed widget origin may load them (script, worklet, fetch).
+  const widgetFiles: Record<string, string> = { "gbk-widget-render.js": "text/javascript; charset=utf-8", "sf2-processor.js": "text/javascript; charset=utf-8" };
+  app.get("/api/mcp/widget/:file", async (req, reply) => {
+    const file = (req.params as { file: string }).file;
+    reply.header("access-control-allow-origin", "*").header("cross-origin-resource-policy", "cross-origin");
+    let path: string; let type: string;
+    try {
+      if (file === "soundfont.sf2") { path = resolveSoundFontPath(cfg); type = "application/octet-stream"; reply.header("cache-control", "public, max-age=86400"); }
+      else if (widgetFiles[file]) { path = resolveWidgetAsset(file); type = widgetFiles[file]; reply.header("cache-control", "public, max-age=300"); }
+      else return reply.code(404).send({ code: "NOT_FOUND", message: "no such widget asset" });
+    } catch (e) { return reply.code(404).send({ code: "NOT_FOUND", message: (e as Error).message }); }
+    reply.type(type).header("content-length", String(statSync(path).size));
+    return reply.send(createReadStream(path));
+  });
 
   // ---- operational status (no private data) --------------------------------------------------
   app.get("/api/mcp/status", async () => ({

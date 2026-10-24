@@ -41,7 +41,7 @@ test("MCP initialize, tools/list with annotations, anonymous capabilities, auth 
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, ["gbk_cancel_render", "gbk_claim_composition", "gbk_create_composition", "gbk_delete_composition", "gbk_edit_composition", "gbk_get_artifacts", "gbk_get_capabilities",
       "gbk_get_composition", "gbk_get_render_status", "gbk_list_compositions", "gbk_open_workstation", "gbk_publish_composition",
-      "gbk_render_composition", "gbk_show_composition_ui"].sort());
+      "gbk_render_composition", "gbk_show_composition_ui", "gbk_widget_render_finish", "gbk_widget_render_start"].sort());
     const caps = tools.find((t) => t.name === "gbk_get_capabilities")!;
     assert.equal(caps.annotations?.readOnlyHint, true);
     const create = tools.find((t) => t.name === "gbk_create_composition")!;
@@ -55,7 +55,7 @@ test("MCP initialize, tools/list with annotations, anonymous capabilities, auth 
 
     // The MCP Apps player resource declares CSP domains for the artifact origin — sandboxed hosts
     // block the <audio> element and the download links without them (they point at the public origin).
-    const uiRes = await anon.send("resources/read", { uri: "ui://gbk/composer.html" });
+    const uiRes = await anon.send("resources/read", { uri: "ui://gbk/composer-v2.html" });
     const contents = (uiRes.rpc?.result as { contents: { _meta?: { ui?: { csp?: { resourceDomains?: string[]; connectDomains?: string[] } } } }[] }).contents;
     assert.deepEqual(contents[0]._meta?.ui?.csp?.resourceDomains, ["http://composer.test"]);
     assert.deepEqual(contents[0]._meta?.ui?.csp?.connectDomains, ["http://composer.test"]);
