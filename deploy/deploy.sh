@@ -7,7 +7,7 @@ HOST=${DEPLOY_HOST:-root@compose.grepawk.com}; ID=$(date -u +%Y%m%dT%H%M%SZ)-$(g
 export GBK_RELEASE_ID=$ID
 npm run build:compose
 npm run build:server
-tar czf /tmp/gbk-composer-$ID.tgz dist server/dist/index.mjs server/dist/widget deploy package.json
+tar czf /tmp/gbk-composer-$ID.tgz dist server/dist/index.mjs server/dist/render-worker.mjs server/dist/widget deploy package.json
 scp /tmp/gbk-composer-$ID.tgz deploy/remote-install.sh "$HOST:/tmp/"
 ssh "$HOST" "bash /tmp/remote-install.sh /tmp/gbk-composer-$ID.tgz $ID && install -m0644 /var/www/gbk-composer/current/deploy/nginx.conf /etc/nginx/sites-available/compose.grepawk.com.new && echo 'review + install nginx: see docs/compose-deploy.md'"
 # SoundFonts: the small fonts ship inside dist/static; the large server-delivery
