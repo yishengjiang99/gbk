@@ -40,7 +40,8 @@ test("MCP connect/create/edit/render/download/delete and pages are counted; beac
     const u = new URL(r.artifacts[0].downloadUrl); await (await fetch(s.base + u.pathname + u.search)).arrayBuffer();
     await c.call("gbk_delete_composition", t);
     await (await fetch(`${s.base}/chatgpt`)).text(); await (await fetch(`${s.base}/privacy`)).text();
-    assert.equal((await fetch(`${s.base}/api/funnel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "browser_render_completed", source: "widget" }) })).status, 204);
+    assert.equal((await fetch(`${s.base}/api/funnel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "browser_render_completed", source: "studio" }) })).status, 204);
+    assert.equal((await fetch(`${s.base}/api/funnel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "browser_render_completed", source: "widget" }) })).status, 400, "widget renders are counted server-side on gbk_widget_render_finish");
     assert.equal((await fetch(`${s.base}/api/funnel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "create", source: "guest" }) })).status, 400, "server-side events cannot be forged");
 
     assert.equal((await fetch(`${s.base}/api/admin/funnel`)).status, 401);

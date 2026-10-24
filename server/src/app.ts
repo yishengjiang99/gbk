@@ -78,7 +78,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   });
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   // MCP renders run in the user's connected Studio tab over the browser bridge; the server never synthesizes.
-  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { if ((o as { evt?: string }).evt === "mcp_render_completed") funnel.bump("browser_render_completed", "studio-tab"); app.log.info(o); }, (u) => limits.for(u).dailyRenders);
+  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { const e = o as { evt?: string; executor?: string }; if (e.evt === "mcp_render_completed") funnel.bump("browser_render_completed", e.executor === "widget" ? "widget" : "studio-tab"); app.log.info(o); }, (u) => limits.for(u).dailyRenders);
   // Migration from invite-code login: every access-code user and every existing song/composition owner becomes an
   // established account with the same id, so their songs, compositions and OAuth grants keep working unchanged.
   const legacy = new Set([...cfg.security.accessCodes.map((e) => { const i = e.indexOf(":"); return (i > 0 ? e.slice(0, i) : "user").replace(/[^\w.-]/g, "").slice(0, 40) || "user"; }), ...shares.owners(), ...mcpStore.owners()]);

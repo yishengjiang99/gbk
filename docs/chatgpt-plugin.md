@@ -120,12 +120,11 @@ source with a count, and nothing else (no IP, account id, cookie, prompt, conten
 | `page_view_landing` | the site root loads (browser beacon) | `web` |
 | `mcp_connect` | a new MCP session initializes | `guest` / `account` |
 | `create`, `edit`, `render_requested`, `claim`, `publish`, `delete` | the tool succeeds (idempotent replays and `studio_required` are not counted) | `guest` / `account` |
-| `browser_render_completed` | a Studio tab finishes an MCP render, or the Studio/player beacon reports a finished browser render | `studio-tab` / `studio` / `widget` |
+| `browser_render_completed` | a verified WAV upload completes an MCP render (in-chat player via `gbk_widget_render_finish`, or a connected Studio tab), or Studio's WAV export beacon fires | `widget` / `studio-tab` / `studio` |
 | `midi_download`, `wav_download` | an artifact is fetched in full or from byte 0 | `guest` / `account` |
 
 The browser beacon is `POST /api/funnel {event, source}`. It accepts only `page_view_landing/web` and
-`browser_render_completed/widget|studio`, is limited to 30 per minute per IP in memory, and keeps the IP nowhere.
-The in-chat widget should send `{"event":"browser_render_completed","source":"widget"}` after a successful render.
+`browser_render_completed/studio`, is limited to 30 per minute per IP in memory, and keeps the IP nowhere.
 
 Read the data:
 - Admin JSON: `GET /api/admin/funnel?days=30` while signed in as a `COMPOSER_ADMIN_USERS` account. It returns totals,

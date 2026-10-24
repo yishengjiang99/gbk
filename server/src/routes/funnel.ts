@@ -9,7 +9,7 @@ import { RateLimiter } from "../security/rate-limit.ts";
 import type { FunnelSource, FunnelStore } from "../persistence/funnel.ts";
 import { currentSession } from "./agent.ts";
 
-const BEACON: Record<string, FunnelSource[]> = { page_view_landing: ["web"], browser_render_completed: ["widget", "studio"] };
+const BEACON: Record<string, FunnelSource[]> = { page_view_landing: ["web"], browser_render_completed: ["studio"] };
 
 export function funnelRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, funnel: FunnelStore) {
   const limiter = new RateLimiter(30);

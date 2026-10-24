@@ -239,7 +239,7 @@ export class RenderService {
     try { this.store.addArtifacts(rows); }
     catch (e) { for (const r of rows) { try { rmSync(join(dir, r.rel_path)); } catch { /* gone */ } } throw e; }
     this.finish(a.jobId, "completed", null, 1);
-    this.log({ evt: "mcp_render_completed", user: a.owner, jobId: a.jobId, compositionId: a.row.id, revision: a.row.revision, bytes: wavBytes.length, sha256: sha });
+    this.log({ evt: "mcp_render_completed", user: a.owner, jobId: a.jobId, compositionId: a.row.id, revision: a.row.revision, bytes: wavBytes.length, sha256: sha, executor });
   }
   private failJob(jobId: string, code: string, message: string) {
     this.finish(jobId, "failed", JSON.stringify({ code, message }));
