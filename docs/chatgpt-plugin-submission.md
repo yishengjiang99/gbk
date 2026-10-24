@@ -141,7 +141,7 @@ These are produced by `GBK_NODE22="npx -y node@22" npx playwright test --config 
 - `starter-1-baroque-fugue.png`, `starter-2-jazz-walking-bass.png`, `starter-3-octave-crescendo.png`: one per starter prompt, 706×860 PNG, showing the in-chat player after the same tool calls ChatGPT makes. Prompt 2 was rendered in a connected Studio tab.
 - `gbk-composer-demo.mp4` (about 41 s, 1280×800): a Studio session going from the compose prompt to the live piano roll, the in-browser WAV render, the private-save dialog, and playback.
 
-`review.demo_recording_url` needs a reviewer-accessible URL. Host the video somewhere the owner approves, then add the URL.
+Demo recording (`review.demo_recording_url`): https://yishengjiang99.github.io/gbk/submission/gbk-composer-demo.mp4. The video and screenshots are in `public/submission/`, so they ship with the GitHub Pages build.
 
 ## Privacy and data retention
 
