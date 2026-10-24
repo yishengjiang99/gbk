@@ -39,7 +39,7 @@ export async function shareCurrent(title?: string): Promise<ShareInfo> {
   const p: Project = workstation.project;
   if (workstation.readOnlyReason) throw new Error("Fork this song before sharing it as your own");
   if (!p.tracks.length) throw new Error("nothing to share yet");
-  const s = await ok<ShareInfo>(await fetch(`${apiBase()}/shares`, { method: "POST", credentials: "same-origin", headers: H(), body: JSON.stringify({ title: title ?? p.name, project: p, parentSlug: p.meta?.forkOf ?? null }) }));
+  const s = await ok<ShareInfo>(await fetch(`${apiBase()}/shares`, { method: "POST", credentials: "same-origin", headers: H(), body: JSON.stringify({ title: title ?? p.name, project: p, parentSlug: p.meta?.forkOf ?? null, public: true }) }));
   const arts = (await artifactStore().list().catch(() => [])).filter((a) => a.projectId === p.id);
   for (const kind of ["wav", "midi"] as const) {
     const a = arts.find((x) => x.kind === kind); if (!a) continue;
@@ -56,7 +56,7 @@ export async function deleteShare(slug: string) { return ok(await fetch(`${apiBa
 export interface SavedSong extends ShareInfo { updatedAt?: string; projectId?: string | null; created?: boolean }
 /** Save (upsert) the project as the caller's PRIVATE song. Never makes anything public. */
 export async function autosaveProject(p: Project): Promise<SavedSong> {
-  return ok(await fetch(`${apiBase()}/songs/autosave`, { method: "PUT", credentials: "same-origin", headers: H(), body: JSON.stringify({ project: p, parentSlug: p.meta?.forkOf ?? null }) }));
+  return ok(await fetch(`${apiBase()}/songs/autosave`, { method: "PUT", credentials: "same-origin", headers: H(), body: JSON.stringify({ project: p, parentSlug: p.meta?.forkOf ?? null, public: true }) }));
 }
 export async function uploadMedia(slug: string, kind: "wav" | "midi" | "mp3", blob: Blob, meta?: unknown) {
   return ok(await fetch(`${apiBase()}/shares/${slug}/media/${kind}`, { method: "PUT", credentials: "same-origin", headers: { ...H(false), "content-type": kind === "wav" ? "audio/wav" : kind === "mp3" ? "audio/mpeg" : "audio/midi", ...(meta ? { "x-gbk-wav-meta": JSON.stringify(meta) } : {}) }, body: blob }));

@@ -29,7 +29,7 @@ test("GET /api/shares/top: public only, ranked by forks then newest, light paylo
   const s = await startServer(new ScriptModel([() => reply("x")]));
   try {
     const alice = await login(s.base, "code-a"), bob = await login(s.base, "code-b");
-    const post = async (who: typeof alice, title: string, parentSlug?: string) => (await (await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(who), body: JSON.stringify({ title, project: await song(title), parentSlug }) })).json()) as { slug: string };
+    const post = async (who: typeof alice, title: string, parentSlug?: string) => (await (await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(who), body: JSON.stringify({ title, project: await song(title), parentSlug, public: true }) })).json()) as { slug: string };
     const a = await post(alice, "Old popular"); const b = await post(alice, "Hidden"); const c = await post(alice, "Newest plain");
     await post(bob, "Fork 1", a.slug);
     await fetch(`${s.base}/api/shares/${b.slug}`, { method: "PATCH", headers: H(alice), body: '{"public":false}' });

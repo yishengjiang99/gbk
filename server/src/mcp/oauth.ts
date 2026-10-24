@@ -10,13 +10,14 @@
 //    are enforced — never fetched for arbitrary hosts (SSRF guard)
 //  - Refresh-token rotation with family revocation on reuse, and RFC 7009 revocation
 //
-// Account linking: /oauth/authorize requires the website's existing GBK session (invite-code login). The
-// GBK user from that session becomes the token subject — the OAuth client never chooses the user.
+// Account linking: /oauth/authorize requires a GBK website session — the same accounts as the studio (Sign in with
+// GitHub / Google, or a migrated access-code account). The GBK account from that session becomes the token
+// subject — the OAuth client never chooses the user. There is no separate MCP account.
 // Consent: approval is a CSRF-protected POST against a single-use, server-side consent transaction that
 // binds user + client + redirect URI + scopes + PKCE challenge + resource. GET never mints a code.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Config } from "../config.ts";
+import { authProviders, type Config } from "../config.ts";
 import type { SessionStore } from "../security/authentication.ts";
 import { parseCookies, COOKIE } from "../security/authentication.ts";
 import { McpStore, hashToken, newOpaqueId } from "./store.ts";
@@ -116,13 +117,17 @@ export function oauthRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (badScope) return fail("invalid_scope", `unknown scope ${badScope}`);
     const user = sessionUser(req);
     if (!user) {
-      // Account linking step: the user signs in to GBK (existing invite-code login), then returns here.
-      const back = `${issuer}/oauth/authorize?${new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined) as [string, string][]).toString()}`;
+      // Account linking step: the user signs in to GBK (GitHub / Google), and the sign-in returns straight here.
+      const back = `/oauth/authorize?${new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined) as [string, string][]).toString()}`;
+      const esc = (x: string) => x.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+      const label: Record<string, string> = { github: "Sign in with GitHub", google: "Sign in with Google" };
+      const buttons = authProviders(cfg).map((p) => `<p><a data-provider="${p}" href="/api/auth/${p}?return=${encodeURIComponent(back)}" style="display:inline-block;padding:.6rem 1rem;border:1px solid #888;border-radius:6px;text-decoration:none;color:#111">${label[p]}</a></p>`).join("");
       return reply.type("text/html").send(`<!doctype html><meta charset="utf-8"><title>Connect GBK Composer</title>
-<body style="font-family:system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem">
+<body style="font-family:system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem;background:#fff;color:#222">
 <h1>Connect GBK Composer</h1>
-<p>Sign in to GBK Composer first (the same invite code you use at <a href="${issuer}/">${issuer}</a>), then open this link again to approve the connection:</p>
-<p><a href="${back.replace(/&/g, "&amp;")}">${back.replace(/&/g, "&amp;")}</a></p>
+<p>Sign in to GBK Composer to approve the connection. You will come straight back here.</p>
+${buttons || "<p>Sign-in is not available right now.</p>"}
+${cfg.security.accessCodes.length ? `<p style="font-size:.9rem">Have an invite code? Sign in at <a href="${issuer}/studio">${issuer}/studio</a>, then <a href="${esc(back)}">continue here</a>.</p>` : ""}
 <p>The app requesting access will receive only the scopes you approve, and only for your own compositions.</p></body>`);
     }
     // Consent is a CSRF-protected, server-side transaction — this GET only renders the approval form.

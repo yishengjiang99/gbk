@@ -68,7 +68,7 @@ export class RenderService {
   private sfPath = "";
   private stopped = false;
 
-  constructor(private cfg: Config, private store: McpStore, private log: (o: object) => void = () => {}) {}
+  constructor(private cfg: Config, private store: McpStore, private log: (o: object) => void = () => {}, private rendersPerDay: (owner: string) => number = () => cfg.mcp.maxRendersPerDay) {}
 
   async start(): Promise<void> {
     try {
@@ -112,7 +112,8 @@ export class RenderService {
 
   // ---- public API ---------------------------------------------------------------------
   submit(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig): RenderJobRow {
-    if (this.store.countJobsSince(owner, 86_400_000) >= this.cfg.mcp.maxRendersPerDay) throw new McpError("QUOTA_EXCEEDED", `daily render limit reached (${this.cfg.mcp.maxRendersPerDay})`);
+    const limit = this.rendersPerDay(owner);
+    if (this.store.countJobsSince(owner, 86_400_000) >= limit) throw new McpError("QUOTA_EXCEEDED", `daily render limit reached (${limit})`);
     const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, executor: this.executor, rendererVersion: RENDERER_VERSION } });
     this.queue.push({ jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config });
     this.pump();

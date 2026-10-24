@@ -40,12 +40,23 @@ export function ComposerPanel({ project, readOnly }: { project: Project; readOnl
         <span className={`cmp-conn ${s.conn.state}`} data-testid="composer-conn" data-state={s.conn.state}>{STATUS[s.conn.state]} ●</span>
       </div>
       {!s.auth.checked ? <div className="ws-dim">…</div> : !s.auth.authenticated ? (
-        <form className="cmp-login" data-testid="composer-login" onSubmit={(e) => { e.preventDefault(); void s.login(code); }}>
-          <div className="ws-dim">The AI Composer is invite-only for now. Enter your access code. (Shared songs below play without one.)</div>
-          <input type="password" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Access code" aria-label="Access code" autoComplete="current-password" />
-          <button type="submit">Sign in</button>
+        <div className="cmp-login" data-testid="composer-login">
+          <div className="ws-dim">Sign in to compose with the AI. It's free, with a daily limit. (Shared songs play without signing in.)</div>
+          {(s.auth.providers ?? []).map((p) => (
+            <a key={p} className="cmp-signin" data-testid={`signin-${p}`} href={`/api/auth/${p}?return=${encodeURIComponent(location.pathname + location.search)}`}>{p === "github" ? "Sign in with GitHub" : "Sign in with Google"}</a>
+          ))}
+          {!s.auth.providers?.length && !s.auth.codeLogin && <div className="ws-dim">Sign-in is not available right now.</div>}
+          {s.auth.codeLogin && (
+            <details className="cmp-code" open={!s.auth.providers?.length}>
+              <summary>Have an invite code?</summary>
+              <form onSubmit={(e) => { e.preventDefault(); void s.login(code); }}>
+                <input type="password" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Access code" aria-label="Access code" autoComplete="current-password" />
+                <button type="submit">Sign in</button>
+              </form>
+            </details>
+          )}
           {s.auth.error && <div className="cmp-error">{s.auth.error}</div>}
-        </form>
+        </div>
       ) : (<>
         {s.conn.state !== "connected" && s.conn.state !== "connecting" && <div className="cmp-error">{STATUS[s.conn.state]} {s.conn.detail ?? ""} <button onClick={s.reconnect}>Reconnect</button></div>}
         {s.info?.rejectedTools.length ? <div className="cmp-error">Server refused {s.info.rejectedTools.length} tool definitions from this page (version mismatch? reload).</div> : null}
@@ -60,7 +71,7 @@ export function ComposerPanel({ project, readOnly }: { project: Project; readOnl
             onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
           <button type="submit" data-testid="composer-send" disabled={busy || !text.trim() || s.conn.state !== "connected"}>Send</button>
         </form>
-        <ComposerSettings info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.user} onLogout={() => void s.logout()} onReset={s.reset} />
+        <ComposerSettings info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} onLogout={() => void s.logout()} onReset={s.reset} />
       </>)}
       <SharePanel project={project} readOnly={readOnly} authenticated={s.auth.authenticated} publishRequest={publishReq} />
     </aside>

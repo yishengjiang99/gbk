@@ -700,8 +700,10 @@ current project is checkpointed rather than replaced. `gbk_render_wav` is forced
 
 Composer access and limits are server concerns, separate from WebMCP tool registration:
 
-- Login uses invite or access codes from `COMPOSER_ACCESS_CODES`. A code can use the `name:code`
-  form to name the user. When no codes are configured, nobody can log in.
+- Anyone can sign in with Google or GitHub (`/api/auth/<provider>`; a provider appears only when its
+  `*_CLIENT_ID` and `*_CLIENT_SECRET` are set). Accounts live in `accounts.sqlite`. Every account has
+  a daily LLM-token and render limit; accounts younger than `ACCOUNT_NEW_DAYS` get smaller limits.
+  Legacy access codes (`COMPOSER_ACCESS_CODES`, `name:code`) still sign in the migrated invite users.
 - The session cookie is HMAC-signed, `HttpOnly` and `SameSite=Strict`. A separate non-HttpOnly CSRF
   cookie supports double-submit checks through the `x-gbk-csrf` header.
 - State-changing HTTP routes and the WebSocket upgrade check the request Origin against the

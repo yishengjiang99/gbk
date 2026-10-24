@@ -69,6 +69,8 @@
 .cmp-artifact { border: 1px solid #2e8b57; border-radius: 6px; padding: 6px; background: #0f1f16; } .cmp-artifact audio { width: 100%; height: 32px; }
 .cmp-settings summary { cursor: pointer; color: #aab2c5; } .cmp-settings select { background: #1a2029; color: #eef1f7; border: 1px solid #465063; }
 .cmp-login { display: flex; flex-direction: column; gap: 6px; } .cmp-login input { background: #1a2029; color: #eef1f7; border: 1px solid #465063; border-radius: 4px; padding: 4px 6px; }
+.cmp-signin { display: block; text-align: center; padding: 6px 8px; border: 1px solid #465063; border-radius: 4px; background: #fff; color: #1a2029; text-decoration: none; font-weight: 600; } .cmp-signin:hover { background: #eef1f7; }
+.cmp-code summary { cursor: pointer; font-size: 0.85em; } .cmp-code form { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .cmp-share { display: flex; flex-direction: column; gap: 4px; } .cmp-readonly { background: #2a2410; border: 1px solid #6b5a1e; border-radius: 4px; padding: 6px; }
 .cmp-mine { margin: 4px 0; padding-left: 16px; } .cmp-mine button { margin-left: 4px; }
 @media (max-width: 900px) { .ws-body:has(.cmp) { grid-template-columns: 1fr; } .cmp-messages { max-height: 40vh; } }

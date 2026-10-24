@@ -11,7 +11,7 @@ unless someone explicitly clicks **Share**.
 - Routes: `/` Explore (shared songs), `/studio` workstation, `/s/<slug>` shared song (read-only new local project, **Fork** = editable copy).
 - Safety: tool catalog and policy are server-side (render forced to an artifact, `create_project` never replaces the current project).
   Edits to the user's own projects still need **Accept**. Autonomous commits happen only in agent-created projects. Tool results are wrapped as untrusted data.
-- Auth/limits: invite codes (`COMPOSER_ACCESS_CODES=name:code`), HMAC session cookie + CSRF, Origin checks, per-IP/login/message/upload
+- Auth/limits: Google/GitHub sign-in with per-account daily token/render limits (legacy `COMPOSER_ACCESS_CODES` still accepted), HMAC session cookie + CSRF, Origin checks, per-IP/login/message/upload
   rate limits, daily per-user token/cost budgets plus a global cost budget. `COMPOSER_ENABLED=0` is the off switch.
 
 ## Deploy (systemd + nginx, no Docker)
