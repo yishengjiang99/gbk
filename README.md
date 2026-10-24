@@ -1,10 +1,16 @@
-## SF2 + MIDI Explorer Architecture
+## GBK: an agentic music composer
 
-This project is a React + Vite web app for:
-- exploring SoundFont2 (`.sf2`) data,
-- loading and visualizing MIDI files,
-- playing MIDI through a custom SF2 AudioWorklet synth,
-- monitoring audio via shared analyzer graphs.
+GBK is a music workstation that AI agents compose in. Agents work through the
+WebMCP tools the page registers (47 of them: notes, tracks, instruments,
+arrangement, rendering) and through the server-hosted Composer at
+<https://compose.grepawk.com>, which runs the model loop while the browser
+executes the tools. Songs made this way are shared, forked and browsed on the
+Composer's Explore page.
+
+Underneath is the engine the agents play: a custom SoundFont2 synth in an
+AudioWorklet, MIDI file playback and live input, and offline WAV rendering.
+The explorer UI for SF2 data and MIDI files is the manual side of the same
+workstation.
 
 ## High-Level Modules
 
