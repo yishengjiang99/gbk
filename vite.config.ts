@@ -1,6 +1,13 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
+
+/** Release id baked into the bundle for error reports: GBK_RELEASE_ID (deploy.sh) or the git short sha. */
+function releaseId(): string {
+  if (process.env.GBK_RELEASE_ID) return process.env.GBK_RELEASE_ID;
+  try { return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || "dev"; } catch { return "dev"; }
+}
 
 /**
  * WebMCP origin trial: inject <meta http-equiv="origin-trial" content="TOKEN"> into every HTML entry when a token is
@@ -26,6 +33,7 @@ function webMcpOriginTrial(): Plugin {
 
 export default defineConfig({
   plugins: [react(), webMcpOriginTrial()],
+  define: { __GBK_RELEASE__: JSON.stringify(releaseId()) },
   // "/" for compose.grepawk.com (default), "/gbk/" for the GitHub Pages build (GBK_BASE_PATH=/gbk/).
   base: process.env.GBK_BASE_PATH ?? "/",
   // Local dev / e2e only: proxy same-origin /api (+ WebSocket) to a Composer agent server, like nginx does in production.

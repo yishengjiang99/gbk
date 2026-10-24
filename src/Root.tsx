@@ -5,6 +5,7 @@ import { ExplorePage } from "./components/explore/ExplorePage.tsx";
 import { parseRoute, navigate, appUrl, type Route } from "./agent/routes.ts";
 import { apiBase } from "./agent/bridge-client.ts";
 import { openShared } from "./agent/share-client.ts";
+import { reportError } from "./telemetry/error-reporter.ts";
 
 /** Is the Composer server (same-origin /api) present? Not on the GitHub Pages build: then GBK behaves as before. */
 function useComposerAvailable(): boolean | null {
@@ -23,7 +24,7 @@ export default function Root() {
   useEffect(() => {
     if (route.view !== "share") return;
     setShareErr("");
-    void openShared(route.slug, route.fork).then((sh) => { if (sh.slug && sh.slug !== route.slug) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); }).catch((e) => setShareErr(`Could not open shared song: ${(e as Error).message}`));
+    void openShared(route.slug, route.fork).then((sh) => { if (sh.slug && sh.slug !== route.slug) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); setShareErr(`Could not open shared song: ${(e as Error).message}`); });
   }, [route]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && playerOpen) setPlayerOpen(false); };

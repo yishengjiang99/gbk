@@ -8,6 +8,7 @@ import { loadSoundFont, peekSoundFont } from "../audio/soundfont-loader.ts";
 import { resolveTrackPreset } from "../audio/offline-renderer.ts";
 import { synthEvent } from "../synth-ingress.ts";
 import type { SynthEvent } from "../sf2-renderer.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 /** LiveGraph.post is loosely typed; the synthEvent builders produce the exact wire shapes. */
 const asMsg = (e: SynthEvent): Record<string, unknown> => e as unknown as Record<string, unknown>;
@@ -87,7 +88,7 @@ export class Sf2LiveSink implements LiveSink {
   }
   private post(trackId: string, msg: Record<string, unknown>) {
     if (this.apply(trackId)) { this.graph!.post(msg); return; } // hot path: synchronous
-    void this.prepare().then(() => { if (this.apply(trackId)) this.graph?.post(msg); }).catch(() => undefined);
+    void this.prepare().then(() => { if (this.apply(trackId)) this.graph?.post(msg); }).catch((e) => reportError(e, { where: "live-sink.prepare" }));
   }
   noteOn(trackId: string, note: number, velocity: number) { this.post(trackId, asMsg(synthEvent.noteOn(0, note, velocity))); }
   noteOff(_trackId: string, note: number) { this.graph?.post(asMsg(synthEvent.noteOff(0, note))); } // never re-points the engine

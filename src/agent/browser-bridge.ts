@@ -9,6 +9,7 @@ import { composerManifest } from "./tool-manifest.ts";
 import { MAX_FRAME_BYTES, type ServerMessage, type ToolResultEnvelope } from "./protocol.ts";
 import { renderProjectOffline, type OfflineRenderOptions } from "../audio/offline-renderer.ts";
 import type { Project } from "../workstation/model.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 /** Server-issued render of a stored MCP composition (ChatGPT / Codex / plugin). Not an agent tool: the LLM never sees it. */
 export const MCP_RENDER_TOOL = "gbk_mcp_render_job";
@@ -108,6 +109,7 @@ export class BrowserToolBridge {
       return { ok: true, projectId: this.c.project.id, revision: this.c.project.revision, data: meta, warnings: [] };
     } catch (e) {
       const err = e as { code?: string; message?: string };
+      if (!ac.signal.aborted) reportError(e, { where: "mcp-render", code: err.code ?? "RENDER_FAILED" });
       return this.fail(ac.signal.aborted ? "RENDER_TIMEOUT" : (err.code ?? "RENDER_FAILED"), err.message ?? String(e));
     } finally { clearTimeout(timer); this.inflight.delete(msg.callId); }
   }

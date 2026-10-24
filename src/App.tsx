@@ -22,6 +22,7 @@ import {
   type LiveTakeCapture,
   type LiveTakeNote,
 } from "./live-take.ts";
+import { reportError } from "./telemetry/error-reporter.ts";
 
 // ---------------------------------------------------------------------------
 // Local interface definitions for SF2 internal structures accessed at runtime
@@ -932,7 +933,7 @@ export default function App() {
           }))
         );
       })
-      .catch(() => {});
+      .catch((e) => reportError(e, { where: "soundfont-manifest" }));
     return () => {
       cancelled = true;
     };

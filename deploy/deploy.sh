@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOST=${DEPLOY_HOST:-root@compose.grepawk.com}; ID=$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)
+export GBK_RELEASE_ID=$ID
 npm run build:compose
 npm run build:server
 tar czf /tmp/gbk-composer-$ID.tgz dist server/dist/index.mjs deploy package.json

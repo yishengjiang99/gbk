@@ -19,6 +19,8 @@ import { healthRoutes } from "./routes/health.ts";
 import { configRoutes } from "./routes/config.ts";
 import { agentRoutes } from "./routes/agent.ts";
 import { shareRoutes } from "./routes/shares.ts";
+import { clientErrorRoutes } from "./routes/client-errors.ts";
+import { ClientErrorStore } from "./persistence/client-errors.ts";
 import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
 import { RenderService } from "./mcp/browser-render.ts";
@@ -29,7 +31,7 @@ export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
 
 export interface AppDeps { model?: ModelClient; persist?: boolean; logger?: boolean | object; fetch?: typeof fetch; now?: () => number }
 export interface McpHandle { store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; close: () => Promise<void> }
-export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; shares: ShareStore; mcp: McpHandle; accounts: AccountStore }> {
+export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; shares: ShareStore; mcp: McpHandle; accounts: AccountStore; clientErrors: ClientErrorStore }> {
   const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers[\"x-gbk-csrf\"]"] }, bodyLimit: 64 * 1024, trustProxy: "127.0.0.1", disableRequestLogging: false });
   const sessions = new SessionStore(cfg);
   const catalog = new ToolCatalog();
@@ -57,6 +59,8 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
   signinRoutes(app, cfg, sessions, accounts, new RateLimiter(cfg.security.loginPerMinute), deps.fetch);
   shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model);
+  const clientErrors = new ClientErrorStore(persistEarly ? join(cfg.dataDir, "accounts.sqlite") : ":memory:");
+  clientErrorRoutes(app, cfg, sessions, clientErrors);
   // Remote MCP (ChatGPT/Codex): durable compositions, OAuth, Studio-tab rendering, signed artifacts.
   const mcpStore = new McpStore(persist ? join(cfg.dataDir, "mcp.sqlite") : ":memory:", persist ? cfg.dataDir : mkdtempSync(join(tmpdir(), "gbk-mcp-")));
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
@@ -71,7 +75,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
   const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { await mcpHttp.close(); await mcpRenders.stop(); mcpStore.close(); accounts.close(); } };
+    close: async () => { await mcpHttp.close(); await mcpRenders.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);
@@ -79,5 +83,5 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   });
   const sweep = setInterval(() => sessions.sweep(), 60_000); sweep.unref?.();
   app.addHook("preClose", async () => { clearInterval(sweep); for (const c of hub.wss.clients) c.terminate(); });
-  return { app, hub, sessions, ledger, shares, mcp, accounts };
+  return { app, hub, sessions, ledger, shares, mcp, accounts, clientErrors };
 }

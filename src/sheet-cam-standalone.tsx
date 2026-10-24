@@ -1,3 +1,4 @@
+import "./telemetry/install.ts";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { SheetCam } from "./sheet-cam.tsx";
