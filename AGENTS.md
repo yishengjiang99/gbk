@@ -112,6 +112,30 @@ If both fail the same way, inspect preset-region construction in [`sf2-parser.js
 - If it mentions asset lists or missing demo MIDI files:
   inspect [`scripts/generate-midi-manifest.mjs`](/Users/yishengj/synth/scripts/generate-midi-manifest.mjs).
 
+## Adding a SoundFont (SF2)
+
+SoundFonts are **pinned downloads, never committed binaries** (same pattern as the OMR models). `soundfonts/catalog.json` is the single source of truth; `soundfonts/*.sf2` is gitignored. The build, the app's SoundFont picker, and the MCP soundfont tools all read the catalog/manifest — adding a font is a catalog change, not a code change.
+
+Selection criteria — a font is usable only if all hold:
+
+- Plain **SF2 (2.01)** format. SF3 is rejected: the parsers do not decode its Ogg/Vorbis samples.
+- Full **General MIDI** layout (melodic banks + drum bank 128).
+- **Redistributable license** with a text we can ship. Reject ROM-derived banks (e.g. Roland SC-55 rips — copyrighted samples) and license-less collections, however good they sound.
+- Pin a **commit SHA**, never a branch. If upstream tags a beta as its main HEAD (e.g. GeneralUser GS 2.0.3 BETA), stay on the stable release.
+
+Procedure:
+
+1. Download the candidate `.sf2`; record its byte size and `sha256`.
+2. Verify it parses in **both** engines before cataloging: `SF2SoundFont` (`src/sf2/soundfont.ts`, offline renders + MCP) and the legacy `parseSF2` (root `sf2-parser.ts`, live playback). Confirm preset count > 0 and that bank 0 / program 0 (piano) and bank 128 (drums) resolve. If either engine rejects it, stop.
+3. Add an entry to `soundfonts/catalog.json`: `id` (kebab-case, stable — it is the MCP/UI identifier), `label`, `file`, `description`, `bytes`, `sha256`, `source` (repo URL), `sourceRef` (commit SHA), `url` (direct download), `license`, `delivery`. Save the license text into `soundfonts/licenses/`.
+   - Git LFS gotcha: `raw.githubusercontent.com` returns the LFS *pointer*, not the font. Use `https://media.githubusercontent.com/media/<owner>/<repo>/<ref>/<path>`; the downloaded file's sha256 should equal the LFS oid.
+4. Choose `delivery`:
+   - `"bundled"` — copied into `dist/static/` at build time; ships to GitHub Pages **and** compose. Keep these ≤ ~35 MB.
+   - `"server"` — compose only. Too large to bundle: `deploy/deploy.sh` syncs it (sha256-checked) to the persistent `/var/www/gbk-composer/soundfonts/` dir, nginx serves it at `/soundfonts/<file>`, and it appears in the manifest only for compose builds (`GBK_SOUNDFONT_SERVER=1`, set by `npm run build:compose`). Add `"serverPath": "/soundfonts/<file>"` to the entry.
+5. Exactly one font carries `"default": true`. Changing the default also means updating the MCP server's startup priming (`server/src/mcp/service.ts`) and the `GBK_SOUNDFONT_PATH` example in `deploy/compose.env.example`.
+6. Build and verify: `npm run fetch:soundfonts` (add `--server` to also fetch server fonts), then `npm run build`. Check `public/static/soundfont-manifest.json` lists the font and `dist/static/` holds the bundled bytes. Then in the built app: switch to the new font in the SoundFont menu picker, play a MIDI (live path), and run one offline render (engine path) — both must sound. For compose, after deploying, `curl` the live manifest and the font URL.
+7. Commit only `catalog.json`, the license text, and (if the rationale is non-obvious) a note in `soundfonts/README.md`. The generated manifest is a build artifact; never hand-edit it.
+
 ## Project-Specific Caveats
 
 - [`vite.config.js`](/Users/yishengj/synth/vite.config.js) currently sets `base: "/gbk/"`. That is correct for GitHub Pages deployment but can matter if prompts involve asset URL handling.
