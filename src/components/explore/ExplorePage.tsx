@@ -91,6 +91,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
         ))}
       </div>
       <nav className="ws-row xp-pager"><button disabled={!page} onClick={() => setPage(page - 1)}>← Newer</button><span className="ws-dim">page {page + 1}</span><button disabled={!more} onClick={() => setPage(page + 1)} data-testid="explore-next">Older →</button></nav>
+      <footer className="ws-row ws-dim xp-footer"><a href="https://compose.grepawk.com/chatgpt">ChatGPT plugin</a><a href="https://compose.grepawk.com/privacy">Privacy</a><a href="https://compose.grepawk.com/terms">Terms</a><a href="https://compose.grepawk.com/support">Support</a></footer>
     </div>
   );
 }

@@ -155,3 +155,4 @@ html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-
 .ws-float-body { max-height: calc(100dvh - 40px); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .ws-float .ws-keys { border-top: 0; }
 .ws-float button[aria-label]::after { display: none; } /* hover tooltips would hang below the clipped keyboard strip */
+.xp-footer{gap:16px;justify-content:center;padding:16px 0 24px}
