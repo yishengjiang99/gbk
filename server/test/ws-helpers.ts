@@ -13,6 +13,8 @@ import type { ServerMessage } from "../src/bridge/protocol.ts";
 export async function startServer(model: ModelClient, over: Record<string, string> = {}) {
   const cfg = testConfig({ COMPOSER_PUBLIC_ORIGIN: "http://composer.test", ...over });
   const built = await buildApp(cfg, { model, persist: false, logger: false });
+  // Tests close the app right after their last fetch; never let a lingering keep-alive/upgraded socket hold close().
+  built.app.addHook("preClose", (done) => { built.app.server.closeAllConnections?.(); done(); });
   await built.app.listen({ port: 0, host: "127.0.0.1" });
   const port = (built.app.server.address() as { port: number }).port;
   return { ...built, cfg, port, base: `http://127.0.0.1:${port}` };

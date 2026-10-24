@@ -70,7 +70,7 @@ test("capture demo recording + starter-prompt screenshots", async ({ browser }) 
   // 2) jazz in F at 140 BPM + walking bass -> render WAV and MIDI in the studio tab
   const c2 = await mcp.call("gbk_create_composition", { title: "Jazz in F", style: "jazz", key: "F major", tempo: 140, bars: 24, idempotencyKey: "capture-prompt-2" });
   const g2 = await mcp.call("gbk_get_composition", { compositionId: c2.compositionId });
-  const bassTrack = (g2.tracks as { id: string; name: string }[]).find((t) => /bass/i.test(t.name)) ?? (g2.tracks as { id: string }[]).at(-1)!;
+  const bassTrack = (g2.tracks as { id: string; name: string }[]).find((t) => /bass/i.test(t.name)) ?? (g2.tracks as { id: string }[]).slice(-1)[0]!;
   await mcp.call("gbk_edit_composition", { compositionId: c2.compositionId, expectedRevision: g2.revision, operations: [{ type: "generate_part", track: bassTrack.id, startBar: 1, endBar: 24, kind: "walking_bass" }] });
   const r2 = await mcp.call("gbk_render_composition", { compositionId: c2.compositionId, waitSeconds: 120, tailSeconds: 2 });
   expect(r2.status).toBe("completed");
@@ -78,7 +78,7 @@ test("capture demo recording + starter-prompt screenshots", async ({ browser }) 
   // 3) "my last piece": bass doubled an octave lower in bars 9-16 + CC11 crescendo
   const last = (await mcp.call("gbk_list_compositions", { limit: 1 })).items[0];
   const g3 = await mcp.call("gbk_get_composition", { compositionId: last.compositionId });
-  const tracks = g3.tracks as { id: string; name: string }[]; const bass = tracks.find((t) => /bass/i.test(t.name)) ?? tracks.at(-1)!;
+  const tracks = g3.tracks as { id: string; name: string }[]; const bass = tracks.find((t) => /bass/i.test(t.name)) ?? tracks.slice(-1)[0]!;
   const target = tracks.find((t) => t.id !== bass.id)!;
   await mcp.call("gbk_edit_composition", { compositionId: last.compositionId, expectedRevision: g3.revision, operations: [
     { type: "orchestrate", sourceTrack: bass.id, targetTrack: target.id, startBar: 9, endBar: 16, semitones: -12 },
