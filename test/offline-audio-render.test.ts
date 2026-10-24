@@ -66,7 +66,9 @@ test("Stop: abort mid-render rejects promptly and the offline context is never r
   const p = renderProjectOffline(song(16), OPT, ac.signal, (x, st) => { if (st === "rendering" && x > 0 && x < 0.9) ac.abort(); }, { soundFont: SF, offlineEnv: spy });
   await assert.rejects(p, (e: RenderError) => e.code === "OPERATION_CANCELLED");
   assert.ok(Date.now() - t0 < 20_000);
-  await new Promise((r) => setTimeout(r, 200));
+  // The fake audio thread reaches its next 2 s checkpoint, parks there, and is never resumed.
+  for (let i = 0; i < 200 && ctx!.state !== "suspended"; i++) await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 500));
   assert.equal(ctx!.state, "suspended", "audio thread parked at the checkpoint, not still rendering");
 });
 
