@@ -31,6 +31,7 @@ export function enableAutosave(c: WorkstationController, delayMs = 800) {
   return c.subscribe((s) => {
     const key = `${s.project.id}:${s.project.revision}`;
     if (key === lastKey || s.project.tracks.length === 0) return;
+    if (!isOwnProject(s.project) || c.readOnlyReason) return; // never autosave someone else's (read-only) shared song
     lastKey = key;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => { void midiFileStore.putProject({ id: s.project.id, schemaVersion: PROJECT_SCHEMA_VERSION, savedAt: Date.now(), project: s.project }); }, delayMs);
@@ -38,7 +39,7 @@ export function enableAutosave(c: WorkstationController, delayMs = 800) {
 }
 
 export async function restoreLatest(c: WorkstationController): Promise<boolean> {
-  const rec = await midiFileStore.getLatestProject();
+  const rec = await midiFileStore.getLatestProject((r) => { const q = migrateProject(r.project); return !!q && isOwnProject(q); });
   const p = rec ? migrateProject(rec.project) : null;
   if (!p) return false;
   const cur = c.project;
@@ -48,4 +49,16 @@ export async function restoreLatest(c: WorkstationController): Promise<boolean> 
   const agentOwned = p.meta?.owner === "agent";
   if (cur.tracks.length === 0 || (cur.revision === 0 && (cur.name === p.name || agentOwned))) { c.load(p); return true; }
   return false;
+}
+
+/** Name of the demo song older builds auto-loaded (and autosaved) on startup. */
+const LEGACY_DEMO = /^60884_Beethoven-Symphony-No51$/;
+/**
+ * A project the user owns and may be restored on /studio: not an open read-only share (meta.sharedFrom),
+ * and not the untouched auto-loaded demo older builds silently autosaved for every visitor.
+ */
+export function isOwnProject(p: Project): boolean {
+  if (p.meta?.sharedFrom) return false;
+  if (p.revision === 0 && LEGACY_DEMO.test(p.name)) return false;
+  return true;
 }

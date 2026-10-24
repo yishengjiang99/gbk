@@ -373,6 +373,9 @@ function CcKnob({ label, value, onChange, disabled = false }: CcKnobProps) {
 // MidiReader props
 // ---------------------------------------------------------------------------
 
+/** Name of the demo song older builds auto-loaded on startup. */
+export function isLegacyDefaultDemo(name: string | undefined | null) { return !!name && /^60884_Beethoven-Symphony-No51(\.mid)?$/.test(name); }
+
 export interface SoundfontOption {
   label: string;
   title?: string;
@@ -1317,7 +1320,8 @@ export default function MidiReader({
           console.warn("[midi-file-store] playlist restore failed", err);
         }
 
-        if (persisted?.kind === "bundled" && persisted.path) {
+        // The old auto-loaded demo (Beethoven 5th) was persisted as "last song" for everyone; never re-open it automatically.
+        if (persisted?.kind === "bundled" && persisted.path && !isLegacyDefaultDemo(persisted.name)) {
           const restored = normalized.find((m) => m.path === persisted.path) ?? {
             name: persisted.name,
             path: persisted.path,
@@ -1366,19 +1370,7 @@ export default function MidiReader({
           }
         }
 
-        const preferred = normalized.find((m) => m.name === "60884_Beethoven-Symphony-No51.mid");
-        const first = preferred ?? normalized[0];
-        if (first) {
-          setSelectedMidiPath(first.path);
-          const midiRes = await fetch(`${import.meta.env.BASE_URL}${first.path}`);
-          if (!midiRes.ok) throw new Error(`Failed to fetch ${first.path}`);
-          const buf = await midiRes.arrayBuffer();
-          if (!userPickedDuringStartup()) loadMidiIntoTracks(buf, first.name, {
-            selectedPath: first.path,
-            sourceKind: "bundled",
-            startup: true,
-          });
-        }
+        // No default demo song: a fresh /studio starts with an empty project (the user picks a song explicitly).
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setSongError(msg);

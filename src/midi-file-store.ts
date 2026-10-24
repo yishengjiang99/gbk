@@ -234,10 +234,10 @@ export class MidiFileStore {
   }
 
   /** Most recently saved project record, or null. */
-  async getLatestProject(): Promise<StoredProjectRecord | null> {
+  async getLatestProject(accept: (r: StoredProjectRecord) => boolean = () => true): Promise<StoredProjectRecord | null> {
     const all = await this.withStore(PROJECTS_STORE, "readonly", (store) => requestToPromise(store.getAll()), [] as unknown[]);
     const list = (Array.isArray(all) ? all : []) as StoredProjectRecord[];
-    return list.filter((r) => r && typeof r.id === "string" && typeof r.savedAt === "number").sort((x, y) => y.savedAt - x.savedAt)[0] ?? null;
+    return list.filter((r) => r && typeof r.id === "string" && typeof r.savedAt === "number" && accept(r)).sort((x, y) => y.savedAt - x.savedAt)[0] ?? null;
   }
 }
 
