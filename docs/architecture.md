@@ -49,6 +49,6 @@ Project ──structuredClone──▶ RenderJobManager (FIFO, cancel, status)
 ```
 The live player is not involved; Export WAV, `gbk_prepare_wav_export`, `gbk_render_wav` (Composer agent and WebMCP)
 and MCP render jobs (`gbk_mcp_render_job`, executed in the user's Studio tab) all share this path. All synthesis runs
-on the browser's offline audio thread; the server never renders audio (it only stores uploaded, SHA-256-verified WAVs).
+on the browser's offline audio thread; MCP clients with no browser render on the server instead, with the same engine in a worker thread (`server/src/mcp/server-render.ts`, off with `SERVER_RENDER=0`).
 Stop in the Composer sends `cancel_run`; the server forwards `cancel_call` and the tab aborts the job, which parks the
 OfflineAudioContext at its next checkpoint (never resumed).

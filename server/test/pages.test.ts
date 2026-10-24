@@ -23,7 +23,7 @@ test("static pages render with SEO tags, footer links and normal scrolling", asy
     }
     const c = await (await fetch(`${s.base}/chatgpt`)).text();
     assert.match(c, /application\/ld\+json/); assert.match(c, /coming soon/); assert.doesNotMatch(c, /Install in ChatGPT/);
-    assert.match(c, /never synthesize audio/);
+    assert.match(c, /rendered on GBK.s server/);
     for (const p of STARTER_PROMPTS) assert.ok(c.includes(p.replace(/'/g, "&#39;")), p);
     const robots = await (await fetch(`${s.base}/robots.txt`)).text(); assert.match(robots, /Sitemap: .*\/sitemap\.xml/);
     const sm = await (await fetch(`${s.base}/sitemap.xml`)).text();

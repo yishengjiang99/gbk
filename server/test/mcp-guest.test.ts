@@ -1,5 +1,5 @@
-// Account-free ("guest") MCP projects: capability isolation, read-only capability, browser-only rendering
-// (the server never synthesizes audio), durable guest budgets, and restart recovery.
+// Account-free ("guest") MCP projects: capability isolation, read-only capability, the SERVER_RENDER=0 browser
+// handoff (server rendering itself: mcp-server-render.test.ts), durable guest budgets, and restart recovery.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -29,7 +29,7 @@ async function forbidServerSynthesis<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 test("guest lifecycle: create without login, edit with capability in a new session, MIDI + browser render handoff, ID alone grants nothing", async () => {
-  const s = await startServer(model());
+  const s = await startServer(model(), { SERVER_RENDER: "0" });
   try {
     await forbidServerSynthesis(async () => {
       const a = new McpClient(s.base); await a.initialize();
@@ -110,15 +110,18 @@ test("guest lifecycle: create without login, edit with capability in a new sessi
   } finally { await s.app.close(); }
 });
 
-test("no server synthesis: server code imports no renderer/synth, and guest renders never produce a WAV", async () => {
+test("server synthesis is confined to the render worker thread; SERVER_RENDER=0 never produces a WAV", async () => {
   const root = new URL("../src/", import.meta.url).pathname;
   const files: string[] = [];
   const walk = (d: string) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|mjs|js)$/.test(f)) files.push(p); } };
   walk(root);
-  // Imports of any synthesis module, audio-context construction, or render worker threads.
-  const banned = /(from|import|require\()\s*\(?["'][^"']*(offline-renderer|sf2-renderer|sf2-processor|offline-audio-context|synth-engine|node:worker_threads|worker_threads)[^"']*["']|new\s+(Offline)?AudioContext\b|renderProjectOffline\(/;
-  for (const f of files) assert.doesNotMatch(readFileSync(f, "utf8"), banned, `${f} must not synthesize audio on the server`);
-  const s = await startServer(model());
+  // Synthesis modules may only be imported by the worker entry; the main thread never constructs an audio context.
+  const banned = /(from|import|require\()\s*\(?["'][^"']*(offline-renderer|sf2-renderer|sf2-processor|offline-audio-context|node-offline-env|synth-engine)[^"']*["']|new\s+(Offline)?AudioContext\b|renderProjectOffline\(/;
+  for (const f of files) if (!f.endsWith("/mcp/render-worker.ts")) {
+    const src = readFileSync(f, "utf8").replace(/^import type .*$/gm, "");
+    assert.doesNotMatch(src, banned, `${f} must not synthesize on the main thread (use the render worker)`);
+  }
+  const s = await startServer(model(), { SERVER_RENDER: "0" });
   try {
     await forbidServerSynthesis(async () => {
       const c = new McpClient(s.base); await c.initialize();
@@ -143,7 +146,7 @@ test("global guest create budget cannot be reset by a new session; same-session 
 });
 
 test("guest size, revision, per-project render, storage and composition caps reject before persisting", async () => {
-  const s = await startServer(model(), { MCP_GUEST_MAX_REVISIONS: "1", MCP_GUEST_RENDERS_PER_DAY: "1" });
+  const s = await startServer(model(), { SERVER_RENDER: "0", MCP_GUEST_MAX_REVISIONS: "1", MCP_GUEST_RENDERS_PER_DAY: "1" });
   try {
     const a = new McpClient(s.base); await a.initialize();
     await assert.rejects(a.call("gbk_create_composition", { ...brief, bars: 512 }), errorCode("QUOTA_EXCEEDED"));

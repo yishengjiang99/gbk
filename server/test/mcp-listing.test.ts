@@ -23,14 +23,15 @@ test("plugin.json listing fields fit final-submission limits", () => {
   for (const p of ui.defaultPrompt) assert.ok(p.length <= 128 && !p.includes("\n"), p);
 });
 
-test("listing claims match supported styles and instruments; no server-render claim", () => {
+test("listing claims match supported styles and instruments; rendering claims match both paths", () => {
   for (const style of ["baroque", "classical", "pop", "jazz", "ambient"]) assert.ok(STRATEGIES[style], style);
   assert.equal(Object.keys(STRATEGIES).length, 5);
   const named = ui.longDescription.match(/including (.+?) and drums\./)![1].split(/, /).concat("drums");
   for (const n of named) assert.ok(INSTRUMENTS[n.trim()], `instrument ${n}`);
   const all = [plugin.description, ui.longDescription, ...ui.defaultPrompt].join(" ");
-  assert.doesNotMatch(all, /server-side render|no (open )?browser tab is required|stretto/i);
-  assert.match(ui.longDescription, /rendered in your own browser, never on GBK.s server/);
+  assert.doesNotMatch(all, /never on GBK.s server|stretto/i);
+  assert.match(ui.longDescription, /rendered in your browser/);
+  assert.match(ui.longDescription, /rendered on GBK.s server/);
 });
 
 test("tools/list advertises 'Use this' descriptions and publish is the only open-world tool", async () => {
@@ -44,7 +45,7 @@ test("tools/list advertises 'Use this' descriptions and publish is the only open
       assert.equal(t.annotations.openWorldHint, t.name === "gbk_publish_composition", t.name);
       assert.equal(t.annotations.destructiveHint, t.name === "gbk_delete_composition", t.name);
     }
-    assert.match(tools.find((t) => t.name === "gbk_render_composition")!.description, /never synthesizes audio/);
+    assert.match(tools.find((t) => t.name === "gbk_render_composition")!.description, /renders it on the GBK server/);
   } finally { await s.app.close(); }
 });
 

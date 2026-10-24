@@ -119,13 +119,14 @@ test("Composer bridge: a render past its deadline returns RENDER_TIMEOUT (not a 
   assert.equal(r.error?.code, "RENDER_TIMEOUT", JSON.stringify(r.error)); assert.match(r.error!.message, /OfflineAudioContext/);
 });
 
-test("audit: no synthesis outside the AudioWorklet; the server imports no audio engine", () => {
+test("audit: no synthesis outside the AudioWorklet; on the server only the render worker thread imports the engine", () => {
   const walk = (d: string): string[] => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(f) ? [p] : []; });
   const engineUsers = walk("src").filter((f) => /new Sf2SynthEngine\(/.test(readFileSync(f, "utf8"))).sort();
   assert.deepEqual(engineUsers, ["src/sf2-processor-core.ts", "src/sf2/parity.ts"], "only the worklet core (and the engine-parity harness) instantiate the engine");
   for (const f of walk("server/src")) {
+    if (f === join("server", "src", "mcp", "render-worker.ts")) continue; // headless server renders: worker thread only, never the event loop
     const s = readFileSync(f, "utf8");
-    const imports = [...s.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+    const imports = [...s.replace(/^import type .*$/gm, "").matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]); // type-only imports carry no code
     assert.deepEqual(imports.filter((i) => /sf2-renderer|offline-renderer|offline-context|sf2-processor|render-job\.ts|wav-encoder|loudness|sf2\/soundfont/.test(i)), [], `${f} must not import an audio engine`);
     assert.doesNotMatch(s, /renderProjectOffline|Sf2SynthEngine|OfflineAudioContext\(/, `${f} must not synthesize audio`);
   }

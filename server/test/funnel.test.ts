@@ -36,8 +36,8 @@ test("MCP connect/create/edit/render/download/delete and pages are counted; beac
     const g = await c.call<{ compositionId: string; revision: number; accessToken: string }>("gbk_create_composition", { title: "Funnel", bars: 4 });
     const t = { compositionId: g.compositionId, accessToken: g.accessToken };
     await c.call("gbk_edit_composition", { ...t, expectedRevision: g.revision, operations: [{ type: "set_tempo", bpm: 100 }] });
-    const r = await c.call<{ artifacts: { downloadUrl: string }[] }>("gbk_render_composition", t);
-    const u = new URL(r.artifacts[0].downloadUrl); await (await fetch(s.base + u.pathname + u.search)).arrayBuffer();
+    const r = await c.call<{ artifacts: { kind: string; downloadUrl: string }[] }>("gbk_render_composition", t);
+    const u = new URL(r.artifacts.find((a) => a.kind === "midi")!.downloadUrl); await (await fetch(s.base + u.pathname + u.search)).arrayBuffer();
     await c.call("gbk_delete_composition", t);
     await (await fetch(`${s.base}/chatgpt`)).text(); await (await fetch(`${s.base}/privacy`)).text();
     assert.equal((await fetch(`${s.base}/api/funnel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "browser_render_completed", source: "studio" }) })).status, 204);
