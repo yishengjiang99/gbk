@@ -85,6 +85,22 @@ test("cancel: cancel_run stops the run and the in-flight call", async () => {
   } finally { await s.app.close(); }
 });
 
+test("Stop during an in-page render: cancel_run tells the tab to cancel the call (render-class calls get the render timeout)", async () => {
+  const model = new ScriptModel([() => calls(tc("r", "gbk_render_wav", {})), () => reply("never")]);
+  const s = await startServer(model);
+  try {
+    const a = await login(s.base, "code-a"); const tab = new TestTab(); tab.autoRespond = false; await tab.open(s.base, a.cookie);
+    tab.send({ type: "user_message", clientMessageId: "u", text: "render it" });
+    const call = await tab.waitFor("tool_call");
+    assert.equal(call.tool, "gbk_render_wav");
+    assert.equal(call.deadlineMs, s.cfg.agent.renderTimeoutMs);
+    assert.ok(s.cfg.agent.renderTimeoutMs > s.cfg.agent.toolTimeoutMs);
+    tab.send({ type: "cancel_run", runId: call.runId });
+    const cc = await tab.waitFor("cancel_call"); assert.equal(cc.callId, call.callId);
+    const f = await tab.waitFor("run_failed"); assert.equal(f.code, "OPERATION_CANCELLED");
+  } finally { await s.app.close(); }
+});
+
 test("duplicate tool_call messages execute once; duplicate/stray tool_result messages are ignored", async () => {
   const c = new WorkstationController(); const b = new BrowserToolBridge(c);
   let runs = 0; const orig = b.tools.get("gbk_create_track")!; b.tools.set("gbk_create_track", { ...orig, run: (a, s) => { runs++; return orig.run(a, s); } });

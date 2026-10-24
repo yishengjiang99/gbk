@@ -4,26 +4,9 @@ import { readFileSync } from "node:fs";
 
 import { generateBachMidi } from "../src/bach-generator.ts";
 import { parseMidiBuffer } from "../src/midi-timer.worker.ts";
-import { renderOfflineSequenceToAudioBuffer } from "../src/sf2-renderer.ts";
+import { Sf2SynthEngine, sortEvents } from "../src/sf2-renderer.ts";
 import { parseSF2 } from "../sf2-parser.ts";
 
-class TestAudioBuffer {
-  numberOfChannels: number;
-  length: number;
-  sampleRate: number;
-  private channels: Float32Array[];
-
-  constructor(numberOfChannels: number, length: number, sampleRate: number) {
-    this.numberOfChannels = numberOfChannels;
-    this.length = length;
-    this.sampleRate = sampleRate;
-    this.channels = Array.from({ length: numberOfChannels }, () => new Float32Array(length));
-  }
-
-  getChannelData(channel: number): Float32Array {
-    return this.channels[channel];
-  }
-}
 
 test("generateBachMidi creates a parseable multi-track MIDI file", () => {
   const generated = generateBachMidi({ seed: 12345 });
@@ -99,15 +82,11 @@ test("generated Bach render has audible signal in the opening seconds", () => {
     }
   }
 
-  const audioBuffer = new TestAudioBuffer(2, sampleRate * 2, sampleRate);
-  renderOfflineSequenceToAudioBuffer({
-    audioBuffer: audioBuffer as unknown as AudioBuffer,
-    tracks,
-    events,
-    maxVoices: 128,
-  });
-
-  const out = audioBuffer.getChannelData(0);
+  // Same per-quantum path the sf2-processor AudioWorklet runs inside the OfflineAudioContext.
+  const engine = new Sf2SynthEngine(sampleRate, { maxVoices: 128 });
+  engine.setTrackStates(tracks);
+  const out = new Float32Array(sampleRate * 2), right = new Float32Array(sampleRate * 2);
+  engine.renderScheduled(out, right, sortEvents(events));
   const firstSecondPeak = out
     .subarray(0, sampleRate)
     .reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0);

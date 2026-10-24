@@ -24,7 +24,6 @@ import {
   type BachKey,
   type BachLength,
 } from "./bach-generator.ts";
-import { renderOfflineSequenceToAudioBufferIncremental } from "./sf2-renderer.ts";
 import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
 import { resolveOrchestraPan } from "./audio/orchestra-pan.ts";
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";

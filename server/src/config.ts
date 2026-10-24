@@ -6,7 +6,7 @@ export interface Config {
   /** Public ChatGPT plugin listing URL. Unset = the /chatgpt page shows "coming soon" instead of an install button. */
   chatgptPluginUrl: string;
   llm: { baseUrl: string; apiKey: string; model: string; models: string[]; apiStyle: "chat_completions" | "responses"; provider: string; priceInPerMTok: number; priceOutPerMTok: number; requestTimeoutMs: number; maxRetries: number; stream: boolean; parallelToolCalls: boolean };
-  agent: { maxToolSteps: number; maxConcurrentRunsPerUser: number; toolTimeoutMs: number; maxInputChars: number; maxContextTokens: number; maxOutputTokens: number; sessionIdleSeconds: number; dailyTokenBudget: number; newAccountDailyTokenBudget: number; dailyCostBudgetUsd: number; globalDailyCostBudgetUsd: number; reconnectGraceMs: number; maxToolResultChars: number };
+  agent: { maxToolSteps: number; maxConcurrentRunsPerUser: number; toolTimeoutMs: number; renderTimeoutMs: number; maxInputChars: number; maxContextTokens: number; maxOutputTokens: number; sessionIdleSeconds: number; dailyTokenBudget: number; newAccountDailyTokenBudget: number; dailyCostBudgetUsd: number; globalDailyCostBudgetUsd: number; reconnectGraceMs: number; maxToolResultChars: number };
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number };
   /** Sign-in. A provider is offered only when both its client id and secret are set. */
   auth: { github: { clientId: string; clientSecret: string } | null; google: { clientId: string; clientSecret: string } | null; newAccountDays: number };
@@ -45,7 +45,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     llm: { baseUrl: (env.LLM_BASE_URL ?? "").replace(/\/$/, ""), apiKey: env.LLM_API_KEY ?? "", model, models, apiStyle: style, provider: env.LLM_PROVIDER_NAME ?? hostOf(env.LLM_BASE_URL),
       priceInPerMTok: num(env.LLM_PRICE_INPUT_PER_MTOK, 3), priceOutPerMTok: num(env.LLM_PRICE_OUTPUT_PER_MTOK, 15), requestTimeoutMs: num(env.LLM_REQUEST_TIMEOUT_MS, 120_000), maxRetries: num(env.LLM_MAX_RETRIES, 3),
       stream: env.LLM_STREAM !== "0", parallelToolCalls: env.LLM_PARALLEL_TOOL_CALLS !== "0" },
-    agent: { maxToolSteps: num(env.AGENT_MAX_TOOL_STEPS, 40), maxConcurrentRunsPerUser: num(env.AGENT_MAX_CONCURRENT_RUNS_PER_USER, 1), toolTimeoutMs: num(env.AGENT_TOOL_TIMEOUT_MS, 120_000),
+    agent: { maxToolSteps: num(env.AGENT_MAX_TOOL_STEPS, 40), maxConcurrentRunsPerUser: num(env.AGENT_MAX_CONCURRENT_RUNS_PER_USER, 1), toolTimeoutMs: num(env.AGENT_TOOL_TIMEOUT_MS, 120_000), renderTimeoutMs: num(env.AGENT_RENDER_TIMEOUT_MS, 660_000),
       maxInputChars: num(env.AGENT_MAX_INPUT_CHARS, 12_000), maxContextTokens: num(env.AGENT_MAX_CONTEXT_TOKENS, 32_000), maxOutputTokens: num(env.AGENT_MAX_OUTPUT_TOKENS, 4096),
       sessionIdleSeconds: num(env.AGENT_SESSION_IDLE_SECONDS, 1800), dailyTokenBudget: num(env.AGENT_DAILY_TOKEN_BUDGET, 2_000_000), newAccountDailyTokenBudget: num(env.AGENT_NEW_ACCOUNT_DAILY_TOKEN_BUDGET, 200_000), dailyCostBudgetUsd: num(env.AGENT_DAILY_COST_BUDGET_USD, 5),
       globalDailyCostBudgetUsd: num(env.AGENT_GLOBAL_DAILY_COST_BUDGET_USD, 20), reconnectGraceMs: num(env.AGENT_RECONNECT_GRACE_MS, 30_000), maxToolResultChars: num(env.AGENT_MAX_TOOL_RESULT_CHARS, 12_000) },

@@ -109,7 +109,7 @@ export class AgentRuntime {
         if (disconnected) return { ok: false, projectId: link.projectId, revision: link.revision, warnings: [], error: { code: "BROWSER_DISCONNECTED", message: "not executed: the browser tab disconnected" } };
         const pol = this.catalog.get(tool)!.policy;
         try {
-          const r = await link.callTool(o.runId, callId, tool, args, { expectProjectId: pol.createsProject ? null : (conv.projectId ?? link.projectId), consent: { newProject: true }, timeoutMs: cfg.agent.toolTimeoutMs });
+          const r = await link.callTool(o.runId, callId, tool, args, { expectProjectId: pol.createsProject ? null : (conv.projectId ?? link.projectId), consent: { newProject: true }, timeoutMs: pol.cls === "render" ? cfg.agent.renderTimeoutMs : cfg.agent.toolTimeoutMs });
           if (r.ok && pol.createsProject) conv.projectId = r.projectId;
           if (r.ok) { conv.lastRevision = r.revision; if (pol.cls !== "read") conv.recentEdits = [...conv.recentEdits.slice(-19), `${tool} -> rev ${r.revision}`]; }
           return r;

@@ -105,7 +105,7 @@ export class AgentHub {
         return;
       }
       case "tool_progress": { const run = this.runs.get(String(m.runId)); if (run && run.user === conn.user && conn.pending.has(String(m.callId))) conn.emit({ type: "tool_progress", runId: m.runId, callId: m.callId, progress: Number(m.progress) || 0, detail: String(m.detail ?? "").slice(0, 80) }); return; }
-      case "cancel_run": { const run = this.runs.get(String(m.runId)); if (run && run.user === conn.user) { run.abort.abort(); conn.pending.rejectAll("OPERATION_CANCELLED", "cancelled", String(m.runId)); this.log({ evt: "cancel", user: conn.user, runId: m.runId }); } return; }
+      case "cancel_run": { const run = this.runs.get(String(m.runId)); if (run && run.user === conn.user) { run.abort.abort(); for (const callId of conn.pending.idsFor(String(m.runId))) conn.emit({ type: "cancel_call", runId: String(m.runId), callId }); conn.pending.rejectAll("OPERATION_CANCELLED", "cancelled", String(m.runId)); this.log({ evt: "cancel", user: conn.user, runId: m.runId }); } return; }
       case "reset_conversation": if ([...this.runs.values()].some((r) => r.user === conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "stop the current run first" }); this.convs.reset(conn.user); return;
       case "user_message": return void this.startRun(conn, m);
       default: conn.emit({ type: "error", code: "UNKNOWN_TYPE", message: "unknown message type" });

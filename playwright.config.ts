@@ -51,6 +51,12 @@ export default defineConfig({
       testMatch: /song-video\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1500, height: 900 } },
     },
+    // WAV render in a real WebKit (Safari engine): OfflineAudioContext + AudioWorklet, no realtime AudioContext.
+    {
+      name: "webkit-render",
+      testMatch: /offline-render\.spec\.ts/,
+      use: { ...devices["iPhone 13"] },
+    },
     ...(enableVisualChrome
       ? [
           {

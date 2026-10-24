@@ -53,7 +53,8 @@ export const COMPOSER_TOOL_POLICY: Record<string, ToolPolicy> = {
   gbk_undo: { cls: "mutate" },
   gbk_redo: { cls: "mutate" },
   // rendering: local only, artifact output, never a download, never bytes to the model
-  gbk_render_wav: { cls: "render", force: { output: "artifact", download: false } },
+  // waitSeconds: the in-page render has its own timeout/stall watchdog; never hand the agent a still-running job.
+  gbk_render_wav: { cls: "render", force: { output: "artifact", download: false, waitSeconds: 600 } },
   gbk_cancel_render: { cls: "mutate" },
 };
 // Deliberately NOT exposed to the server agent: gbk_read_wav_bytes (would relay media through the LLM),
