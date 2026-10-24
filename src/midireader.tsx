@@ -30,6 +30,7 @@ import { resolveOrchestraPan } from "./audio/orchestra-pan.ts";
 import { buildSwedenSheetMusicMidi, isSupportedSheetMusicImageFile, parseSheetMusicToMidi, type ParsedSheetMusicWithLayout } from "./sheet-music-reader.ts";
 import { buildMidiSendEvents } from "./midi-output.ts";
 import { midiFileStore } from "./midi-file-store.ts";
+import type { LiveTakeControls } from "./live-take.ts";
 import { resolveViewportHeightPx } from "./viewport-height.ts";
 
 // ---------------------------------------------------------------------------
@@ -417,6 +418,8 @@ interface MidiReaderProps {
   recorderView: ReactNode;
   /** Live MIDI-driver status line for the bottom dock. */
   midiStatus: string;
+  /** Player live take (App-owned capture tapped off live input). */
+  liveTake?: LiveTakeControls | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +496,7 @@ export default function MidiReader({
   sf2View,
   recorderView,
   midiStatus,
+  liveTake = null,
 }: MidiReaderProps) {
   const [playRequested, setPlayRequested] = useState(false);
   const [playlistSearch, setPlaylistSearch] = useState("");
@@ -1695,38 +1699,81 @@ export default function MidiReader({
   useEffect(() => { playerBridge.onReady(); }, [sf2Ready]);
   useEffect(() => { playerBridge.onTime(songTime); }, [songTime]);
 
+  /** Add raw SMF bytes to the playlist exactly like an uploaded file:
+   *  persist, append the entry, load it as the current song, select it. */
+  async function addUploadedBytes(buf: ArrayBuffer, name: string) {
+    const id = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const createdAt = Date.now();
+    // Persist first: the file must survive reloads. A failed write only
+    // affects persistence; the file still plays for this session.
+    await midiFileStore.putMidiFile({
+      id,
+      name,
+      bytes: buf.slice(0),
+      source: "upload",
+      createdAt,
+    });
+    const entry: UploadedEntry = { id, name, midiData: buf };
+    const nextUploads = [...uploadedEntries, entry];
+    setUploadedEntries(nextUploads);
+    void midiFileStore.putPlaylistMeta({
+      version: 1,
+      uploads: nextUploads.map((e) => ({ id: e.id, name: e.name })),
+      scans: scannedEntries.map((e) => ({ id: e.id, name: e.name })),
+    });
+    loadMidiIntoTracks(buf, name, { sourceKind: "uploaded", fileId: id });
+    // Set after the load: loadMidiIntoTracks clears the upload selection first.
+    setSelectedUploadId(id);
+  }
+
   async function onUploadMidi(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !workerRef.current) return;
     try {
       const buf = await file.arrayBuffer();
-      const id = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const createdAt = Date.now();
-      // Persist first: the file must survive reloads. A failed write only
-      // affects persistence; the file still plays for this session.
-      await midiFileStore.putMidiFile({
-        id,
-        name: file.name,
-        bytes: buf.slice(0),
-        source: "upload",
-        createdAt,
-      });
-      const entry: UploadedEntry = { id, name: file.name, midiData: buf };
-      const nextUploads = [...uploadedEntries, entry];
-      setUploadedEntries(nextUploads);
-      void midiFileStore.putPlaylistMeta({
-        version: 1,
-        uploads: nextUploads.map((e) => ({ id: e.id, name: e.name })),
-        scans: scannedEntries.map((e) => ({ id: e.id, name: e.name })),
-      });
-      loadMidiIntoTracks(buf, file.name, { sourceKind: "uploaded", fileId: id });
-      // Set after the load: loadMidiIntoTracks clears the upload selection first.
-      setSelectedUploadId(id);
+      await addUploadedBytes(buf, file.name);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSongError(msg);
       onError?.(msg);
       setSong(null);
+    }
+  }
+
+  function handleNewLiveTake() {
+    if (!liveTake) return;
+    if (liveTake.onNewFile()) {
+      onSelectTab("midi");
+      setPianoRollOpen(true);
+    }
+  }
+
+  /** Save the live take: browser download of the .mid, then the same
+   *  playlist route an uploaded file takes so it can play back at once. */
+  async function onSaveLiveTake() {
+    if (!liveTake) return;
+    const file = liveTake.takeFile();
+    if (!file) return;
+    const blob = new Blob([file.bytes as BlobPart], { type: "audio/midi" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    try {
+      const buf = file.bytes.buffer.slice(
+        file.bytes.byteOffset,
+        file.bytes.byteOffset + file.bytes.byteLength
+      ) as ArrayBuffer;
+      await addUploadedBytes(buf, file.name);
+      liveTake.markSaved();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSongError(msg);
+      onError?.(msg);
     }
   }
 
@@ -2458,6 +2505,16 @@ export default function MidiReader({
             <div className="gbk-scrollview">
               <div className="gbk-unzoom" style={{ zoom: 1 / waZoom }}>{recorderView}</div>
             </div>
+          ) : pianoRollOpen && liveTake?.armed ? (
+            <div className="gbk-scrollview">
+              <PianoRoll
+                tracks={[{ name: "Live take", notes: liveTake.notes }]}
+                songTime={liveTake.elapsedSec}
+                duration={Math.max(10, liveTake.elapsedSec)}
+                onSeek={() => {}}
+                onClose={() => setPianoRollOpen(false)}
+              />
+            </div>
           ) : pianoRollOpen && song ? (
             <div className="gbk-scrollview">
               <PianoRoll
@@ -2498,12 +2555,21 @@ export default function MidiReader({
               {CAMERA_GLYPH}
             </button>
             <div className="gbk-fright">
+              {liveTake ? (
+                <>
+                  <button type="button" className="gbk-fbtn" onClick={handleNewLiveTake} aria-label="New File: start a new live take" title="New File: start a new live take">New File</button>
+                  <button type="button" className="gbk-fbtn" onClick={() => void onSaveLiveTake()} disabled={!liveTake.armed || liveTake.eventCount === 0} aria-label="Save live take as a MIDI file" title="Save live take as a MIDI file">Save</button>
+                </>
+              ) : null}
               <button type="button" className="gbk-fbtn" onClick={() => ejectInputRef.current?.click()} aria-label="Add MIDI file to playlist" title="Add MIDI file to playlist">+ ADD</button>
             </div>
           </div>
           <div className="gbk-fstatus">
             <strong className="transportTimer">{fmtTime(songTime)} / {fmtTime(duration)}</strong>
             <span> · {song ? `${songName || "Untitled MIDI"} · ${song.bpm} BPM` : "No MIDI loaded"} · Audio {audioCtxState} · {midiStatus}</span>
+            {liveTake?.armed ? (
+              <span> · <strong>Live take</strong> {fmtTime(liveTake.elapsedSec)} · {liveTake.noteCount} notes{liveTake.hasUnsaved ? "" : " · saved"}</span>
+            ) : null}
           </div>
         </div>
         <input ref={ejectInputRef} type="file" accept=".mid,.midi" onChange={onUploadMidi} aria-label="Upload MIDI file" style={{ display: "none" }} />

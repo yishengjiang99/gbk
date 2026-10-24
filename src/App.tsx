@@ -17,6 +17,11 @@ import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 import { primeSoundFontCache, setActiveSoundFont } from "./audio/soundfont-loader.ts";
 import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
 import { synthEvent } from "./synth-ingress.ts";
+import {
+  createLiveTakeCapture,
+  type LiveTakeCapture,
+  type LiveTakeNote,
+} from "./live-take.ts";
 
 // ---------------------------------------------------------------------------
 // Local interface definitions for SF2 internal structures accessed at runtime
@@ -728,6 +733,51 @@ export default function App() {
   const triggerNoteOffRef = useRef<((note: number) => Promise<void>) | null>(null);
   const resolvePresetIndexRef = useRef<((program: number, bank: number) => number | null) | null>(null);
 
+  // Player live take: a passive tap on live input (see src/live-take.ts). The
+  // capture observes the same values the live handlers send to the worklet;
+  // the UI snapshot below only mirrors it for the player's buttons and roll.
+  const liveTakeRef = useRef<LiveTakeCapture | null>(null);
+  if (liveTakeRef.current == null) liveTakeRef.current = createLiveTakeCapture();
+  const [liveTakeUi, setLiveTakeUi] = useState<{
+    armed: boolean;
+    noteCount: number;
+    eventCount: number;
+    hasUnsaved: boolean;
+    notes: LiveTakeNote[];
+    elapsedSec: number;
+  }>({ armed: false, noteCount: 0, eventCount: 0, hasUnsaved: false, notes: [], elapsedSec: 0 });
+  function refreshLiveTakeUi(): void {
+    const take = liveTakeRef.current;
+    if (!take) return;
+    setLiveTakeUi({
+      armed: take.armed,
+      noteCount: take.noteCount(),
+      eventCount: take.eventCount(),
+      hasUnsaved: take.hasUnsavedNotes(),
+      notes: take.notes(),
+      elapsedSec: take.elapsedSec(),
+    });
+  }
+  useEffect(() => {
+    if (!liveTakeUi.armed) return;
+    const id = window.setInterval(refreshLiveTakeUi, 200);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTakeUi.armed]);
+  function startNewLiveTake(): boolean {
+    const take = liveTakeRef.current;
+    if (!take) return false;
+    if (
+      take.hasUnsavedNotes() &&
+      !confirm("Start a new take? The current take has unsaved notes, which will be cleared.")
+    ) {
+      return false;
+    }
+    take.arm();
+    refreshLiveTakeUi();
+    return true;
+  }
+
   const releaseAudioInfrastructure = useCallback(() => {
     // Fast Refresh retains refs while re-running effect cleanup. None of the
     // nodes, module promises, or animation handles can survive a closed context.
@@ -1122,12 +1172,16 @@ export default function App() {
     const regions = getCurrentPresetRegions(presetIndex);
     node.port.postMessage({ type: "setPreset", regions });
     node.port.postMessage({ type: "noteOn", note, velocity });
+    liveTakeRef.current?.noteOn(note, velocity);
+    refreshLiveTakeUi();
   }
 
   async function triggerNoteOff(note: number): Promise<void> {
     const node = workletNodeRef.current;
     if (!node) return;
     node.port.postMessage({ type: "noteOff", note });
+    liveTakeRef.current?.noteOff(note);
+    refreshLiveTakeUi();
   }
   triggerNoteOnRef.current = triggerNoteOn;
   triggerNoteOffRef.current = triggerNoteOff;
@@ -1157,6 +1211,7 @@ export default function App() {
 
   const handleMidiProgramChange = useCallback(
     (program: number, bank: number, channel: number, sourceLabel = "MIDI"): void => {
+      liveTakeRef.current?.programChange(program);
       const nextIndex = resolvePresetIndexRef.current?.(program, bank);
       if (nextIndex != null && nextIndex >= 0) {
         selectedPresetRef.current = nextIndex;
@@ -1180,6 +1235,7 @@ export default function App() {
   // channel the hardware sent on.
   const handleMidiControlChange = useCallback(
     (controller: number, value: number, _channel: number): void => {
+      liveTakeRef.current?.controlChange(controller, value);
       workletNodeRef.current?.port.postMessage(synthEvent.controlChange(0, controller, value));
     },
     []
@@ -1187,6 +1243,7 @@ export default function App() {
 
   const handleMidiPitchBend = useCallback(
     (value: number, _channel: number): void => {
+      liveTakeRef.current?.pitchBend(value);
       workletNodeRef.current?.port.postMessage(synthEvent.pitchBend(0, value));
     },
     []
@@ -1194,6 +1251,7 @@ export default function App() {
 
   const handleMidiChannelPressure = useCallback(
     (value: number, _channel: number): void => {
+      liveTakeRef.current?.channelPressure(value);
       workletNodeRef.current?.port.postMessage(synthEvent.channelPressure(0, value));
     },
     []
@@ -1201,6 +1259,7 @@ export default function App() {
 
   const handleMidiPolyPressure = useCallback(
     (note: number, value: number, _channel: number): void => {
+      liveTakeRef.current?.polyPressure(note, value);
       workletNodeRef.current?.port.postMessage(synthEvent.polyPressure(0, note, value));
     },
     []
@@ -1406,6 +1465,20 @@ export default function App() {
           explorer or recorder never destroys playback or the transport. The
           MIDI explorer panels below the chrome render only on the midi tab. */}
       <MidiReader
+          liveTake={{
+            armed: liveTakeUi.armed,
+            noteCount: liveTakeUi.noteCount,
+            eventCount: liveTakeUi.eventCount,
+            hasUnsaved: liveTakeUi.hasUnsaved,
+            notes: liveTakeUi.notes,
+            elapsedSec: liveTakeUi.elapsedSec,
+            onNewFile: startNewLiveTake,
+            takeFile: () => liveTakeRef.current?.toFile() ?? null,
+            markSaved: () => {
+              liveTakeRef.current?.markSaved();
+              refreshLiveTakeUi();
+            },
+          }}
           vizTimeData={recentTimeData}
           masterVolume={masterVolume}
           onMasterVolumeChange={applyMasterVolume}
