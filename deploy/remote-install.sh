@@ -5,7 +5,7 @@ set -euo pipefail
 TGZ=$1; ID=$2; ROOT=/var/www/gbk-composer; REL=$ROOT/releases/$ID
 mkdir -p "$REL" /var/lib/gbk-composer; chown www-data:www-data /var/lib/gbk-composer
 tar xzf "$TGZ" -C "$REL"
-(cd "$REL" && npm install --omit=dev --no-audit --no-fund --ignore-scripts fastify@5 ws@8 >/dev/null)
+(cd "$REL" && npm install --omit=dev --no-audit --no-fund --ignore-scripts fastify@5 ws@8 @modelcontextprotocol/sdk@1 zod@4 >/dev/null)
 PREV=$(readlink -f $ROOT/current 2>/dev/null || true)
 ln -sfn "$REL" $ROOT/current.new && mv -Tf $ROOT/current.new $ROOT/current
 if [ ! -f /etc/gbk-composer.env ]; then install -m 0640 -o root -g www-data "$REL/deploy/compose.env.example" /etc/gbk-composer.env; echo "WARNING: created /etc/gbk-composer.env from the example; edit it"; fi
