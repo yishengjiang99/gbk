@@ -4,10 +4,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { ScriptModel, reply } from "./helpers.ts";
+import { ScriptModel, reply, testConfig } from "./helpers.ts";
 import { startServer } from "./ws-helpers.ts";
 import { McpClient } from "./mcp-helpers.ts";
 import { McpStore } from "../src/mcp/store.ts";
+import { CompositionService } from "../src/mcp/service.ts";
+import { RenderService, DEFAULT_RENDER_CONFIG } from "../src/mcp/render.ts";
+import { ShareStore } from "../src/persistence/shares.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -188,4 +191,54 @@ test("E: worker interruption fails explicitly (no false completion); an empty pr
     assert.ok(r.error?.code, "failure carries a machine-readable code");
     assert.equal(r.artifacts.length, 0);
   } finally { await s.app.close(); }
+});
+
+test("F: queued jobs resume after a restart (orphans fail explicitly); terminal states are final; artifact publication is atomic", async () => {
+  const cfg = testConfig({ COMPOSER_PUBLIC_ORIGIN: "http://composer.test" });
+  const dir = mkdtempSync(join(tmpdir(), "gbk-mcp-f-"));
+  const file = join(dir, "mcp.sqlite");
+
+  // Phase 1: a composition plus a QUEUED job row, exactly as a process dying before the
+  // worker picked the job up would leave it — plus a queued job for a vanished composition.
+  const st1 = new McpStore(file, dir);
+  const svc = new CompositionService(cfg, st1, new ShareStore(":memory:"));
+  const { row } = await svc.create("alice", { title: "Restart Fugue", style: "baroque", key: "D minor", tempo: 108, bars: 4, seed: 3,
+    instrumentation: ["organ", "organ", "organ", "organ"] }, new AbortController().signal);
+  const job = st1.createJob({ compositionId: row.id, owner: "alice", revision: row.revision, config: { ...DEFAULT_RENDER_CONFIG } });
+  const orphan = st1.createJob({ compositionId: "cmp_missing", owner: "alice", revision: 0, config: { ...DEFAULT_RENDER_CONFIG } });
+  st1.close();
+
+  // Phase 2: a fresh store + render service on the same files (the "restart").
+  const st2 = new McpStore(file, dir);
+  const renders = new RenderService(cfg, st2);
+  await renders.start();
+  try {
+    const orphanAfter = st2.getJob(orphan.id, "alice")!;
+    assert.equal(orphanAfter.status, "failed", "orphaned queued job fails instead of sticking at queued");
+    assert.match(orphanAfter.error ?? "", /JOB_ORPHANED/);
+
+    let final = st2.getJob(job.id, "alice")!;
+    for (let i = 0; i < 240 && !["completed", "failed", "cancelled"].includes(final.status); i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      final = st2.getJob(job.id, "alice")!;
+    }
+    assert.equal(final.status, "completed", `rehydrated job completes (got ${final.status}: ${final.error ?? ""})`);
+    assert.equal(st2.listArtifacts(row.id, "alice").filter((a) => a.job_id === job.id).length, 2, "WAV + MIDI published for the resumed job");
+  } finally { await renders.stop(); st2.close(); }
+
+  // Terminal states are final: a guarded transition out of a terminal state changes nothing.
+  const st3 = new McpStore(join(dir, "other.sqlite"), dir);
+  const j3 = st3.createJob({ compositionId: "cmp_x", owner: "alice", revision: 0, config: {} });
+  assert.equal(st3.transitionJob(j3.id, ["queued", "running"], { status: "cancelled", finished_at: Date.now() }), true);
+  assert.equal(st3.transitionJob(j3.id, ["queued", "running"], { status: "failed", error: "late worker exit" }), false,
+    "a late failure must not overwrite a cancellation");
+  assert.equal(st3.getJob(j3.id, "alice")!.status, "cancelled");
+
+  // Atomic publication: a failing second insert rolls the whole batch back.
+  assert.throws(() => st3.addArtifacts([
+    { job_id: j3.id, composition_id: "cmp_x", owner: "alice", revision: 0, kind: "wav", filename: "a.wav", mime_type: "audio/wav", size_bytes: 1, sha256: "x", rel_path: "a.wav", meta_json: "{}" },
+    { job_id: j3.id, composition_id: "cmp_x", owner: "alice", revision: 0, kind: null as never, filename: "b.mid", mime_type: "audio/midi", size_bytes: 1, sha256: "y", rel_path: "b.mid", meta_json: "{}" },
+  ]));
+  assert.equal(st3.listArtifacts("cmp_x", "alice").length, 0, "no partial artifact batch survives a failed publication");
+  st3.close();
 });

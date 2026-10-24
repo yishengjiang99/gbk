@@ -3,16 +3,21 @@
 //
 // Guarantees:
 //  - The project snapshot is pinned at submit time (structuredClone) and the job records its revision.
-//  - Artifacts are written to disk first, validated by the renderer itself (header/duration/silence/
-//    clipping/non-finite + SHA-256), the SHA-256 is re-checked on receipt, and only then are artifact rows
-//    inserted and the job marked completed — a killed worker can never publish a partial artifact.
-//  - On process start, jobs left "running" are failed explicitly by McpStore (WORKER_INTERRUPTED).
+//  - Artifact publication is atomic: every payload (WAV + MIDI) is built and validated first, files are
+//    written, and only then are the artifact rows inserted in ONE store transaction and the job marked
+//    completed — a failure anywhere publishes nothing, never a lone WAV for a failed job.
+//  - On process start, jobs left "running" are failed explicitly by McpStore (WORKER_INTERRUPTED), and
+//    jobs left "queued" are rehydrated from their stored revision snapshot + config and resumed (or
+//    failed as JOB_ORPHANED when their composition/revision no longer exists) — never stuck forever.
+//  - Terminal states are final: job completion/failure/cancellation transitions only from
+//    queued/running (store.transitionJob), so a late worker exit, a racing "done" or a timeout can
+//    never overwrite a cancelled or completed job.
 //  - Per-job timeout terminates the worker (and respawns it); cancellation does the same.
 //  - If worker threads cannot start at all, the service falls back to in-process rendering with the same
 //    canonical code path and reports executor:"inprocess" honestly in job metadata.
 import { Worker } from "node:worker_threads";
 import { createHash } from "node:crypto";
-import { existsSync, writeFileSync, renameSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, writeFileSync, renameSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Config } from "../config.ts";
@@ -30,6 +35,7 @@ export interface RenderConfig {
   normalize: "loudness" | "peak" | "off"; targetLufs?: number; tailSeconds?: number; includeMidi: boolean;
 }
 export const DEFAULT_RENDER_CONFIG: RenderConfig = { sampleRate: 44100, channels: 2, format: "pcm16", normalize: "loudness", tailSeconds: 3, includeMidi: true };
+const TERMINAL: readonly string[] = ["completed", "failed", "cancelled"];
 
 export function resolveSoundFontPath(cfg: Config): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -81,6 +87,30 @@ export class RenderService {
       this.executor = "inprocess";
       try { this.sfPath = resolveSoundFontPath(this.cfg); } catch { /* renders will fail with the same error, surfaced per job */ }
     }
+    this.rehydrate();
+  }
+  /**
+   * Resume jobs that were queued when the process stopped. Everything a job needs is durable (the
+   * composition's stored revision snapshot + the job's config), so a queued job simply re-enters the
+   * in-memory queue. A job whose composition/revision has vanished fails explicitly as JOB_ORPHANED.
+   */
+  private rehydrate() {
+    if (this.stopped) return;
+    let resumed = 0;
+    for (const job of this.store.listJobsByStatus("queued")) {
+      const row = this.store.getComposition(job.composition_id, job.owner);
+      const rev = row ? this.store.getRevision(job.composition_id, job.owner, job.revision) : null;
+      if (!row || !rev) {
+        this.finish(job.id, "failed", JSON.stringify({ code: "JOB_ORPHANED", message: "queued render's composition or revision no longer exists after a restart; submit a new render" }));
+        continue;
+      }
+      const stored = JSON.parse(job.config_json) as RenderConfig & { executor?: string; rendererVersion?: string };
+      const { executor: _e, rendererVersion: _r, ...config } = stored;
+      this.queue.push({ jobId: job.id, owner: job.owner, row, snapshot: JSON.parse(rev.project_json) as Project, config: { ...DEFAULT_RENDER_CONFIG, ...(config as RenderConfig) } });
+      resumed++;
+    }
+    if (resumed) this.log({ evt: "mcp_render_rehydrated", jobs: resumed });
+    this.pump();
   }
   async stop(): Promise<void> {
     this.stopped = true;
@@ -216,29 +246,53 @@ export class RenderService {
     }
   }
   private completeJob(job: Pending, wavBytes: Uint8Array, meta: Record<string, unknown>) {
+    // Lost a race with cancel/timeout? The bytes are discarded and nothing is published.
+    const cur = this.store.getJobAny(job.jobId);
+    if (!cur || TERMINAL.includes(cur.status)) return;
     // Re-verify what the worker claims before anything is published.
     const sha = createHash("sha256").update(wavBytes).digest("hex");
     if (sha !== meta.sha256) throw new McpError("RENDER_FAILED", "rendered WAV failed SHA-256 verification against the worker's report; artifact discarded");
     const info = parseWavHeader(wavBytes.subarray(0, Math.min(wavBytes.length, 4096)), wavBytes.length);
     if (meta.validated !== true) throw new McpError("RENDER_FAILED", "renderer did not validate the WAV; artifact discarded");
-    mkdirSync(this.store.artifactsDir, { recursive: true });
-    const write = (rel: string, bytes: Uint8Array) => { const tmp = join(this.store.artifactsDir, `${rel}.tmp`); writeFileSync(tmp, bytes); renameSync(tmp, join(this.store.artifactsDir, rel)); };
-    const base = { job_id: job.jobId, composition_id: job.row.id, owner: job.owner, revision: job.row.revision };
-    const wavRel = `${job.jobId}.wav`; write(wavRel, wavBytes);
-    const provenance = { rendererVersion: RENDERER_VERSION, sourceRevision: job.row.revision, soundFont: meta.soundFont, renderMs: meta.renderMs, executor: this.executor };
-    this.store.addArtifact({ ...base, kind: "wav", filename: `${job.row.title.replace(/[^\w\- .]/g, "_").slice(0, 60) || "gbk"}.wav`, mime_type: "audio/wav",
-      size_bytes: wavBytes.length, sha256: sha, rel_path: wavRel,
-      meta_json: JSON.stringify({ validated: true, sampleRate: info.sampleRate, channels: info.channels, format: info.format, durationSeconds: info.durationSeconds,
-        frames: info.frames, peakDbFS: meta.peakDbFS, rmsDbFS: meta.rmsDbFS, clippedSamples: meta.clippedSamples, loudness: meta.loudness, instruments: meta.instruments, warnings: meta.warnings, noteCount: meta.noteCount, ...provenance }) });
+    // Build EVERY payload before publishing anything: if MIDI export fails, the job fails with
+    // zero artifacts instead of leaving a registered WAV behind for a failed job.
+    let midi: Uint8Array | null = null;
     if (job.config.includeMidi) {
-      const midi = serializeSmf(job.snapshot, { soundNrpn: true });
-      if (!(midi.length > 14 && String.fromCharCode(...midi.subarray(0, 4)) === "MThd")) throw new McpError("RENDER_FAILED", "MIDI export failed validation (missing MThd header); WAV kept, MIDI discarded");
-      const midiRel = `${job.jobId}.mid`; write(midiRel, midi);
+      midi = serializeSmf(job.snapshot, { soundNrpn: true });
+      if (!(midi.length > 14 && String.fromCharCode(...midi.subarray(0, 4)) === "MThd")) throw new McpError("RENDER_FAILED", "MIDI export failed validation (missing MThd header); no artifacts were published for this job");
+    }
+    const base = { job_id: job.jobId, composition_id: job.row.id, owner: job.owner, revision: job.row.revision };
+    const provenance = { rendererVersion: RENDERER_VERSION, sourceRevision: job.row.revision, soundFont: meta.soundFont, renderMs: meta.renderMs, executor: this.executor };
+    const title = job.row.title.replace(/[^\w\- .]/g, "_").slice(0, 60) || "gbk";
+    const rows: Parameters<McpStore["addArtifacts"]>[0] = [
+      { ...base, kind: "wav", filename: `${title}.wav`, mime_type: "audio/wav",
+        size_bytes: wavBytes.length, sha256: sha, rel_path: `${job.jobId}.wav`,
+        meta_json: JSON.stringify({ validated: true, sampleRate: info.sampleRate, channels: info.channels, format: info.format, durationSeconds: info.durationSeconds,
+          frames: info.frames, peakDbFS: meta.peakDbFS, rmsDbFS: meta.rmsDbFS, clippedSamples: meta.clippedSamples, loudness: meta.loudness, instruments: meta.instruments, warnings: meta.warnings, noteCount: meta.noteCount, ...provenance }) },
+    ];
+    const payloads: { rel: string; bytes: Uint8Array }[] = [{ rel: `${job.jobId}.wav`, bytes: wavBytes }];
+    if (midi) {
       const soundOverrides = job.snapshot.sound?.tracks && Object.keys(job.snapshot.sound.tracks).length
         ? "project has SoundFont voice overrides: additive ones export as SF2 NRPNs; absolute/key-ranged overrides and global effects are audible in the WAV only" : undefined;
-      this.store.addArtifact({ ...base, kind: "midi", filename: `${job.row.title.replace(/[^\w\- .]/g, "_").slice(0, 60) || "gbk"}.mid`, mime_type: "audio/midi",
-        size_bytes: midi.length, sha256: createHash("sha256").update(midi).digest("hex"), rel_path: midiRel,
+      rows.push({ ...base, kind: "midi", filename: `${title}.mid`, mime_type: "audio/midi",
+        size_bytes: midi.length, sha256: createHash("sha256").update(midi).digest("hex"), rel_path: `${job.jobId}.mid`,
         meta_json: JSON.stringify({ validated: true, format: "SMF type 1", preserves: ["tempo map", "meter map", "program changes", "CC events", "pitch bend", "section markers"], ...(soundOverrides ? { portabilityNote: soundOverrides } : {}), ...provenance }) });
+      payloads.push({ rel: `${job.jobId}.mid`, bytes: midi });
+    }
+    // Publish: files first (via tmp + rename), then all rows in one transaction, then completion.
+    // If the transaction fails, the just-written files are removed again — no orphaned artifacts.
+    mkdirSync(this.store.artifactsDir, { recursive: true });
+    const written: string[] = [];
+    try {
+      for (const p of payloads) {
+        const tmp = join(this.store.artifactsDir, `${p.rel}.tmp`);
+        writeFileSync(tmp, p.bytes); renameSync(tmp, join(this.store.artifactsDir, p.rel));
+        written.push(p.rel);
+      }
+      this.store.addArtifacts(rows);
+    } catch (e) {
+      for (const rel of written) try { rmSync(join(this.store.artifactsDir, rel), { force: true }); } catch { /* best effort */ }
+      throw e;
     }
     this.finish(job.jobId, "completed", null, 1);
     this.log({ evt: "mcp_render_completed", user: job.owner, jobId: job.jobId, compositionId: job.row.id, revision: job.row.revision, bytes: wavBytes.length, sha256: sha });
@@ -249,7 +303,10 @@ export class RenderService {
   }
   private finish(jobId: string, status: "completed" | "failed" | "cancelled", error: string | null, progress?: number) {
     this.clearTimer(jobId);
-    this.store.patchJob(jobId, { status, error, finished_at: Date.now(), ...(progress !== undefined ? { progress } : {}) });
+    // Terminal states are final — only the first transition out of queued/running counts, so a late
+    // worker exit, a racing completion or a timeout can never overwrite a cancelled/completed job.
+    const moved = this.store.transitionJob(jobId, ["queued", "running"], { status, error, finished_at: Date.now(), ...(progress !== undefined ? { progress } : {}) });
+    if (!moved) return;
     const waiters = this.waiters.get(jobId);
     if (waiters) {
       this.waiters.delete(jobId);
