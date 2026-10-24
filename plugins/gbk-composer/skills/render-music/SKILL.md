@@ -32,7 +32,10 @@ and hand the user working, authorized links.
    user asked for something else.
 2. **Submit the render.** Call `gbk_render_composition` with the
    `compositionId` (the render pins that saved revision). Keep the returned
-   `jobId`.
+   `jobId`. Rendering runs in the user's GBK Studio browser tab: if the result
+   is `status: "studio_required"`, give the user the `studioUrl` ("open the
+   studio to render"), ask them to keep it open while signed in, then submit
+   again. No job exists until then.
 3. **Poll appropriately.** If the job is not complete, poll
    `gbk_get_render_status` with increasing waits (use `waitSeconds` /
    backoff rather than rapid repeated calls) until it reaches `completed`
@@ -43,8 +46,9 @@ and hand the user working, authorized links.
    channels, format, size, and `sha256`. If the job failed or validation
    failed, report the error plainly — never fabricate a file, a checksum,
    or a success message.
-5. **Return authorized links.** Get download references from
-   `gbk_get_artifacts` and present:
+5. **Return authorized links.** The completed render/status result already
+   carries a signed `downloadUrl` per artifact — present those. Use
+   `gbk_get_artifacts` when you need fresh URLs after they expire. Present:
    - the WAV download URL,
    - the MIDI download URL (when `includeMidi` was set),
    - the interactive player via `gbk_show_composition_ui`,

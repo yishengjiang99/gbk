@@ -32,13 +32,16 @@ open the same composition in GBK Studio afterwards.
   returns `status: "studio_required"` and a `studioUrl` ("open the studio to render"); no job
   is created. Jobs are durable (running/completed/failed/cancelled) with a per-job timeout,
   cancellation, per-account daily render limits, and explicit failure when the tab disconnects
-  or the server restarts mid-render. No partial artifact is ever published.
+  or the server restarts mid-render. Artifacts are published atomically (all payloads validated +
+  SHA-256 re-checked before any row is inserted); render and status results carry signed download URLs.
 - **Artifacts.** WAV/MIDI bytes live on disk under `<dataDir>/mcp-artifacts/`, metadata +
   provenance (renderer version, source revision, SoundFont, normalized params, SHA-256) in
   SQLite. Downloads use short-lived signed URLs (`MCP_ARTIFACT_URL_TTL_SEC`, default 15 min)
   via `GET /api/mcp/artifacts/:id` with Range streaming; the endpoint also accepts a Bearer
-  token or the website session and re-checks ownership at access time. Large audio is never
-  inlined into MCP responses.
+  token or the website session and re-checks ownership at access time. Completed
+  `gbk_render_composition` / `gbk_get_render_status` responses carry the signed URLs directly
+  in their artifact entries — call `gbk_get_artifacts` when you need fresh ones after expiry.
+  Large audio is never inlined into MCP responses.
 - **MCP Apps UI.** `gbk_show_composition_ui` renders `ui://gbk/composer.html`
   (`text/html;profile=mcp-app`): audio player with seek, tick-accurate piano roll fed by the
   authoritative project, section markers, CC11 lanes, track list, WAV/MIDI downloads and an

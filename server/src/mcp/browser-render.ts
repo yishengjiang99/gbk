@@ -18,6 +18,7 @@ import { parseWavHeader } from "../../../src/audio/audio-validation.ts";
 import { McpStore, type RenderJobRow, type CompositionRow } from "./store.ts";
 import { McpError } from "./errors.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
+import { signArtifactUrl } from "./urls.ts";
 
 export interface RenderConfig {
   sampleRate: 44100 | 48000; channels: 1 | 2; format: "pcm16" | "float32";
@@ -138,7 +139,7 @@ export class RenderService {
       progress: job.progress, config: JSON.parse(job.config_json) as RenderConfig & { executor: string; rendererVersion: string },
       error: job.error ? JSON.parse(job.error) as { code: string; message: string } : null,
       createdAt: new Date(job.created_at).toISOString(), finishedAt: job.finished_at ? new Date(job.finished_at).toISOString() : null,
-      artifacts: artifacts.map((a) => ({ artifactId: a.id, kind: a.kind, filename: a.filename, mimeType: a.mime_type, sizeBytes: a.size_bytes, sha256: a.sha256, meta: JSON.parse(a.meta_json) })),
+      artifacts: artifacts.map((a) => { const s = signArtifactUrl(this.cfg, a.id); return { artifactId: a.id, kind: a.kind, filename: a.filename, mimeType: a.mime_type, sizeBytes: a.size_bytes, sha256: a.sha256, downloadUrl: s.url, downloadUrlExpiresAt: s.expiresAt, meta: JSON.parse(a.meta_json) }; }),
     };
   }
 
