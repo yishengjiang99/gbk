@@ -28,19 +28,19 @@ grants nothing, and `readAccessToken` cannot edit, render or publish.
   keep a guest project, a signed-in user can call `gbk_claim_composition` with
   the edit token. Delete only on explicit request: `gbk_delete_composition`.
 
-## Rendering without an account (browser only)
+## Where audio is rendered
 
-The server never synthesizes audio. For account-free projects
-`gbk_render_composition` returns `status: "browser_render"`: the MIDI file is
-ready immediately (signed `downloadUrl` in `artifacts`), and audio is rendered
-in the user's browser through `browserRender`:
-
-1. Call `gbk_show_composition_ui` (with the token) so the in-chat player plays
-   and renders the piece locally, or
-2. give the user `browserRender.studioUrl` — a private read-only GBK Studio
-   link where they can play and export WAV in their browser.
-
-Never claim a WAV exists unless a `wav` artifact is listed.
+`gbk_render_composition` works without a browser. When no GBK Studio tab is
+connected (Codex, account-free projects, any headless client) or you pass
+`headless: true`, GBK renders the WAV on its server with the same SoundFont
+engine and always exports the MIDI file too. The call waits up to
+`waitSeconds` (default 50) and returns `status: "completed"` with signed
+`downloadUrl`s for the `wav` and `midi` artifacts; otherwise poll
+`gbk_get_render_status`. Server renders are capped (guests 180 s, accounts
+300 s including the tail, a few per hour, one at a time per project);
+`QUOTA_EXCEEDED` says which limit was hit. Signed-in users with an open Studio
+tab render there. In ChatGPT, the in-chat player (`gbk_show_composition_ui`,
+**Render** button) is an alternative that renders in the user's browser.
 
 ## Available tools
 
@@ -66,13 +66,11 @@ Never claim a WAV exists unless a `wav` artifact is listed.
    user asked for something else.
 2. **Submit the render.** Call `gbk_render_composition` with the
    `compositionId` (the render pins that saved revision). Keep the returned
-   `jobId`. Account-free projects get `browser_render` (see above): call
-   `gbk_show_composition_ui` (pass the accessToken) and tell the user to press
-   **Render** in the in-chat player. For signed-in users with no GBK Studio tab
-   connected, the result is `status: "studio_required"`: likewise show the
-   in-chat player and have the user press **Render**: it renders, plays and
-   saves the WAV (and MIDI) right in the chat with no Studio tab. Opening the
-   `studioUrl` signed in and submitting again also works.
+   `jobId`. With no Studio tab connected, the server renders it (see above).
+   Only if the deployment turned server rendering off do you get
+   `browser_render` (guests) or `studio_required` (accounts): then show the
+   in-chat player (`gbk_show_composition_ui`) and have the user press
+   **Render**.
 3. **Poll appropriately.** If the job is not complete, poll
    `gbk_get_render_status` with increasing waits (use `waitSeconds` /
    backoff rather than rapid repeated calls) until it reaches `completed`

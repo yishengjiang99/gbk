@@ -23,14 +23,28 @@ open the same composition in GBK Studio afterwards.
 - **Durable state.** Compositions live in SQLite (`mcp.sqlite` in `COMPOSER_DATA_DIR`) with a
   full revision snapshot per edit. Edits require `expectedRevision`; conflicts return
   `STALE_REVISION` with the current revision. Mutating calls accept `idempotencyKey`.
-- **Rendering in the browser.** The server never synthesizes audio. `gbk_render_composition`
-  pins the revision snapshot, creates a durable job and hands it over the existing browser
+- **Headless server rendering (default with no Studio tab).** When no Studio tab is connected, or
+  the client passes `headless: true`, `gbk_render_composition` renders on the server: a worker-thread
+  pool (`server/src/mcp/server-render.ts` -> `render-worker.ts`, bundled as
+  `server/dist/render-worker.mjs`) runs `renderProjectOffline` with the app's own SF2 engine on a
+  Node OfflineEnv (`src/audio/node-offline-env.ts`), so the event loop never blocks. Output: WAV
+  (44.1 kHz stereo PCM16, loudness-normalized by default) and an SMF type 1 MIDI file (always),
+  published through the same SHA-256 / header / validation checks, returned as signed URLs (never
+  bytes). The call waits up to `waitSeconds` (default 50). Limits (env, default): `SERVER_RENDER_GUEST_MAX_SECONDS`
+  180, `SERVER_RENDER_ACCOUNT_MAX_SECONDS` 300 (including tail), `SERVER_RENDER_CONCURRENCY` 1 worker,
+  `SERVER_RENDER_MAX_QUEUE` 8, one queued/running server render per owner (guest project or account),
+  `SERVER_RENDER_GUEST_PER_HOUR` 6 per guest project, `SERVER_RENDER_ACCOUNT_PER_HOUR` 30,
+  `SERVER_RENDER_GUEST_PER_CLIENT_PER_DAY` 30 per network (salted IP hash), plus the existing daily
+  render caps; `SERVER_RENDER_TIMEOUT_MS` 180000 (worker terminated and replaced),
+  `SERVER_RENDER_WORKER_HEAP_MB` 768. Off switch: `SERVER_RENDER=0` (then guests get the MIDI +
+  `browser_render` handoff and accounts `studio_required`). Covered by `server/test/mcp-server-render.test.ts`.
+- **Rendering in the Studio tab.** For a signed-in user with a connected Studio tab,
+  `gbk_render_composition` pins the revision snapshot, creates a durable job and hands it over the existing browser
   WebSocket bridge to the user's connected, signed-in GBK Studio tab (`gbk_mcp_render_job`).
   The tab runs `renderProjectOffline` (the Studio's own SF2 engine), uploads the WAV in chunks
   with a per-job capability token, and the server verifies SHA-256, the WAV header and the
-  renderer's validation before publishing WAV + MIDI artifacts. With no tab connected the tool
-  returns `status: "studio_required"` and a `studioUrl` ("open the studio to render"), and points
-  to the in-chat player; no job is created.
+  renderer's validation before publishing WAV + MIDI artifacts. With no tab connected it renders on
+  the server (above); only with `SERVER_RENDER=0` does it return `status: "studio_required"`.
 - **Rendering in the in-chat player (no Studio tab).** The player (`gbk_show_composition_ui`) has a
   Render button. It calls the app-only tool `gbk_widget_render_start` (job + capability token),
   loads `/api/mcp/widget/gbk-widget-render.js` (built by `scripts/build-widget.mjs` from
@@ -86,11 +100,11 @@ Scopes: `gbk:compositions.read`, `gbk:compositions.write`, `gbk:renders.create`,
   capabilities cannot edit, render or publish (`INSUFFICIENT_SCOPE`). Anonymous list is empty.
 - Studio links (`/s/<slug>#access=<readAccessToken>`) carry only the read capability, in the fragment;
   the page sends it as `x-gbk-project-token` (redacted from logs). Publish URLs carry none.
-- Rendering is browser-only. A guest `gbk_render_composition` exports the MIDI on the server (no audio)
-  and returns `status: "browser_render"` with `browserRender` = { `widgetTool`, `studioUrl`,
+- Guest renders run on the server (headless, above). With `SERVER_RENDER=0` a guest
+  `gbk_render_composition` exports the MIDI only and returns `status: "browser_render"` with `browserRender` = { `widgetTool`, `studioUrl`,
   `snapshotUrl` (`GET /api/mcp/guest/snapshot`, header `x-gbk-project-token`), `readAccessToken` } so
   the in-chat player or a Studio tab renders WAV locally. `server/test/mcp-guest.test.ts` asserts the
-  server never constructs an audio context and imports no synthesis module.
+  main thread never constructs an audio context; synthesis modules are imported only by the render worker.
 - Limits (env, defaults): `MCP_GUEST_MAX_SECONDS` 180, `MCP_GUEST_MAX_BARS` 64, `MCP_GUEST_MAX_EVENTS`
   20000, `MCP_GUEST_MAX_REVISIONS` 100, `MCP_GUEST_RENDERS_PER_DAY` 20 per project, durable global
   rolling-24h `MCP_GUEST_CREATES_PER_DAY` 200 and `MCP_GUEST_MUTATIONS_PER_DAY` 2000,
@@ -105,8 +119,8 @@ Scopes: `gbk:compositions.read`, `gbk:compositions.write`, `gbk:renders.create`,
 - DoS bounds: per-client create cap `MCP_GUEST_CREATES_PER_CLIENT_PER_DAY` (default 20, keyed by a salted
   hash of the IP, checked before the global budget so one client cannot drain it), 60 anonymous calls
   per IP per minute (429), global create/edit budgets, 2000-session cap (429), storage cap
-  (`QUOTA_EXCEEDED` before anything is written). Guests have no server render queue: a guest render
-  request only serializes MIDI and completes immediately, so it cannot occupy queue depth. Covered by
+  (`QUOTA_EXCEEDED` before anything is written). Guest server renders share the bounded render
+  queue with one in flight per project and the per-network daily cap above. Covered by
   `server/test/mcp-guest.test.ts`.
 
 ## Funnel analytics

@@ -27,7 +27,8 @@ import { FunnelStore } from "./persistence/funnel.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
 import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
-import { RenderService } from "./mcp/browser-render.ts";
+import { RenderService, resolveSoundFontPath } from "./mcp/browser-render.ts";
+import { ServerRenderPool } from "./mcp/server-render.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
@@ -77,21 +78,24 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     try { const g = resolveGuestCapability(cfg, mcpStore, token); return g.compositionId === projectId && g.user === owner; } catch { return false; }
   });
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
-  // MCP renders run in the user's connected Studio tab over the browser bridge; the server never synthesizes.
-  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { const e = o as { evt?: string; executor?: string }; if (e.evt === "mcp_render_completed") funnel.bump("browser_render_completed", e.executor === "widget" ? "widget" : "studio-tab"); app.log.info(o); }, (u) => limits.for(u).dailyRenders);
+  // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless
+  // clients) they run on the server in worker threads (SERVER_RENDER=0 turns that off).
+  const serverPool = new ServerRenderPool(cfg, () => resolveSoundFontPath(cfg), (o) => app.log.info(o));
+  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { const e = o as { evt?: string; executor?: string }; if (e.evt === "mcp_render_completed" && e.executor !== "server") funnel.bump("browser_render_completed", e.executor === "widget" ? "widget" : "studio-tab"); app.log.info(o); }, (u) => limits.for(u).dailyRenders, serverPool);
   // Migration from invite-code login: every access-code user and every existing song/composition owner becomes an
   // established account with the same id, so their songs, compositions and OAuth grants keep working unchanged.
   const legacy = new Set([...cfg.security.accessCodes.map((e) => { const i = e.indexOf(":"); return (i > 0 ? e.slice(0, i) : "user").replace(/[^\w.-]/g, "").slice(0, 40) || "user"; }), ...shares.owners(), ...mcpStore.owners()]);
   let migrated = 0; for (const u of legacy) if (!isGuest(u) && accounts.ensureLegacy(u)) migrated++;
   if (migrated) app.log.info({ evt: "accounts_migrated", count: migrated });
   await mcpRenders.start();
+  if (process.env.NODE_ENV === "production") void serverPool.start(); // warm the workers + SoundFont at boot
   // Artifact expiry: bytes + rows past MCP_ARTIFACT_RETENTION_DAYS are deleted at startup and hourly.
   const prune = () => { try { const n = mcpStore.pruneArtifacts(cfg.mcp.artifactRetentionDays); if (n) app.log.info({ evt: "mcp_artifacts_pruned", count: n }); } catch (e) { app.log.warn({ evt: "mcp_artifact_prune_failed", message: (e as Error).message }); } };
   prune(); const pruneTimer = setInterval(prune, 3_600_000); pruneTimer.unref();
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
   const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); } };
+    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);

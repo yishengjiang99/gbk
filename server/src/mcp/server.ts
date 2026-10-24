@@ -4,7 +4,7 @@
 // canonical gbk_* registry stays the musical engine underneath (via the service); it is NOT mirrored 1:1
 // here, so ChatGPT/Codex get deterministic operations, durable revisions and artifacts. Rendering runs in the in-chat player
 // (gbk_widget_render_*, ui.ts) or is delegated to the user's
-// connected Studio tab over the browser bridge (browser-render.ts); the server never synthesizes audio.
+// connected Studio tab over the browser bridge (browser-render.ts); with no tab, it renders headlessly on the server (server-render.ts).
 //
 // Every tool returns structuredContent plus a JSON text fallback, uses typed domain errors, and enforces
 // per-tool OAuth scopes. Mutating tools accept idempotencyKey: a replay with the same key + same request
@@ -23,6 +23,7 @@ import { composerUiHtml, COMPOSER_UI_URI } from "./ui.ts";
 import { MCP_SERVER_VERSION } from "./service-meta.ts";
 import type { FunnelEvent, FunnelStore } from "../persistence/funnel.ts";
 
+const SERVER_RENDER_DEFAULT_WAIT_S = 50;
 const TOOL_EVENTS: Record<string, FunnelEvent> = { gbk_create_composition: "create", gbk_edit_composition: "edit", gbk_render_composition: "render_requested", gbk_claim_composition: "claim", gbk_publish_composition: "publish", gbk_delete_composition: "delete" };
 import { guestCapability, guestOwner, resolveGuestCapability, GUEST_EDIT_SCOPES } from "./guest.ts";
 
@@ -208,13 +209,14 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- rendering --------------------------------------------------------------------------------------
   server.registerTool("gbk_render_composition", {
-    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV plus a Standard MIDI File. The server never synthesizes audio. Without sign-in (accessToken): MIDI is exported immediately and status is browser_render with a browserRender handoff (in-chat player via gbk_show_composition_ui, or a read-only Studio link) where audio renders in the user's browser. Signed-in: synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required. Then prefer the in-chat player: call gbk_show_composition_ui and tell the user to press Render in the player (it renders, plays and saves the WAV in their browser, no Studio tab or sign-in needed); opening studioUrl and calling again also works. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
+    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV (44.1 kHz stereo PCM16, loudness-normalized by default) plus a Standard MIDI File, returned as signed download URLs with metadata (never audio bytes). Works without a browser: when no GBK Studio tab is connected (Codex, guests with an accessToken, any headless client) or headless is true, GBK renders it on the GBK server with the same SF2 engine and waits up to waitSeconds (default 50) for the result; if it is still running, poll gbk_get_render_status. Signed-in users with a connected Studio tab render there. Server renders are limited in length (guests 180 s, accounts 300 s), rate and concurrency; QUOTA_EXCEEDED explains which. In ChatGPT the in-chat player (gbk_show_composition_ui, Render button) is an alternative that renders in the user's browser.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
       sampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(), channels: z.union([z.literal(1), z.literal(2)]).optional(),
       format: z.enum(["pcm16", "float32"]).optional(), normalize: z.enum(["loudness", "peak", "off"]).optional(),
       targetLufs: z.number().min(-40).max(-5).optional().describe("Loudness target (default -16 LUFS, peak ceiling -1 dBTP)"),
       tailSeconds: z.number().min(0).max(30).optional(), includeMidi: z.boolean().optional(),
-      waitSeconds: z.number().min(0).max(120).optional(), idempotencyKey: IDEMPOTENCY },
+      headless: z.boolean().optional().describe("Render on the GBK server even if a Studio tab is connected (for clients without a browser)"),
+      waitSeconds: z.number().min(0).max(120).optional().describe(`Wait up to this long for completion (server renders default to ${SERVER_RENDER_DEFAULT_WAIT_S} s)`), idempotencyKey: IDEMPOTENCY },
     annotations: annotations(false),
   }, async (a) => run("gbk_render_composition", "gbk:renders.create", a as Record<string, unknown>, async (p) => {
     const user = p!.user;
@@ -229,17 +231,28 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     const row = service.getRow(user, a.compositionId);
     const config: RenderConfig = { ...DEFAULT_RENDER_CONFIG, sampleRate: a.sampleRate ?? 44100, channels: a.channels ?? 2, format: a.format ?? "pcm16",
       normalize: a.normalize ?? "loudness", targetLufs: a.targetLufs, tailSeconds: a.tailSeconds ?? 3, includeMidi: a.includeMidi ?? true };
+    const serverJob = async (guest: boolean) => {
+      const job = renders.submitServer(user, { ...row, revision: rowRev }, snapshot, config, { guest, client: ctx.auth.client, ...(guest ? { perDay: cfg.mcp.guestRendersPerDay } : {}) });
+      const final = await renders.waitFor(user, job.id, (a.waitSeconds ?? SERVER_RENDER_DEFAULT_WAIT_S) * 1000);
+      return { ...renders.jobView(user, final), renderedOn: "server",
+        ...(final.status === "completed" ? { message: "Rendered on the GBK server. Give the user the wav and midi artifact downloadUrl values exactly as returned; never paste audio bytes." }
+          : final.status === "failed" || final.status === "cancelled" ? {} : { next: "Poll gbk_get_render_status with this jobId (waitSeconds up to 120) until status is completed/failed/cancelled." }) };
+    };
     if (p!.via === "guest") {
-      // Account-free: the server never synthesizes. Export MIDI now; audio renders in the user's browser.
+      if (renders.serverRenderEnabled) return serverJob(true);
+      // Server rendering turned off (SERVER_RENDER=0): export MIDI now; audio renders in the user's browser.
       const job = renders.midiOnlyJob(user, { ...row, revision: rowRev }, snapshot, config, service.exportMidi(snapshot), cfg.mcp.guestRendersPerDay);
       return { ...renders.jobView(user, job), status: "browser_render", audio: "not rendered on the server",
         browserRender: browserRenderFor(user, row.id, rowRev),
-        message: "MIDI is ready (signed download URL in artifacts). Audio renders only in a browser: call gbk_show_composition_ui to play/render it in the in-chat player, or give the user browserRender.studioUrl (read-only private link) to open GBK Studio and play or export WAV there. Never claim a WAV exists until one is listed." };
+        message: "MIDI is ready (signed download URL in artifacts). Server rendering is off on this deployment, so audio renders only in a browser: call gbk_show_composition_ui to play/render it in the in-chat player, or give the user browserRender.studioUrl (read-only private link) to open GBK Studio and play or export WAV there. Never claim a WAV exists until one is listed." };
     }
-    const sub = renders.submit(user, { ...row, revision: rowRev }, snapshot, config);
-    if ("studioRequired" in sub) return { status: "studio_required", compositionId: a.compositionId, revision: rowRev, studioUrl: sub.studioUrl,
-      inChatPlayer: { tool: "gbk_show_composition_ui", compositionId: a.compositionId },
-      message: `Rendering runs in your browser and no GBK Studio tab is connected. Easiest: show the in-chat player (gbk_show_composition_ui) and press Render there - it renders, plays and saves the WAV right in this chat. Alternatively open the studio (${sub.studioUrl}), keep it open signed in, and call gbk_render_composition again.` };
+    const sub = a.headless && renders.serverRenderEnabled ? null : renders.submit(user, { ...row, revision: rowRev }, snapshot, config);
+    if (!sub || "studioRequired" in sub) {
+      if (renders.serverRenderEnabled) return serverJob(false);
+      return { status: "studio_required", compositionId: a.compositionId, revision: rowRev, studioUrl: sub!.studioUrl,
+        inChatPlayer: { tool: "gbk_show_composition_ui", compositionId: a.compositionId },
+        message: `Server rendering is off on this deployment and no GBK Studio tab is connected. Show the in-chat player (gbk_show_composition_ui) and press Render there, or open the studio (${sub!.studioUrl}), keep it open signed in, and call gbk_render_composition again.` };
+    }
     const job = sub.job;
     let final = job;
     if (a.waitSeconds) final = await renders.waitFor(user, job.id, a.waitSeconds * 1000);

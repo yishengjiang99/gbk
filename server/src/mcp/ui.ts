@@ -2,7 +2,7 @@
 // Single HTML document, vanilla JS. The only external resources are on our own origin (declared in the resource CSP):
 // the renderer bundle + SF2 AudioWorklet (/api/mcp/widget/*, loaded on demand when the user presses Render), the
 // SoundFont, and the render-job snapshot/upload endpoints. Render synthesizes the WAV in the user's browser with the
-// canonical OfflineAudioContext path (src/widget/widget-render.ts -> src/audio/offline-context.ts); the server never does.
+// canonical OfflineAudioContext path (src/widget/widget-render.ts -> src/audio/offline-context.ts). Headless MCP clients render on the server instead (server-render.ts).
 // Served by the MCP server as COMPOSER_UI_URI and rendered inside ChatGPT /
 // other MCP Apps hosts. Data arrives via the ui/* postMessage bridge
 // (ui/notifications/tool-result, structuredContent) with a window.openai

@@ -32,7 +32,7 @@ async function fugue(mcp: McpClient): Promise<Created> {
 }
 
 test("A: composition with no tab; render asks to open the studio, then renders in the connected Studio tab; artifacts download and verify", async () => {
-  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1", SERVER_RENDER: "0" });
   try {
     assert.equal(s.hub.registry.size, 0, "no browser clients connected (Test C precondition)");
     const alice = asUser(s, "alice"); await alice.initialize();

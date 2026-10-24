@@ -18,7 +18,7 @@ export interface Config {
     enabled: boolean;
     /** Local test auth (x-gbk-test-user header / Bearer test:<user>). Refused outright in production. */
     testAuth: boolean;
-    /** Absolute path to the bundled .sf2 (read for preset/instrument metadata only; never synthesized on the server). Empty = auto-detect. */
+    /** Absolute path to the bundled .sf2 (preset/instrument metadata and the headless server renderer). Empty = auto-detect. */
     soundFontPath: string;
     renderTimeoutMs: number; maxRenderSeconds: number;
     /** Per-user caps that bound render cost. */
@@ -41,6 +41,9 @@ export interface Config {
     /** Per-client creation cap (rolling 24h, keyed by a salted hash of the client IP), far below the global cap. */
     guestCreatesPerClientPerDay: number;
   };
+  /** Headless server-side rendering for MCP clients without a Studio tab. SERVER_RENDER=0 turns it off. */
+  serverRender: { enabled: boolean; concurrency: number; maxQueue: number; timeoutMs: number; workerHeapMb: number;
+    guestMaxSeconds: number; accountMaxSeconds: number; guestPerHour: number; accountPerHour: number; guestPerClientPerDay: number };
 }
 
 const num = (v: string | undefined, d: number) => { const n = Number(v); return v !== undefined && v !== "" && Number.isFinite(n) ? n : d; };
@@ -101,6 +104,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       guestMaxStorageBytes: Math.max(1, num(env.MCP_GUEST_MAX_STORAGE_BYTES, 256 * 1024 ** 2)),
       guestCallsPerMinute: Math.max(1, Math.floor(num(env.MCP_GUEST_CALLS_PER_MINUTE, 60))),
       guestCreatesPerClientPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_CLIENT_PER_DAY, 20))),
+    },
+    serverRender: {
+      enabled: env.SERVER_RENDER !== "0",
+      concurrency: Math.max(1, Math.floor(num(env.SERVER_RENDER_CONCURRENCY, 1))),
+      maxQueue: Math.max(0, Math.floor(num(env.SERVER_RENDER_MAX_QUEUE, 8))),
+      timeoutMs: Math.max(1000, num(env.SERVER_RENDER_TIMEOUT_MS, 180_000)),
+      workerHeapMb: Math.max(64, num(env.SERVER_RENDER_WORKER_HEAP_MB, 768)),
+      guestMaxSeconds: Math.max(1, num(env.SERVER_RENDER_GUEST_MAX_SECONDS, 180)),
+      accountMaxSeconds: Math.max(1, num(env.SERVER_RENDER_ACCOUNT_MAX_SECONDS, 300)),
+      guestPerHour: Math.max(1, Math.floor(num(env.SERVER_RENDER_GUEST_PER_HOUR, 6))),
+      accountPerHour: Math.max(1, Math.floor(num(env.SERVER_RENDER_ACCOUNT_PER_HOUR, 30))),
+      guestPerClientPerDay: Math.max(1, Math.floor(num(env.SERVER_RENDER_GUEST_PER_CLIENT_PER_DAY, 30))),
     },
   };
 }

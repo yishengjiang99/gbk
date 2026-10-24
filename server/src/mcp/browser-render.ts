@@ -1,4 +1,5 @@
-// RenderService: MCP render jobs executed in the user's connected GBK Studio tab, never on the server.
+// RenderService: MCP render jobs executed in the user's connected GBK Studio tab, the in-chat player, or (no tab /
+// headless clients) on the server in a worker thread (server-render.ts; SERVER_RENDER=0 turns that off).
 //
 // The server holds durable job state and the pinned snapshot; synthesis happens in the browser with the same
 // canonical offline renderer the Studio uses. Flow:
@@ -19,6 +20,8 @@ import { McpStore, type RenderJobRow, type CompositionRow } from "./store.ts";
 import { McpError } from "./errors.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
 import { signArtifactUrl } from "./urls.ts";
+import type { ServerRenderPool } from "./server-render.ts";
+import { tickToSec } from "../../../src/workstation/timing.ts";
 
 export interface RenderConfig {
   sampleRate: 44100 | 48000; channels: 1 | 2; format: "pcm16" | "float32";
@@ -28,7 +31,7 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = { sampleRate: 44100, channels
 export const BROWSER_RENDER_TOOL = "gbk_mcp_render_job";
 export const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
-/** The bundled SoundFont (read server-side only for preset/instrument metadata, never for synthesis). */
+/** The bundled SoundFont (preset metadata, and the headless server renderer). */
 export function resolveSoundFontPath(cfg: Config): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [cfg.mcp.soundFontPath, join(process.cwd(), "dist", "static", "GeneralUser-GS.sf2"), join(process.cwd(), "public", "static", "GeneralUser-GS.sf2"),
@@ -61,7 +64,52 @@ export class RenderService {
   private active = new Map<string, Active>();
   private waiters = new Map<string, Set<{ owner: string; fn: Waiter }>>();
   constructor(private cfg: Config, private store: McpStore, private studio: StudioLookup, private log: (o: object) => void = () => {},
-    private rendersPerDay: (owner: string) => number = () => cfg.mcp.maxRendersPerDay) {}
+    private rendersPerDay: (owner: string) => number = () => cfg.mcp.maxRendersPerDay, private serverPool?: ServerRenderPool) {}
+  private recentServer = new Map<string, number[]>();
+
+  /** True when headless server rendering is available (SERVER_RENDER is not 0 and the pool exists). */
+  get serverRenderEnabled() { return !!this.serverPool?.enabled; }
+
+  /**
+   * Render on the server (headless worker thread, app's own SF2 engine) for clients with no Studio tab: Codex, guests,
+   * any browserless MCP client. Same job row, verification and atomic WAV + MIDI publication as the browser paths;
+   * MIDI is always exported. Limits: duration, per-owner hourly rate + one in flight, per-network daily cap for
+   * guests, bounded queue and a hard timeout (ServerRenderPool).
+   */
+  submitServer(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, o: { guest: boolean; client?: string; perDay?: number }): RenderJobRow {
+    const pool = this.serverPool;
+    if (!pool?.enabled) throw new McpError("WORKER_UNAVAILABLE", "server rendering is turned off on this deployment");
+    const sr = this.cfg.serverRender;
+    const maxSeconds = o.guest ? sr.guestMaxSeconds : sr.accountMaxSeconds;
+    const seconds = tickToSec(snapshot, snapshot.endTick) + (config.tailSeconds ?? 3);
+    if (!Number.isFinite(seconds) || seconds > maxSeconds) throw new McpError("QUOTA_EXCEEDED", `server renders are limited to ${maxSeconds} s (this one is ${Math.round(seconds)} s including the tail); shorten the piece or render it in GBK Studio`);
+    const perDay = o.perDay ?? this.rendersPerDay(owner);
+    if (this.store.countJobsSince(owner, 86_400_000) >= perDay) throw new McpError("QUOTA_EXCEEDED", `daily render limit reached (${perDay})`);
+    const now = Date.now(), perHour = o.guest ? sr.guestPerHour : sr.accountPerHour;
+    const recent = (this.recentServer.get(owner) ?? []).filter((t) => t > now - 3_600_000);
+    if (recent.length >= perHour) throw new McpError("QUOTA_EXCEEDED", `server render rate limit reached (${perHour} per hour); retry later`);
+    if (pool.inFlight(owner) > 0) throw new McpError("QUOTA_EXCEEDED", "a server render for this project/account is already running; wait for it (gbk_get_render_status) before starting another");
+    if (pool.depth() >= sr.concurrency + sr.maxQueue) throw new McpError("QUOTA_EXCEEDED", "the server render queue is full; retry in a minute");
+    if (o.guest && !this.store.takeGuestBudget(`server-render:${o.client ?? "unknown"}`, sr.guestPerClientPerDay)) throw new McpError("QUOTA_EXCEEDED", `account-free server render limit for this network reached (${sr.guestPerClientPerDay} per day); retry tomorrow or sign in`);
+    recent.push(now); this.recentServer.set(owner, recent);
+    const cfgFull: RenderConfig = { ...config, includeMidi: true };
+    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...cfgFull, executor: "server", rendererVersion: RENDERER_VERSION } });
+    mkdirSync(this.store.artifactsDir, { recursive: true });
+    const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config: cfgFull, tokenHash: hash(randomBytes(24).toString("base64url")), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
+    this.active.set(job.id, a);
+    this.store.patchJob(job.id, { status: "running", progress: 0 });
+    const options = { sampleRate: cfgFull.sampleRate, channels: cfgFull.channels, format: cfgFull.format, normalize: cfgFull.normalize, targetLufs: cfgFull.targetLufs, tailSeconds: cfgFull.tailSeconds ?? 3, maxSeconds,
+      timeoutMs: sr.timeoutMs, stallMs: sr.timeoutMs };
+    this.log({ evt: "mcp_server_render_started", user: owner, jobId: job.id, compositionId: row.id, revision: row.revision, seconds: Math.round(seconds) });
+    pool.run(job.id, owner, a.snapshot, options, (x) => { if (this.active.has(job.id)) this.store.patchJob(job.id, { progress: Math.max(0, Math.min(0.99, x)) }); })
+      .then((r) => {
+        if (!this.active.has(job.id)) return;
+        writeFileSync(a.partPath, r.bytes); a.received = r.bytes.length;
+        try { this.completeJob(a, r.meta); } catch (e) { this.failJob(job.id, (e as McpError).code ?? "RENDER_FAILED", (e as Error).message); }
+      })
+      .catch((e: { code?: string; message?: string }) => { if (this.active.has(job.id)) this.failJob(job.id, e.code ?? "RENDER_FAILED", e.message ?? "server render failed"); });
+    return this.store.getJob(job.id, owner)!;
+  }
 
   /** Jobs still queued from before a restart lost their Studio-tab handoff: fail them explicitly (never stuck). */
   async start() {
@@ -102,8 +150,8 @@ export class RenderService {
   }
 
   /**
-   * Guest (account-free) render request. There is no account to route a Studio tab to, and the server never
-   * synthesizes, so this records a job, publishes the server-serialized MIDI (validated SMF; no audio), and
+   * Guest render request when server rendering is off (SERVER_RENDER=0). There is no account to route a Studio tab
+   * to, so this records a job, publishes the server-serialized MIDI (validated SMF; no audio), and
    * leaves audio to the browser: the in-chat player or a Studio tab opened from the private read-only link.
    */
   midiOnlyJob(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, midi: Uint8Array, perDay: number): RenderJobRow {
@@ -127,7 +175,7 @@ export class RenderService {
   /**
    * Start a render that the ChatGPT in-chat player (MCP Apps widget, ui.ts) performs in the user's browser - no Studio
    * tab or sign-in needed there. Same job row, capability token, snapshot/upload endpoints and validation as the Studio
-   * path; the widget reports completion with finishWidget(). The server still never synthesizes audio.
+   * path; the widget reports completion with finishWidget().
    */
   submitWidget(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, perDay?: number) {
     const limit = perDay ?? this.rendersPerDay(owner);
@@ -182,6 +230,7 @@ export class RenderService {
   cancel(owner: string, jobId: string): RenderJobRow {
     const j = this.status(owner, jobId);
     if (["completed", "failed", "cancelled"].includes(j.status)) return j;
+    this.serverPool?.cancel(jobId);
     this.finish(jobId, "cancelled", null);
     return this.status(owner, jobId);
   }

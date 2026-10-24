@@ -6,9 +6,10 @@ modify individual passages, control expression, and export WAV and MIDI.
 
 This package connects ChatGPT and Codex to the GBK Composer remote MCP
 server at `https://compose.grepawk.com/mcp`. Compositions are created and
-stored server-side; WAV/MIDI renders run in your own signed-in GBK Studio
-browser tab at <https://compose.grepawk.com> (the server never synthesizes
-audio — with no tab open, the render tool returns an open-the-studio link).
+stored server-side. WAV/MIDI renders run on the GBK server when the client has
+no browser (Codex, account-free projects), in the ChatGPT in-chat player, or
+in a signed-in GBK Studio tab at <https://compose.grepawk.com>. Results come
+back as signed download links, never as audio bytes.
 
 ## Package contents
 
@@ -88,8 +89,10 @@ clients using the declaration in `mcp.json`.
 - Limits: global daily create/edit budgets, per-project revision and render
   request limits, length/size caps, global guest storage cap, per-IP call
   throttle, 30-day artifact expiry. `MCP_GUEST=0` turns account-free access off.
-- Rendering is browser-only: MIDI is exported on the server, audio renders in
-  the in-chat player or a Studio tab. The server never synthesizes audio.
+- Rendering: with no Studio tab, the server renders WAV + MIDI headlessly with
+  GBK's own SF2 engine in a worker thread (guests 180 s, accounts 300 s max,
+  per-hour and per-network caps, one render at a time per project, queue of 8,
+  3 min timeout). `SERVER_RENDER=0` turns server rendering off.
 
 ### Optional account sign-in (OAuth)
 

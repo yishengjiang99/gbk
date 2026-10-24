@@ -119,7 +119,7 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 | `gbk_get_composition` | true | false | false | Reads one of the user's compositions; no changes. |
 | `gbk_list_compositions` | true | false | false | Lists the user's own compositions; no changes. |
 | `gbk_edit_composition` | false | false | false | Writes a new revision of the user's private composition; earlier revisions are kept, so nothing is lost, and nothing becomes public. |
-| `gbk_render_composition` | false | false | false | Creates a render job: a server-exported MIDI file, plus WAV rendered in the user's own browser (Studio tab or in-chat player). It changes no content and publishes nothing. |
+| `gbk_render_composition` | false | false | false | Creates a render job producing a WAV and a MIDI file, rendered on GBK's server when no Studio tab is connected (or in a connected Studio tab), returned as signed download links. It changes no content and publishes nothing. |
 | `gbk_widget_render_start` / `gbk_widget_render_finish` | false | false | false | App-only (`ui.visibility: ["app"]`), called by the in-chat player's Render button: create the user's own render job and publish the WAV their browser rendered (server verifies SHA-256 and the WAV header) plus a server-built MIDI file; nothing is published publicly. |
 | `gbk_get_render_status` | true | false | false | Reads render job status; no changes. |
 | `gbk_cancel_render` | false | false | false | Stops the user's own queued or running render job; no composition data is deleted and nothing is published. |
@@ -203,8 +203,11 @@ Demo recording (`review.demo_recording_url`): https://yishengjiang99.github.io/g
   `gbk_delete_composition` (edit key required), or on request through support by
   composition id (the key is confirmed privately, never posted). Deletion
   removes the project data and its artifacts from primary storage.
-- **Audio rendering.** GBK's server never synthesizes audio; WAV is
-  rendered in the user's browser.
+- **Audio rendering.** WAV is rendered in the user's browser (in-chat
+  player or GBK Studio) or, for clients without a browser such as Codex, on
+  GBK's own server with the same SoundFont engine. No third-party audio or AI
+  service receives the composition. Server-rendered WAV and MIDI files are
+  stored with the composition and downloaded through private, expiring links.
 - **Model-provider note.** Requests from ChatGPT run GBK's deterministic
   composition engine; they do not invoke GBK's
   website LLM agent, so no additional model-provider processing of the
