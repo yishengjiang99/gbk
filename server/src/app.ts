@@ -23,6 +23,8 @@ import { agentRoutes } from "./routes/agent.ts";
 import { shareRoutes } from "./routes/shares.ts";
 import { clientErrorRoutes } from "./routes/client-errors.ts";
 import { ClientErrorStore } from "./persistence/client-errors.ts";
+import { FunnelStore } from "./persistence/funnel.ts";
+import { funnelRoutes } from "./routes/funnel.ts";
 import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
 import { RenderService } from "./mcp/browser-render.ts";
@@ -59,7 +61,9 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   app.addHook("onSend", async (_req, reply, payload) => { reply.header("x-content-type-options", "nosniff"); if (!reply.getHeader("cache-control")) reply.header("cache-control", "no-store"); return payload; });
   healthRoutes(app, cfg, () => ({ connections: hub.registry.size, activeRuns: hub.activeRuns }), VERSION);
   configRoutes(app, cfg);
-  pageRoutes(app, cfg);
+  const funnel = new FunnelStore(persist ? join(cfg.dataDir, "analytics.sqlite") : ":memory:");
+  pageRoutes(app, cfg, funnel);
+  funnelRoutes(app, cfg, sessions, funnel);
   openaiChallengeRoute(app, cfg.openaiAppsChallenge);
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
   reviewerRoutes(app, cfg, sessions, accounts);
@@ -74,7 +78,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   });
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   // MCP renders run in the user's connected Studio tab over the browser bridge; the server never synthesizes.
-  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => app.log.info(o), (u) => limits.for(u).dailyRenders);
+  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { if ((o as { evt?: string }).evt === "mcp_render_completed") funnel.bump("browser_render_completed", "studio-tab"); app.log.info(o); }, (u) => limits.for(u).dailyRenders);
   // Migration from invite-code login: every access-code user and every existing song/composition owner becomes an
   // established account with the same id, so their songs, compositions and OAuth grants keep working unchanged.
   const legacy = new Set([...cfg.security.accessCodes.map((e) => { const i = e.indexOf(":"); return (i > 0 ? e.slice(0, i) : "user").replace(/[^\w.-]/g, "").slice(0, 40) || "user"; }), ...shares.owners(), ...mcpStore.owners()]);
@@ -85,9 +89,9 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const prune = () => { try { const n = mcpStore.pruneArtifacts(cfg.mcp.artifactRetentionDays); if (n) app.log.info({ evt: "mcp_artifacts_pruned", count: n }); } catch (e) { app.log.warn({ evt: "mcp_artifact_prune_failed", message: (e as Error).message }); } };
   prune(); const pruneTimer = setInterval(prune, 3_600_000); pruneTimer.unref();
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
-  const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, log: (o) => app.log.info(o) });
+  const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); } };
+    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);

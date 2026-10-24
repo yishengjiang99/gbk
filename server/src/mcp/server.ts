@@ -21,6 +21,9 @@ import { McpError, toMcpError } from "./errors.ts";
 import { signArtifactUrl } from "./urls.ts";
 import { composerUiHtml, COMPOSER_UI_URI } from "./ui.ts";
 import { MCP_SERVER_VERSION } from "./service-meta.ts";
+import type { FunnelEvent, FunnelStore } from "../persistence/funnel.ts";
+
+const TOOL_EVENTS: Record<string, FunnelEvent> = { gbk_create_composition: "create", gbk_edit_composition: "edit", gbk_render_composition: "render_requested", gbk_claim_composition: "claim", gbk_publish_composition: "publish", gbk_delete_composition: "delete" };
 import { guestCapability, guestOwner, resolveGuestCapability, GUEST_EDIT_SCOPES } from "./guest.ts";
 
 export interface McpMetrics { calls: number; errors: number; authFailures: number; byTool: Record<string, number> }
@@ -34,7 +37,7 @@ export interface McpMetrics { calls: number; errors: number; authFailures: numbe
 export interface SessionAuth { current: Principal | null; client?: string }
 export interface McpContext {
   cfg: Config; store: McpStore; service: CompositionService; renders: RenderService;
-  auth: SessionAuth; signal: AbortSignal; metrics: McpMetrics;
+  auth: SessionAuth; signal: AbortSignal; metrics: McpMetrics; funnel?: FunnelStore;
   log: (o: object) => void;
 }
 
@@ -97,6 +100,11 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
       accessNote: "No GBK account was used. Keep compositionId + accessToken private and pass accessToken on every follow-up call (it works in new sessions). readAccessToken and the Studio link are read-only. A lost accessToken cannot be recovered." };
   }
 
+  /** Aggregate funnel counter for a successful first execution (replays are not counted). */
+  function track(tool: string, p: Principal | null, out: Record<string, unknown>) {
+    const ev = TOOL_EVENTS[tool]; if (!ev || out.status === "studio_required") return;
+    ctx.funnel?.bump(ev, p?.via === "guest" ? "guest" : "account");
+  }
   async function run<T extends Record<string, unknown>>(tool: string, scope: Scope | null, args: Record<string, unknown>, fn: (p: Principal | null) => Promise<T>): Promise<ReturnType<typeof ok> | ReturnType<typeof fail>> {
     metrics.calls++; metrics.byTool[tool] = (metrics.byTool[tool] ?? 0) + 1;
     try {
@@ -114,10 +122,13 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
         await guestAdmission(tool, scope, p);
         const out = await fn(p);
         store.putIdempotent(p.user, key, tool, reqHash, out);
+        track(tool, p, out);
         return ok(present(tool, p, out));
       }
       await guestAdmission(tool, scope, p);
-      return ok(present(tool, p, await fn(p)));
+      const out = present(tool, p, await fn(p));
+      track(tool, p, out);
+      return ok(out);
     } catch (e) {
       metrics.errors++;
       const me = toMcpError(e);
@@ -151,7 +162,9 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
       style: z.enum(["baroque", "classical", "pop", "jazz", "ambient"]).optional().describe("baroque uses the Bach fugue generator + continuo"),
       mood: z.string().max(120).optional(), key: z.string().max(32).optional().describe("e.g. \"D minor\""),
       tempo: z.number().min(20).max(400).optional().describe("BPM"),
-      timeSignature: z.tuple([z.number().int().min(1).max(32), z.number().int().min(1).max(32)]).optional(),
+      // Array + length rather than a tuple: tuple schemas emit draft-07 array-form "items", which strict tool-calling
+      // APIs (e.g. xAI) reject outright, so the whole tool list would fail to load there.
+      timeSignature: z.array(z.number().int().min(1).max(32)).length(2).optional().describe("[numerator, denominator], e.g. [3, 4]"),
       bars: z.number().int().min(1).max(512).optional(), durationSeconds: z.number().min(5).max(3600).optional().describe("Alternative to bars; converted using tempo and meter"),
       instrumentation: z.array(z.string().max(32)).max(12).optional().describe("Instrument names from gbk_get_capabilities (violin, viola, cello, harpsichord, organ, piano, ...). Repeat a name for multiple voices, e.g. four organs."),
       voices: z.union([z.literal(3), z.literal(4)]).optional(), complexity: z.number().int().min(1).max(5).optional(),

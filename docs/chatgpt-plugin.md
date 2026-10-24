@@ -109,6 +109,29 @@ Scopes: `gbk:compositions.read`, `gbk:compositions.write`, `gbk:renders.create`,
   request only serializes MIDI and completes immediately, so it cannot occupy queue depth. Covered by
   `server/test/mcp-guest.test.ts`.
 
+## Funnel analytics
+
+Server-side, aggregate only (`server/src/persistence/funnel.ts`, `analytics.sqlite`): one row per UTC day, event and coarse
+source with a count, and nothing else (no IP, account id, cookie, prompt, content, id or token; no third-party scripts).
+
+| Event | Counted when | Source |
+| --- | --- | --- |
+| `page_view_chatgpt`, `page_view_legal` | `/chatgpt`, `/privacy`, `/terms` or `/support` is served | — |
+| `page_view_landing` | the site root loads (browser beacon) | `web` |
+| `mcp_connect` | a new MCP session initializes | `guest` / `account` |
+| `create`, `edit`, `render_requested`, `claim`, `publish`, `delete` | the tool succeeds (idempotent replays and `studio_required` are not counted) | `guest` / `account` |
+| `browser_render_completed` | a Studio tab finishes an MCP render, or the Studio/player beacon reports a finished browser render | `studio-tab` / `studio` / `widget` |
+| `midi_download`, `wav_download` | an artifact is fetched in full or from byte 0 | `guest` / `account` |
+
+The browser beacon is `POST /api/funnel {event, source}`. It accepts only `page_view_landing/web` and
+`browser_render_completed/widget|studio`, is limited to 30 per minute per IP in memory, and keeps the IP nowhere.
+The in-chat widget should send `{"event":"browser_render_completed","source":"widget"}` after a successful render.
+
+Read the data:
+- Admin JSON: `GET /api/admin/funnel?days=30` while signed in as a `COMPOSER_ADMIN_USERS` account. It returns totals,
+  bySource, byDay and conversion ratios.
+- CLI on the server: `cd /var/www/gbk-composer/current && sudo -u www-data node --disable-warning=ExperimentalWarning deploy/funnel.mjs --days 30` (add `--json` for raw rows).
+
 ## Optional account authentication
 
 OAuth 2.1 per the MCP authorization spec, with this server as its own authorization server:

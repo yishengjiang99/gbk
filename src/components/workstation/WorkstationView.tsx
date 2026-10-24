@@ -29,6 +29,7 @@ import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { ComposerPanel } from "../composer/ComposerPanel.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
+import { funnelBeacon } from "../../telemetry/funnel.ts";
 import { tickToBarBeat, tickToSec } from "../../workstation/timing.ts";
 
 export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: { onOpenPlayer: () => void; composer?: boolean; onExplore?: () => void }) {
@@ -106,6 +107,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
     const done = await renderJobs().wait(j.id);
     if (done.status !== "completed") throw new Error(`WAV export ${done.status}: ${done.error?.message ?? ""}`);
     const r = renderJobs().result(j.id);
+    funnelBeacon("browser_render_completed", "studio");
     if (r) workstation.host.download?.(r.blob, safeFilename(done.projectName, "wav"));
   });
 
