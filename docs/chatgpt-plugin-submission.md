@@ -48,10 +48,13 @@ human account owner have not been performed by preparing this packet.
 game soundtracks, film cues, ambient music, MIDI orchestration, and music
 programming and experimentation.
 
-**Brand assets:** ICON PLACEHOLDER — the listing icon will be supplied by the owner (`plugins/gbk-composer/assets/icon.png`, then reference it from `plugin.json`). No logo, icon, or screenshot assets are bundled yet (see
-`plugins/gbk-composer/assets/README.md`). Real assets must be supplied by
-the account owner before a public submission that requires them — do not
-submit placeholder or third-party artwork.
+**Brand assets:** `plugins/gbk-composer/assets/icon.png` (512×512, from `icon.svg`) is set as `interface.logo` and `interface.composerIcon`. Brand colors: `#3A2E9E` (light) and `#FFB627` (dark).
+
+**Listing URLs:**
+- Website: https://compose.grepawk.com/chatgpt
+- Privacy policy: https://compose.grepawk.com/privacy
+- Terms of service: https://compose.grepawk.com/terms
+- Support: https://compose.grepawk.com/support (routes to GitHub issues)
 
 ## Test prompts
 
@@ -112,7 +115,7 @@ the human account owner (or a human with the relevant account access):
       endpoint, OAuth endpoints, and render worker to
       `compose.grepawk.com`, and verify `https://compose.grepawk.com/mcp`
       answers an MCP `initialize` request.
-- [ ] **Supply real brand assets** (logo/icon/screenshots), if the target
+- [x] Icon supplied (`assets/icon.png`); screenshots still optional. Supply real brand assets (logo/icon/screenshots), if the target
       directory requires them, and reference them in `plugin.json`.
 - [ ] **Add the custom MCP server in ChatGPT.** In the owner's ChatGPT
       account: Plugins → add custom MCP server → URL

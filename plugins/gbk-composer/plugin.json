@@ -21,7 +21,14 @@
         "displayName": "GBK Composer",
         "longDescription": "GBK Composer writes and edits real MIDI music from a chat. Ask for a piece in one of five styles (baroque, classical, pop, jazz, ambient) with a key, tempo, meter, length and instruments, and GBK builds a structured, multi-track arrangement with a deterministic, seeded engine. Baroque requests use a Bach-style fugue generator with continuo.\n\nFollow-up prompts change one passage without touching the rest: add a melody, bass, walking bass, chords, arpeggio, drums or counterpoint part; transpose, invert, quantize, humanize or vary notes; double a line at the octave; shape dynamics with CC curves such as a CC11 crescendo; and change tempo, instruments or the mix. Every edit is saved as a new revision.\n\nInstruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.\n\nTo hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. WAV and Standard MIDI renders run in your own browser: keep a signed-in GBK Studio tab open at compose.grepawk.com and GBK renders there, then returns download links. If no Studio tab is open, GBK gives you a link to open one.\n\nCompositions are private to your GBK account. GBK publishes a public share page only when you ask it to.",
         "shortDescription": "Compose and edit MIDI music",
-        "websiteURL": "https://compose.grepawk.com"
+        "websiteURL": "https://compose.grepawk.com/chatgpt",
+        "logo": "./assets/icon.png",
+        "composerIcon": "./assets/icon.png",
+        "brandColor": "#3A2E9E",
+        "brandColorDark": "#FFB627",
+        "privacyPolicyURL": "https://compose.grepawk.com/privacy",
+        "termsOfServiceURL": "https://compose.grepawk.com/terms",
+        "supportURL": "https://compose.grepawk.com/support"
       }
     }
   },
