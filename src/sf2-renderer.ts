@@ -11,6 +11,7 @@ import { SF2Effects } from "./sf2/effects.ts";
 import { type VoiceOverride, type EffectsParams, computeOverrideDeltas } from "./sf2/voice-overrides.ts";
 export type { VoiceOverride, EffectsParams } from "./sf2/voice-overrides.ts";
 import { MasterBus, MASTER_GAIN_DEFAULT_DB } from "./sf2/master-bus.ts";
+import { stereoPanGains } from "./audio/orchestra-pan.ts";
 export { MasterBus, MASTER_BUS_DEFAULTS, MASTER_GAIN_DEFAULT_DB, type MasterBusParams } from "./sf2/master-bus.ts";
 
 export type EnvStage = "idle" | "delay" | "attack" | "hold" | "decay" | "sustain" | "release";
@@ -392,6 +393,7 @@ export class Sf2SynthEngine {
     this.inputs = { velocity: 0, key: 0, cc: this.ccs, ccBase: 0, pitchWheel: 8192, pitchWheelSensitivity: 2, channelPressure: 0, polyPressure: 0 };
     this.fx = new SF2Effects(outSr);
     this.master = new MasterBus(outSr);
+    this.faderCoef = 1 - Math.exp(-1 / (0.01 * outSr));
     this.resetChannels();
   }
 
@@ -1047,10 +1049,57 @@ export class Sf2SynthEngine {
   get masterGainDb(): number { return this.masterGainDbValue; }
   set masterGainDb(db: number) { this.masterGainDbValue = db; this.masterGainLin = Math.pow(10, db / 20); }
 
+  // ── Track output stage (non-normative) ─────────────────────────────────────
+  // Per-track orchestra pan + fader, applied AFTER the master bus. This is the in-engine
+  // replacement for the StereoPannerNode -> GainNode pair the realtime graphs used to wire per
+  // track on the main thread: the pan matrix is stereoPanGains (the same stereo-input
+  // StereoPanner law the offline renderer applies post-engine) and the fader approaches its
+  // target with the 10 ms one-pole the GainNode's setTargetAtTime used for mute/solo/fader
+  // moves. Both are linear and sit after the nonlinear master bus, so the composition is the
+  // old node chain exactly. Defaults are identity (pan 0, fader 1) and the identity case is
+  // bit-exact, so headless/offline renders are unchanged. Distinct from per-voice pan
+  // (region/track pan + the CC10 default modulator, linear law), which is untouched.
+  private trackPanValue = 0;
+  private panLL = 1; private panRL = 0; private panLR = 0; private panRR = 1;
+  private trackFaderTarget = 1;
+  private trackFaderValue = 1;
+  /** One-pole step toward the fader target; set in the constructor (needs outSr). */
+  private faderCoef = 0;
+
+  /** Track pan, -1..1 (orchestra seating). Default 0 (center = identity). */
+  get trackPan(): number { return this.trackPanValue; }
+  set trackPan(pan: number) {
+    const p = Math.max(-1, Math.min(1, Number.isFinite(pan) ? pan : 0));
+    if (p === this.trackPanValue) return;
+    this.trackPanValue = p;
+    const g = stereoPanGains(p);
+    this.panLL = g.ll; this.panRL = g.rl; this.panLR = g.lr; this.panRR = g.rr;
+  }
+
+  /** Track fader as a linear gain (the player passes its (volume/100)^2 law already applied). Default 1. */
+  get trackFader(): number { return this.trackFaderTarget; }
+  set trackFader(gain: number) { this.trackFaderTarget = Math.max(0, Number.isFinite(gain) ? gain : 1); }
+  /** Current (smoothed) fader gain — inspection/tests. */
+  get trackFaderCurrent(): number { return this.trackFaderValue; }
+
   private applyMaster(): void {
     const l = this.frameL * this.masterGainLin, r = this.frameR * this.masterGainLin;
     if (this.masterDynamicsEnabled) { this.master.process(l, r); this.frameL = this.master.outL; this.frameR = this.master.outR; }
     else { this.frameL = l; this.frameR = r; }
+    this.applyTrackStage();
+  }
+
+  private applyTrackStage(): void {
+    let f = this.trackFaderValue;
+    if (f !== this.trackFaderTarget) {
+      f += (this.trackFaderTarget - f) * this.faderCoef;
+      if (Math.abs(this.trackFaderTarget - f) < 1e-7) f = this.trackFaderTarget;
+      this.trackFaderValue = f;
+    }
+    if (this.trackPanValue === 0 && f === 1) return;
+    const l = this.frameL, r = this.frameR;
+    this.frameL = (l * this.panLL + r * this.panRL) * f;
+    this.frameR = (l * this.panLR + r * this.panRR) * f;
   }
 
   private mixSends(): void {

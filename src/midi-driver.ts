@@ -1,3 +1,5 @@
+import { BankSelectTracker } from "./synth-ingress.ts";
+
 export type MidiData = number[] | ArrayBufferView | ArrayBuffer | null;
 
 export interface MidiDriverCallbacks {
@@ -61,8 +63,7 @@ export function createMidiMessageHandler({
   onChannelPressure,
   onPolyPressure,
 }: MidiDriverCallbacks): MidiMessageHandler {
-  const bankMsb = new Uint8Array(16);
-  const bankLsb = new Uint8Array(16);
+  const banks = new BankSelectTracker();
 
   return {
     handleMidiMessage(data: MidiData): boolean {
@@ -86,8 +87,7 @@ export function createMidiMessageHandler({
       if (command === 0xb0) {
         const cc = data1 & 0x7f;
         const value = data2 & 0x7f;
-        if (cc === 0) bankMsb[channel] = value;
-        if (cc === 32) bankLsb[channel] = value;
+        banks.observe(cc, value, channel);
         onControlChange?.(cc, value, channel);
         return true;
       }
@@ -105,8 +105,7 @@ export function createMidiMessageHandler({
       }
       if (command === 0xc0) {
         const program = data1 & 0x7f;
-        const bank = ((bankMsb[channel] & 0x7f) << 7) | (bankLsb[channel] & 0x7f);
-        onProgramChange?.(program, bank, channel);
+        onProgramChange?.(program, banks.bank(channel), channel);
         return true;
       }
       return false;

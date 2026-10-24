@@ -44,6 +44,16 @@ class Sf2Processor extends AudioWorkletProcessor {
       if (typeof db === "number" && Number.isFinite(db)) this.engine.masterGainDb = db;
       return;
     }
+    if (msg.type === "setTrackPan") {
+      const pan = (msg as { pan?: number }).pan;
+      if (typeof pan === "number" && Number.isFinite(pan)) this.engine.trackPan = pan;
+      return;
+    }
+    if (msg.type === "setTrackFader") {
+      const gain = (msg as { gain?: number }).gain;
+      if (typeof gain === "number" && Number.isFinite(gain)) this.engine.trackFader = gain;
+      return;
+    }
     if (msg.type === "setSequence") {
       this.scheduledEvents = Array.isArray(msg.events) ? msg.events : [];
       this.scheduledEventIndex = 0;

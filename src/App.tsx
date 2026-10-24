@@ -16,6 +16,7 @@ import { MidiRecorderUI } from "./MidiRecorderUI";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 import { primeSoundFontCache, setActiveSoundFont } from "./audio/soundfont-loader.ts";
 import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
+import { synthEvent } from "./synth-ingress.ts";
 
 // ---------------------------------------------------------------------------
 // Local interface definitions for SF2 internal structures accessed at runtime
@@ -707,7 +708,6 @@ export default function App() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const masterGainRef = useRef<GainNode | null>(null);
   const [masterVolume, setMasterVolume] = useState(1);
   const masterVolumeRef = useRef(1);
   const timeDomainRef = useRef<Float32Array<ArrayBuffer> | null>(null);
@@ -739,10 +739,8 @@ export default function App() {
     lastVizUpdateRef.current = 0;
     workletNodeRef.current?.disconnect();
     analyserRef.current?.disconnect();
-    masterGainRef.current?.disconnect();
     workletNodeRef.current = null;
     analyserRef.current = null;
-    masterGainRef.current = null;
     timeDomainRef.current = null;
     freqDomainRef.current = null;
     workletLoadPromiseRef.current = null;
@@ -1010,26 +1008,19 @@ export default function App() {
         };
       }
 
-      const currentTime = ctx.currentTime;
       let analyser = analyserRef.current;
-      let masterGain = masterGainRef.current;
 
       if (!analyser) {
+        // The shared summing point: every engine node connects here directly and the analyser
+        // sums them on the way to the destination. Each SF2 engine runs its own master stage
+        // (gain, compressor, limiter, safety clip) and track stage (pan, fader); the volume
+        // knob drives the engines' masterGainDb, not a node.
         analyser = ctx.createAnalyser();
         analyser.fftSize = 2048;
         analyser.smoothingTimeConstant = 0.82;
         analyserRef.current = analyser;
         timeDomainRef.current = new Float32Array(analyser.fftSize);
         freqDomainRef.current = new Uint8Array(analyser.frequencyBinCount);
-      }
-
-      if (!masterGain) {
-        // Unity summing bus. Each SF2 engine runs its own master stage (gain, compressor, limiter,
-        // safety clip); the volume knob drives the engines' masterGainDb, not this node.
-        masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(1, currentTime);
-        masterGainRef.current = masterGain;
-        masterGain.connect(analyser);
         analyser.connect(ctx.destination);
       }
 
@@ -1047,7 +1038,7 @@ export default function App() {
         setAudioReady(true);
       }
       startAnalyzerLoop();
-      return { ctx, input: masterGain };
+      return { ctx, input: analyser };
     },
     [releaseAudioInfrastructure]
   );
@@ -1189,28 +1180,28 @@ export default function App() {
   // channel the hardware sent on.
   const handleMidiControlChange = useCallback(
     (controller: number, value: number, _channel: number): void => {
-      workletNodeRef.current?.port.postMessage({ type: "controlChange", channel: 0, controller, value });
+      workletNodeRef.current?.port.postMessage(synthEvent.controlChange(0, controller, value));
     },
     []
   );
 
   const handleMidiPitchBend = useCallback(
     (value: number, _channel: number): void => {
-      workletNodeRef.current?.port.postMessage({ type: "pitchBend", channel: 0, velocity: value });
+      workletNodeRef.current?.port.postMessage(synthEvent.pitchBend(0, value));
     },
     []
   );
 
   const handleMidiChannelPressure = useCallback(
     (value: number, _channel: number): void => {
-      workletNodeRef.current?.port.postMessage({ type: "channelPressure", channel: 0, value });
+      workletNodeRef.current?.port.postMessage(synthEvent.channelPressure(0, value));
     },
     []
   );
 
   const handleMidiPolyPressure = useCallback(
     (note: number, value: number, _channel: number): void => {
-      workletNodeRef.current?.port.postMessage({ type: "polyPressure", channel: 0, note, value });
+      workletNodeRef.current?.port.postMessage(synthEvent.polyPressure(0, note, value));
     },
     []
   );

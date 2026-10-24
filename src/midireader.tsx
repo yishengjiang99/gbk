@@ -81,7 +81,8 @@ type TrackMix = { mute: boolean; solo: boolean; fader?: number };
 type PresetOption = { index: number; bank: number; program: number; name: string };
 type MidiOption = { name: string; path: string };
 type MidiOutputOption = { id: string; name: string };
-type TrackNode = { node: AudioWorkletNode; panner: StereoPannerNode; gain: GainNode };
+/** One worklet node per track; orchestra pan + fader live in the engine's track stage (setTrackPan/setTrackFader). */
+type TrackNode = { node: AudioWorkletNode };
 type PlaybackDebugEvent = { type: "playbackDebug"; order: number; [key: string]: unknown };
 type MidiSourceKind = "bundled" | "uploaded" | "generated";
 type CurrentMidiSource = { kind: MidiSourceKind; name: string; path?: string };
@@ -840,16 +841,6 @@ export default function MidiReader({
       } catch {
         // no-op
       }
-      try {
-        rec.gain?.disconnect();
-      } catch {
-        // no-op
-      }
-      try {
-        rec.panner?.disconnect();
-      } catch {
-        // no-op
-      }
     }
     trackNodesRef.current = [];
     portsAttachedRef.current = false;
@@ -885,13 +876,14 @@ export default function MidiReader({
     for (let i = 0; i < songData.tracks.length; i += 1) {
       const track = songData.tracks[i];
       const rec = trackNodesRef.current[i];
-      if (!rec?.gain) continue;
+      if (!rec?.node) continue;
       const muted = !!mix?.[track.index]?.mute;
       const solo = !!mix?.[track.index]?.solo;
       // CC7 / CC11 = 0 silence the track through the engine's default modulators; mute/solo only here.
       const audible = anySolo ? solo : !muted;
       const fader = mix?.[track.index]?.fader ?? 1;
-      rec.gain.gain.setTargetAtTime(audible ? fader : 0, rec.gain.context.currentTime, 0.01);
+      // The engine's track stage smooths toward the target with the same 10 ms law the GainNode used.
+      rec.node.port.postMessage({ type: "setTrackFader", gain: audible ? fader : 0 });
     }
   };
 
@@ -900,7 +892,7 @@ export default function MidiReader({
     for (let i = 0; i < songData.tracks.length; i += 1) {
       const track = songData.tracks[i];
       const rec = trackNodesRef.current[i];
-      if (!rec?.panner) continue;
+      if (!rec?.node) continue;
       const overridePreset = overrides?.[track.index];
       const defaultPreset = trackDefaultPresetMap[track.index];
       const effectivePreset =
@@ -915,7 +907,7 @@ export default function MidiReader({
         track.name,
         preset?.name
       );
-      rec.panner.pan.setValueAtTime(pan ?? 0, rec.panner.context.currentTime);
+      rec.node.port.postMessage({ type: "setTrackPan", pan: pan ?? 0 });
     }
   };
 
@@ -1442,13 +1434,9 @@ export default function MidiReader({
         numberOfOutputs: 1,
         outputChannelCount: [2],
       });
-      const panner = new StereoPannerNode(ctx, { pan: 0 });
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(1, ctx.currentTime);
-      node.connect(panner);
-      panner.connect(gain);
-      gain.connect(input);
-      trackNodes.push({ node, panner, gain });
+      // straight into the shared analyser: pan + fader happen in the engine's track stage.
+      node.connect(input);
+      trackNodes.push({ node });
     }
     trackNodesRef.current = trackNodes;
 

@@ -1,4 +1,6 @@
 import { controllerStateAt, ctlToSynth, type CtlPlayEvent, type MixBase } from "./workstation/controller-events.ts";
+import { BankSelectTracker, createSynthIngress, type SynthIngress } from "./synth-ingress.ts";
+import type { SF2Region } from "./sf2/soundfont.ts";
 interface ParsedTempoEvent {
   seq: number;
   tick: number;
@@ -147,6 +149,18 @@ interface WorkerTrackState {
   presetIndex: number | null;
   port: MessagePort | null;
   channels: number[];
+  /** Unified ingress bound to `port`, rebuilt when the port is re-attached. */
+  sink: { port: MessagePort; ingress: SynthIngress } | null;
+}
+
+/** The track's engine sink (unified ingress over its worklet port). */
+function sinkFor(state: WorkerTrackState): SynthIngress | null {
+  if (!state.port) return null;
+  if (!state.sink || state.sink.port !== state.port) {
+    const port = state.port;
+    state.sink = { port, ingress: createSynthIngress((msg) => port.postMessage(msg)) };
+  }
+  return state.sink.ingress;
 }
 
 interface LoadMidiMsg {
@@ -372,16 +386,14 @@ export function parseMidiBuffer(buffer: ArrayBuffer): Song {
     const notes: NoteRecord[] = [];
     const playEvents: PlayEvent[] = [];
     const active = new Map<string, ActiveNote[]>();
-    const bankMsb = new Uint8Array(16);
-    const bankLsb = new Uint8Array(16);
+    const banks = new BankSelectTracker();
     const sorted = [...track.events].sort((a, b) => (a.tick - b.tick) || (a.seq - b.seq));
 
     for (const e of sorted) {
       const sec = tickToSec(tempoMap, division, e.tick);
       maxTick = Math.max(maxTick, e.tick);
       if (e.type === "cc") {
-        if (e.cc === 0) bankMsb[e.channel] = e.value;
-        if (e.cc === 32) bankLsb[e.channel] = e.value;
+        banks.observe(e.cc, e.value, e.channel);
         // Bank select is folded into the following program event; every other CC is timed + routed.
         if (e.cc !== 0 && e.cc !== 32) playEvents.push({ sec, type: "cc", channel: e.channel, controller: e.cc, value: e.value, seq: e.seq });
         continue;
@@ -391,8 +403,7 @@ export function parseMidiBuffer(buffer: ArrayBuffer): Song {
         continue;
       }
       if (e.type === "program") {
-        const bank = ((bankMsb[e.channel] & 0x7f) << 7) | (bankLsb[e.channel] & 0x7f);
-        playEvents.push({ sec, type: "program", channel: e.channel, program: e.program, bank, seq: e.seq });
+        playEvents.push({ sec, type: "program", channel: e.channel, program: e.program, bank: banks.bank(e.channel), seq: e.seq });
         continue;
       }
       if (e.type === "noteOn") {
@@ -502,16 +513,17 @@ function clearTimer(): void {
 
 function stopNotes(): void {
   for (const state of trackState) {
-    if (!state?.port) continue;
+    const sink = state ? sinkFor(state) : null;
+    if (!sink) continue;
     for (const key of state.active) {
       const [ch, note] = key.split(":").map(Number);
-      state.port.postMessage({ type: "noteOff", channel: ch, note });
+      sink.noteOff(ch, note);
     }
     state.active.clear();
     // Release sustain/sostenuto so pedal-held voices never hang after pause/stop/seek.
     for (const ch of state.channels) {
-      state.port.postMessage({ type: "controlChange", channel: ch, controller: 64, value: 0 });
-      state.port.postMessage({ type: "controlChange", channel: ch, controller: 66, value: 0 });
+      sink.controlChange(ch, 64, 0);
+      sink.controlChange(ch, 66, 0);
     }
   }
 }
@@ -527,8 +539,9 @@ function pauseInternal(): void {
 
 function setTrackPreset(payload: SetTrackPresetMsg): void {
   const state = trackState[payload.trackIndex];
-  if (!state?.port) return;
-  state.port.postMessage({ type: "setPreset", regions: payload.regions ?? [] });
+  const sink = state ? sinkFor(state) : null;
+  if (!sink) return;
+  sink.setPreset((payload.regions ?? []) as SF2Region[]);
   state.waitingForPreset = false;
   state.override = !!payload.override;
   state.presetIndex = payload.presetIndex ?? null;
@@ -549,6 +562,8 @@ function runTick(): void {
     const track = song.tracks[i];
     const state = trackState[i];
     if (!state?.port) continue;
+    const sink = sinkFor(state);
+    if (!sink) continue;
     if (state.waitingForPreset) continue;
     while (state.nextEventIndex < track.playEvents.length) {
       const ev = track.playEvents[state.nextEventIndex];
@@ -573,7 +588,7 @@ function runTick(): void {
           break;
         }
       } else if (ev.type === "noteOn") {
-        state.port.postMessage({ type: "noteOn", channel: ev.channel, note: ev.note, velocity: ev.velocity });
+        sink.noteOn(ev.channel, ev.note, ev.velocity);
         postPlaybackDebug({
           kind: "noteOn",
           trackIndex: i,
@@ -584,9 +599,12 @@ function runTick(): void {
         state.active.add(`${ev.channel}:${ev.note}`);
       } else if (ev.type === "cc" || ev.type === "pitchBend" || ev.type === "channelPressure" || ev.type === "polyPressure") {
         // Timed controller -> same track worklet, same MIDI channel -> engine controller/modulator state.
-        state.port.postMessage(ctlToSynth(ev));
+        if (ev.type === "cc") sink.controlChange(ev.channel, ev.controller ?? 0, ev.value);
+        else if (ev.type === "pitchBend") sink.pitchBend(ev.channel, ev.value);
+        else if (ev.type === "channelPressure") sink.channelPressure(ev.channel, ev.value);
+        else sink.polyPressure(ev.channel, ev.note ?? 0, ev.value);
       } else if (ev.type === "noteOff") {
-        state.port.postMessage({ type: "noteOff", channel: ev.channel, note: ev.note });
+        sink.noteOff(ev.channel, ev.note);
         state.active.delete(`${ev.channel}:${ev.note}`);
       }
       state.nextEventIndex += 1;
@@ -626,6 +644,7 @@ workerGlobal.onmessage = (event: MessageEvent<InboundMsg>) => {
         presetIndex: null,
         port: ports.get(t.index) ?? null,
         channels: [...new Set(t.playEvents.map((e) => e.channel))],
+        sink: null,
       }));
       workerGlobal.postMessage({ type: "songLoaded", song });
     } catch (err) {

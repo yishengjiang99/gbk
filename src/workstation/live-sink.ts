@@ -6,6 +6,11 @@ import type { LiveSink } from "./live-input.ts";
 import { selectedTrackId } from "./live-input.ts";
 import { loadSoundFont, peekSoundFont } from "../audio/soundfont-loader.ts";
 import { resolveTrackPreset } from "../audio/offline-renderer.ts";
+import { synthEvent } from "../synth-ingress.ts";
+import type { SynthEvent } from "../sf2-renderer.ts";
+
+/** LiveGraph.post is loosely typed; the synthEvent builders produce the exact wire shapes. */
+const asMsg = (e: SynthEvent): Record<string, unknown> => e as unknown as Record<string, unknown>;
 
 /** The audio side (Web Audio in the browser, a fake in tests). */
 export interface LiveGraph { post(msg: Record<string, unknown>): void; setMix(gain: number, pan: number): void; readonly latencyMs: number | null; readonly state: string; resume(): void }
@@ -17,17 +22,20 @@ export async function createWebAudioGraph(): Promise<LiveGraph> {
   const ctx = new AudioContext({ latencyHint: "interactive" });
   await ctx.audioWorklet.addModule(url);
   const node = new AudioWorkletNode(ctx, "sf2-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
-  const gain = ctx.createGain(), pan = ctx.createStereoPanner();
-  node.connect(gain).connect(pan).connect(ctx.destination);
+  // Same shape as the player graph: the worklet is the only node; mix lives in the engine's track stage.
+  node.connect(ctx.destination);
   if (ctx.state !== "running") await ctx.resume().catch(() => undefined);
   return {
     post: (m) => node.port.postMessage(m),
-    setMix: (g, p) => { gain.gain.setValueAtTime(g, ctx.currentTime); pan.pan.setValueAtTime(p, ctx.currentTime); },
+    setMix: (g, p) => {
+      node.port.postMessage({ type: "setTrackFader", gain: g });
+      node.port.postMessage({ type: "setTrackPan", pan: p });
+    },
     get latencyMs() { return Math.round(((ctx.baseLatency ?? 0) + ((ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0)) * 1000); },
     get state() { return ctx.state; },
     resume: () => { if (ctx.state === "suspended") void ctx.resume(); },
-    // debug handles for headless checks
-    ...({ ctx, pan } as object),
+    // debug handle for headless checks
+    ...({ ctx } as object),
   } as LiveGraph;
 }
 
@@ -72,7 +80,7 @@ export class Sf2LiveSink implements LiveSink {
     g.setMix(t.mix.mute ? 0 : ((ov.volume ?? t.mix.volume) / 100) ** 2, Math.max(-1, Math.min(1, ((ov.pan ?? t.mix.pan) - 64) / 63)));
     if (r.presetIndex !== this.presetIndex) {
       if (this.current && this.current.trackId !== trackId) this.allNotesOff(); // don't leave the old instrument hanging
-      this.presetIndex = r.presetIndex; g.post({ type: "setPreset", channel: 0, regions: r.regions });
+      this.presetIndex = r.presetIndex; g.post(asMsg(synthEvent.setPreset(r.regions, 0)));
     }
     this.current = { trackId, presetName: r.presetName, presetIndex: r.presetIndex, bank: r.bank, program: r.program };
     return true;
@@ -81,11 +89,11 @@ export class Sf2LiveSink implements LiveSink {
     if (this.apply(trackId)) { this.graph!.post(msg); return; } // hot path: synchronous
     void this.prepare().then(() => { if (this.apply(trackId)) this.graph?.post(msg); }).catch(() => undefined);
   }
-  noteOn(trackId: string, note: number, velocity: number) { this.post(trackId, { type: "noteOn", channel: 0, note, velocity }); }
-  noteOff(_trackId: string, note: number) { this.graph?.post({ type: "noteOff", channel: 0, note }); } // never re-points the engine
-  controlChange(trackId: string, controller: number, value: number) { this.post(trackId, { type: "controlChange", channel: 0, controller, value }); }
-  pitchBend(trackId: string, value: number) { this.post(trackId, { type: "pitchBend", channel: 0, velocity: value }); }
-  allNotesOff() { this.graph?.post({ type: "controlChange", channel: 0, controller: 64, value: 0 }); this.graph?.post({ type: "controlChange", channel: 0, controller: 123, value: 0 }); }
+  noteOn(trackId: string, note: number, velocity: number) { this.post(trackId, asMsg(synthEvent.noteOn(0, note, velocity))); }
+  noteOff(_trackId: string, note: number) { this.graph?.post(asMsg(synthEvent.noteOff(0, note))); } // never re-points the engine
+  controlChange(trackId: string, controller: number, value: number) { this.post(trackId, asMsg(synthEvent.controlChange(0, controller, value))); }
+  pitchBend(trackId: string, value: number) { this.post(trackId, asMsg(synthEvent.pitchBend(0, value))); }
+  allNotesOff() { this.graph?.post(asMsg(synthEvent.controlChange(0, 64, 0))); this.graph?.post(asMsg(synthEvent.controlChange(0, 123, 0))); }
   /** Re-point at the selected track (selection / program / mix changed). */
   refresh(trackId: string | null = selectedTrackId(this.c.project)) { if (trackId) this.apply(trackId); }
 }
