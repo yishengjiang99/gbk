@@ -24,7 +24,6 @@ This repo is a Vite + React app for inspecting SoundFont 2 (`.sf2`) files, loadi
 - [`sf2-parser.js`](/Users/yishengj/synth/sf2-parser.js): SoundFont parser plus preset region builder consumed by the runtime.
 - [`src/styles.css`](/Users/yishengj/synth/src/styles.css): single main stylesheet for the UI.
 - [`public/static`](/Users/yishengj/synth/public/static): bundled demo `.sf2` and `.mid` assets.
-- [`guide/driver.js`](/Users/yishengj/synth/guide/driver.js): reference/demo snippet for driving the worklet directly; not part of the main app path.
 - [`midi-clock.html`](/Users/yishengj/synth/midi-clock.html) + [`src/midi-clock/`](/Users/yishengj/synth/src/midi-clock): standalone, framework-free MIDI Clock follower demo (Web MIDI/synthetic input -> worker estimator + transport state machine -> AudioWorklet click). `estimator`, `transport`, `clock-domain` and `click-scheduler` are pure modules reused by `test/midi-clock-*.test.ts` and `scripts/midi-clock-experiment.ts`. Design notes: [`docs/midi-clock-follower.md`](/Users/yishengj/synth/docs/midi-clock-follower.md).
 
 ## Runtime Architecture
