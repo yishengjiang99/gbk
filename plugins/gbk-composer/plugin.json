@@ -78,7 +78,8 @@
               "prompt": "What's the weather in Paris tomorrow?"
             }
           ]
-        }
+        },
+        "demo_recording_url": "https://yishengjiang99.github.io/gbk/submission/gbk-composer-demo.mp4"
       },
       "publication": {
         "release_notes": "1.0.0: first public release. Compose in five styles (baroque, classical, pop, jazz, ambient) with a deterministic, seeded engine; targeted revision-safe edits (parts, transforms, octave doubling, CC curves, tempo, instruments, mix); interactive piano-roll player; WAV and MIDI rendered in the user's own GBK Studio browser tab; compositions private until the user asks to publish."
