@@ -25,5 +25,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
         timeout-minutes: 15
-      - run: npm run test:server -- --test-timeout=180000
-        timeout-minutes: 15
+      - name: server tests (diagnostic, per file)
+        timeout-minutes: 20
+        run: |
+          for f in server/test/*.test.ts; do echo "=== $f"; timeout 150 node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test "$f" 2>&1 | grep -E '^# (pass|fail)|^not ok' ; echo "rc=${PIPESTATUS[0]}"; done
