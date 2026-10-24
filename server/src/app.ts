@@ -21,7 +21,7 @@ import { agentRoutes } from "./routes/agent.ts";
 import { shareRoutes } from "./routes/shares.ts";
 import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
-import { RenderService } from "./mcp/render.ts";
+import { RenderService } from "./mcp/browser-render.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
 import type { McpMetrics } from "./mcp/server.ts";
 
@@ -57,10 +57,11 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
   signinRoutes(app, cfg, sessions, accounts, new RateLimiter(cfg.security.loginPerMinute), deps.fetch);
   shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model);
-  // Remote MCP (ChatGPT/Codex): durable compositions, OAuth, worker-thread rendering, signed artifacts.
+  // Remote MCP (ChatGPT/Codex): durable compositions, OAuth, Studio-tab rendering, signed artifacts.
   const mcpStore = new McpStore(persist ? join(cfg.dataDir, "mcp.sqlite") : ":memory:", persist ? cfg.dataDir : mkdtempSync(join(tmpdir(), "gbk-mcp-")));
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
-  const mcpRenders = new RenderService(cfg, mcpStore, (o) => app.log.info(o), (u) => limits.for(u).dailyRenders);
+  // MCP renders run in the user's connected Studio tab over the browser bridge; the server never synthesizes.
+  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => app.log.info(o), (u) => limits.for(u).dailyRenders);
   // Migration from invite-code login: every access-code user and every existing song/composition owner becomes an
   // established account with the same id, so their songs, compositions and OAuth grants keep working unchanged.
   const legacy = new Set([...cfg.security.accessCodes.map((e) => { const i = e.indexOf(":"); return (i > 0 ? e.slice(0, i) : "user").replace(/[^\w.-]/g, "").slice(0, 40) || "user"; }), ...shares.owners(), ...mcpStore.owners()]);

@@ -18,7 +18,7 @@ import type { SessionStore } from "../security/authentication.ts";
 import { currentSession } from "../routes/agent.ts";
 import type { McpStore } from "./store.ts";
 import type { CompositionService } from "./service.ts";
-import type { RenderService } from "./render.ts";
+import type { RenderService } from "./browser-render.ts";
 import { createGbkMcpServer, type McpMetrics, type SessionAuth } from "./server.ts";
 import { resolvePrincipal, resourceOf, SCOPES, type Principal } from "./auth.ts";
 import { McpError } from "./errors.ts";
@@ -156,6 +156,18 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
     return reply.send(createReadStream(path));
   };
   app.get("/api/mcp/artifacts/:id", serveArtifact); // Fastify auto-exposes HEAD for this GET route
+
+  // ---- Studio-tab render handoff (browser-render.ts): capability-token endpoints the tab calls ----------
+  app.get("/api/mcp/render-jobs/:id/snapshot", async (req, reply) => {
+    try { reply.header("cache-control", "no-store"); return deps.renders.snapshotFor((req.params as { id: string }).id, (req.headers["x-gbk-render-token"] ?? (req.query as { token?: string }).token)); }
+    catch (e) { return reply.code(404).send({ code: "NOT_FOUND", message: (e as Error).message }); }
+  });
+  app.put("/api/mcp/render-jobs/:id/wav", { bodyLimit: 9 * 1024 * 1024 }, async (req, reply) => {
+    const buf = req.body as Buffer;
+    if (!Buffer.isBuffer(buf)) return reply.code(415).send({ code: "BAD_TYPE", message: "send raw bytes (application/octet-stream)" });
+    try { return deps.renders.acceptChunk((req.params as { id: string }).id, req.headers["x-gbk-render-token"], Number((req.query as { offset?: string }).offset ?? 0), new Uint8Array(buf)); }
+    catch (e) { const code = (e as McpError).code ?? "INVALID_ARGUMENT"; return reply.code(code === "NOT_FOUND" ? 404 : 400).send({ code, message: (e as Error).message }); }
+  });
 
   // ---- operational status (no private data) --------------------------------------------------
   app.get("/api/mcp/status", async () => ({

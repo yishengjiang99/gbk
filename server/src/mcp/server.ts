@@ -2,7 +2,8 @@
 //
 // Public surface = a small, user-goal-focused tool layer over CompositionService / RenderService. The
 // canonical gbk_* registry stays the musical engine underneath (via the service); it is NOT mirrored 1:1
-// here, so ChatGPT/Codex get deterministic operations, durable revisions and artifacts — not browser state.
+// here, so ChatGPT/Codex get deterministic operations, durable revisions and artifacts. Rendering is delegated to the user's
+// connected Studio tab over the browser bridge (browser-render.ts); the server never synthesizes audio.
 //
 // Every tool returns structuredContent plus a JSON text fallback, uses typed domain errors, and enforces
 // per-tool OAuth scopes. Mutating tools accept idempotencyKey: a replay with the same key + same request
@@ -13,7 +14,7 @@ import { createHash } from "node:crypto";
 import type { Config } from "../config.ts";
 import type { McpStore, ArtifactRow } from "./store.ts";
 import type { CompositionService, EditOperation } from "./service.ts";
-import { RenderService, DEFAULT_RENDER_CONFIG, type RenderConfig } from "./render.ts";
+import { RenderService, DEFAULT_RENDER_CONFIG, type RenderConfig } from "./browser-render.ts";
 import { requireScope, type Principal, type Scope } from "./auth.ts";
 import { McpError, toMcpError } from "./errors.ts";
 import { signArtifactUrl } from "./urls.ts";
@@ -97,7 +98,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- compositions ----------------------------------------------------------------------------------
   server.registerTool("gbk_create_composition", {
-    title: "Create a composition", description: "Create a durable, server-side GBK composition with the deterministic arrangement engine (seeded). Returns the composition id, revision, structure summary and Studio URL. No browser tab is required. Rendering is a separate step (gbk_render_composition).",
+    title: "Create a composition", description: "Create a durable, server-side GBK composition with the deterministic arrangement engine (seeded). Returns the composition id, revision, structure summary and Studio URL. No browser tab is required to compose. Rendering is a separate step (gbk_render_composition) that runs in the user's connected Studio tab.",
     inputSchema: {
       title: z.string().min(1).max(128),
       style: z.enum(["baroque", "classical", "pop", "jazz", "ambient"]).optional().describe("baroque uses the Bach fugue generator + continuo"),
@@ -147,7 +148,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- rendering --------------------------------------------------------------------------------------
   server.registerTool("gbk_render_composition", {
-    title: "Render a composition", description: "Render a saved composition revision to a validated WAV (canonical SF2 offline renderer, server-side, no browser needed) plus a Standard MIDI File. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
+    title: "Render a composition", description: "Render a saved composition revision to a validated WAV plus a Standard MIDI File. Synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required with an open-the-studio-to-render link (studioUrl) — ask the user to open it, then call again. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
     inputSchema: { compositionId: COMPOSITION_ID, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
       sampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(), channels: z.union([z.literal(1), z.literal(2)]).optional(),
       format: z.enum(["pcm16", "float32"]).optional(), normalize: z.enum(["loudness", "peak", "off"]).optional(),
@@ -168,7 +169,10 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     const row = service.getRow(user, a.compositionId);
     const config: RenderConfig = { ...DEFAULT_RENDER_CONFIG, sampleRate: a.sampleRate ?? 44100, channels: a.channels ?? 2, format: a.format ?? "pcm16",
       normalize: a.normalize ?? "loudness", targetLufs: a.targetLufs, tailSeconds: a.tailSeconds ?? 3, includeMidi: a.includeMidi ?? true };
-    const job = renders.submit(user, { ...row, revision: rowRev }, snapshot, config);
+    const sub = renders.submit(user, { ...row, revision: rowRev }, snapshot, config);
+    if ("studioRequired" in sub) return { status: "studio_required", compositionId: a.compositionId, revision: rowRev, studioUrl: sub.studioUrl,
+      message: `Rendering runs in your browser, and no GBK Studio tab is connected for this account. Open the studio to render: ${sub.studioUrl} — keep it open (signed in), then call gbk_render_composition again.` };
+    const job = sub.job;
     let final = job;
     if (a.waitSeconds) final = await renders.waitFor(user, job.id, a.waitSeconds * 1000);
     return { ...renders.jobView(user, final), ...(final.status !== "completed" ? { next: "Poll gbk_get_render_status with this jobId until status is completed/failed/cancelled." } : {}) };

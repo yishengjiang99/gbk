@@ -18,7 +18,7 @@ import type { Config } from "../config.ts";
 import type { ShareStore } from "../persistence/shares.ts";
 import { McpStore, type CompositionRow } from "./store.ts";
 import { McpError, toMcpError } from "./errors.ts";
-import { resolveSoundFontPath } from "./render.ts";
+import { resolveSoundFontPath } from "./browser-render.ts";
 
 export { RENDERER_VERSION } from "./service-meta.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
@@ -119,7 +119,7 @@ export class CompositionService {
       soundFont: "GeneralUser GS (bundled); pipe organ = GM program 19 (instrument name 'organ')",
       renderFormats: { sampleRates: [44100, 48000], channels: [1, 2], formats: ["pcm16", "float32"], normalize: ["loudness", "peak", "off"], targetLufsRange: [-40, -5], peakCeilingDbTp: -1, maxRenderSeconds: this.cfg.mcp.maxRenderSeconds },
       controllers: { audible: [1, 7, 10, 11, 64, 66, 67, 91, 93], storedOnly: [71, 74], note: "all CC 0-127 are preserved and exported to MIDI" },
-      limits: { maxCompositionsPerUser: this.cfg.mcp.maxCompositions, maxRendersPerDay: this.cfg.mcp.maxRendersPerDay, renderConcurrency: this.cfg.mcp.renderConcurrency },
+      limits: { maxCompositionsPerUser: this.cfg.mcp.maxCompositions, maxRendersPerDay: this.cfg.mcp.maxRendersPerDay, renderExecutor: "browser (connected GBK Studio tab)" },
       deterministic: "same project snapshot + renderer version + SoundFont + seed + render config => byte-identical WAV (SHA-256 recorded per artifact)",
       unsupported: ["arbitrary JavaScript/filesystem/shell access", "per-preset effect types beyond the built-in reverb/chorus", "SMPTE time division"],
     };

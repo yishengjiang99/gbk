@@ -32,7 +32,10 @@ and hand the user working, authorized links.
    user asked for something else.
 2. **Submit the render.** Call `gbk_render_composition` with the
    `compositionId` (the render pins that saved revision). Keep the returned
-   `jobId`.
+   `jobId`. Rendering runs in the user's GBK Studio browser tab: if the result
+   is `status: "studio_required"`, give the user the `studioUrl` ("open the
+   studio to render"), ask them to keep it open while signed in, then submit
+   again. No job exists until then.
 3. **Poll appropriately.** If the job is not complete, poll
    `gbk_get_render_status` with increasing waits (use `waitSeconds` /
    backoff rather than rapid repeated calls) until it reaches `completed`

@@ -1,15 +1,15 @@
-// Remote MCP end-to-end music workflows (mission §12, Tests A–E). No browser tab is ever opened:
-// Test C is inherent — every render below completes with zero connected browser clients
-// (asserted explicitly via the agent hub registry).
+// Remote MCP end-to-end music workflows (mission §12, Tests A–E). Rendering happens ONLY in a connected
+// Studio tab (a node TestTab running the real BrowserToolBridge + offline renderer); with no tab the render
+// tool returns an "open the studio to render" link and creates no job.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { ScriptModel, reply, testConfig } from "./helpers.ts";
-import { startServer } from "./ws-helpers.ts";
+import { startServer, openStudio } from "./ws-helpers.ts";
 import { McpClient } from "./mcp-helpers.ts";
 import { McpStore } from "../src/mcp/store.ts";
 import { CompositionService } from "../src/mcp/service.ts";
-import { RenderService, DEFAULT_RENDER_CONFIG } from "../src/mcp/render.ts";
+import { RenderService, DEFAULT_RENDER_CONFIG } from "../src/mcp/browser-render.ts";
 import { ShareStore } from "../src/persistence/shares.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +29,7 @@ async function fugue(mcp: McpClient): Promise<Created> {
   });
 }
 
-test("A: autonomous composition + render with NO browser tab; artifacts download and verify", async () => {
+test("A: composition with no tab; render asks to open the studio, then renders in the connected Studio tab; artifacts download and verify", async () => {
   const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
   try {
     assert.equal(s.hub.registry.size, 0, "no browser clients connected (Test C precondition)");
@@ -47,8 +47,15 @@ test("A: autonomous composition + render with NO browser tab; artifacts download
     const list = await alice.call<{ items: unknown[] }>("gbk_list_compositions", {});
     assert.equal(list.items.length, 1);
 
+    const none = await alice.call<{ status: string; studioUrl: string; message: string }>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 5 });
+    assert.equal(none.status, "studio_required");
+    assert.equal(none.studioUrl, "http://composer.test/studio");
+    assert.match(none.message, /Open the studio to render/);
+    const tab = await openStudio(s, "code-a");
     const r = await alice.call<Rendered>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 120, tailSeconds: 1 });
     assert.equal(r.status, "completed", JSON.stringify(r));
+    assert.ok(tab.executed.includes("gbk_mcp_render_job"), "the Studio tab did the render");
+    assert.equal((r as unknown as { config: { executor: string } }).config.executor, "browser");
     const wav = r.artifacts.find((a) => a.kind === "wav")!, mid = r.artifacts.find((a) => a.kind === "midi")!;
     assert.ok(wav && mid, "both WAV and MIDI artifacts exist");
     // The render result itself carries signed download URLs — no second call needed
@@ -79,7 +86,7 @@ test("A: autonomous composition + render with NO browser tab; artifacts download
     const midBytes = new Uint8Array(await midRes.arrayBuffer());
     assert.equal(String.fromCharCode(...midBytes.subarray(0, 4)), "MThd", "valid Standard MIDI File");
     assert.equal(sha(midBytes), mid.sha256);
-    assert.equal(s.hub.registry.size, 0, "still no browser clients: rendering was fully server-side (Test C)");
+    tab.close();
   } finally { await s.app.close(); }
 });
 
@@ -89,6 +96,7 @@ test("B: follow-up edit keeps the composition, bumps the revision, leaves untouc
     const alice = asUser(s, "alice"); await alice.initialize();
     const c = await fugue(alice);
     const before = await alice.call<Created & { notes?: { items: { tick: number }[] } }>("gbk_get_composition", { compositionId: c.compositionId, includeNotes: true, limit: 1000 });
+    await openStudio(s, "code-a");
     const firstRender = await alice.call<Rendered>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 120, tailSeconds: 1 });
     const firstSha = firstRender.artifacts.find((a) => a.kind === "wav")!.sha256;
 
@@ -149,6 +157,7 @@ test("D: concurrent users are isolated — no project or artifact leakage", asyn
       (e: Error & { payload?: { error?: { code?: string } } }) => e.payload?.error?.code === "NOT_FOUND");
     await assert.rejects(bob.call("gbk_get_artifacts", { compositionId: ca.compositionId }),
       (e: Error & { payload?: { error?: { code?: string } } }) => e.payload?.error?.code === "NOT_FOUND");
+    await openStudio(s, "code-a");
     const render = await alice.call<Rendered>("gbk_render_composition", { compositionId: ca.compositionId, waitSeconds: 120, tailSeconds: 0 });
     assert.equal(render.status, "completed");
     const artId = (render as unknown as { artifacts: { artifactId: string }[] }).artifacts[0].artifactId;
@@ -192,6 +201,7 @@ test("E: worker interruption fails explicitly (no false completion); an empty pr
       revision = step.revision;
     }
     const emptied = { revision };
+    await openStudio(s, "code-a");
     const r = await alice.call<{ status: string; error: { code: string } | null; artifacts: unknown[] }>("gbk_render_composition", { compositionId: c.compositionId, revision: emptied.revision, waitSeconds: 60 });
     assert.equal(r.status, "failed");
     assert.ok(r.error?.code, "failure carries a machine-readable code");
@@ -199,7 +209,19 @@ test("E: worker interruption fails explicitly (no false completion); an empty pr
   } finally { await s.app.close(); }
 });
 
-test("F: queued jobs resume after a restart (orphans fail explicitly); terminal states are final; artifact publication is atomic", async () => {
+test("F: the per-account daily render limit is enforced on MCP renders", async () => {
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1", MCP_MAX_RENDERS_PER_DAY: "1" });
+  try {
+    const alice = asUser(s, "alice"); await alice.initialize();
+    const c = await alice.call<Created>("gbk_create_composition", { title: "Limit", style: "classical", bars: 2, seed: 3 });
+    await openStudio(s, "code-a");
+    const r = await alice.call<Rendered>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 120, tailSeconds: 0 });
+    assert.equal(r.status, "completed");
+    await assert.rejects(alice.call("gbk_render_composition", { compositionId: c.compositionId }), /QUOTA_EXCEEDED/);
+  } finally { await s.app.close(); }
+});
+
+test("G: queued jobs left by a restart fail explicitly; terminal states are final; artifact publication is atomic", async () => {
   const cfg = testConfig({ COMPOSER_PUBLIC_ORIGIN: "http://composer.test" });
   const dir = mkdtempSync(join(tmpdir(), "gbk-mcp-f-"));
   const file = join(dir, "mcp.sqlite");
@@ -214,22 +236,18 @@ test("F: queued jobs resume after a restart (orphans fail explicitly); terminal 
   const orphan = st1.createJob({ compositionId: "cmp_missing", owner: "alice", revision: 0, config: { ...DEFAULT_RENDER_CONFIG } });
   st1.close();
 
-  // Phase 2: a fresh store + render service on the same files (the "restart").
+  // Phase 2: a fresh store + render service on the same files (the "restart"). Renders need a live Studio
+  // tab handoff that did not survive the restart, so leftover queued jobs fail explicitly (never stick).
   const st2 = new McpStore(file, dir);
-  const renders = new RenderService(cfg, st2);
+  const renders = new RenderService(cfg, st2, () => null);
   await renders.start();
   try {
     const orphanAfter = st2.getJob(orphan.id, "alice")!;
     assert.equal(orphanAfter.status, "failed", "orphaned queued job fails instead of sticking at queued");
-    assert.match(orphanAfter.error ?? "", /JOB_ORPHANED/);
-
-    let final = st2.getJob(job.id, "alice")!;
-    for (let i = 0; i < 240 && !["completed", "failed", "cancelled"].includes(final.status); i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      final = st2.getJob(job.id, "alice")!;
-    }
-    assert.equal(final.status, "completed", `rehydrated job completes (got ${final.status}: ${final.error ?? ""})`);
-    assert.equal(st2.listArtifacts(row.id, "alice").filter((a) => a.job_id === job.id).length, 2, "WAV + MIDI published for the resumed job");
+    const after = st2.getJob(job.id, "alice")!;
+    assert.equal(after.status, "failed");
+    assert.match(after.error ?? "", /JOB_INTERRUPTED/);
+    assert.equal(st2.listArtifacts(row.id, "alice").length, 0);
   } finally { await renders.stop(); st2.close(); }
 
   // Terminal states are final: a guarded transition out of a terminal state changes nothing.

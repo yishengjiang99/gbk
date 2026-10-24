@@ -23,14 +23,17 @@ open the same composition in GBK Studio afterwards.
 - **Durable state.** Compositions live in SQLite (`mcp.sqlite` in `COMPOSER_DATA_DIR`) with a
   full revision snapshot per edit. Edits require `expectedRevision`; conflicts return
   `STALE_REVISION` with the current revision. Mutating calls accept `idempotencyKey`.
-- **Autonomous rendering.** Render jobs run in worker threads executing `renderProjectOffline`
-  (Sf2SynthEngine + bundled GeneralUser-GS SoundFont) — the exact code path the browser uses,
-  proven in Node by `test/audio-render.test.ts`. No Chromium, no tab. Jobs are durable:
-  queued/running/completed/failed/cancelled, with per-job timeout, cancellation, per-user
-  quotas, and crash semantics (a job left `running` by a dead process is failed explicitly as
-  `WORKER_INTERRUPTED`; a job left `queued` resumes from its stored revision snapshot and
-  config, or fails as `JOB_ORPHANED` if its composition vanished; artifacts are published
-  atomically — all payloads validated + SHA-256 re-checked before any row is inserted).
+- **Rendering in the browser.** The server never synthesizes audio. `gbk_render_composition`
+  pins the revision snapshot, creates a durable job and hands it over the existing browser
+  WebSocket bridge to the user's connected, signed-in GBK Studio tab (`gbk_mcp_render_job`).
+  The tab runs `renderProjectOffline` (the Studio's own SF2 engine), uploads the WAV in chunks
+  with a per-job capability token, and the server verifies SHA-256, the WAV header and the
+  renderer's validation before publishing WAV + MIDI artifacts. With no tab connected the tool
+  returns `status: "studio_required"` and a `studioUrl` ("open the studio to render"); no job
+  is created. Jobs are durable (running/completed/failed/cancelled) with a per-job timeout,
+  cancellation, per-account daily render limits, and explicit failure when the tab disconnects
+  or the server restarts mid-render. Artifacts are published atomically (all payloads validated +
+  SHA-256 re-checked before any row is inserted); render and status results carry signed download URLs.
 - **Artifacts.** WAV/MIDI bytes live on disk under `<dataDir>/mcp-artifacts/`, metadata +
   provenance (renderer version, source revision, SoundFont, normalized params, SHA-256) in
   SQLite. Downloads use short-lived signed URLs (`MCP_ARTIFACT_URL_TTL_SEC`, default 15 min)
@@ -79,8 +82,8 @@ OAuth 2.1 per the MCP authorization spec, with this server as its own authorizat
 
 The MCP surface ships inside the existing release (no new service, no Docker):
 
-1. Build as usual (`npm run build:compose` also builds `server/dist/index.mjs` and
-   `server/dist/render-worker.mjs` via `build:server`).
+1. Build as usual (`npm run build:compose` and `npm run build:server`, which builds
+   `server/dist/index.mjs`).
 2. Add the `MCP_*` variables from `deploy/compose.env.example` to `/etc/gbk-composer.env`.
    Leave `MCP_TEST_AUTH` unset/`0` in production.
 3. Install the updated `deploy/nginx.conf` (adds the `/mcp` streaming location and the
