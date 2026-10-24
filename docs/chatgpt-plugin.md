@@ -29,8 +29,22 @@ open the same composition in GBK Studio afterwards.
   The tab runs `renderProjectOffline` (the Studio's own SF2 engine), uploads the WAV in chunks
   with a per-job capability token, and the server verifies SHA-256, the WAV header and the
   renderer's validation before publishing WAV + MIDI artifacts. With no tab connected the tool
-  returns `status: "studio_required"` and a `studioUrl` ("open the studio to render"); no job
-  is created. Jobs are durable (running/completed/failed/cancelled) with a per-job timeout,
+  returns `status: "studio_required"` and a `studioUrl` ("open the studio to render"), and points
+  to the in-chat player; no job is created.
+- **Rendering in the in-chat player (no Studio tab).** The player (`gbk_show_composition_ui`) has a
+  Render button. It calls the app-only tool `gbk_widget_render_start` (job + capability token),
+  loads `/api/mcp/widget/gbk-widget-render.js` (built by `scripts/build-widget.mjs` from
+  `src/widget/widget-render.ts`), and renders the pinned snapshot with the same
+  `renderProjectOffline` -> `offline-context.ts` OfflineAudioContext + `sf2-processor` AudioWorklet
+  path (worklet module from `/api/mcp/widget/sf2-processor.js`, falling back to a blob: copy;
+  SoundFont from `/api/mcp/widget/soundfont.sf2`). Progress %, Stop, 15 min timeout plus the
+  renderer's stall/timeout watchdogs. Playback uses an AudioContext buffer (no blob: media URL),
+  the WAV is uploaded in chunks to the same validated endpoint, and `gbk_widget_render_finish`
+  publishes WAV + MIDI artifacts (executor `widget`), so Download WAV/MIDI become signed links.
+  These asset/upload endpoints send `Access-Control-Allow-Origin: *` (no credentials; the token is
+  the authority). The resource declares our origin in `_meta.ui.csp` and `openai/widgetCSP`.
+  Check it against a mimicked host sandbox with
+  `node --import tsx/esm test/e2e/widget-sandbox.check.ts` (Chromium + WebKit, strict CSP). Jobs are durable (running/completed/failed/cancelled) with a per-job timeout,
   cancellation, per-account daily render limits, and explicit failure when the tab disconnects
   or the server restarts mid-render. Artifacts are published atomically (all payloads validated +
   SHA-256 re-checked before any row is inserted); render and status results carry signed download URLs.
@@ -42,7 +56,7 @@ open the same composition in GBK Studio afterwards.
   `gbk_render_composition` / `gbk_get_render_status` responses carry the signed URLs directly
   in their artifact entries — call `gbk_get_artifacts` when you need fresh ones after expiry.
   Large audio is never inlined into MCP responses.
-- **MCP Apps UI.** `gbk_show_composition_ui` renders `ui://gbk/composer.html`
+- **MCP Apps UI.** `gbk_show_composition_ui` renders `ui://gbk/composer-v2.html`
   (`text/html;profile=mcp-app`): audio player with seek, tick-accurate piano roll fed by the
   authoritative project, section markers, CC11 lanes, track list, WAV/MIDI downloads and an
   Open-in-Studio link. Tools remain fully usable in hosts without UI support.
@@ -187,7 +201,7 @@ artifacts before claiming success.
 - **Artifact URL 401** — signed URLs expire (`MCP_ARTIFACT_URL_TTL_SEC`); fetch fresh ones
   with `gbk_get_artifacts`.
 - **UI blank in host** — the host must support MCP Apps; verify `gbk_show_composition_ui`'s
-  `_meta.ui.resourceUri` and fetch `ui://gbk/composer.html` via `resources/read` in the
+  `_meta.ui.resourceUri` and fetch `ui://gbk/composer-v2.html` via `resources/read` in the
   Inspector. Tools still work without the UI.
 
 ## Privacy & retention

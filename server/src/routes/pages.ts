@@ -6,7 +6,7 @@ import type { Config } from "../config.ts";
 
 export const STARTER_PROMPTS = [
   "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.",
-  "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then render WAV and MIDI.",
+  "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.",
   "In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo.",
 ];
 export const SUPPORT_URL = "https://github.com/yishengjiang99/gbk/issues";
@@ -61,7 +61,7 @@ ${install}<a class="cta alt" href="/studio">Open GBK Studio</a>
 <li><strong>Listen and look</strong> in an in-chat player with a piano roll, track list and dynamics lanes.</li>
 <li><strong>Instruments</strong> come from the bundled GeneralUser GS SoundFont: violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir, drums and more.</li></ul>
 <h2>Rendering happens in your browser</h2>
-<p class="note">GBK's servers never synthesize audio. Without an account, the MIDI file downloads straight from the chat, and audio plays and renders in the in-chat player or in GBK Studio opened from your private link, where you can export WAV. If you sign in, a WAV can also be rendered in your open, signed-in <a href="/studio">GBK Studio</a> tab and its download link returned to the chat.</p>
+<p class="note">GBK's servers never synthesize audio. Press <strong>Render</strong> in the in-chat player and the WAV is synthesized right there in your browser with the GBK SoundFont engine, then plays in the chat with a download (MIDI downloads straight from the chat). No GBK Studio tab is needed. If you sign in, a WAV can also be rendered in your open, signed-in <a href="/studio">GBK Studio</a> tab and its download link returned to the chat.</p>
 <h2>Private by default, no account needed</h2><p>From ChatGPT you can compose without signing in: each piece gets a private access key that only your chat holds. If you later sign in, you can claim a piece into your GBK account for safekeeping, or ask GBK to delete it. Either way it stays private. GBK publishes a public share page only when you explicitly ask it to. See the <a href="/privacy">privacy policy</a>.</p>
 <h2>Connect it yourself</h2><p>Developers can add the remote MCP server <code>${esc(cfg.publicOrigin)}/mcp</code> (Streamable HTTP, no authentication required; optional OAuth sign-in with Google or GitHub) to any MCP-capable client.</p>`;
   return page(cfg, "/chatgpt", "GBK Composer for ChatGPT: compose and edit MIDI music", desc, body, {
@@ -101,7 +101,7 @@ function support(cfg: Config): string {
   return page(cfg, "/support", "Support · GBK Composer", "Get help with GBK Composer, report a bug, or request account deletion.", `<h1>Support</h1>
 <p>GBK Composer is supported through GitHub issues.</p><p><a class="cta" href="${SUPPORT_URL}" rel="noopener">Open a GitHub issue</a></p>
 <h2>Before you file</h2><ul>
-<li><strong>Render did nothing / "open the studio to render"</strong>: rendering runs in your browser. Open <a href="/studio">GBK Studio</a>, sign in with the same account, keep the tab open, and try again. Without an account, play the piece in the in-chat player or open the private Studio link the plugin gave you, and export WAV there.</li><li><strong>Lost access key (no account)</strong>: compositions created without signing in can only be opened with their key. We cannot recover a lost key.</li>
+<li><strong>Render did nothing / "open the studio to render"</strong>: rendering runs in your browser. Ask GBK to show the player and press Render there (the first render downloads a ~32 MB SoundFont). Or open <a href="/studio">GBK Studio</a>, sign in with the same account, keep the tab open, and try again. Without an account, play the piece in the in-chat player or open the private Studio link the plugin gave you, and export WAV there.</li><li><strong>Lost access key (no account)</strong>: compositions created without signing in can only be opened with their key. We cannot recover a lost key.</li>
 <li><strong>Daily limit reached</strong>: AI and render limits reset daily.</li>
 <li>Issues are public: describe the problem and include a song or composition id if helpful, but never post passwords, tokens or other private data.</li></ul>
 <h2>Deleting a composition created without an account</h2><p>Open an issue titled "Delete guest composition" with the composition id (it starts with <code>cmp_</code>). Do not post the access key; we will arrange a private way to confirm you hold it, then delete the composition, its revisions and files.</p>

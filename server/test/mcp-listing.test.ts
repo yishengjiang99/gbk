@@ -39,6 +39,7 @@ test("tools/list advertises 'Use this' descriptions and publish is the only open
     const c = new McpClient(s.base); await c.initialize();
     const tools = ((await c.send("tools/list", {})).rpc?.result as { tools: { name: string; description: string; annotations: Record<string, boolean> }[] }).tools;
     for (const t of tools) {
+      if (t.name.startsWith("gbk_widget_render_")) continue; // app-only (ui.visibility ["app"]): called by the in-chat player, never the model
       if (t.name !== "gbk_cancel_render" && t.name !== "gbk_publish_composition") assert.match(t.description, /^Use this/, t.name);
       assert.equal(t.annotations.openWorldHint, t.name === "gbk_publish_composition", t.name);
       assert.equal(t.annotations.destructiveHint, t.name === "gbk_delete_composition", t.name);

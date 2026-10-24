@@ -1,13 +1,20 @@
 // MCP Apps UI resource for GBK Composer.
-// Single self-contained HTML document: no external resources, vanilla JS only.
+// Single HTML document, vanilla JS. The only external resources are on our own origin (declared in the resource CSP):
+// the renderer bundle + SF2 AudioWorklet (/api/mcp/widget/*, loaded on demand when the user presses Render), the
+// SoundFont, and the render-job snapshot/upload endpoints. Render synthesizes the WAV in the user's browser with the
+// canonical OfflineAudioContext path (src/widget/widget-render.ts -> src/audio/offline-context.ts); the server never does.
 // Served by the MCP server as COMPOSER_UI_URI and rendered inside ChatGPT /
 // other MCP Apps hosts. Data arrives via the ui/* postMessage bridge
 // (ui/notifications/tool-result, structuredContent) with a window.openai
 // fallback for ChatGPT-specific hosts.
 
-export const COMPOSER_UI_URI = "ui://gbk/composer.html";
+// Versioned: hosts cache templates by URI, and v2 changed the HTML (in-chat rendering).
+export const COMPOSER_UI_URI = "ui://gbk/composer-v2.html";
 
-export const COMPOSER_UI_HTML = `<!doctype html>
+/** The player HTML for a server at `origin` (e.g. https://compose.grepawk.com). */
+export function composerUiHtml(origin: string): string { return TEMPLATE.replace("__GBK_ORIGIN__", JSON.stringify(origin.replace(/\/$/, ""))); }
+
+const TEMPLATE = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -63,6 +70,8 @@ label.zoomlbl{font-size:12px;color:var(--muted)}
   border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px}
 .hidden{display:none !important}
 audio{display:none}
+.prog{flex:1 1 140px;min-width:100px;height:8px;border-radius:4px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+.prog>div{height:100%;width:0;background:var(--accent);transition:width .2s}
 @media (max-width:420px){ main{padding:8px} h1{font-size:17px} section{padding:9px} }
 </style>
 </head>
@@ -75,7 +84,7 @@ audio{display:none}
   </header>
 
   <div id="loading" role="status">Waiting for composition data…</div>
-  <div id="noRender" class="hidden" role="status">No render yet — ask GBK to render this composition.</div>
+  <div id="noRender" class="hidden" role="status">No audio yet — press Render to synthesize it here in your browser.</div>
 
   <section id="playerSec" class="hidden" aria-label="Playback">
     <div class="row">
@@ -83,6 +92,13 @@ audio{display:none}
       <span class="time"><span id="curTime">0:00</span> / <span id="durTime">0:00</span></span>
       <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
     </div>
+    <div class="row" id="renderRow" style="margin-top:8px">
+      <button id="renderBtn" type="button">Render audio</button>
+      <button id="stopBtn" type="button" class="hidden">Stop</button>
+      <div class="prog hidden" id="progWrap" role="progressbar" aria-label="Render progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progBar"></div></div>
+      <span class="time" id="progPct"></span>
+    </div>
+    <div class="meta" id="renderStatus" role="status">Renders in your browser with the GBK SoundFont engine. No GBK Studio tab needed.</div>
     <audio id="audio" preload="metadata"></audio>
     <div class="meta" id="playerErr"></div>
   </section>
@@ -128,8 +144,9 @@ audio{display:none}
 <script>
 (function(){
 "use strict";
+var ORIGIN=__GBK_ORIGIN__;
 var COLORS=["#7aa2ff","#ff9f6e","#6ed3a5","#e58ad1","#ffd166","#6ec9e8","#b49aff","#ff7a7a","#9ede6e","#e8c07a","#7ad1c3","#c3a6ff"];
-var state={data:null,zoom:1,highlight:{},anyHighlight:false,playing:false,raf:0};
+var state={toolArgs:null,data:null,zoom:1,highlight:{},anyHighlight:false,playing:false,raf:0};
 var pending={}; var nextId=1;
 var $=function(id){return document.getElementById(id);};
 var els={title:$("title"),meta:$("metaLine"),rev:$("revLine"),loading:$("loading"),noRender:$("noRender"),
@@ -137,7 +154,8 @@ var els={title:$("title"),meta:$("metaLine"),rev:$("revLine"),loading:$("loading
   audio:$("audio"),play:$("playBtn"),seek:$("seek"),cur:$("curTime"),dur:$("durTime"),perr:$("playerErr"),
   scroll:$("rollScroll"),roll:$("roll"),ccWrap:$("ccWrap"),cc:$("cc"),tracks:$("trackList"),
   wav:$("dlWav"),midi:$("dlMidi"),studio:$("openStudio"),refresh:$("refreshBtn"),
-  status:$("statusLine"),form:$("followForm"),follow:$("followText")};
+  status:$("statusLine"),form:$("followForm"),follow:$("followText"),
+  renderBtn:$("renderBtn"),stopBtn:$("stopBtn"),progWrap:$("progWrap"),progBar:$("progBar"),progPct:$("progPct"),rstatus:$("renderStatus")};
 
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function fmt(t){ if(!isFinite(t)||t<0)t=0; var m=Math.floor(t/60), s=Math.floor(t%60); return m+":"+(s<10?"0":"")+s; }
@@ -184,6 +202,7 @@ window.addEventListener("message",function(ev){
     if(sc&&sc.compositionId) render(sc);
   } else if(msg.method==="ui/notifications/tool-input"){
     var a=msg.params&&(msg.params.arguments||msg.params);
+    if(a&&typeof a==="object") state.toolArgs=a;
     if(a&&a.structuredContent) render(a.structuredContent);
   } else if(msg.method==="ui/notifications/host-context-changed"){
     if(msg.params&&msg.params.theme) applyTheme(msg.params.theme);
@@ -191,6 +210,8 @@ window.addEventListener("message",function(ev){
 });
 
 function initBridge(){
+  var openaiInput=window.openai&&(window.openai.toolInput||window.openai.tool_input);
+  if(openaiInput&&typeof openaiInput==="object") state.toolArgs=openaiInput;
   var openaiData=window.openai&&(window.openai.toolOutput||window.openai.tool_output);
   if(openaiData&&openaiData.compositionId) render(openaiData);
   rpcRequest("ui/initialize",{
@@ -238,14 +259,16 @@ function render(data){
 
   var art=data.artifacts||{};
   var hasWav=!!(art.wav&&art.wav.downloadUrl);
-  els.noRender.classList.toggle("hidden",hasWav);
+  var local=pl.mode==="buf";
+  els.noRender.classList.toggle("hidden",hasWav||local);
   els.player.classList.remove("hidden");
-  if(hasWav){
+  if(hasWav&&!local){
+    pl.mode="el";
     if(els.audio.getAttribute("src")!==art.wav.downloadUrl) els.audio.setAttribute("src",art.wav.downloadUrl);
     els.dur.textContent=fmt(art.wav.durationSeconds||data.durationSec||0);
   }
-  els.wav.classList.toggle("hidden",!hasWav);
-  if(hasWav) els.wav.setAttribute("href",art.wav.downloadUrl);
+  if(!local){ els.wav.classList.toggle("hidden",!hasWav); if(hasWav) els.wav.setAttribute("href",art.wav.downloadUrl); }
+  els.renderBtn.textContent=(hasWav||local)?"Re-render":"Render audio";
   var hasMidi=!!(art.midi&&art.midi.downloadUrl);
   els.midi.classList.toggle("hidden",!hasMidi);
   if(hasMidi) els.midi.setAttribute("href",art.midi.downloadUrl);
@@ -323,7 +346,7 @@ function drawRoll(){
     ctx.fillRect(x,y+0.5,nw,Math.max(2,rowH-1));
   }
   ctx.globalAlpha=1;
-  var curSec=els.audio.currentTime||0;
+  var curSec=pCur();
   var curTick=curSec/(60/(d.tempoBpm*d.ppq));
   var cx=(curTick/tot)*w;
   ctx.strokeStyle=dark?"#ffffff":"#111111"; ctx.lineWidth=1.5;
@@ -350,37 +373,183 @@ function drawCC(){
   ctx.globalAlpha=1;
 }
 
-/* ---------- playback ---------- */
+/* ---------- playback ----------
+   Two sources: "el" = the saved WAV artifact in <audio> (signed URL on our origin), "buf" = a WAV rendered in this
+   widget, played through an AudioContext buffer (no blob: media URL needed, so a strict media-src CSP is fine). */
+var pl={mode:null,ac:null,buf:null,src:null,t0:0,off:0,playing:false};
+function ensureAc(){
+  if(!pl.ac){ var C=window.AudioContext||window.webkitAudioContext; if(!C) return null; try{ pl.ac=new C(); }catch(e){ return null; } }
+  if(pl.ac.state==="suspended"){ try{ pl.ac.resume(); }catch(e){} }
+  return pl.ac;
+}
+function pDur(){ if(pl.mode==="buf") return pl.buf?pl.buf.duration:0; return els.audio.duration||(state.data?state.data.durationSec:0)||0; }
+function pCur(){
+  if(pl.mode==="buf"){ var t=pl.playing&&pl.ac?pl.off+(pl.ac.currentTime-pl.t0):pl.off; return Math.max(0,Math.min(t,pDur())); }
+  return els.audio.currentTime||0;
+}
+function setPlaying(on){ state.playing=on; pl.playing=on; els.play.textContent=on?"⏸ Pause":"▶ Play"; els.play.setAttribute("aria-label",on?"Pause":"Play");
+  if(on) loop(); else { if(state.raf)cancelAnimationFrame(state.raf); syncUi(); } }
+function bufStop(){ if(pl.src){ try{ pl.src.onended=null; pl.src.stop(); }catch(e){} pl.src=null; } }
+function bufStart(at){
+  var ac=ensureAc(); if(!ac||!pl.buf) return;
+  bufStop(); var src=ac.createBufferSource(); src.buffer=pl.buf; src.connect(ac.destination);
+  pl.off=Math.max(0,Math.min(at,pl.buf.duration)); pl.t0=ac.currentTime; src.start(0,pl.off); pl.src=src;
+  src.onended=function(){ if(pl.src===src){ pl.src=null; pl.off=0; setPlaying(false); } };
+  setPlaying(true);
+}
+function pSeek(sec){
+  if(pl.mode==="buf"){ if(pl.playing) bufStart(sec); else pl.off=Math.max(0,Math.min(sec,pDur())); }
+  else if(els.audio.getAttribute("src")){ try{ els.audio.currentTime=Math.min(sec,isFinite(els.audio.duration)?els.audio.duration:sec); }catch(e){} }
+  syncUi();
+}
 function syncUi(){
-  var dur=els.audio.duration||(state.data?state.data.durationSec:0)||0;
-  var cur=els.audio.currentTime||0;
+  var dur=pDur(), cur=pCur();
   els.cur.textContent=fmt(cur); if(dur) els.dur.textContent=fmt(dur);
   els.seek.value=dur?String(Math.round(cur/dur*1000)):"0";
   drawRoll();
 }
 function loop(){ if(state.playing){ syncUi(); state.raf=requestAnimationFrame(loop); } }
 els.play.addEventListener("click",function(){
-  if(!els.audio.getAttribute("src")){ els.perr.textContent="No WAV render is available yet."; return; }
-  if(els.audio.paused){ els.audio.play(); } else { els.audio.pause(); }
+  if(pl.mode==="buf"){ if(pl.playing){ pl.off=pCur(); bufStop(); setPlaying(false); } else bufStart(pl.off>=pDur()-0.01?0:pl.off); return; }
+  if(!els.audio.getAttribute("src")){ els.perr.textContent="No audio yet. Press Render to make it here."; return; }
+  if(els.audio.paused){ var p=els.audio.play(); if(p&&p.catch) p.catch(function(e){ els.perr.textContent="Playback was blocked ("+(e&&e.message||e)+"). Press Play again."; }); } else { els.audio.pause(); }
 });
-els.audio.addEventListener("play",function(){ state.playing=true; els.play.textContent="⏸ Pause"; els.play.setAttribute("aria-label","Pause"); loop(); });
-els.audio.addEventListener("pause",function(){ state.playing=false; els.play.textContent="▶ Play"; els.play.setAttribute("aria-label","Play"); if(state.raf)cancelAnimationFrame(state.raf); syncUi(); });
-els.audio.addEventListener("ended",function(){ state.playing=false; });
+els.audio.addEventListener("play",function(){ if(pl.mode==="el") setPlaying(true); });
+els.audio.addEventListener("pause",function(){ if(pl.mode==="el") setPlaying(false); });
+els.audio.addEventListener("ended",function(){ if(pl.mode==="el") setPlaying(false); });
 els.audio.addEventListener("timeupdate",function(){ if(!state.playing) syncUi(); });
 els.audio.addEventListener("loadedmetadata",syncUi);
-els.audio.addEventListener("error",function(){ els.perr.textContent="Audio failed to load. Use Download WAV instead."; });
-els.seek.addEventListener("input",function(){
-  var dur=els.audio.duration||0; if(dur) els.audio.currentTime=(Number(els.seek.value)/1000)*dur;
-  syncUi();
-});
+els.audio.addEventListener("error",function(){ if(pl.mode==="el") els.perr.textContent="The saved audio could not load here. Press Render to make it in this player, or use Download WAV."; });
+els.seek.addEventListener("input",function(){ var dur=pDur(); if(dur) pSeek((Number(els.seek.value)/1000)*dur); });
 els.roll.addEventListener("click",function(ev){
   var d=state.data; if(!d) return;
   var r=els.roll.getBoundingClientRect();
   var ratio=(ev.clientX-r.left)/Math.max(1,r.width);
-  var sec=ratio*tickToSec(d,totalTicks(d));
-  if(els.audio.getAttribute("src")&&isFinite(els.audio.duration)) els.audio.currentTime=Math.min(sec,els.audio.duration||sec);
-  else { try{ els.audio.currentTime=sec; }catch(e){} }
-  syncUi();
+  pSeek(ratio*tickToSec(d,totalTicks(d)));
+});
+
+/* ---------- in-browser render ----------
+   Render: gbk_widget_render_start (job + capability token) -> fetch the pinned snapshot -> GbkWidgetRender.render()
+   (OfflineAudioContext + SF2 AudioWorklet, progress, Stop, timeouts) -> play locally + blob download -> upload the WAV
+   in chunks -> gbk_widget_render_finish (server verifies SHA-256/header, publishes WAV + MIDI artifacts). */
+var RENDER_TIMEOUT_MS=15*60*1000;
+var job={busy:false,ctl:null,info:null,pct:0,blobUrl:null};
+function callToolRaw(name,args){
+  var p;
+  if(window.openai&&typeof window.openai.callTool==="function") p=Promise.resolve(window.openai.callTool(name,args||{}));
+  else p=rpcRequest("tools/call",{name:name,arguments:args||{}});
+  return p.then(function(r){
+    r=r||{}; if(r.result&&!r.structuredContent&&!r.content) r=r.result;
+    if(r.isError){ var t=r.content&&r.content[0]&&r.content[0].text; var e; try{ e=JSON.parse(t).error; }catch(x){ e={message:t||"tool failed"}; }
+      var err=new Error((e&&e.message)||"tool failed"); err.code=e&&e.code; throw err; }
+    return r.structuredContent||r;
+  });
+}
+function setProg(frac,label){
+  var pct=Math.max(job.pct,Math.round(Math.max(0,Math.min(1,frac))*100)); job.pct=pct;
+  els.progBar.style.width=pct+"%"; els.progWrap.setAttribute("aria-valuenow",String(pct)); els.progPct.textContent=pct+"%";
+  if(label) els.rstatus.textContent=label;
+}
+var STAGES={worklet:"Loading the audio engine…",soundfont:"Downloading the SoundFont (first time ~32 MB)…",loading:"Preparing…",resolving:"Resolving instruments…",rendering:"Rendering audio…",encoding:"Encoding WAV…",validating:"Checking the WAV…"};
+function loadRenderer(){
+  if(window.GbkWidgetRender) return Promise.resolve(window.GbkWidgetRender);
+  return new Promise(function(resolve,reject){
+    var sc=document.createElement("script"); sc.src=ORIGIN+"/api/mcp/widget/gbk-widget-render.js"; sc.async=true; sc.crossOrigin="anonymous";
+    sc.onload=function(){ window.GbkWidgetRender?resolve(window.GbkWidgetRender):reject(new Error("renderer script loaded but did not initialise")); };
+    sc.onerror=function(){ reject(new Error("could not load the renderer from "+ORIGIN+" (blocked by the host?)")); };
+    document.head.appendChild(sc);
+  });
+}
+function renderUi(busy){
+  job.busy=busy; els.renderBtn.disabled=busy; els.stopBtn.classList.toggle("hidden",!busy);
+  els.progWrap.classList.toggle("hidden",!busy&&job.pct===0);
+}
+function finishJob(ok,extra){
+  var i=job.info; if(!i) return Promise.resolve(null);
+  var args={jobId:i.jobId,token:i.token,ok:ok}; if(i.accessToken) args.accessToken=i.accessToken;
+  if(ok) args.meta=extra; else { args.errorCode=extra.code||"RENDER_FAILED"; args.errorMessage=String(extra.message||extra).slice(0,1900); }
+  return callToolRaw("gbk_widget_render_finish",args).catch(function(){ return null; });
+}
+function startRender(){
+  var d=state.data; if(!d||job.busy) return;
+  ensureAc(); // inside the click: unlocks audio output for later playback
+  var ctl=new AbortController(); job.ctl=ctl; job.info=null; job.pct=0; setProg(0,"Starting…"); renderUi(true); els.perr.textContent="";
+  var timer=setTimeout(function(){ job.timedOut=true; ctl.abort(); },RENDER_TIMEOUT_MS);
+  var res=null;
+  var startArgs={compositionId:d.compositionId,revision:d.revision};
+  var tok=state.toolArgs&&state.toolArgs.accessToken; if(typeof tok==="string"&&tok) startArgs.accessToken=tok;
+  // Account-free project opened with only a read capability: render + play locally, nothing is saved.
+  var br=d.browserRender;
+  var startJob=callToolRaw("gbk_widget_render_start",startArgs).catch(function(e){
+    if(br&&br.snapshotUrl&&br.readAccessToken) return {localOnly:true,snapshotUrl:br.snapshotUrl,headers:{"x-gbk-project-token":br.readAccessToken},
+      options:{sampleRate:44100,channels:2,format:"pcm16",normalize:"loudness",tailSeconds:3}};
+    throw e;
+  });
+  Promise.all([loadRenderer(),startJob]).then(function(x){
+    var R=x[0]; job.info=x[1].localOnly?null:x[1]; var src=x[1];
+    if(job.info&&startArgs.accessToken) job.info.accessToken=startArgs.accessToken;
+    if(ctl.signal.aborted) throw abortErr();
+    return fetch(src.snapshotUrl,{headers:src.headers||{"x-gbk-render-token":src.token},signal:ctl.signal}).then(function(r){
+      if(!r.ok) throw new Error("snapshot unavailable (HTTP "+r.status+")"); return r.json();
+    }).then(function(snap){
+      return R.render({base:ORIGIN,project:snap.project,options:src.options,signal:ctl.signal,onProgress:function(f,st){ setProg(f*0.95,STAGES[st]||st); }});
+    });
+  }).then(function(r){
+    res=r; job.worklet=r.worklet; setProg(0.95,"Rendered "+fmt(r.durationSeconds)+". Preparing playback…");
+    var name=((d.title||"gbk").replace(/[^\\w\\- .]/g,"_").slice(0,60)||"gbk")+".wav";
+    try{ if(job.blobUrl) URL.revokeObjectURL(job.blobUrl); job.blobUrl=URL.createObjectURL(r.blob); els.wav.setAttribute("href",job.blobUrl); els.wav.setAttribute("download",name); els.wav.classList.remove("hidden"); }catch(e){}
+    var ac=ensureAc();
+    if(!ac) throw new Error("this browser has no AudioContext for playback; use Download WAV");
+    return ac.decodeAudioData(r.bytes.slice().buffer).then(function(buf){
+      bufStop(); els.audio.pause(); pl.mode="buf"; pl.buf=buf; pl.off=0; setPlaying(false);
+      els.noRender.classList.add("hidden"); els.renderBtn.textContent="Re-render"; syncUi();
+      if(!job.info) return {localOnly:true};
+      setProg(0.96,"Ready to play. Saving the WAV to your GBK library…");
+      return upload(r,ctl.signal);
+    });
+  }).then(function(fin){
+    setProg(1,null);
+    if(fin&&fin.localOnly){ els.rstatus.textContent="Done: "+fmt(res.durationSeconds)+" rendered in your browser. Press Play. (Not saved: this player only has read access; Download WAV saves it to your device.)"; return; }
+    var w=fin&&fin.latest&&fin.latest.wav;
+    if(fin&&fin.status==="completed"){
+      if(w&&w.downloadUrl){ els.wav.setAttribute("href",w.downloadUrl); els.wav.removeAttribute("download"); els.wav.setAttribute("target","_blank"); }
+      var m=fin.latest&&fin.latest.midi; if(m&&m.downloadUrl){ els.midi.setAttribute("href",m.downloadUrl); els.midi.classList.remove("hidden"); }
+      d.artifacts={wav:w?{downloadUrl:w.downloadUrl,durationSeconds:res.durationSeconds}:undefined,midi:m};
+      els.rstatus.textContent="Done: "+fmt(res.durationSeconds)+" rendered in your browser and saved. Press Play.";
+    } else els.rstatus.textContent="Rendered and playable here, but saving to your library failed"+(fin&&fin.error?" ("+fin.error.message+")":"")+". Download WAV still works.";
+  }).catch(function(e){
+    var code=(e&&e.code)||""; var stopped=ctl.signal.aborted;
+    var msg=stopped?(job.timedOut?"Render timed out and was stopped.":"Render stopped."):("Render failed: "+((e&&e.message)||String(e)));
+    if(code==="UNAUTHENTICATED") msg="Sign in to GBK Composer in ChatGPT to render.";
+    if(res&&!stopped) msg="Rendered and playable here, but saving failed: "+((e&&e.message)||e);
+    els.rstatus.textContent=msg;
+    finishJob(false,{code:stopped?"OPERATION_CANCELLED":(code||"RENDER_FAILED"),message:(e&&e.message)||String(e)});
+  }).then(function(){ clearTimeout(timer); job.ctl=null; job.timedOut=false; renderUi(false); });
+}
+function abortErr(){ var e=new Error("cancelled"); e.code="OPERATION_CANCELLED"; return e; }
+function upload(r,signal){
+  var i=job.info, step=Math.max(65536,Math.min(i.chunkBytes||8388608,8388608)), off=0, b=r.bytes;
+  function next(){
+    if(off>=b.length) return null;
+    var part=b.subarray(off,Math.min(off+step,b.length));
+    return fetch(i.uploadUrl+"?offset="+off,{method:"PUT",headers:{"x-gbk-render-token":i.token,"content-type":"application/octet-stream"},body:part,signal:signal}).then(function(u){
+      if(!u.ok) throw new Error("upload failed at byte "+off+" (HTTP "+u.status+")");
+      off+=part.length; setProg(0.96+0.03*(off/b.length),null); return next();
+    });
+  }
+  return Promise.resolve(next()).then(function(){
+    var meta={sha256:r.sha256,durationSeconds:r.durationSeconds,musicSeconds:r.musicSeconds,tailSeconds:r.tailSeconds,sampleRate:r.sampleRate,channels:r.channels,format:r.format,
+      framesRendered:r.framesRendered,byteLength:r.byteLength,peakDbFS:r.peakDbFS,rmsDbFS:r.rmsDbFS,clippedSamples:r.clippedSamples,gain:r.gain,validated:r.validated,
+      loudness:r.loudness,instruments:r.instruments,warnings:r.warnings,soundFont:r.soundFont,noteCount:r.noteCount,renderMs:r.renderMs,worklet:r.worklet};
+    var fa={jobId:i.jobId,token:i.token,ok:true,meta:meta}; if(i.accessToken) fa.accessToken=i.accessToken;
+    return callToolRaw("gbk_widget_render_finish",fa);
+  });
+}
+els.renderBtn.addEventListener("click",startRender);
+els.stopBtn.addEventListener("click",function(){ if(job.ctl) job.ctl.abort(); });
+els.wav.addEventListener("click",function(ev){
+  var href=els.wav.getAttribute("href")||"";
+  if(/^https?:/.test(href)&&window.openai&&typeof window.openai.openExternal==="function"){ ev.preventDefault(); try{ window.openai.openExternal({href:href,redirectUrl:false}); }catch(e){ window.open(href,"_blank"); } }
 });
 
 /* ---------- actions ---------- */
@@ -414,8 +583,12 @@ els.form.addEventListener("submit",function(ev){
 window.addEventListener("resize",function(){ drawRoll(); drawCC(); });
 
 initBridge();
+window.__gbkPlayer={state:state,pl:pl,job:job,render:render,startRender:startRender};
 })();
 </script>
 </body>
 </html>
 `;
+
+/** The player HTML with a same-origin base (tests, screenshots). */
+export const COMPOSER_UI_HTML = composerUiHtml("");
