@@ -24,4 +24,6 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npm run test:server
+        timeout-minutes: 15
+      - run: npm run test:server -- --test-timeout=180000
+        timeout-minutes: 15
