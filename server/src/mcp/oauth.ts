@@ -31,6 +31,24 @@ const pkceOk = (verifier: string, challenge: string) => {
 };
 const err = (reply: FastifyReply, status: number, error: string, description: string) => reply.code(status).send({ error, error_description: description });
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
+
+/** Match a requested redirect_uri against a registered one. Exact string match, except that for
+ *  http loopback redirects (RFC 8252 §7.3) the port is ignored: native apps such as Codex register
+ *  `http://127.0.0.1/callback` and listen on an ephemeral port. Scheme, host, path and query must
+ *  still match exactly; userinfo and fragments are never allowed on the loopback path. */
+export function redirectUriMatches(registered: string, requested: string): boolean {
+  if (registered === requested) return true;
+  let reg: URL, req: URL;
+  try { reg = new URL(registered); req = new URL(requested); } catch { return false; }
+  if (reg.protocol !== "http:" || req.protocol !== "http:") return false;
+  if (!LOOPBACK_HOSTS.has(reg.hostname) || reg.hostname !== req.hostname) return false;
+  if (reg.username || reg.password || req.username || req.password || reg.hash || req.hash || requested.includes("#")) return false;
+  // Compare the raw path+query after the authority so URL normalisation cannot widen the match.
+  const rest = (u: string) => u.replace(/^http:\/\/[^/?#]*/i, "");
+  return rest(registered) === rest(requested) && reg.pathname === req.pathname && reg.search === req.search;
+}
+
 export function oauthRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: McpStore) {
   // OAuth token/registration posts are form-encoded by spec; Fastify ships no urlencoded parser by default.
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => {
@@ -107,7 +125,7 @@ export function oauthRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const clientId = q.client_id ?? ""; const redirectUri = q.redirect_uri ?? "";
     const client = clientId ? await resolveClient(clientId) : null;
     if (!client) return err(reply, 400, "invalid_client", "unknown client_id (use dynamic registration or a CIMD document URL)");
-    if (!redirectUri || !client.redirect_uris.includes(redirectUri)) return err(reply, 400, "invalid_redirect_uri", "redirect_uri is not registered for this client");
+    if (!redirectUri || !client.redirect_uris.some((r) => redirectUriMatches(r, redirectUri))) return err(reply, 400, "invalid_redirect_uri", "redirect_uri is not registered for this client");
     const fail = (error: string, description: string) => redirectWith(reply, redirectUri, { error, error_description: description, iss: issuer, ...(q.state ? { state: q.state } : {}) });
     if (q.response_type !== "code") return fail("unsupported_response_type", "only response_type=code is supported");
     if (!q.code_challenge || q.code_challenge_method !== "S256") return fail("invalid_request", "PKCE with code_challenge_method=S256 is required");
