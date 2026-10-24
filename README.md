@@ -707,7 +707,7 @@ Composer access and limits are server concerns, separate from WebMCP tool regist
 
 ## Songs
 Songs made with GBK's agent tools are published in [`songs/`](songs/) and shown at
-<https://yishengjiang99.github.io/gbk/songs/>. Publish one with `npm run song:publish -- songs/recipes/<name>.json`; see [docs/songs.md](docs/songs.md).
+<https://compose.grepawk.com>. Publish one with `npm run song:publish -- songs/recipes/<name>.json`; see [docs/songs.md](docs/songs.md).
 
 ## Composer (compose.grepawk.com)
 A server-hosted AI Composer, with the browser as the tool executor, plus song sharing, forking and an Explore page. See [docs/compose-deploy.md](docs/compose-deploy.md).
