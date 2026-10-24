@@ -1,3 +1,4 @@
+import "./support/offline-audio-context.ts"; // OfflineAudioContext stand-in (renders never run without one)
 // Offline reverb/chorus audibility + tail, whole-file loudness normalization, determinism, live-parity auto-pan
 // and pinned player preset overrides.
 import test from "node:test";

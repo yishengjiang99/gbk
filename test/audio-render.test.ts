@@ -1,3 +1,4 @@
+import "./support/offline-audio-context.ts"; // OfflineAudioContext stand-in (renders never run without one)
 // Headless renderer: real GeneralUser GS SoundFont, real Sf2SynthEngine, no AudioContext / player / WebMCP.
 import test from "node:test";
 import assert from "node:assert/strict";

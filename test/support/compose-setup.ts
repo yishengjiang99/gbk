@@ -1,3 +1,4 @@
+import "./offline-audio-context.ts"; // renders go through an OfflineAudioContext (test stand-in under Node)
 import { readFileSync } from "node:fs";
 import { WorkstationController } from "../../src/workstation/controller.ts";
 import { parseSmf } from "../../src/workstation/smf.ts";
