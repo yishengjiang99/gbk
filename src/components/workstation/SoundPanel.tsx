@@ -7,6 +7,7 @@ import type { Proposal } from "../../workstation/controller.ts";
 import { workstation } from "./useWorkstation.ts";
 import { voiceReport, humanEditToOverride } from "../../workstation/sound.ts";
 import { EFFECTS_RANGES, type EffectsParams } from "../../sf2/voice-overrides.ts";
+import { reportError } from "../../telemetry/error-reporter.ts";
 
 type Report = ReturnType<typeof voiceReport>;
 type Gens = Report["zones"][number]["generators"];
@@ -56,7 +57,7 @@ export function SoundPanel({ project, trackId, proposal }: { project: Project; t
   const [drag, setDrag] = useState<Record<string, number>>({});
   // Same SoundFont + mapping as the renderer: load it on demand, then re-render with real zones.
   const [, setSfReady] = useState(0);
-  useEffect(() => { let live = true; void workstation.host.ensureSoundFont?.().then(() => { if (live) setSfReady((x) => x + 1); }).catch(() => {}); return () => { live = false; }; }, []);
+  useEffect(() => { let live = true; void workstation.host.ensureSoundFont?.().then(() => { if (live) setSfReady((x) => x + 1); }).catch((e) => reportError(e, { where: "ensureSoundFont" })); return () => { live = false; }; }, []);
   const soundProposal = proposal && proposal.ops.some((o) => (o.op === "setVoicePatch" && o.trackId === trackId) || o.op === "setEffects") ? proposal : null;
   const rep = trackId ? report(project, trackId) : null; // zones may arrive after the player loads: no memo
   const repB = trackId && soundProposal ? report(soundProposal.candidate, trackId) : null;

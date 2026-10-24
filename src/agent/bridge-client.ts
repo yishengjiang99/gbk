@@ -3,6 +3,7 @@
 import type { WorkstationController } from "../workstation/controller.ts";
 import { BrowserToolBridge } from "./browser-bridge.ts";
 import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage } from "./protocol.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 export type ConnState = "idle" | "connecting" | "connected" | "reconnecting" | "offline" | "unauthorized";
 
@@ -42,7 +43,7 @@ export class BridgeClient {
       this.unsub?.();
       this.unsub = this.c.subscribe((s) => { const k = `${s.project.id}:${s.project.revision}`; if (k !== last) { last = k; this.send({ type: "project_state", projectId: s.project.id, revision: s.project.revision }); } });
     };
-    ws.onmessage = (ev) => { let m: ServerMessage; try { m = JSON.parse(String(ev.data)); } catch { return; } void this.handle(m); };
+    ws.onmessage = (ev) => { let m: ServerMessage; try { m = JSON.parse(String(ev.data)); } catch (e) { reportError(e, { where: "agent-ws.parse" }); return; } void this.handle(m); };
     ws.onclose = (ev) => {
       clearInterval(this.pingTimer); this.unsub?.(); this.unsub = undefined;
       this.bridge.cancel(); // results of a dead connection are never applied later

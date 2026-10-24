@@ -1,5 +1,6 @@
 // Entry for midi-clock.html: wires the DOM to MidiClockFollower. No framework.
 
+import "../telemetry/install.ts";
 import clickProcessorUrl from "./click-processor.ts?worker&url";
 import { MidiClockFollower } from "./follower.ts";
 import type { ClockStatus } from "./protocol.ts";

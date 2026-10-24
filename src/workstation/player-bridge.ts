@@ -8,6 +8,7 @@ import type { SF2Region } from "../sf2/soundfont.ts";
 import { renderProjectOffline, setLivePresetOverridesProvider } from "../audio/offline-renderer.ts";
 import { bindRendererSoundFont } from "../audio/renderer-host.ts";
 import { normalizeEffects, type EffectsParams, type VoiceOverride } from "../sf2/voice-overrides.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 export interface PlayerHandle {
   /** Load SMF bytes into the player (does not persist into the playlist). */
@@ -60,7 +61,7 @@ class PlayerBridge {
       const p = parseSmf(buf, name.replace(/\.(mid|midi)$/i, ""));
       this.ctrl.load(p);
       this.loadedRevision = p.revision; this.loadedProjectId = p.id;
-    } catch { /* unsupported file: leave project unchanged */ }
+    } catch (e) { reportError(e, { where: "player-bridge.parseSmf", name: nm }); /* unsupported file: leave project unchanged */ }
   }
   onSongLoaded() { const w = this.songWaiters; this.songWaiters = []; w.forEach((f) => f()); }
   onTime(sec: number) { const c = this.ctrl; if (!c) return; c.updateTransport({ positionTick: secToTick(c.project, sec) }); }

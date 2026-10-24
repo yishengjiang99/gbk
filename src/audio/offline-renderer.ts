@@ -11,6 +11,7 @@ import { StatsAccumulator, validateWav, type AudioStats, type WavInfo } from "./
 import { RenderError, throwIfAborted, yieldToEventLoop } from "./render-error.ts";
 import { LoudnessMeter, chooseGain, LOUDNESS_TARGET_LUFS, type LoudnessReport, type NormalizeMode } from "./loudness.ts";
 import { resolveOrchestraPan, stereoPanGains } from "./orchestra-pan.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 export interface OfflineRenderOptions {
   sampleRate: 44100 | 48000;
@@ -249,7 +250,7 @@ export function resolveTrackPreset(p: Project, trackId: string, sf: SF2SoundFont
   try {
     const r = resolveInstrument(sf, g?.program ?? 0, g?.bankMsb ?? 0, g?.channel ?? t.channel);
     return { presetName: r.presetName, presetIndex: r.presetIndex, bank: r.bank, program: r.program, regions: r.regions, pinned: false, substituted: r.substituted };
-  } catch { return null; }
+  } catch (e) { reportError(e, { where: "resolveTrackPreset", trackId }); return null; }
 }
 
 const scalePan = (g: ReturnType<typeof stereoPanGains>, k: number) => ({ ll: g.ll * k, rl: g.rl * k, lr: g.lr * k, rr: g.rr * k });

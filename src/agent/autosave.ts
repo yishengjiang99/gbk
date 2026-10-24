@@ -4,6 +4,7 @@ import { workstation } from "../workstation/instance.ts";
 import { artifactStore } from "../audio/artifact-store.ts";
 import { autosaveProject, uploadMedia, type SavedSong } from "./share-client.ts";
 import type { Project } from "../workstation/model.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 const MAX_WAV = 40 * 1024 * 1024;
 type Listener = (s: { projectId: string; song: SavedSong | null; saving: boolean; error?: string }) => void;
@@ -53,7 +54,7 @@ export class SongAutosaver {
         this.saved.set(p.id, { rev: p.revision, song, wavId: prev?.wavId }); out = song;
         this.emit({ projectId: p.id, song, saving: false });
         await this.attachWav(p);
-      } catch (e) { this.emit({ projectId: p.id, song: prev?.song ?? null, saving: false, error: (e as Error).message }); }
+      } catch (e) { reportError(e, { where: "autosave" }); this.emit({ projectId: p.id, song: prev?.song ?? null, saving: false, error: (e as Error).message }); }
     })();
     await this.inflight; this.inflight = null;
     return out;
@@ -69,7 +70,7 @@ export class SongAutosaver {
       await uploadMedia(rec.song.slug, "wav", blob, a.wav ? { durationSeconds: a.wav.durationSeconds, sampleRate: a.wav.sampleRate, revision: a.revision, sha256: a.sha256 } : undefined);
       rec.song = { ...rec.song, hasWav: true };
       this.emit({ projectId: p.id, song: rec.song, saving: false });
-    } catch { rec.wavId = undefined; }
+    } catch (e) { reportError(e, { where: "autosave.attachWav" }); rec.wavId = undefined; }
   }
 }
 export const songAutosaver = new SongAutosaver();

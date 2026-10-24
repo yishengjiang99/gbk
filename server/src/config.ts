@@ -1,6 +1,8 @@
 // Environment configuration. Secrets stay server-side; toPublic() is the only view that leaves the process.
 export interface Config {
-  publicOrigin: string; allowedOrigins: string[]; port: number; host: string; dataDir: string; enabled: boolean;
+  publicOrigin: string; allowedOrigins: string[];
+  /** Account ids allowed to read admin endpoints (GET /api/admin/client-errors). COMPOSER_ADMIN_USERS, comma-separated. */
+  adminUsers: string[]; port: number; host: string; dataDir: string; enabled: boolean;
   llm: { baseUrl: string; apiKey: string; model: string; models: string[]; apiStyle: "chat_completions" | "responses"; provider: string; priceInPerMTok: number; priceOutPerMTok: number; requestTimeoutMs: number; maxRetries: number; stream: boolean; parallelToolCalls: boolean };
   agent: { maxToolSteps: number; maxConcurrentRunsPerUser: number; toolTimeoutMs: number; maxInputChars: number; maxContextTokens: number; maxOutputTokens: number; sessionIdleSeconds: number; dailyTokenBudget: number; newAccountDailyTokenBudget: number; dailyCostBudgetUsd: number; globalDailyCostBudgetUsd: number; reconnectGraceMs: number; maxToolResultChars: number };
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number };
@@ -36,7 +38,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const style = env.LLM_API_STYLE ?? "chat_completions";
   if (style !== "chat_completions" && style !== "responses") throw new Error(`LLM_API_STYLE must be chat_completions or responses, got ${style}`);
   return {
-    publicOrigin, allowedOrigins: [publicOrigin, ...list(env.COMPOSER_EXTRA_ORIGINS)], port: num(env.PORT, 8080), host: env.HOST ?? "127.0.0.1",
+    publicOrigin, allowedOrigins: [publicOrigin, ...list(env.COMPOSER_EXTRA_ORIGINS)], adminUsers: list(env.COMPOSER_ADMIN_USERS), port: num(env.PORT, 8080), host: env.HOST ?? "127.0.0.1",
     dataDir: env.COMPOSER_DATA_DIR ?? "./composer-data", enabled: env.COMPOSER_ENABLED !== "0",
     llm: { baseUrl: (env.LLM_BASE_URL ?? "").replace(/\/$/, ""), apiKey: env.LLM_API_KEY ?? "", model, models, apiStyle: style, provider: env.LLM_PROVIDER_NAME ?? hostOf(env.LLM_BASE_URL),
       priceInPerMTok: num(env.LLM_PRICE_INPUT_PER_MTOK, 3), priceOutPerMTok: num(env.LLM_PRICE_OUTPUT_PER_MTOK, 15), requestTimeoutMs: num(env.LLM_REQUEST_TIMEOUT_MS, 120_000), maxRetries: num(env.LLM_MAX_RETRIES, 3),

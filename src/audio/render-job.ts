@@ -5,6 +5,7 @@ import { renderProjectOffline, type OfflineRenderOptions, type RenderResult, typ
 import { artifactStore, type ArtifactMeta, type ArtifactStore } from "./artifact-store.ts";
 import { RenderError, asRenderError } from "./render-error.ts";
 import type { LoadedSoundFont } from "./soundfont-loader.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 export type JobStatus = "queued" | "loading" | "rendering" | "encoding" | "validating" | "saving" | "completed" | "failed" | "cancelled";
 export interface RenderJob {
@@ -63,6 +64,7 @@ export class RenderJobManager {
         return this.patch(id, { status: "completed", progress: 1, finishedAt: Date.now(), artifactId, result: { ...meta, stats: lean } });
       } catch (e) {
         const err = asRenderError(e);
+        if (err.code !== "OPERATION_CANCELLED") reportError(e, { where: "render-job", code: err.code });
         return this.patch(id, { status: err.code === "OPERATION_CANCELLED" ? "cancelled" : "failed", finishedAt: Date.now(), error: { code: err.code, message: err.message } });
       } finally { this.aborts.delete(id); }
     };
