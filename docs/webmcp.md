@@ -11,7 +11,7 @@ no cross-origin exposure (`exposedTo` is never set), and no arbitrary JS/DOM/fil
 - Registration is a module-level singleton bound to one `AbortController`; re-render/HMR re-registration aborts the old set first.
 - `execute(input, {signal})` honors cancellation and always reads live `WorkstationController` state.
 - Every tool returns JSON text: `{ ok, projectId, revision, data, warnings }` or `{ ok:false, error:{code,message} }`.
-  Codes: `STALE_REVISION, INVALID_RANGE, INVALID_ARGUMENT, UNSUPPORTED_CC, AUDIO_NOT_READY, USER_APPROVAL_REQUIRED, OPERATION_CANCELLED`.
+  Codes: `STALE_REVISION, INVALID_RANGE, INVALID_ARGUMENT, UNSUPPORTED, AUDIO_NOT_READY, USER_APPROVAL_REQUIRED, OPERATION_CANCELLED`.
 - Read tools carry `readOnlyHint: true` and `untrustedContentHint: true` (track names/metadata come from files).
 
 ## Modes: real WebMCP, origin trial, in-page shim
