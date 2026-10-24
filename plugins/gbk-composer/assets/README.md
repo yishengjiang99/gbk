@@ -1,5 +1,7 @@
 # Assets
 
+**Icon placeholder:** the ChatGPT listing icon is owner-supplied and pending. Drop it here as `icon.png` (square) and add the reference to `plugin.json` `interface` at that time.
+
 No logo, icon, or screenshot assets are bundled with this plugin package yet.
 
 `plugin.json` deliberately does not reference any icon, logo, or screenshot

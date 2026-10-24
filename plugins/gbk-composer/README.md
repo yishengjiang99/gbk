@@ -6,8 +6,9 @@ modify individual passages, control expression, and export WAV and MIDI.
 
 This package connects ChatGPT and Codex to the GBK Composer remote MCP
 server at `https://compose.grepawk.com/mcp`. Compositions are created and
-rendered server-side — no open browser tab is required — and every project
-can also be opened in GBK Studio at <https://compose.grepawk.com>.
+stored server-side; WAV/MIDI renders run in your own signed-in GBK Studio
+browser tab at <https://compose.grepawk.com> (the server never synthesizes
+audio — with no tab open, the render tool returns an open-the-studio link).
 
 ## Package contents
 
@@ -45,9 +46,8 @@ installed (see Auth below).
 2. In ChatGPT, open **Plugins** and add a custom MCP server.
 3. Enter the server URL: `https://compose.grepawk.com/mcp`
 4. Complete the GBK sign-in / account-linking flow (OAuth, see below).
-5. Invoke it, for example: "@GBK Compose a 32-bar four-voice Baroque fugue
-   in D minor at 108 BPM with organ instrumentation and expressive CC11
-   dynamics. Render WAV and MIDI."
+5. Invoke it, for example: "@GBK Compose a 16-bar Baroque fugue in D minor
+   for organ, then show me the piano roll."
 
 The same MCP endpoint can be configured in Codex and other MCP-compatible
 clients using the declaration in `mcp.json`.

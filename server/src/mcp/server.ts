@@ -92,13 +92,13 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- discovery (public, read-only) ----------------------------------------------------------------
   server.registerTool("gbk_get_capabilities", {
-    title: "GBK capabilities", description: "Discover GBK Composer styles, composition modes, instruments (SoundFont presets), render formats and limits. Call this before composing instead of guessing supported features.",
+    title: "GBK capabilities", description: "Use this when you need to know what GBK Composer supports: the five styles (baroque, classical, pop, jazz, ambient), edit operations, instrument names and their SoundFont presets, audible MIDI controllers, render formats and per-account limits. Call it before composing instead of guessing. Read-only; no sign-in required.",
     inputSchema: {}, annotations: annotations(true, true),
   }, async () => run("gbk_get_capabilities", null, {}, async () => ({ capabilities: service.capabilities() })));
 
   // ---- compositions ----------------------------------------------------------------------------------
   server.registerTool("gbk_create_composition", {
-    title: "Create a composition", description: "Create a durable, server-side GBK composition with the deterministic arrangement engine (seeded). Returns the composition id, revision, structure summary and Studio URL. No browser tab is required to compose. Rendering is a separate step (gbk_render_composition) that runs in the user's connected Studio tab.",
+    title: "Create a composition", description: "Use this when the user asks for a new piece of music. Creates a private, durable GBK composition with the deterministic, seeded arrangement engine (style, key, tempo, meter, bars or duration, instrumentation, voices, sections). Returns the composition id, revision, structure summary and Studio URL. No browser tab is required to compose. Rendering is a separate step (gbk_render_composition) that runs in the user's connected Studio tab.",
     inputSchema: {
       title: z.string().min(1).max(128),
       style: z.enum(["baroque", "classical", "pop", "jazz", "ambient"]).optional().describe("baroque uses the Bach fugue generator + continuo"),
@@ -124,20 +124,20 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   }));
 
   server.registerTool("gbk_get_composition", {
-    title: "Get a composition", description: "Structured summary of one of your compositions: sections, tracks, instrumentation, controllers, revision history. Optionally include paginated notes for a bar range.",
+    title: "Get a composition", description: "Use this to inspect an existing composition before editing or describing it. Structured summary: sections, tracks, instrumentation, controllers, revision history. Optionally include paginated notes for a bar range.",
     inputSchema: { compositionId: COMPOSITION_ID, startBar: z.number().int().min(1).optional(), endBar: z.number().int().min(1).optional(),
       includeNotes: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(1000).optional() },
     annotations: annotations(true, true),
   }, async (a) => run("gbk_get_composition", "gbk:compositions.read", a as Record<string, unknown>, async (p) => service.get(p!.user, a.compositionId, a)));
 
   server.registerTool("gbk_list_compositions", {
-    title: "List your compositions", description: "Your durable GBK compositions, most recently updated first.",
+    title: "List your compositions", description: "Use this to find the user's existing GBK compositions (for example \"my last piece\"), most recently updated first. Returns ids, titles and revisions.",
     inputSchema: { limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() },
     annotations: annotations(true, true),
   }, async (a) => run("gbk_list_compositions", "gbk:compositions.read", a as Record<string, unknown>, async (p) => ({ items: service.list(p!.user, a.limit, a.offset) })));
 
   server.registerTool("gbk_edit_composition", {
-    title: "Edit a composition", description: "Apply typed, deterministic edit operations to one passage or aspect of an existing composition. Requires expectedRevision (optimistic concurrency): on STALE_REVISION, re-read with gbk_get_composition and retry. Operations: generate_part {track, startBar, endBar, kind: melody|bass|walking_bass|chords|arpeggio|alberti|drums|counterpoint, seed?}, transform_notes {track, startBar, endBar, transform: transpose|invert|retrograde|repeat|sequence|quantize|humanize|articulation|phrase_dynamics|variation, ...}, orchestrate {sourceTrack, targetTrack, startBar, endBar, semitones?, velocityScale?} (e.g. octave doubling), cc_curve {track|trackIds, controller, startBar, endBar, shape: crescendo|decrescendo|swell|linear|smoothstep|exponential, from?, to?, peak?}, note_patch {add?, remove?, update?}, cc_patch {track, controller, startBar, endBar, points:[{tick,value}]}, set_mix {track, volume?, pan?, expression?, mute?, solo?}, set_instrument {track, program, bankMsb?, bankLsb?}, set_tempo {bpm}, set_sections {sections}, generate_arrangement {style, ...}, generate_fugue_section {key, voices, atBar, ...}. Unrelated sections are left untouched; the result reports untouchedSectionsUnchanged.",
+    title: "Edit a composition", description: "Use this when the user wants to change an existing composition. Applies typed, deterministic edit operations to one passage or aspect of an existing composition. Requires expectedRevision (optimistic concurrency): on STALE_REVISION, re-read with gbk_get_composition and retry. Operations: generate_part {track, startBar, endBar, kind: melody|bass|walking_bass|chords|arpeggio|alberti|drums|counterpoint, seed?}, transform_notes {track, startBar, endBar, transform: transpose|invert|retrograde|repeat|sequence|quantize|humanize|articulation|phrase_dynamics|variation, ...}, orchestrate {sourceTrack, targetTrack, startBar, endBar, semitones?, velocityScale?} (e.g. octave doubling), cc_curve {track|trackIds, controller, startBar, endBar, shape: crescendo|decrescendo|swell|linear|smoothstep|exponential, from?, to?, peak?}, note_patch {add?, remove?, update?}, cc_patch {track, controller, startBar, endBar, points:[{tick,value}]}, set_mix {track, volume?, pan?, expression?, mute?, solo?}, set_instrument {track, program, bankMsb?, bankLsb?}, set_tempo {bpm}, set_sections {sections}, generate_arrangement {style, ...}, generate_fugue_section {key, voices, atBar, ...}. Unrelated sections are left untouched; the result reports untouchedSectionsUnchanged.",
     inputSchema: { compositionId: COMPOSITION_ID, expectedRevision: z.number().int().min(0),
       operations: z.array(z.record(z.string(), z.unknown())).min(1).max(32), idempotencyKey: IDEMPOTENCY },
     annotations: annotations(false),
@@ -148,7 +148,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- rendering --------------------------------------------------------------------------------------
   server.registerTool("gbk_render_composition", {
-    title: "Render a composition", description: "Render a saved composition revision to a validated WAV plus a Standard MIDI File. Synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required with an open-the-studio-to-render link (studioUrl) — ask the user to open it, then call again. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
+    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV plus a Standard MIDI File. The server never synthesizes audio. Synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required with an open-the-studio-to-render link (studioUrl) — ask the user to open it, then call again. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
     inputSchema: { compositionId: COMPOSITION_ID, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
       sampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(), channels: z.union([z.literal(1), z.literal(2)]).optional(),
       format: z.enum(["pcm16", "float32"]).optional(), normalize: z.enum(["loudness", "peak", "off"]).optional(),
@@ -179,7 +179,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   }));
 
   server.registerTool("gbk_get_render_status", {
-    title: "Render status", description: "Progress, completion state, validation data and artifact references for a render job.",
+    title: "Render status", description: "Use this to poll a render job started by gbk_render_composition: progress, completion state, validation data and artifact references.",
     inputSchema: { jobId: z.string().min(1).max(128), waitSeconds: z.number().min(0).max(120).optional() },
     annotations: annotations(true, true),
   }, async (a) => run("gbk_get_render_status", "gbk:artifacts.read", a as Record<string, unknown>, async (p) => {
@@ -194,7 +194,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   }, async (a) => run("gbk_cancel_render", "gbk:renders.create", a as Record<string, unknown>, async (p) => renders.jobView(p!.user, renders.cancel(p!.user, a.jobId))));
 
   server.registerTool("gbk_get_artifacts", {
-    title: "Get artifacts", description: "Authorized download references (short-lived signed URLs, re-checked at access) and metadata for a composition's WAV and MIDI artifacts.",
+    title: "Get artifacts", description: "Use this when the user wants to download a composition's files. Authorized download references (short-lived signed URLs, re-checked at access) and metadata for a composition's WAV and MIDI artifacts.",
     inputSchema: { compositionId: COMPOSITION_ID }, annotations: annotations(true, true),
   }, async (a) => run("gbk_get_artifacts", "gbk:artifacts.read", a as Record<string, unknown>, async (p) => {
     service.getRow(p!.user, a.compositionId);
@@ -207,13 +207,13 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- studio / publishing -------------------------------------------------------------------------------
   server.registerTool("gbk_open_workstation", {
-    title: "Open in GBK Studio", description: "Return an authenticated deep link that opens this exact composition revision in GBK Studio (private by default; Fork inside Studio to edit a copy there).",
+    title: "Open in GBK Studio", description: "Use this when the user wants to open or keep editing a composition in GBK Studio, or needs a Studio tab for rendering. Returns an authenticated deep link that opens this exact composition revision in GBK Studio (private by default; Fork inside Studio to edit a copy there).",
     inputSchema: { compositionId: COMPOSITION_ID }, annotations: annotations(true, true),
   }, async (a) => run("gbk_open_workstation", "gbk:compositions.read", a as Record<string, unknown>, async (p) => service.openWorkstation(p!.user, a.compositionId)));
 
   server.registerTool("gbk_publish_composition", {
     title: "Publish a composition", description: "Publish a composition as a public GBK share page. This is the ONLY tool that makes a composition public, and it must be called only when the user explicitly asks to publish/share publicly.",
-    inputSchema: { compositionId: COMPOSITION_ID }, annotations: annotations(false, true),
+    inputSchema: { compositionId: COMPOSITION_ID }, annotations: { ...annotations(false, true), openWorldHint: true },
   }, async (a) => run("gbk_publish_composition", "gbk:shares.publish", a as Record<string, unknown>, async (p) => service.publish(p!.user, a.compositionId)));
 
   // ---- MCP Apps UI -----------------------------------------------------------------------------------------
@@ -224,7 +224,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     _meta: { ui: { prefersBorder: true, csp: { resourceDomains: [publicOrigin], connectDomains: [publicOrigin] } } } }] }));
 
   server.registerTool("gbk_show_composition_ui", {
-    title: "Show the composition player", description: "Render the interactive GBK player (playback, seekable piano roll, track list, CC lanes, WAV/MIDI downloads, Studio link) for a composition inside the host. Call after creating/rendering when the user wants to listen or see the piano roll. Tools remain fully usable without this UI.",
+    title: "Show the composition player", description: "Use this when the user wants to listen to, see, or download a composition. Shows the interactive GBK player (playback, seekable piano roll, track list, CC lanes, WAV/MIDI downloads, Studio link) for a composition inside the host. Call after creating/rendering when the user wants to listen or see the piano roll. Tools remain fully usable without this UI.",
     inputSchema: { compositionId: COMPOSITION_ID },
     annotations: annotations(true, true),
     _meta: { ui: { resourceUri: COMPOSER_UI_URI }, "openai/outputTemplate": COMPOSER_UI_URI },

@@ -20,28 +20,27 @@ human account owner have not been performed by preparing this packet.
 - **Category:** Productivity
 - **Capabilities:** Interactive, Write
 
-**Short description**
+**Display name:** GBK Composer
 
-> Compose, edit, and render structured MIDI music to WAV and MIDI.
+**Short description** (≤30 chars)
+
+> Compose and edit MIDI music
 
 **Long description**
 
-> GBK Composer lets you compose, edit, orchestrate, visualize, and render
-> MIDI music with a deterministic SoundFont synthesizer, directly from
-> ChatGPT or Codex. Create durable compositions with structured
-> arrangements — including Baroque fugues, counterpoint, and multi-voice
-> writing — modify individual passages without disturbing the rest, control
-> expression with MIDI CC automation, and export validated stereo WAV and
-> Standard MIDI files. Every composition is saved server-side under your
-> GBK account, can be revised by follow-up prompts, played and inspected in
-> an interactive player with a piano-roll view, and opened in GBK Studio
-> for full editing.
+> GBK Composer writes and edits real MIDI music from a chat. Ask for a piece in one of five styles (baroque, classical, pop, jazz, ambient) with a key, tempo, meter, length and instruments, and GBK builds a structured, multi-track arrangement with a deterministic, seeded engine. Baroque requests use a Bach-style fugue generator with continuo.
+>
+> Follow-up prompts change one passage without touching the rest: add a melody, bass, walking bass, chords, arpeggio, drums or counterpoint part; transpose, invert, quantize, humanize or vary notes; double a line at the octave; shape dynamics with CC curves such as a CC11 crescendo; and change tempo, instruments or the mix. Every edit is saved as a new revision.
+>
+> Instruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.
+>
+> To hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. WAV and Standard MIDI renders run in your own browser: keep a signed-in GBK Studio tab open at compose.grepawk.com and GBK renders there, then returns download links. If no Studio tab is open, GBK gives you a link to open one.
+>
+> Compositions are private to your GBK account. GBK publishes a public share page only when you ask it to.
 
 **Description (manifest)**
 
-> Compose, edit, orchestrate, visualize, and render MIDI music with a
-> deterministic SoundFont synthesizer. Generate structured arrangements,
-> modify individual passages, control expression, and export WAV and MIDI.
+> Compose and edit structured MIDI music in five styles, shape dynamics with CC automation, preview it in a piano-roll player, and render WAV and MIDI in your GBK Studio browser tab.
 
 **Keywords:** music, composition, midi, fugue, orchestration
 
@@ -49,46 +48,26 @@ human account owner have not been performed by preparing this packet.
 game soundtracks, film cues, ambient music, MIDI orchestration, and music
 programming and experimentation.
 
-**Brand assets:** no logo, icon, or screenshot assets are bundled yet (see
+**Brand assets:** ICON PLACEHOLDER — the listing icon will be supplied by the owner (`plugins/gbk-composer/assets/icon.png`, then reference it from `plugin.json`). No logo, icon, or screenshot assets are bundled yet (see
 `plugins/gbk-composer/assets/README.md`). Real assets must be supplied by
 the account owner before a public submission that requires them — do not
 submit placeholder or third-party artwork.
 
 ## Test prompts
 
-Use these prompts verbatim when testing the integration and when a
-reviewer asks for demonstration prompts.
+These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked by `server/test/mcp-listing.test.ts`). Rendering needs a signed-in GBK Studio tab open in the browser; without one the render tool returns a studio link.
 
-1. **Compose and render**
+1. > Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.
 
-   > Compose a 32-bar four-voice Baroque fugue in D minor at 108 BPM with
-   > organ instrumentation and expressive CC11 dynamics. Render WAV and
-   > MIDI.
+   Expected: A new private composition (style baroque, organ, D minor, 16 bars) is created and the interactive player with piano roll is shown.
 
-   Expected: a new durable composition is created; the render job completes
-   with `validated: true`; WAV and MIDI download links and the project URL
-   are returned; the interactive player is shown.
+2. > Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then render WAV and MIDI.
 
-2. **Follow-up edit of the same composition**
+   Expected: A jazz composition is created, a `walking_bass` part is generated via `gbk_edit_composition`, and with a Studio tab connected the render returns WAV and MIDI download links (otherwise `studio_required` + studioUrl).
 
-   > Take the composition you just created. Add stretto in the final eight
-   > bars, increase the bass presence, and rerender.
+3. > In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo.
 
-   Expected: the same composition ID is retained, the revision increments,
-   only the intended material changes, and a revised render is produced.
-
-   (Related edit prompt from the interface defaults: "Make measures 17–24
-   more dramatic. Add an octave doubling to the bass, increase the dynamics
-   using CC11, preserve the earlier sections, and render the revised
-   piece.")
-
-3. **Visualize and download**
-
-   > Show me the piano roll and let me download both files.
-
-   Expected: the interactive component shows playback and a piano roll
-   matching the composition's MIDI timing, and working authorized WAV and
-   MIDI download links are provided.
+   Expected: `gbk_list_compositions` finds the latest piece; one edit applies `orchestrate` (semitones -12, bars 9–16) and a `cc_curve` crescendo on CC11; revision increments and other sections are unchanged.
 
 ## Privacy and data retention
 
