@@ -27,7 +27,7 @@ digraph GbkAudioPath {
     timer [label="MIDI timer worker\nSMF parse, tempo map, timed playEvents\n5 ms tick, 30 ms lookahead\nsrc/midi-timer.worker.ts", fillcolor="#ffedb5"];
     preset [label="Preset resolution\nprogram and bank to preset index\npreset index to merged regions\nApp.tsx, soundfont.ts", fillcolor="#ffedb5"];
     live_sink_route [label="LiveInputSession to Sf2LiveSink\nomni input to selected track\nengine channel 0, resolveTrackPreset", fillcolor="#ffedb5"];
-    app_live_route [label="App live callbacks\nnotes, bank state, program change\nother CC, bend and pressure not forwarded", fillcolor="#ffedb5"];
+    app_live_route [label="App live callbacks\nnotes, bank state, program change\nall CC, bend and pressure forwarded", fillcolor="#ffedb5"];
   }
 
   subgraph cluster_synth_voices {

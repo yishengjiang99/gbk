@@ -4,6 +4,11 @@ export interface MidiDriverCallbacks {
   onNoteOn?: (note: number, velocity: number, channel: number) => void;
   onNoteOff?: (note: number, channel: number) => void;
   onProgramChange?: (program: number, bank: number, channel: number) => void;
+  onControlChange?: (controller: number, value: number, channel: number) => void;
+  /** 14-bit pitch bend value, 0..16383 (8192 = center). */
+  onPitchBend?: (value: number, channel: number) => void;
+  onChannelPressure?: (value: number, channel: number) => void;
+  onPolyPressure?: (note: number, value: number, channel: number) => void;
   onRawMessage?: (timestampMs: number, data: ArrayLike<number>) => void;
 }
 
@@ -51,6 +56,10 @@ export function createMidiMessageHandler({
   onNoteOn,
   onNoteOff,
   onProgramChange,
+  onControlChange,
+  onPitchBend,
+  onChannelPressure,
+  onPolyPressure,
 }: MidiDriverCallbacks): MidiMessageHandler {
   const bankMsb = new Uint8Array(16);
   const bankLsb = new Uint8Array(16);
@@ -79,6 +88,19 @@ export function createMidiMessageHandler({
         const value = data2 & 0x7f;
         if (cc === 0) bankMsb[channel] = value;
         if (cc === 32) bankLsb[channel] = value;
+        onControlChange?.(cc, value, channel);
+        return true;
+      }
+      if (command === 0xa0) {
+        onPolyPressure?.(data1 & 0x7f, data2 & 0x7f, channel);
+        return true;
+      }
+      if (command === 0xd0) {
+        onChannelPressure?.(data1 & 0x7f, channel);
+        return true;
+      }
+      if (command === 0xe0) {
+        onPitchBend?.(((data2 & 0x7f) << 7) | (data1 & 0x7f), channel);
         return true;
       }
       if (command === 0xc0) {
@@ -96,6 +118,10 @@ export async function createMidiDriver({
   onNoteOn,
   onNoteOff,
   onProgramChange,
+  onControlChange,
+  onPitchBend,
+  onChannelPressure,
+  onPolyPressure,
   onRawMessage,
   onStateChange,
   selectedInputId = "all",
@@ -109,7 +135,15 @@ export async function createMidiDriver({
   type InputRecord = { input: MIDIInput; handler: (event: MIDIMessageEvent) => void };
   const inputHandlers = new Map<string, InputRecord>();
   let activeInputId = selectedInputId;
-  const messageHandler = createMidiMessageHandler({ onNoteOn, onNoteOff, onProgramChange });
+  const messageHandler = createMidiMessageHandler({
+    onNoteOn,
+    onNoteOff,
+    onProgramChange,
+    onControlChange,
+    onPitchBend,
+    onChannelPressure,
+    onPolyPressure,
+  });
 
   function shouldHandle(inputId: string): boolean {
     return activeInputId === "all" || activeInputId === inputId;

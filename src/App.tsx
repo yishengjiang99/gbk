@@ -1126,17 +1126,62 @@ export default function App() {
     []
   );
 
+  // Live CC / bend / pressure go to the same worklet engine as the live notes. Live note
+  // messages carry no channel, so the engine voices them on channel 0 (the Sf2LiveSink
+  // convention); controller state must land on channel 0 to shape those voices, whatever
+  // channel the hardware sent on.
+  const handleMidiControlChange = useCallback(
+    (controller: number, value: number, _channel: number): void => {
+      workletNodeRef.current?.port.postMessage({ type: "controlChange", channel: 0, controller, value });
+    },
+    []
+  );
+
+  const handleMidiPitchBend = useCallback(
+    (value: number, _channel: number): void => {
+      workletNodeRef.current?.port.postMessage({ type: "pitchBend", channel: 0, velocity: value });
+    },
+    []
+  );
+
+  const handleMidiChannelPressure = useCallback(
+    (value: number, _channel: number): void => {
+      workletNodeRef.current?.port.postMessage({ type: "channelPressure", channel: 0, value });
+    },
+    []
+  );
+
+  const handleMidiPolyPressure = useCallback(
+    (note: number, value: number, _channel: number): void => {
+      workletNodeRef.current?.port.postMessage({ type: "polyPressure", channel: 0, note, value });
+    },
+    []
+  );
+
   useEffect(() => {
     externalMidiMessageHandlerRef.current = createMidiMessageHandler({
       onNoteOn: (note, velocity, channel) => handleMidiNoteOn(note, velocity, channel, "Embedded MIDI"),
       onNoteOff: (note, channel) => handleMidiNoteOff(note, channel, "Embedded MIDI"),
       onProgramChange: (program, bank, channel) =>
         handleMidiProgramChange(program, bank, channel, "Embedded MIDI"),
+      onControlChange: (controller, value, channel) =>
+        handleMidiControlChange(controller, value, channel),
+      onPitchBend: (value, channel) => handleMidiPitchBend(value, channel),
+      onChannelPressure: (value, channel) => handleMidiChannelPressure(value, channel),
+      onPolyPressure: (note, value, channel) => handleMidiPolyPressure(note, value, channel),
     });
     return () => {
       externalMidiMessageHandlerRef.current = null;
     };
-  }, [handleMidiNoteOff, handleMidiNoteOn, handleMidiProgramChange]);
+  }, [
+    handleMidiNoteOff,
+    handleMidiNoteOn,
+    handleMidiProgramChange,
+    handleMidiControlChange,
+    handleMidiPitchBend,
+    handleMidiChannelPressure,
+    handleMidiPolyPressure,
+  ]);
 
   useEffect(() => {
     const bridge = createExternalMidiBridge({
@@ -1253,6 +1298,11 @@ export default function App() {
         onNoteOff: (note, channel) => handleMidiNoteOff(note, channel, "MIDI"),
         onProgramChange: (program, bank, channel) =>
           handleMidiProgramChange(program, bank, channel, "MIDI"),
+        onControlChange: (controller, value, channel) =>
+          handleMidiControlChange(controller, value, channel),
+        onPitchBend: (value, channel) => handleMidiPitchBend(value, channel),
+        onChannelPressure: (value, channel) => handleMidiChannelPressure(value, channel),
+        onPolyPressure: (note, value, channel) => handleMidiPolyPressure(note, value, channel),
         onStateChange: ({ connected, names, inputs }) => {
           setMidiInputs(inputs ?? []);
           if (connected === 0) {

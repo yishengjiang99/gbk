@@ -39,8 +39,8 @@ built-in synthetic source and schedules a click on the audio clock. See
   [docs/SF2_COMPLIANCE.md](docs/SF2_COMPLIANCE.md) (80 pass, 3 n/a, each row backed by
   `test/sf2-compliance-*.test.ts`); cross-engine parity against the Swift engine runs with
   `SF2_PARITY_SWIFT_BIN=… npm test`.
-- `src/midi-driver.ts`: Web MIDI input handling for live controllers (note on/off, bank select
-  and program change callbacks).
+- `src/midi-driver.ts`: Web MIDI input handling for live controllers (note, bank/program,
+  control change, pitch bend and pressure callbacks).
 
 ## Runtime Data Flow
 
@@ -143,12 +143,14 @@ The older player and SF2 Explorer live path is narrower:
   `navigator.requestMIDIAccess({ sysex: true })`. `src/external-midi-bridge.ts` can feed raw MIDI
   from a parent frame into the same message handler, and QWERTY handling in `src/App.tsx` calls the
   same note functions.
-- The handler decodes note on and note off. It keeps CC0 and CC32 only as bank-select state and
-  combines them for a following program change. It does not forward other CCs, pitch bend or pressure
-  to the synth.
+- The handler decodes note on and note off, control changes, pitch bend, and channel and poly
+  pressure. CC0 and CC32 still fold into the bank of a following program change, and every CC is
+  also forwarded as a `controlChange` event. CC, bend and pressure events are posted to the worklet
+  as `controlChange`, `pitchBend`, `channelPressure` and `polyPressure` messages, so they shape the
+  sounding preset through the engine's normal per-channel controller state.
 - A program change updates the selected preset. The next note-on posts `setPreset` with that preset's
-  regions and then `noteOn`. The hardware channel is not passed in the worklet message, so this path
-  uses engine channel 0.
+  regions and then `noteOn`. The hardware channel is not passed in the worklet messages, so this
+  path uses engine channel 0 for notes and for the forwarded CC, bend and pressure state alike.
 - Raw sample preview is an exception. `App.playRawSample(...)` builds a mono `AudioBuffer` and plays
   it through an `AudioBufferSourceNode` connected directly to `ctx.destination`. It bypasses the SF2
   engine, effects, master bus and analyser.

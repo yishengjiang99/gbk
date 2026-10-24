@@ -116,7 +116,7 @@
 <path fill="#ffedb5" stroke="black" d="M659.21,-1083.6C659.21,-1083.6 478.79,-1083.6 478.79,-1083.6 472.79,-1083.6 466.79,-1077.6 466.79,-1071.6 466.79,-1071.6 466.79,-1052.4 466.79,-1052.4 466.79,-1046.4 472.79,-1040.4 478.79,-1040.4 478.79,-1040.4 659.21,-1040.4 659.21,-1040.4 665.21,-1040.4 671.21,-1046.4 671.21,-1052.4 671.21,-1052.4 671.21,-1071.6 671.21,-1071.6 671.21,-1077.6 665.21,-1083.6 659.21,-1083.6"/>
 <text xml:space="preserve" text-anchor="middle" x="569" y="-1071" font-family="Helvetica,sans-Serif" font-size="10.00">App live callbacks</text>
 <text xml:space="preserve" text-anchor="middle" x="569" y="-1059" font-family="Helvetica,sans-Serif" font-size="10.00">notes, bank state, program change</text>
-<text xml:space="preserve" text-anchor="middle" x="569" y="-1047" font-family="Helvetica,sans-Serif" font-size="10.00">other CC, bend and pressure not forwarded</text>
+<text xml:space="preserve" text-anchor="middle" x="569" y="-1047" font-family="Helvetica,sans-Serif" font-size="10.00">all CC, bend and pressure forwarded</text>
 </g>
 <!-- live_app&#45;&gt;app_live_route -->
 <g id="edge11" class="edge">
