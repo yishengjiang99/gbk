@@ -30,7 +30,7 @@ test("listing claims match supported styles and instruments; no server-render cl
   for (const n of named) assert.ok(INSTRUMENTS[n.trim()], `instrument ${n}`);
   const all = [plugin.description, ui.longDescription, ...ui.defaultPrompt].join(" ");
   assert.doesNotMatch(all, /server-side render|no (open )?browser tab is required|stretto/i);
-  assert.match(ui.longDescription, /run in your own browser/);
+  assert.match(ui.longDescription, /rendered in your own browser, never on GBK.s server/);
 });
 
 test("tools/list advertises 'Use this' descriptions and publish is the only open-world tool", async () => {
@@ -41,7 +41,7 @@ test("tools/list advertises 'Use this' descriptions and publish is the only open
     for (const t of tools) {
       if (t.name !== "gbk_cancel_render" && t.name !== "gbk_publish_composition") assert.match(t.description, /^Use this/, t.name);
       assert.equal(t.annotations.openWorldHint, t.name === "gbk_publish_composition", t.name);
-      assert.equal(t.annotations.destructiveHint, false, t.name);
+      assert.equal(t.annotations.destructiveHint, t.name === "gbk_delete_composition", t.name);
     }
     assert.match(tools.find((t) => t.name === "gbk_render_composition")!.description, /never synthesizes audio/);
   } finally { await s.app.close(); }

@@ -1,15 +1,17 @@
 // Fastify wiring for the remote MCP endpoint, OAuth endpoints, signed artifact delivery and status.
 //
 // Transport: official SDK StreamableHTTPServerTransport, stateful sessions keyed by mcp-session-id.
-// Auth policy (MCP authorization spec): discovery (initialize / tools/list / resources) and the single
-// public read-only tool gbk_get_capabilities may run anonymously; every other tools/call requires a
-// principal. A tools/call without one gets HTTP 401 + a WWW-Authenticate challenge pointing at the
-// protected-resource metadata, which is what makes ChatGPT start the OAuth flow. A session is bound to
+// Auth policy: with guest projects enabled (default; MCP_GUEST=0 turns them off) anonymous tools/calls are
+// accepted and authorized per call by explicit per-project capabilities (guest.ts) — a transport session is
+// never a project credential, and anonymous calls are IP-throttled on top of durable global guest budgets.
+// OAuth / website sessions keep working for account users. With guests off, discovery and
+// gbk_get_capabilities stay anonymous and every other tools/call gets HTTP 401 + a WWW-Authenticate
+// challenge pointing at the protected-resource metadata (which makes ChatGPT start the OAuth flow). A session is bound to
 // the user it was created with — presenting a different user on the same session id is rejected — but
 // its authorization is NOT frozen at initialize: on every request the session is rebound to the
 // credentials actually presented (same user), so refreshed/narrower tokens take effect immediately,
 // and an anonymous session may upgrade to an authenticated one. Idle sessions are evicted.
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { createReadStream, statSync } from "node:fs";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -24,6 +26,8 @@ import { resolvePrincipal, resourceOf, SCOPES, type Principal } from "./auth.ts"
 import { McpError } from "./errors.ts";
 import { verifyArtifactSignature } from "./urls.ts";
 import { oauthRoutes } from "./oauth.ts";
+import { resolveGuestCapability } from "./guest.ts";
+import { RateLimiter } from "../security/rate-limit.ts";
 
 export interface McpDeps {
   store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics;
@@ -52,6 +56,9 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
   const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
   interface SessionEntry { transport: StreamableHTTPServerTransport; user: string | null; auth: SessionAuth; lastSeen: number }
   const transports = new Map<string, SessionEntry>();
+  const MAX_SESSIONS = 2000;
+  const guestLimiter = new RateLimiter(cfg.mcp.guestCallsPerMinute);
+  const clientKey = (ip: string) => createHmac("sha256", cfg.security.sessionSecret).update(`guest-client:${ip}`).digest("hex").slice(0, 24);
 
   const handle = async (req: FastifyRequest, reply: import("fastify").FastifyReply) => {
     const raw = reply.raw;
@@ -72,13 +79,19 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
       throw e;
     }
     const anonAllowed = ANON_METHODS.has(method) || isNotification || (method === "tools/call" && !!first?.params?.name && ANON_TOOLS.has(first.params.name));
-    if (!principal && !anonAllowed) return rpcError(reply, 401, "authentication required: connect your GBK account via OAuth", challenge);
+    if (!principal && !anonAllowed) {
+      if (!cfg.mcp.guestEnabled) return rpcError(reply, 401, "authentication required: connect your GBK account via OAuth", challenge);
+      if (method === "tools/call" && !guestLimiter.take(req.ip)) {
+        return reply.code(429).header("retry-after", String(guestLimiter.retryAfterSec(req.ip))).send({ jsonrpc: "2.0", error: { code: -32002, message: "too many account-free MCP calls from this network; retry shortly" }, id: null });
+      }
+    }
 
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     reply.hijack();
     if (sessionId && transports.has(sessionId)) {
       const entry = transports.get(sessionId)!;
       entry.lastSeen = Date.now();
+      entry.auth.client = clientKey(req.ip);
       const reqUser = principal?.user ?? null;
       if (entry.user !== reqUser) {
         // The only legal transition is anonymous -> authenticated (the OAuth flow completes after
@@ -102,11 +115,15 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
       for (const [id, e] of transports) {
         if (Date.now() - e.lastSeen > SESSION_IDLE_MS) { transports.delete(id); void e.transport.close().catch(() => undefined); }
       }
+      if (transports.size >= MAX_SESSIONS) {
+        raw.statusCode = 429; raw.setHeader("retry-after", "60"); raw.setHeader("content-type", "application/json");
+        raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32002, message: "MCP session capacity reached; retry later" }, id: null })); return;
+      }
       const ac = new AbortController();
       // Abort tool work only when the client actually goes away mid-response; the request's own
       // 'close' fires as soon as the body is consumed and must not cancel the call.
       raw.on("close", () => { if (!raw.writableEnded) ac.abort(); });
-      const auth: SessionAuth = { current: principal };
+      const auth: SessionAuth = { current: principal, client: clientKey(req.ip) };
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => { transports.set(id, { transport, user: principal?.user ?? null, auth, lastSeen: Date.now() }); },
@@ -127,6 +144,7 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
     const { id } = req.params as { id: string };
     const row = deps.store.getArtifactAny(id);
     if (!row) return reply.code(404).send({ code: "NOT_FOUND", message: "no such artifact" });
+    if (row.created_at <= Date.now() - cfg.mcp.artifactRetentionDays * 86_400_000) return reply.code(410).send({ code: "ARTIFACT_EXPIRED", message: "artifact retention period ended; render again" });
     const q = req.query as { exp?: string; sig?: string };
     const signed = verifyArtifactSignature(cfg, id, q.exp, q.sig);
     if (!signed) {
@@ -168,6 +186,21 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
     try { return deps.renders.acceptChunk((req.params as { id: string }).id, req.headers["x-gbk-render-token"], Number((req.query as { offset?: string }).offset ?? 0), new Uint8Array(buf)); }
     catch (e) { const code = (e as McpError).code ?? "INVALID_ARGUMENT"; return reply.code(code === "NOT_FOUND" ? 404 : 400).send({ code, message: (e as Error).message }); }
   });
+
+  // ---- account-free browser rendering: the read capability fetches the exact project snapshot ---------
+  // Used by the in-chat player widget and the Studio tab opened from a private link to synthesize audio
+  // locally (OfflineAudioContext). Token-authorized (no cookies), so it is safe to allow any origin.
+  app.route({ method: ["GET", "OPTIONS"], url: "/api/mcp/guest/snapshot", handler: async (req, reply) => {
+    reply.header("access-control-allow-origin", "*").header("access-control-allow-headers", "x-gbk-project-token").header("cache-control", "no-store");
+    if (req.method === "OPTIONS") return reply.code(204).send();
+    const token = req.headers["x-gbk-project-token"];
+    try {
+      if (typeof token !== "string") throw new McpError("NOT_FOUND", "send the project readAccessToken in x-gbk-project-token");
+      const g = resolveGuestCapability(cfg, deps.store, token);
+      const row = deps.service.getRow(g.user, g.compositionId);
+      return { compositionId: row.id, revision: row.revision, title: row.title, project: JSON.parse(row.project_json) };
+    } catch (e) { return reply.code(404).send({ code: "NOT_FOUND", message: (e as Error).message }); }
+  } });
 
   // ---- operational status (no private data) --------------------------------------------------
   app.get("/api/mcp/status", async () => ({

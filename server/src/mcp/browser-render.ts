@@ -93,6 +93,29 @@ export class RenderService {
     return { job: this.store.getJob(job.id, owner)! };
   }
 
+  /**
+   * Guest (account-free) render request. There is no account to route a Studio tab to, and the server never
+   * synthesizes, so this records a job, publishes the server-serialized MIDI (validated SMF; no audio), and
+   * leaves audio to the browser: the in-chat player or a Studio tab opened from the private read-only link.
+   */
+  midiOnlyJob(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, midi: Uint8Array, perDay: number): RenderJobRow {
+    if (this.store.countJobsSince(owner, 86_400_000) >= perDay) throw new McpError("QUOTA_EXCEEDED", `daily render request limit for this project reached (${perDay})`);
+    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, includeMidi: true, executor: "browser-handoff", rendererVersion: RENDERER_VERSION } });
+    mkdirSync(this.store.artifactsDir, { recursive: true });
+    const rel = `${job.id}.mid`, tmp = join(this.store.artifactsDir, `${rel}.tmp`);
+    writeFileSync(tmp, midi); renameSync(tmp, join(this.store.artifactsDir, rel));
+    const fname = row.title.replace(/[^\w\- .]/g, "_").slice(0, 60) || "gbk";
+    try {
+      this.store.addArtifacts([{ job_id: job.id, composition_id: row.id, owner, revision: row.revision, kind: "midi", filename: `${fname}.mid`, mime_type: "audio/midi",
+        size_bytes: midi.length, sha256: createHash("sha256").update(midi).digest("hex"), rel_path: rel,
+        meta_json: JSON.stringify({ validated: true, format: "SMF type 1", preserves: ["tempo map", "meter map", "program changes", "CC events", "pitch bend", "section markers"], rendererVersion: RENDERER_VERSION, sourceRevision: row.revision, audio: "browser-only" }) }]);
+    } catch (e) { try { rmSync(join(this.store.artifactsDir, rel)); } catch { /* gone */ } this.failJob(job.id, "RENDER_FAILED", (e as Error).message); throw e; }
+    this.finish(job.id, "completed", null, 1);
+    this.log({ evt: "mcp_guest_midi_export", jobId: job.id, compositionId: row.id, revision: row.revision, bytes: midi.length });
+    void snapshot;
+    return this.store.getJob(job.id, owner)!;
+  }
+
   // ---- endpoints the Studio tab calls (capability token = proof it was handed this job) ----
   private auth(jobId: string, token: unknown): Active {
     const a = this.active.get(jobId);

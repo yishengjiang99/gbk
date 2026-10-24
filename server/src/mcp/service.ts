@@ -19,6 +19,8 @@ import type { ShareStore } from "../persistence/shares.ts";
 import { McpStore, type CompositionRow } from "./store.ts";
 import { McpError, toMcpError } from "./errors.ts";
 import { resolveSoundFontPath } from "./browser-render.ts";
+import { guestCapability, isGuest } from "./guest.ts";
+import { serializeSmf } from "../../../src/workstation/smf.ts";
 
 export { RENDERER_VERSION } from "./service-meta.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
@@ -97,7 +99,8 @@ export class CompositionService {
         notes: p.notes.filter((n) => n.trackId === t.id).length,
         controllers: [...new Set(p.ccs.filter((e) => e.trackId === t.id).map((e) => e.controller))].sort((a, b) => a - b) })),
       revisions: this.store.listRevisions(row.id, row.owner),
-      projectUrl: `${this.cfg.publicOrigin}/studio?mcp=${row.id}`,
+      // Guest projects have no account Studio; their private read-only link comes from gbk_open_workstation.
+      projectUrl: isGuest(row.owner) ? null : `${this.cfg.publicOrigin}/studio?mcp=${row.id}`,
     };
   }
   getRow(owner: string, compositionId: string): CompositionRow {
@@ -119,10 +122,25 @@ export class CompositionService {
       soundFont: "GeneralUser GS (bundled); pipe organ = GM program 19 (instrument name 'organ')",
       renderFormats: { sampleRates: [44100, 48000], channels: [1, 2], formats: ["pcm16", "float32"], normalize: ["loudness", "peak", "off"], targetLufsRange: [-40, -5], peakCeilingDbTp: -1, maxRenderSeconds: this.cfg.mcp.maxRenderSeconds },
       controllers: { audible: [1, 7, 10, 11, 64, 66, 67, 91, 93], storedOnly: [71, 74], note: "all CC 0-127 are preserved and exported to MIDI" },
+      authentication: this.cfg.mcp.guestEnabled ? "optional: without sign-in, gbk_create_composition returns a private per-project accessToken (edit) and readAccessToken; pass accessToken on every follow-up call" : "required (OAuth)",
+      ...(this.cfg.mcp.guestEnabled ? { guestLimits: { maxSeconds: this.cfg.mcp.guestMaxSeconds, maxBars: this.cfg.mcp.guestMaxBars, maxNotesOrControllers: this.cfg.mcp.guestMaxEvents,
+        maxRevisions: this.cfg.mcp.guestMaxRevisions, renderRequestsPerProjectPerDay: this.cfg.mcp.guestRendersPerDay, artifactRetentionDays: this.cfg.mcp.artifactRetentionDays,
+        rendering: "browser only: MIDI is exported immediately; audio renders in the in-chat player or the Studio tab opened from the private link" } } : {}),
       limits: { maxCompositionsPerUser: this.cfg.mcp.maxCompositions, maxRendersPerDay: this.cfg.mcp.maxRendersPerDay, renderExecutor: "browser (connected GBK Studio tab)" },
       deterministic: "same project snapshot + renderer version + SoundFont + seed + render config => byte-identical WAV (SHA-256 recorded per artifact)",
       unsupported: ["arbitrary JavaScript/filesystem/shell access", "per-preset effect types beyond the built-in reverb/chorus", "SMPTE time division"],
     };
+  }
+
+  /** Guest bounds on the resulting project (duration, events, size, global storage). Throws before anything is persisted. */
+  private checkGuestProject(owner: string, project: Project) {
+    if (!isGuest(owner)) return;
+    const m = this.cfg.mcp, json = JSON.stringify(project), duration = tickToSec(project, project.endTick);
+    if (!Number.isFinite(duration) || duration > m.guestMaxSeconds || tickToBarBeat(project, project.endTick).bar > m.guestMaxBars + 1
+      || project.notes.length > m.guestMaxEvents || project.ccs.length > m.guestMaxEvents || json.length > 2 * 1024 * 1024)
+      throw new McpError("QUOTA_EXCEEDED", `guest projects are limited to ${m.guestMaxSeconds} seconds, ${m.guestMaxBars} bars, ${m.guestMaxEvents} notes/controllers and 2 MiB; sign in for larger projects`);
+    if (this.store.guestStorageBytes() + 4 * Buffer.byteLength(json) > m.guestMaxStorageBytes)
+      throw new McpError("QUOTA_EXCEEDED", "global guest storage capacity reached; retry later");
   }
 
   // ---- create ------------------------------------------------------------------------
@@ -135,6 +153,8 @@ export class CompositionService {
     let bars = a.bars;
     if (!bars && a.durationSeconds) bars = Math.max(4, Math.round((a.durationSeconds * tempo / 60) / num));
     bars = Math.min(512, Math.max(1, bars ?? 32));
+    if (isGuest(owner) && (bars > this.cfg.mcp.guestMaxBars || bars * num * 60 / tempo > this.cfg.mcp.guestMaxSeconds))
+      throw new McpError("QUOTA_EXCEEDED", `guest compositions are limited to ${this.cfg.mcp.guestMaxBars} bars and ${this.cfg.mcp.guestMaxSeconds} seconds; sign in for longer pieces`);
     const { c, tools } = this.controllerFor();
     const created = await this.call(tools, c, "gbk_create_project", {
       name: a.title.slice(0, 128), tempo, timeSignature: a.timeSignature ?? [4, 4], key: a.key,
@@ -146,6 +166,8 @@ export class CompositionService {
       ...(a.instrumentation?.length ? { instrumentation: a.instrumentation } : {}),
     }, signal);
     const project = c.project;
+    this.checkGuestProject(owner, project);
+    if (isGuest(owner) && this.store.guestCompositionCount() >= this.cfg.mcp.guestMaxCompositions) throw new McpError("QUOTA_EXCEEDED", "global guest composition capacity reached; retry later");
     const row = this.store.createComposition({ owner, title: project.name, projectJson: JSON.stringify(project), revision: project.revision, source: "mcp" });
     this.log({ evt: "mcp_composition_create", user: owner, compositionId: row.id, revision: row.revision });
     return { row, data: { ...this.summary(row, project), generation: gen.data, createdProjectId: (created.data as { projectId: string }).projectId } };
@@ -153,6 +175,7 @@ export class CompositionService {
 
   /** Import a GBK Studio project the user explicitly saved/shared (private autosave or public share). */
   importFromShare(owner: string, slug: string): { row: CompositionRow; data: Record<string, unknown> } {
+    if (isGuest(owner)) throw new McpError("NOT_FOUND", "importing Studio projects requires a GBK account");
     const share = this.shares.bySlug(slug);
     if (!share || (!share.public && share.owner !== owner)) throw new McpError("NOT_FOUND", "no such saved Studio project for this account");
     const project = JSON.parse(share.project_json) as Project;
@@ -186,12 +209,22 @@ export class CompositionService {
     const { row, project } = this.getProject(owner, compositionId);
     if (row.revision !== expectedRevision) throw new McpError("STALE_REVISION", `expectedRevision ${expectedRevision} does not match current revision ${row.revision}; re-read the composition and retry`, { currentRevision: row.revision });
     if (!operations.length || operations.length > 32) throw new McpError("INVALID_ARGUMENT", "operations must contain 1..32 typed edit operations");
+    if (isGuest(owner)) {
+      if (this.store.listRevisions(row.id, owner).length >= this.cfg.mcp.guestMaxRevisions) throw new McpError("QUOTA_EXCEEDED", `guest project revision limit reached (${this.cfg.mcp.guestMaxRevisions})`);
+      // Bound generation work before it runs; the final project limits are re-checked after every operation.
+      for (const op of operations) for (const k of ["bars", "maxBars", "startBar", "endBar", "atBar", "times", "repeats"]) {
+        const v = (op as Record<string, unknown>)[k];
+        if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > this.cfg.mcp.guestMaxBars + 1))
+          throw new McpError("QUOTA_EXCEEDED", `guest edit ${k} must be within 0..${this.cfg.mcp.guestMaxBars + 1}`);
+      }
+    }
     const { c, tools } = this.controllerFor(project);
     if (!c.resumeAutonomousSession("remote MCP edit")) throw new McpError("USER_APPROVAL_REQUIRED", "this project is user-owned; import it into MCP (gbk_create_composition with importShareSlug) or edit it in GBK Studio where edits go through Accept");
     const before = structuredClone(project);
     const appliedOps: Record<string, unknown>[] = [];
     for (const op of operations) {
       const label = await this.applyOp(tools, c, op, signal);
+      this.checkGuestProject(owner, c.project);
       appliedOps.push({ type: op.type, ...label });
     }
     const after = c.project;
@@ -266,11 +299,40 @@ export class CompositionService {
     }
   }
 
+  // ---- guest lifecycle: delete / claim into an account ------------------------------------------
+  deleteGuest(owner: string, compositionId: string): { deleted: true; compositionId: string } {
+    if (!isGuest(owner)) throw new McpError("INVALID_ARGUMENT", "account compositions are deleted from GBK Studio; this tool deletes account-free projects only");
+    this.getRow(owner, compositionId);
+    this.shares.deleteByProject(owner, compositionId);
+    this.store.deleteComposition(compositionId, owner);
+    this.log({ evt: "mcp_guest_delete", compositionId });
+    return { deleted: true, compositionId };
+  }
+  claim(guestOwnerId: string, account: string, compositionId: string): Record<string, unknown> {
+    if (!isGuest(guestOwnerId) || isGuest(account)) throw new McpError("INVALID_ARGUMENT", "claim moves an account-free project into a signed-in GBK account");
+    this.getRow(guestOwnerId, compositionId);
+    if (this.store.countCompositions(account) >= this.cfg.mcp.maxCompositions) throw new McpError("QUOTA_EXCEEDED", `composition limit reached (${this.cfg.mcp.maxCompositions})`);
+    this.shares.reassignProject(guestOwnerId, account, compositionId);
+    if (!this.store.reassignComposition(compositionId, guestOwnerId, account)) throw new McpError("NOT_FOUND", "project not found");
+    this.log({ evt: "mcp_guest_claim", compositionId, user: account });
+    const { row, project } = this.getProject(account, compositionId);
+    return { ...this.summary(row, project), claimed: true, note: "The project now belongs to your GBK account; its old access keys no longer work." };
+  }
+
+  // ---- MIDI export (server-side serialization only; no audio) ----------------------------------
+  exportMidi(project: Project): Uint8Array {
+    const midi = serializeSmf(project, { soundNrpn: true });
+    if (!(midi.length > 14 && String.fromCharCode(...midi.subarray(0, 4)) === "MThd")) throw new McpError("RENDER_FAILED", "MIDI export failed validation (missing MThd header)");
+    return midi;
+  }
+
   // ---- studio link / publishing --------------------------------------------------------------
   openWorkstation(owner: string, compositionId: string): { url: string; slug: string; note: string } {
     const { row, project } = this.getProject(owner, compositionId);
     const { row: share } = this.shares.upsertAutosave({ owner, projectId: row.id, title: project.name, projectJson: JSON.stringify(project) });
-    return { url: `${this.cfg.publicOrigin}/s/${share.slug}`, slug: share.slug,
+    // Guest links carry ONLY the read capability, and only in the fragment (never sent to servers or logs).
+    const fragment = isGuest(owner) ? `#access=${guestCapability(this.cfg, row, "read")}` : "";
+    return { url: `${this.cfg.publicOrigin}/s/${share.slug}${fragment}`, slug: share.slug,
       note: "Opens the exact saved revision as a private Studio song (read-only view; Fork in Studio creates an editable copy). The MCP composition stays the canonical copy until re-imported." };
   }
   publish(owner: string, compositionId: string): { url: string; slug: string } {
@@ -278,6 +340,6 @@ export class CompositionService {
     const opened = this.openWorkstation(owner, compositionId);
     this.shares.setPublic(opened.slug, true);
     this.store.setVisibility(row.id, owner, "public");
-    return { url: opened.url, slug: opened.slug };
+    return { url: `${this.cfg.publicOrigin}/s/${opened.slug}`, slug: opened.slug };
   }
 }

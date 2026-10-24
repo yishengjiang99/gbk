@@ -16,7 +16,8 @@ human account owner have not been performed by preparing this packet.
 - **Homepage / website:** https://compose.grepawk.com
 - **Repository:** https://github.com/yishengjiang99/gbk
 - **MCP server:** `gbk_composer` — Streamable HTTP at
-  `https://compose.grepawk.com/mcp`, OAuth authorization
+  `https://compose.grepawk.com/mcp`, no authentication required (per-project
+  access keys); OAuth sign-in optional for existing GBK accounts
 - **Category:** Productivity
 - **Capabilities:** Interactive, Write
 
@@ -34,13 +35,13 @@ human account owner have not been performed by preparing this packet.
 >
 > Instruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.
 >
-> To hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. WAV and Standard MIDI renders run in your own browser: keep a signed-in GBK Studio tab open at compose.grepawk.com and GBK renders there, then returns download links. If no Studio tab is open, GBK gives you a link to open one.
+> No account is needed. To hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes; audio is rendered in your own browser, never on GBK's server. GBK exports a Standard MIDI file directly, and a private GBK Studio link lets you play and export WAV in your browser.
 >
-> Compositions are private to your GBK account. GBK publishes a public share page only when you ask it to.
+> Each composition is private and opened only with the access key returned to your chat. GBK publishes a public share page only when you ask it to.
 
 **Description (manifest)**
 
-> Compose and edit structured MIDI music in five styles, shape dynamics with CC automation, preview it in a piano-roll player, and render WAV and MIDI in your GBK Studio browser tab.
+> Compose and edit structured MIDI music in five styles, shape dynamics with CC automation, preview and render it in your browser (in-chat player or GBK Studio), and download MIDI. No account needed.
 
 **Keywords:** music, composition, midi, fugue, orchestration
 
@@ -114,19 +115,25 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 | Tool | readOnly | openWorld | destructive | Justification |
 | --- | --- | --- | --- | --- |
 | `gbk_get_capabilities` | true | false | false | Only returns static capability data; changes nothing and calls nothing outside GBK. |
-| `gbk_create_composition` | false | false | false | Creates a new private composition in the user's GBK account; it overwrites nothing and is not visible outside the account. |
+| `gbk_create_composition` | false | false | false | Creates a new private composition (in the user's GBK account, or account-free with a private access key); it overwrites nothing and is not visible to anyone else. |
 | `gbk_get_composition` | true | false | false | Reads one of the user's compositions; no changes. |
 | `gbk_list_compositions` | true | false | false | Lists the user's own compositions; no changes. |
 | `gbk_edit_composition` | false | false | false | Writes a new revision of the user's private composition; earlier revisions are kept, so nothing is lost, and nothing becomes public. |
-| `gbk_render_composition` | false | false | false | Creates a render job and WAV/MIDI artifacts in the user's account, rendered in their own Studio tab; it changes no content and publishes nothing. |
+| `gbk_render_composition` | false | false | false | Creates a render job: a server-exported MIDI file, plus WAV rendered in the user's own browser (Studio tab or in-chat player). It changes no content and publishes nothing. |
 | `gbk_get_render_status` | true | false | false | Reads render job status; no changes. |
 | `gbk_cancel_render` | false | false | false | Stops the user's own queued or running render job; no composition data is deleted and nothing is published. |
 | `gbk_get_artifacts` | true | false | false | Returns signed download links to the user's own files; no changes. |
 | `gbk_open_workstation` | true | false | false | Returns a deep link into GBK Studio; no changes. |
 | `gbk_publish_composition` | false | true | false | Makes the composition publicly viewable on a share page (open world). Called only on explicit user request; not destructive because it deletes nothing. |
+| `gbk_delete_composition` | false | false | true | Permanently deletes the caller's own account-free composition; requires that project's edit key and an explicit user request. |
+| `gbk_claim_composition` | false | false | false | Moves an account-free composition the caller holds the edit key for into their signed-in GBK account; nothing is deleted or published. |
 | `gbk_show_composition_ui` | true | false | false | Renders a read-only player for the user's composition; no changes. |
 
-### Review details: how reviewers sign in
+### Review details: no sign-in needed
+
+The plugin works without any account: connect with **No authentication** and run the test prompts. Each composition returns a private `accessToken` that ChatGPT passes on follow-up calls; audio plays in the in-chat player (rendered in the browser), MIDI downloads come from the server, and the private Studio link opens the piece read-only in GBK Studio.
+
+### Optional: reviewer account (signed-in path)
 
 GBK normally uses Google sign-in only. For app review there is one username/password account, `openai-reviewer`. The owner enters the password in the portal's **Review details** form; it is never in the package or the repo.
 1. In ChatGPT, connect GBK Composer. The OAuth page at `https://compose.grepawk.com/oauth/authorize` asks the user to sign in.
@@ -159,13 +166,18 @@ Demo recording (`review.demo_recording_url`): https://yishengjiang99.github.io/g
   the structured project data (notes, tracks, sections, controller
   automation, instrumentation, titles, and metadata), their revision
   history, and the rendered artifacts (WAV/MIDI files) produced from them —
-  are stored server-side, associated with that user's GBK account.
+  are stored server-side, associated with that user's GBK account, or, for
+  account-free use, with no account or name at all (only a random project
+  key, of which the server keeps no recoverable copy).
 - **Private by default.** A composition is private to its owner. Creating,
   editing, or rendering a composition never publishes it. A composition
   becomes public only when the user explicitly invokes the publish/share
   operation.
 - **Access control.** Private compositions and artifacts are accessible
-  only to their authenticated owner. Artifact downloads are served through
+  only to their authenticated owner, or for account-free projects to the
+  holder of that project's access key (a composition id alone grants
+  nothing; the read-only key cannot edit). Studio links carry only the
+  read-only key, inside the URL fragment. Artifact downloads are served through
   authorized, expiring URLs, and authorization is checked again when the
   file is downloaded — not only when the URL is issued. Artifact URLs
   should be treated as short-lived credentials and not shared.
@@ -175,15 +187,25 @@ Demo recording (`review.demo_recording_url`): https://yishengjiang99.github.io/g
 - **No sale of data.** Composition and account data is not sold. Data is
   used to provide the composition, rendering, and storage features the
   user invoked.
-- **Retention.** Compositions, revisions, and artifacts are retained while
-  the user's GBK account exists or until the user deletes them, so that
-  follow-up edits and re-renders remain possible.
+- **Retention.** Compositions and revisions are retained while the user's
+  GBK account exists, or for account-free projects until deletion is
+  requested, so that follow-up edits remain possible. Rendered artifacts
+  (WAV/MIDI) are deleted automatically after 30 days.
+- **Lost keys / claim.** An account-free project can only be opened with its
+  access key; a lost key cannot be recovered. While the key is held, a
+  signed-in user can claim the project into their GBK account
+  (`gbk_claim_composition`), after which the account is the recovery path.
 - **Deletion.** A user can delete a composition (and its rendered
   artifacts) from GBK Studio, or request deletion of their account data by
-  contacting the developer through https://compose.grepawk.com. Deletion
+  contacting the developer through https://compose.grepawk.com/support.
+  Account-free projects can be deleted by the key holder with
+  `gbk_delete_composition` (edit key required), or on request through support by
+  composition id (the key is confirmed privately, never posted). Deletion
   removes the project data and its artifacts from primary storage.
-- **Model-provider note.** Renders requested through ChatGPT run GBK's
-  deterministic composition/rendering engine; they do not invoke GBK's
+- **Audio rendering.** GBK's server never synthesizes audio; WAV is
+  rendered in the user's browser.
+- **Model-provider note.** Requests from ChatGPT run GBK's deterministic
+  composition engine; they do not invoke GBK's
   website LLM agent, so no additional model-provider processing of the
   composition is introduced by a render.
 
@@ -193,7 +215,7 @@ These steps cannot be completed by preparing this repository. Each requires
 the human account owner (or a human with the relevant account access):
 
 - [ ] **Deploy the server.** Deploy the release containing the `/mcp`
-      endpoint, OAuth endpoints, and render worker to
+      endpoint (account-free) and optional OAuth endpoints to
       `compose.grepawk.com`, and verify `https://compose.grepawk.com/mcp`
       answers an MCP `initialize` request.
 - [x] Icon supplied (`assets/icon.png`); screenshots still optional. Supply real brand assets (logo/icon/screenshots), if the target
@@ -201,9 +223,11 @@ the human account owner (or a human with the relevant account access):
 - [ ] **Add the custom MCP server in ChatGPT.** In the owner's ChatGPT
       account: Plugins → add custom MCP server → URL
       `https://compose.grepawk.com/mcp`.
-- [ ] **Complete OAuth linking.** Sign in to GBK in the OAuth flow and link
-      the ChatGPT client to the owner's GBK account; confirm a test
-      composition appears under that account in GBK Studio.
+- [ ] **Verify no-auth access.** Connect with no authentication; create,
+      edit, download MIDI and play in the in-chat player without signing in.
+      Confirm another connection cannot open the project by id alone.
+- [ ] **(Optional) OAuth linking.** Sign in to GBK in the OAuth flow and
+      confirm a test composition appears under that account in GBK Studio.
 - [ ] **Run the test prompts above** in the real ChatGPT connection and
       confirm playback, piano roll, downloads, and the Studio deep link.
 - [ ] **Prepare the public submission** with the metadata in this packet,

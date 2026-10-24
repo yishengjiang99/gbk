@@ -216,12 +216,14 @@ test("sessions rebind to the credentials presented per request: narrower token s
     mcp.setHeaders({ authorization: `Bearer ${tokFull.access_token}` });
     await mcp.call("gbk_create_composition", { title: "rebind-3" });
 
-    // Anonymous session: private tools 401, then the SAME session upgrades when a token arrives
+    // Anonymous session: creation is account-free (returns a project capability), and the SAME session
+    // still upgrades when a token arrives
     // (before this fix it 403'd as 'a different user' and forced a reconnect).
     const anon = new McpClient(s.base);
     await anon.initialize();
     const unauth = await anon.callRaw("gbk_create_composition", { title: "nope" });
-    assert.equal(unauth.status, 401);
+    assert.equal(unauth.status, 200);
+    assert.ok((unauth.rpc?.result as { structuredContent: { accessToken?: string } }).structuredContent.accessToken, "anonymous create returns a private edit capability");
     anon.setHeaders({ authorization: `Bearer ${tokFull.access_token}` });
     const created = await anon.call<{ compositionId: string }>("gbk_create_composition", { title: "upgraded" });
     assert.ok(created.compositionId);
