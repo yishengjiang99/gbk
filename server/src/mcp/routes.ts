@@ -26,12 +26,13 @@ import { resolvePrincipal, resourceOf, SCOPES, type Principal } from "./auth.ts"
 import { McpError } from "./errors.ts";
 import { verifyArtifactSignature } from "./urls.ts";
 import { oauthRoutes } from "./oauth.ts";
+import type { FunnelStore } from "../persistence/funnel.ts";
 import { resolveGuestCapability } from "./guest.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import { resolveSoundFontPath, resolveWidgetAsset } from "./browser-render.ts";
 
 export interface McpDeps {
-  store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics;
+  store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; funnel?: FunnelStore;
   log: (o: object) => void;
 }
 
@@ -120,6 +121,7 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
         raw.statusCode = 429; raw.setHeader("retry-after", "60"); raw.setHeader("content-type", "application/json");
         raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32002, message: "MCP session capacity reached; retry later" }, id: null })); return;
       }
+      deps.funnel?.bump("mcp_connect", principal ? "account" : "guest");
       const ac = new AbortController();
       // Abort tool work only when the client actually goes away mid-response; the request's own
       // 'close' fires as soon as the body is consumed and must not cancel the call.
@@ -130,7 +132,7 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
         onsessioninitialized: (id) => { transports.set(id, { transport, user: principal?.user ?? null, auth, lastSeen: Date.now() }); },
       });
       transport.onclose = () => { if (transport.sessionId) transports.delete(transport.sessionId); };
-      const server = createGbkMcpServer({ cfg, store: deps.store, service: deps.service, renders: deps.renders, auth, signal: ac.signal, metrics: deps.metrics, log: deps.log });
+      const server = createGbkMcpServer({ cfg, store: deps.store, service: deps.service, renders: deps.renders, auth, signal: ac.signal, metrics: deps.metrics, funnel: deps.funnel, log: deps.log });
       await server.connect(transport);
       await transport.handleRequest(req.raw, raw, body);
       return;
@@ -164,6 +166,8 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
       .header("content-disposition", `inline; filename="${row.filename.replace(/["\\]/g, "_")}"`)
       .header("x-content-type-options", "nosniff").header("cache-control", "private, no-store");
     if (req.method === "HEAD") { reply.header("content-length", String(size)); return reply.code(200).send(); }
+    // One download per full fetch or first range (players issue many range requests per listen).
+    if (!range || /^bytes=0-/.test(range)) deps.funnel?.bump(row.kind === "wav" ? "wav_download" : "midi_download", row.owner.startsWith("guest:") ? "guest" : "account");
     const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
     if (m) {
       const start = m[1] ? Number(m[1]) : 0; const end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;

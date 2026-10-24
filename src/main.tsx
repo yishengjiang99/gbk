@@ -1,4 +1,7 @@
 import "./telemetry/install.ts";
+import { funnelBeacon } from "./telemetry/funnel.ts";
+// Aggregate landing-page count (no identifiers); the Studio and other routes are not counted.
+if (location.pathname === "/") funnelBeacon("page_view_landing", "web");
 import React from "react";
 import ReactDOM from "react-dom/client";
 import Root from "./Root";

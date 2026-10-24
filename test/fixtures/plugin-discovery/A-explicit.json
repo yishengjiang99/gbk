@@ -1,0 +1,126 @@
+{
+ "category": "A",
+ "description": "Explicit composition requests (should invoke GBK, first tool create or capabilities)",
+ "fixtures": [
+  {
+   "id": "A01",
+   "category": "A",
+   "prompt": "Compose a 16-bar Baroque fugue in D minor for organ.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A02",
+   "category": "A",
+   "prompt": "Write me a short jazz piece in B-flat with a walking bass line at 140 BPM.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A03",
+   "category": "A",
+   "prompt": "Make an ambient track, about a minute long, in C major with strings and choir.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A04",
+   "category": "A",
+   "prompt": "Create a classical string quartet movement in G major, 24 bars, 3/4 time.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A05",
+   "category": "A",
+   "prompt": "Generate a pop song instrumental at 120 BPM in A minor with piano, bass and drums.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A06",
+   "category": "A",
+   "prompt": "Use GBK Composer to write a four-voice chorale in F major.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A07",
+   "category": "A",
+   "prompt": "Compose a harpsichord minuet in the style of Bach, 16 bars.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A08",
+   "category": "A",
+   "prompt": "I need a 30-second upbeat jazz cue for a video intro. Can you compose it?",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A09",
+   "category": "A",
+   "prompt": "Write a MIDI arrangement of an original melancholy waltz for cello and piano.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A10",
+   "category": "A",
+   "prompt": "Compose a short fanfare for trumpets and horns in E-flat major.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A11",
+   "category": "A",
+   "prompt": "Make me a lo-fi ambient loop in D with soft pads, 8 bars.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "A12",
+   "category": "A",
+   "prompt": "Write a three-voice invention for piano in A minor.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  }
+ ]
+}

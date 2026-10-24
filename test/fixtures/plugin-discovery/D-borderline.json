@@ -1,0 +1,86 @@
+{
+ "category": "D",
+ "description": "Borderline (either is acceptable; reported separately, not scored as errors)",
+ "fixtures": [
+  {
+   "id": "D01",
+   "category": "D",
+   "prompt": "Suggest a chord progression for a sad pop song.",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "D02",
+   "category": "D",
+   "prompt": "Can you hum me a melody idea for a lullaby?",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "D03",
+   "category": "D",
+   "prompt": "What tempo should a Baroque minuet be played at? Maybe show me an example.",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "D04",
+   "category": "D",
+   "prompt": "Turn this melody into sheet music: C D E F G G A A G.",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "D05",
+   "category": "D",
+   "prompt": "I'm learning counterpoint. Give me an example of first-species counterpoint.",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "D06",
+   "category": "D",
+   "prompt": "Make a ringtone for my phone.",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "D07",
+   "category": "D",
+   "prompt": "Help me score a 10-second game-over jingle.",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "D08",
+   "category": "D",
+   "prompt": "Is it possible to export music as MIDI from ChatGPT?",
+   "expect": "either",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,104 @@
+{
+ "category": "B",
+ "description": "Follow-ups and implicit music production in a GBK context (should invoke; first tool as listed)",
+ "fixtures": [
+  {
+   "id": "B01",
+   "category": "B",
+   "prompt": "Show me my last GBK composition in the player.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions",
+    "gbk_show_composition_ui"
+   ]
+  },
+  {
+   "id": "B02",
+   "category": "B",
+   "prompt": "List the pieces I've composed with GBK.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions"
+   ]
+  },
+  {
+   "id": "B03",
+   "category": "B",
+   "prompt": "What instruments and styles does GBK Composer support?",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "B04",
+   "category": "B",
+   "prompt": "Render my latest GBK piece to WAV and MIDI.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions",
+    "gbk_render_composition"
+   ]
+  },
+  {
+   "id": "B05",
+   "category": "B",
+   "prompt": "In my last GBK piece, double the bass an octave lower in bars 9-16.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions",
+    "gbk_edit_composition"
+   ]
+  },
+  {
+   "id": "B06",
+   "category": "B",
+   "prompt": "Add a CC11 crescendo to the strings in my most recent composition.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions",
+    "gbk_edit_composition"
+   ]
+  },
+  {
+   "id": "B07",
+   "category": "B",
+   "prompt": "I want to hear the fugue we made earlier with GBK \u2014 play it.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions",
+    "gbk_show_composition_ui"
+   ]
+  },
+  {
+   "id": "B08",
+   "category": "B",
+   "prompt": "Give me a MIDI file of the jazz tune I made with GBK yesterday.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions",
+    "gbk_render_composition"
+   ]
+  },
+  {
+   "id": "B09",
+   "category": "B",
+   "prompt": "Open my newest GBK composition in the studio so I can edit it.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_list_compositions",
+    "gbk_open_workstation"
+   ]
+  },
+  {
+   "id": "B10",
+   "category": "B",
+   "prompt": "Can you write some background music for my podcast intro? Something calm, 20 seconds.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  }
+ ]
+}

@@ -47,3 +47,15 @@ test("tools/list advertises 'Use this' descriptions and publish is the only open
     assert.match(tools.find((t) => t.name === "gbk_render_composition")!.description, /never synthesizes audio/);
   } finally { await s.app.close(); }
 });
+
+test("tool input schemas avoid array-form 'items' (strict tool-calling APIs reject draft-07 tuples)", async () => {
+  const s = await startServer(new ScriptModel([() => reply("x")]));
+  try {
+    const c = new McpClient(s.base); await c.initialize();
+    const tools = ((await c.send("tools/list", {})).rpc?.result as { tools: { name: string; inputSchema: unknown }[] }).tools;
+    const bad: string[] = [];
+    const walk = (n: unknown, path: string) => { if (!n || typeof n !== "object") return; const o = n as Record<string, unknown>; if (Array.isArray(o.items)) bad.push(path); for (const [k, v] of Object.entries(o)) walk(v, `${path}/${k}`); };
+    for (const t of tools) walk(t.inputSchema, t.name);
+    assert.deepEqual(bad, []);
+  } finally { await s.app.close(); }
+});

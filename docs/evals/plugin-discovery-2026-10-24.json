@@ -1,0 +1,457 @@
+{
+ "meta": {
+  "ranAt": "2026-10-24T21:38:56.350Z",
+  "mcpUrl": "http://127.0.0.1:18099/mcp",
+  "model": "grok-4.20-0309-non-reasoning",
+  "liveTools": [
+   "gbk_get_capabilities",
+   "gbk_create_composition",
+   "gbk_get_composition",
+   "gbk_list_compositions",
+   "gbk_edit_composition",
+   "gbk_render_composition",
+   "gbk_get_render_status",
+   "gbk_cancel_render",
+   "gbk_get_artifacts",
+   "gbk_open_workstation",
+   "gbk_publish_composition",
+   "gbk_delete_composition",
+   "gbk_claim_composition",
+   "gbk_show_composition_ui"
+  ],
+  "distractors": [
+   "web_search",
+   "image_generation",
+   "python"
+  ],
+  "usage": {
+   "inputTokens": 193594,
+   "outputTokens": 1504,
+   "estimatedUsd": 0.6033,
+   "budgetUsd": 1,
+   "stoppedForBudget": false
+  }
+ },
+ "scored": [
+  {
+   "id": "A01",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A02",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A03",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A04",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A05",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A06",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A07",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A08",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A09",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A10",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A11",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "A12",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B01",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B02",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B03",
+   "firstTool": "gbk_get_capabilities",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B04",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B05",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B06",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B07",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B08",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B09",
+   "firstTool": "gbk_list_compositions",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "B10",
+   "firstTool": "gbk_get_capabilities",
+   "category": "B",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "C01",
+   "firstTool": "web_search",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C02",
+   "firstTool": "web_search",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C03",
+   "firstTool": null,
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C04",
+   "firstTool": "web_search",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C05",
+   "firstTool": null,
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C06",
+   "firstTool": "web_search",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C07",
+   "firstTool": null,
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C08",
+   "firstTool": "web_search",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C09",
+   "firstTool": null,
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C10",
+   "firstTool": "image_generation",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C11",
+   "firstTool": "python",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "C12",
+   "firstTool": "gbk_get_capabilities",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": true,
+   "invocationCorrect": false,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D01",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D02",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D03",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D04",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D05",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D06",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D07",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "D08",
+   "firstTool": "gbk_get_capabilities",
+   "category": "D",
+   "expect": "either",
+   "invokedGbk": true,
+   "invocationCorrect": null,
+   "firstToolCorrect": null
+  }
+ ],
+ "totals": {
+  "fixtures": 42,
+  "run": 42,
+  "errors": 0
+ },
+ "invocationAccuracy": {
+  "correct": 33,
+  "total": 34,
+  "rate": 0.971
+ },
+ "recall": {
+  "correct": 22,
+  "total": 22,
+  "rate": 1
+ },
+ "falsePositiveRate": 0.083,
+ "firstToolAccuracy": {
+  "correct": 22,
+  "total": 22,
+  "rate": 1
+ },
+ "byCategory": {
+  "A": {
+   "correct": 12,
+   "total": 12,
+   "rate": 1
+  },
+  "B": {
+   "correct": 10,
+   "total": 10,
+   "rate": 1
+  },
+  "C": {
+   "correct": 11,
+   "total": 12,
+   "rate": 0.917
+  }
+ },
+ "borderline": {
+  "total": 8,
+  "invokedGbk": 8
+ }
+}

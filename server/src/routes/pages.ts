@@ -2,6 +2,7 @@
 // plus /robots.txt and /sitemap.xml. Bright theme, normal document scrolling (only /studio is no-scroll).
 // Content is static text describing what the app actually does; no user data, no secrets.
 import type { FastifyInstance } from "fastify";
+import type { FunnelStore } from "../persistence/funnel.ts";
 import type { Config } from "../config.ts";
 
 export const STARTER_PROMPTS = [
@@ -81,6 +82,7 @@ function privacy(cfg: Config): string {
 <h2>Using the plugin without an account</h2><p>The GBK Composer plugin works without signing in. When you create a composition this way, we store the composition, its revision history and its MIDI files on our server with no account and no name attached, and return a private access key (plus a separate read-only key) to the calling app, such as ChatGPT. We do not keep a copy of the key in a form that lets us give it back. Anyone holding the key can open the composition, so keep it private. If the key is lost, the composition cannot be recovered. While you still have the key you can sign in and claim the composition into your GBK account, which then becomes the way to recover it. Private Studio links contain only the read-only key, inside the part of the link after #, which browsers do not send to servers. Guest compositions are subject to size, rate and daily limits.</p>
 <h2>AI processing</h2><p>The in-app composer agent sends your chat messages and the relevant project context to xAI's API to generate responses. The API key is held only on our server and is never sent to your browser. When you use GBK Composer from ChatGPT, your prompts are handled by ChatGPT under OpenAI's terms; our server receives only the tool calls ChatGPT makes (for example, create or edit a composition).</p>
 <h2>Audio rendering</h2><p>Our server does not render audio. Synthesis runs in your browser (GBK Studio, or the player shown inside ChatGPT). For signed-in users, a WAV rendered in a connected Studio tab is uploaded to your account so you can download it. MIDI files are created on our server from the stored notes.</p>
+<h2>Usage statistics</h2><p>To see whether the plugin works for people, our server counts a few steps per day as plain totals: page views of this site, plugin connections, compositions created, edits, render requests, renders finished in the browser, MIDI/WAV downloads, claims, publishes and deletions, split only by guest or signed-in and by player or Studio. These counters contain no IP address, account id, cookie, prompt, composition content or access key, and cannot be linked to you. No third-party analytics run on this site.</p>
 <h2>Logs and diagnostics</h2><p>Our server keeps operational logs (such as request times, paths, IP addresses for rate limiting, account ids, and tool or error codes) and usage counters for daily limits. When something breaks in your browser, the app sends an error report (error message, stack trace, page URL without its query string, browser user agent, app version, recent app actions, and your account id if you are signed in; no IP address, cookies or tokens) so we can fix bugs. Only the most recent reports are kept. We do not use third-party analytics or advertising trackers and do not sell personal data.</p>
 <h2>Retention and deletion</h2><p>Account data is kept while your account is active. You can unpublish or delete content from the app; to delete your account and its data, ask through <a href="/support">support</a>. Rendered files (WAV/MIDI) are deleted automatically after 30 days. Compositions created without an account are kept until you delete them with the plugin's delete tool (it needs the private key), claim them into a GBK account, or ask us to delete them: send the composition id through <a href="/support">support</a> (never post the access key publicly); we may ask you to prove you hold the key privately. Without the key we cannot identify which compositions are yours.</p>
 <h2>Changes and contact</h2><p>We will update this page when practices change. Questions: see <a href="/support">support</a>.</p>`);
@@ -109,9 +111,9 @@ function support(cfg: Config): string {
 <p>See also the <a href="/privacy">privacy policy</a> and <a href="/terms">terms</a>.</p>`);
 }
 
-export function pageRoutes(app: FastifyInstance, cfg: Config) {
+export function pageRoutes(app: FastifyInstance, cfg: Config, funnel?: FunnelStore) {
   const html = (fn: (c: Config) => string) => async (_req: unknown, reply: import("fastify").FastifyReply) =>
-    reply.type("text/html; charset=utf-8").header("cache-control", "public, max-age=300").send(fn(cfg));
+    (funnel?.bump(fn === chatgpt ? "page_view_chatgpt" : "page_view_legal"), reply).type("text/html; charset=utf-8").header("cache-control", "public, max-age=300").send(fn(cfg));
   app.get("/chatgpt", html(chatgpt)); app.get("/privacy", html(privacy)); app.get("/terms", html(terms)); app.get("/support", html(support));
   app.get("/robots.txt", async (_r, reply) => reply.type("text/plain; charset=utf-8").send(
     `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /oauth/\nDisallow: /mcp\nSitemap: ${cfg.publicOrigin}/sitemap.xml\n`));

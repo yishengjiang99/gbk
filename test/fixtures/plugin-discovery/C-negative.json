@@ -1,0 +1,90 @@
+{
+ "category": "C",
+ "description": "Music-adjacent or unrelated requests (should not invoke GBK)",
+ "fixtures": [
+  {
+   "id": "C01",
+   "category": "C",
+   "prompt": "What's the difference between a fugue and a canon?",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C02",
+   "category": "C",
+   "prompt": "Who composed The Well-Tempered Clavier?",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C03",
+   "category": "C",
+   "prompt": "Explain what a MIDI CC message is.",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C04",
+   "category": "C",
+   "prompt": "Recommend some ambient albums for studying.",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C05",
+   "category": "C",
+   "prompt": "Write lyrics for a love song about the ocean.",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C06",
+   "category": "C",
+   "prompt": "How do I tune a guitar to drop D?",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C07",
+   "category": "C",
+   "prompt": "What is the capital of Australia?",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C08",
+   "category": "C",
+   "prompt": "Summarize the history of jazz in three sentences.",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C09",
+   "category": "C",
+   "prompt": "Translate 'good morning' into German.",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C10",
+   "category": "C",
+   "prompt": "Draw a picture of a piano in a sunny room.",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C11",
+   "category": "C",
+   "prompt": "Write a Python function that parses a MIDI file header.",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  },
+  {
+   "id": "C12",
+   "category": "C",
+   "prompt": "What chords are in a ii-V-I progression in C major?",
+   "expect": "no_tool",
+   "expectedFirstTool": null
+  }
+ ]
+}
