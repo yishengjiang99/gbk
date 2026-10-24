@@ -4,6 +4,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
 import { authProviders, type Config } from "../config.ts";
+import { reviewerLoginEnabled } from "./reviewer.ts";
 import type { AccountStore } from "../persistence/accounts.ts";
 import type { AccountLimits, UsageLedger } from "../agent/limits.ts";
 import { COOKIE, CSRF_COOKIE, cookie, parseCookies, type Session, type SessionStore } from "../security/authentication.ts";
@@ -27,7 +28,7 @@ export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const acct = s && accounts ? accounts.get(s.user) : null;
     const lim = s && limits ? limits.for(s.user) : null;
     return { authenticated: !!s, user: s?.user ?? null, name: acct?.name ?? s?.user ?? null, provider: acct?.provider ?? null, csrf, enabled: cfg.enabled,
-      providers: authProviders(cfg), loginAvailable: cfg.security.accessCodes.length > 0,
+      providers: authProviders(cfg), loginAvailable: cfg.security.accessCodes.length > 0, reviewerLogin: reviewerLoginEnabled(cfg),
       limits: lim ? { newAccount: lim.newAccount, dailyTokens: lim.dailyTokens, dailyRenders: lim.dailyRenders, usedTokensToday: ledger?.snapshot(s!.user).dayTokens ?? null } : null };
   });
   app.post("/api/login", async (req, reply) => {

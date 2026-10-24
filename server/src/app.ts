@@ -17,6 +17,7 @@ import { ShareStore } from "./persistence/shares.ts";
 import { AgentHub } from "./bridge/websocket.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { pageRoutes, openaiChallengeRoute } from "./routes/pages.ts";
+import { reviewerRoutes } from "./routes/reviewer.ts";
 import { configRoutes } from "./routes/config.ts";
 import { agentRoutes } from "./routes/agent.ts";
 import { shareRoutes } from "./routes/shares.ts";
@@ -60,6 +61,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   pageRoutes(app, cfg);
   openaiChallengeRoute(app, cfg.openaiAppsChallenge);
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
+  reviewerRoutes(app, cfg, sessions, accounts);
   signinRoutes(app, cfg, sessions, accounts, new RateLimiter(cfg.security.loginPerMinute), deps.fetch);
   shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model);
   const clientErrors = new ClientErrorStore(persistEarly ? join(cfg.dataDir, "accounts.sqlite") : ":memory:");

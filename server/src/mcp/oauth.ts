@@ -15,6 +15,7 @@
 // subject — the OAuth client never chooses the user. There is no separate MCP account.
 // Consent: approval is a CSRF-protected POST against a single-use, server-side consent transaction that
 // binds user + client + redirect URI + scopes + PKCE challenge + resource. GET never mints a code.
+import { reviewerLoginEnabled } from "../routes/reviewer.ts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { authProviders, type Config } from "../config.ts";
@@ -51,7 +52,7 @@ export function redirectUriMatches(registered: string, requested: string): boole
 
 export function oauthRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: McpStore) {
   // OAuth token/registration posts are form-encoded by spec; Fastify ships no urlencoded parser by default.
-  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => {
+  if (!app.hasContentTypeParser("application/x-www-form-urlencoded")) app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => {
     try { done(null, Object.fromEntries(new URLSearchParams(body as string))); } catch (e) { done(e as Error); }
   });
   const issuer = issuerOf(cfg);
@@ -145,6 +146,7 @@ export function oauthRoutes(app: FastifyInstance, cfg: Config, sessions: Session
 <h1>Connect GBK Composer</h1>
 <p>Sign in to GBK Composer to approve the connection. You will come straight back here.</p>
 ${buttons || "<p>Sign-in is not available right now.</p>"}
+${reviewerLoginEnabled(cfg) ? `<p style="font-size:.9rem"><a data-testid="reviewer-signin" href="/signin/reviewer?return=${encodeURIComponent(back)}">Reviewer sign-in</a></p>` : ""}
 ${cfg.security.accessCodes.length ? `<p style="font-size:.9rem">Have an invite code? Sign in at <a href="${issuer}/studio">${issuer}/studio</a>, then <a href="${esc(back)}">continue here</a>.</p>` : ""}
 <p>The app requesting access will receive only the scopes you approve, and only for your own compositions.</p></body>`);
     }

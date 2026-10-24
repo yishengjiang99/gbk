@@ -55,6 +55,7 @@ export function ComposerPanel({ project, readOnly }: { project: Project; readOnl
               </form>
             </details>
           )}
+          {s.auth.reviewerLogin && <a className="ws-dim" data-testid="reviewer-signin" href={`/signin/reviewer?return=${encodeURIComponent(location.pathname + location.search)}`}>Reviewer sign-in</a>}
           {s.auth.error && <div className="cmp-error">{s.auth.error}</div>}
         </div>
       ) : (<>

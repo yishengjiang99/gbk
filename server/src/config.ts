@@ -11,7 +11,9 @@ export interface Config {
   agent: { maxToolSteps: number; maxConcurrentRunsPerUser: number; toolTimeoutMs: number; renderTimeoutMs: number; maxInputChars: number; maxContextTokens: number; maxOutputTokens: number; sessionIdleSeconds: number; dailyTokenBudget: number; newAccountDailyTokenBudget: number; dailyCostBudgetUsd: number; globalDailyCostBudgetUsd: number; reconnectGraceMs: number; maxToolResultChars: number };
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number };
   /** Sign-in. A provider is offered only when both its client id and secret are set. */
-  auth: { github: { clientId: string; clientSecret: string } | null; google: { clientId: string; clientSecret: string } | null; newAccountDays: number };
+  auth: { github: { clientId: string; clientSecret: string } | null; google: { clientId: string; clientSecret: string } | null; newAccountDays: number;
+    /** OpenAI app-review login (one account, openai-reviewer). Off unless REVIEWER_LOGIN_ENABLED=1 and REVIEWER_PASSWORD_HASH are set. */
+    reviewer: { enabled: boolean; passwordHash: string } };
   mcp: {
     enabled: boolean;
     /** Local test auth (x-gbk-test-user header / Bearer test:<user>). Refused outright in production. */
@@ -57,6 +59,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       github: env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } : null,
       google: env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } : null,
       newAccountDays: num(env.ACCOUNT_NEW_DAYS, 7),
+      reviewer: { enabled: env.REVIEWER_LOGIN_ENABLED === "1", passwordHash: (env.REVIEWER_PASSWORD_HASH ?? "").trim() },
     },
     mcp: {
       enabled: env.MCP_ENABLED !== "0",
