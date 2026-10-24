@@ -25,5 +25,6 @@ jobs:
       - run: npm run typecheck
       - run: npm test
         timeout-minutes: 15
+      - run: npm run build:server   # server/dist/widget assets served by /api/mcp/widget
       - run: npm run test:server
         timeout-minutes: 15
