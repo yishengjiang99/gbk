@@ -10,6 +10,7 @@ import { MAX_FRAME_BYTES, type ServerMessage, type ToolResultEnvelope } from "./
 import { renderProjectOffline, type OfflineRenderOptions } from "../audio/offline-renderer.ts";
 import type { Project } from "../workstation/model.ts";
 import { reportError } from "../telemetry/error-reporter.ts";
+import { renderJobs } from "../audio/render-job.ts";
 
 /** Server-issued render of a stored MCP composition (ChatGPT / Codex / plugin). Not an agent tool: the LLM never sees it. */
 export const MCP_RENDER_TOOL = "gbk_mcp_render_job";
@@ -62,13 +63,20 @@ export class BrowserToolBridge {
       if (msg.expectProjectId && this.c.project.id !== msg.expectProjectId && !pol.createsProject)
         return this.fail("PROJECT_CHANGED", `the open project changed (expected ${msg.expectProjectId}, now ${this.c.project.id}); re-read the project before editing`);
       const ac = new AbortController(); this.inflight.set(msg.callId, ac);
-      const timer = setTimeout(() => ac.abort(), Math.max(1000, msg.deadlineMs || 120_000));
+      // Finish (with a clear error) a few seconds BEFORE the server gives up on this call, so the agent sees why.
+      const deadline = Math.max(1000, (msg.deadlineMs || 120_000) - (pol.cls === "render" ? 5000 : 0));
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; ac.abort(); }, deadline);
       let stopProg: (() => void) | undefined;
       if (pol.cls === "render" && onProgress) {
-        const iv = setInterval(() => onProgress(-1, "rendering"), 2000); stopProg = () => clearInterval(iv);
+        // Real progress of the in-page OfflineAudioContext render job, plus a heartbeat while nothing changes.
+        let last = "rendering";
+        const unsub = renderJobs().subscribe((j) => { last = `${j.status} ${Math.round(j.progress * 100)}%`; onProgress(j.progress, last); });
+        const iv = setInterval(() => onProgress(-1, last), 5000); stopProg = () => { clearInterval(iv); unsub(); };
       }
       try {
         const r = await runTool(this.c, tool, args, ac.signal);
+        if (!r.ok && timedOut) return { ...this.fail(pol.cls === "render" ? "RENDER_TIMEOUT" : "TOOL_TIMEOUT", `${msg.tool} did not finish within ${Math.round(deadline / 1000)} s in the browser and was cancelled${pol.cls === "render" ? " (the render runs in this tab's OfflineAudioContext; try a shorter range or mono)" : ""}`), revision: r.revision };
         if (r.ok && pol.createsProject) this.boundProjectId = r.projectId;
         const { content: _drop, ...env } = r; // binary content never leaves the page through the Composer bridge
         const text = JSON.stringify(env);

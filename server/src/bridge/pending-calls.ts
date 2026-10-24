@@ -23,6 +23,8 @@ export class PendingCalls {
   rejectAll(code: BridgeCallError["code"], message: string, runId?: string) {
     for (const [id, p] of this.calls) if (!runId || p.runId === runId) { clearTimeout(p.timer); this.calls.delete(id); p.reject(new BridgeCallError(code, message)); }
   }
+  /** Outstanding call ids of one run (to tell the browser to stop them). */
+  idsFor(runId: string): string[] { return [...this.calls].filter(([, p]) => p.runId === runId).map(([id]) => id); }
   has(callId: string) { return this.calls.has(callId); }
   get size() { return this.calls.size; }
 }

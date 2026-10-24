@@ -59,6 +59,8 @@ export class BridgeClient {
   }
 
   close() { this.closed = true; this.ws?.close(1000); }
+  /** Stop every tool call executing in this tab now (Stop button; the server also sends cancel_call). */
+  cancelLocal() { this.bridge.cancel(); }
   get connected() { return this.ws?.readyState === 1; }
 
   send(m: ClientMessage): boolean {
@@ -71,7 +73,8 @@ export class BridgeClient {
       case "session_ready": this.sessionId = m.sessionId; this.onState("connected"); break;
       case "ping": this.send({ type: "pong", t: m.t }); return;
       case "run_started": this.activeRunId = m.runId; break;
-      case "run_completed": case "run_failed": this.activeRunId = null; break;
+      // A finished/failed/cancelled run never leaves browser work behind (e.g. an in-page render after Stop).
+      case "run_completed": case "run_failed": this.activeRunId = null; this.bridge.cancel(); break;
       case "cancel_call": this.bridge.cancel(m.callId); break;
       case "tool_call": {
         const result = await this.bridge.execute(m, this.sessionId, (progress, detail) => this.send({ type: "tool_progress", sessionId: m.sessionId, runId: m.runId, callId: m.callId, progress, detail }));

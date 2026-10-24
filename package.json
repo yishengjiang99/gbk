@@ -12,7 +12,7 @@
     "dev": "npm run gen:midi-manifest && npm run gen:songs && vite",
     "build": "npm run gen:midi-manifest && npm run gen:songs && npm run prepare:omr-models && npm run prepare:soundfonts && npm run prepare:ort-runtime && vite build",
     "preview": "vite preview",
-    "test": "node --import tsx/esm --test test/*.test.ts",
+    "test": "node --import tsx/esm --import ./test/support/offline-audio-context.ts --test test/*.test.ts",
     "test:e2e": "playwright test",
     "experiment:midi-clock": "node --import tsx/esm scripts/midi-clock-experiment.ts",
     "test:e2e:sweden:chrome": "PW_VISUAL_CHROME=1 PW_KEEP_CHROME_OPEN=1 playwright test test/e2e/sheet-music-scan.spec.ts --project=chrome-headed --grep \"sweden sheet photo transcribes close to the baseline MIDI\"",
@@ -27,9 +27,9 @@
     "build:server": "esbuild server/src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=server/dist/index.mjs --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
     "start:server": "node --disable-warning=ExperimentalWarning server/dist/index.mjs",
     "dev:server": "node --disable-warning=ExperimentalWarning --import tsx/esm server/src/index.ts",
-    "test:server": "node --disable-warning=ExperimentalWarning --import tsx/esm --test server/test/*.test.ts",
+    "test:server": "node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test server/test/*.test.ts",
     "test:e2e:composer": "playwright test --config test/e2e/composer.config.ts",
-    "test:mcp": "node --disable-warning=ExperimentalWarning --import tsx/esm --test server/test/mcp-*.test.ts"
+    "test:mcp": "node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test server/test/mcp-*.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

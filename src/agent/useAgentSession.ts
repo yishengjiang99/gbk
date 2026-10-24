@@ -76,7 +76,7 @@ export function useAgentSession() {
     setItems((xs) => [...xs, { id, role: "user", text: t }]);
     return true;
   }, [model]);
-  const stop = useCallback(() => { const r = run?.runId ?? client.current?.activeRunId; if (r) client.current?.send({ type: "cancel_run", runId: r }); }, [run]);
+  const stop = useCallback(() => { const r = run?.runId ?? client.current?.activeRunId; if (r) client.current?.send({ type: "cancel_run", runId: r }); client.current?.cancelLocal(); }, [run]);
   const reset = useCallback(() => { client.current?.send({ type: "reset_conversation" }); setItems([]); }, []);
   const login = useCallback(async (code: string) => {
     const { status, body } = await api("/login", { method: "POST", body: JSON.stringify({ code }), csrf: auth.csrf });

@@ -64,8 +64,6 @@ test("determinism: identical input renders to an identical hash (reverb, chorus,
   const a = await render(p, { format: "pcm16" }), b = await render(p, { format: "pcm16" });
   assert.equal(a.sha256, b.sha256);
   assert.deepEqual(a.loudness, b.loudness);
-  const uncached = await render(p, { format: "pcm16", cacheBytes: 0 }); // measure pass + full re-render
-  assert.equal(uncached.sha256, a.sha256);
 });
 
 test("loudness default: whole file at -16 LUFS integrated, true peak <= -1 dBTP, relative dynamics untouched", async () => {

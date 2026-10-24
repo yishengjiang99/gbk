@@ -44,11 +44,25 @@ export class IdbArtifactBackend implements ArtifactBackend {
       t.oncomplete = () => res(out); t.onerror = () => rej(asRenderError(t.error, "STORAGE_UNAVAILABLE")); t.onabort = () => rej(asRenderError(t.error ?? new Error("transaction aborted"), "STORAGE_UNAVAILABLE"));
     });
   }
-  async put(meta: ArtifactMeta, blob: Blob) { await this.tx(["meta", "blobs"], "readwrite", (t) => { t.objectStore("blobs").put(blob, meta.id); t.objectStore("meta").put(meta); }); }
-  async getMeta(id: string) { return (await this.tx<ArtifactMeta | undefined>(["meta"], "readonly", (t) => t.objectStore("meta").get(id))) ?? null; }
-  async getBlob(id: string) { return (await this.tx<Blob | undefined>(["blobs"], "readonly", (t) => t.objectStore("blobs").get(id))) ?? null; }
-  async list() { return ((await this.tx<ArtifactMeta[]>(["meta"], "readonly", (t) => t.objectStore("meta").getAll())) ?? []).sort((a, b) => b.createdAt - a.createdAt); }
-  async delete(id: string) { await this.tx(["meta", "blobs"], "readwrite", (t) => { t.objectStore("meta").delete(id); t.objectStore("blobs").delete(id); }); }
+  /** Session-only fallback when this browser's IndexedDB refuses to store the bytes (Safari Private Browsing / Lockdown). */
+  private mem = new MemoryArtifactBackend(); private memOnly = false;
+  async put(meta: ArtifactMeta, blob: Blob) {
+    if (this.memOnly) return this.mem.put(meta, blob);
+    try { await this.tx(["meta", "blobs"], "readwrite", (t) => { t.objectStore("blobs").put(blob, meta.id); t.objectStore("meta").put(meta); }); return; }
+    catch (e) { if (asRenderError(e).code === "QUOTA_EXCEEDED" || /quota/i.test((e as Error).message ?? "")) throw e; }
+    // Some WebKit builds cannot persist Blob values in IndexedDB: store the raw bytes instead.
+    try { const buf = await blob.arrayBuffer(); await this.tx(["meta", "blobs"], "readwrite", (t) => { t.objectStore("blobs").put({ buf, type: blob.type }, meta.id); t.objectStore("meta").put(meta); }); return; }
+    catch (e) { if (asRenderError(e).code === "QUOTA_EXCEEDED" || /quota/i.test((e as Error).message ?? "")) throw e; }
+    this.memOnly = true; await this.mem.put(meta, blob);
+  }
+  async getMeta(id: string) { if (this.memOnly) { const m = await this.mem.getMeta(id); if (m) return m; } return (await this.tx<ArtifactMeta | undefined>(["meta"], "readonly", (t) => t.objectStore("meta").get(id))) ?? null; }
+  async getBlob(id: string) {
+    if (this.memOnly) { const b = await this.mem.getBlob(id); if (b) return b; }
+    const v = await this.tx<Blob | { buf: ArrayBuffer; type: string } | undefined>(["blobs"], "readonly", (t) => t.objectStore("blobs").get(id));
+    if (!v) return null; return v instanceof Blob ? v : new Blob([v.buf], { type: v.type });
+  }
+  async list() { const idb = ((await this.tx<ArtifactMeta[]>(["meta"], "readonly", (t) => t.objectStore("meta").getAll())) ?? []); return [...(this.memOnly ? await this.mem.list() : []), ...idb].sort((a, b) => b.createdAt - a.createdAt); }
+  async delete(id: string) { await this.mem.delete(id); await this.tx(["meta", "blobs"], "readwrite", (t) => { t.objectStore("meta").delete(id); t.objectStore("blobs").delete(id); }); }
 }
 
 export const MAX_CHUNK_BYTES = 256 * 1024;

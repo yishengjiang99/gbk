@@ -38,12 +38,17 @@ Project ──structuredClone──▶ RenderJobManager (FIFO, cancel, status)
    soundfont-loader (cached, /gbk/ base, progress, abort, timeout)
                               ▼
    offline-renderer: buildRenderPlan (sample-frame schedule from tempo map; setup/program/CC/notes, mix as CC7/10/11)
-     → one Sf2SynthEngine per audible track (live parity) → StereoPanner law → sum, in yielding chunks
-     → pass 1 measures BS.1770 loudness + true peak (mix cached), one whole-file gain
+     → offline-context: ONE OfflineAudioContext (webkitOfflineAudioContext fallback) with one sf2-processor
+       AudioWorkletNode per audible track (same engine as live playback) → splitter/gain pan matrix → destination;
+       suspend() every 2 s of audio = progress + cancellation point; stall (45 s) and overall timeouts
+     → BS.1770 loudness + true peak of the rendered buffer, one whole-file gain
      → wav-encoder (PCM16/float32, mono/stereo, 44.1/48 kHz, RF64 for huge files) into one preallocated buffer
      → audio-validation (header, duration, silence, clipping, non-finite) → SHA-256
                               ▼
    artifact-store (IndexedDB "gbk-render-artifacts", bounded range reads) ──▶ ArtifactPanel / WebMCP tools
 ```
-The live player (AudioWorklet) is not involved; Export WAV, `gbk_prepare_wav_export` and `gbk_render_wav` share this
-path. Rendering runs on the main thread in yielding chunks (no worker yet).
+The live player is not involved; Export WAV, `gbk_prepare_wav_export`, `gbk_render_wav` (Composer agent and WebMCP)
+and MCP render jobs (`gbk_mcp_render_job`, executed in the user's Studio tab) all share this path. All synthesis runs
+on the browser's offline audio thread; the server never renders audio (it only stores uploaded, SHA-256-verified WAVs).
+Stop in the Composer sends `cancel_run`; the server forwards `cancel_call` and the tab aborts the job, which parks the
+OfflineAudioContext at its next checkpoint (never resumed).
