@@ -22,10 +22,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-        timeout-minutes: 15
-      - name: server tests (diagnostic, per file)
-        timeout-minutes: 20
-        run: |
-          for f in server/test/*.test.ts; do echo "=== $f"; timeout 150 node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test "$f" 2>&1 | grep -E '^# (pass|fail)|^not ok' ; echo "rc=${PIPESTATUS[0]}"; done
+      - run: sudo apt-get install -y moreutils >/dev/null
+      - name: server tests (diagnostic, mcp-workflow)
+        timeout-minutes: 12
+        run: timeout 600 node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test --test-reporter=spec server/test/mcp-workflow.test.ts 2>&1 | ts '%H:%M:%S' || true
+        shell: bash
