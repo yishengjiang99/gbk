@@ -43,8 +43,9 @@ and hand the user working, authorized links.
    channels, format, size, and `sha256`. If the job failed or validation
    failed, report the error plainly — never fabricate a file, a checksum,
    or a success message.
-5. **Return authorized links.** Get download references from
-   `gbk_get_artifacts` and present:
+5. **Return authorized links.** The completed render/status result already
+   carries a signed `downloadUrl` per artifact — present those. Use
+   `gbk_get_artifacts` when you need fresh URLs after they expire. Present:
    - the WAV download URL,
    - the MIDI download URL (when `includeMidi` was set),
    - the interactive player via `gbk_show_composition_ui`,

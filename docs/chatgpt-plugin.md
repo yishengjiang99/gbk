@@ -28,13 +28,17 @@ open the same composition in GBK Studio afterwards.
   proven in Node by `test/audio-render.test.ts`. No Chromium, no tab. Jobs are durable:
   queued/running/completed/failed/cancelled, with per-job timeout, cancellation, per-user
   quotas, and crash semantics (a job left `running` by a dead process is failed explicitly as
-  `WORKER_INTERRUPTED`; artifacts are published only after full validation + SHA-256 re-check).
+  `WORKER_INTERRUPTED`; a job left `queued` resumes from its stored revision snapshot and
+  config, or fails as `JOB_ORPHANED` if its composition vanished; artifacts are published
+  atomically — all payloads validated + SHA-256 re-checked before any row is inserted).
 - **Artifacts.** WAV/MIDI bytes live on disk under `<dataDir>/mcp-artifacts/`, metadata +
   provenance (renderer version, source revision, SoundFont, normalized params, SHA-256) in
   SQLite. Downloads use short-lived signed URLs (`MCP_ARTIFACT_URL_TTL_SEC`, default 15 min)
   via `GET /api/mcp/artifacts/:id` with Range streaming; the endpoint also accepts a Bearer
-  token or the website session and re-checks ownership at access time. Large audio is never
-  inlined into MCP responses.
+  token or the website session and re-checks ownership at access time. Completed
+  `gbk_render_composition` / `gbk_get_render_status` responses carry the signed URLs directly
+  in their artifact entries — call `gbk_get_artifacts` when you need fresh ones after expiry.
+  Large audio is never inlined into MCP responses.
 - **MCP Apps UI.** `gbk_show_composition_ui` renders `ui://gbk/composer.html`
   (`text/html;profile=mcp-app`): audio player with seek, tick-accurate piano roll fed by the
   authoritative project, section markers, CC11 lanes, track list, WAV/MIDI downloads and an

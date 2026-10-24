@@ -20,7 +20,7 @@ const asUser = (s: { base: string }, user: string) => new McpClient(s.base, { "x
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
 interface Created { compositionId: string; revision: number; noteCount: number; tracks: { id: string; name: string; notes: number }[]; tempoBpm: number; bars: number; projectUrl: string }
-interface Rendered { status: string; jobId: string; artifacts: { kind: string; sha256: string; sizeBytes: number; meta: { validated?: boolean; durationSeconds?: number; sampleRate?: number; channels?: number } }[] }
+interface Rendered { status: string; jobId: string; artifacts: { kind: string; sha256: string; sizeBytes: number; downloadUrl?: string; meta: { validated?: boolean; durationSeconds?: number; sampleRate?: number; channels?: number } }[] }
 
 async function fugue(mcp: McpClient): Promise<Created> {
   return mcp.call<Created>("gbk_create_composition", {
@@ -51,6 +51,12 @@ test("A: autonomous composition + render with NO browser tab; artifacts download
     assert.equal(r.status, "completed", JSON.stringify(r));
     const wav = r.artifacts.find((a) => a.kind === "wav")!, mid = r.artifacts.find((a) => a.kind === "midi")!;
     assert.ok(wav && mid, "both WAV and MIDI artifacts exist");
+    // The render result itself carries signed download URLs — no second call needed
+    // (gbk_get_artifacts below remains the refresh path after they expire).
+    assert.match(wav.downloadUrl ?? "", /\/api\/mcp\/artifacts\//, "render result includes the WAV download URL directly");
+    const directUrl = new URL(wav.downloadUrl!);
+    const directRes = await fetch(`${s.base}${directUrl.pathname}${directUrl.search}`);
+    assert.equal(directRes.status, 200, "the URL from the render result downloads without another tool call");
     assert.equal(wav.meta.validated, true);
     assert.equal(wav.meta.sampleRate, 44100); assert.equal(wav.meta.channels, 2);
     // 8 bars of 4/4 at 108 BPM ≈ 17.8 s of music + 1 s tail.
