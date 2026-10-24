@@ -9,6 +9,7 @@ FROM node:22-slim
 WORKDIR /app
 RUN npm init -y >/dev/null && npm i --omit=dev fastify@5 ws@8 && mkdir -p /data && chown node /data
 COPY --from=build /app/server/dist/index.mjs server/dist/index.mjs
+COPY --from=build /app/server/dist/render-worker.mjs server/dist/render-worker.mjs
 COPY --from=build /app/server/dist/widget server/dist/widget
 USER node
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 COMPOSER_DATA_DIR=/data
