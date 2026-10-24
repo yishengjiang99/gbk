@@ -1,8 +1,13 @@
 # GBK WebMCP tools
 
 GBK exposes its workstation to in-browser agents via the WebMCP **imperative API**
-(`document.modelContext.registerTool`, falling back to `navigator.modelContext`). There is no HTTP/SSE MCP server,
+(`document.modelContext.registerTool`, falling back to `navigator.modelContext`). In the browser there is
 no cross-origin exposure (`exposedTo` is never set), and no arbitrary JS/DOM/filesystem/network tool.
+
+> **Remote MCP (ChatGPT / Codex):** the same canonical registry now also powers a server-side
+> Streamable-HTTP MCP endpoint at `https://compose.grepawk.com/mcp` with durable compositions,
+> OAuth 2.1, autonomous worker-thread rendering and an MCP Apps player — see
+> [chatgpt-plugin.md](chatgpt-plugin.md). The browser WebMCP surface described here is unchanged.
 
 - Toggle **Enable Agent Tools** in the workstation header; the status pill shows `WebMCP on/off` (real API) or
   `Agent tools (shim: window.gbkTools) on/off` (fallback). With the real API it is off by default; in shim mode it is

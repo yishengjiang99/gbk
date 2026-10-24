@@ -1,6 +1,10 @@
 [Unit]
-Description=GBK Composer agent API (compose.grepawk.com)
+Description=GBK Composer agent API + remote MCP (compose.grepawk.com)
 After=network.target
+# The MCP endpoint (/mcp), OAuth endpoints and the render worker threads run inside this same process:
+# worker threads need no extra unit, compositions/artifacts live under COMPOSER_DATA_DIR (already in
+# ReadWritePaths), and the SoundFont is read from the release's dist/static. MCP_* env lives in
+# /etc/gbk-composer.env (see deploy/compose.env.example).
 
 [Service]
 Type=simple

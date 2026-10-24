@@ -4,6 +4,21 @@ export interface Config {
   llm: { baseUrl: string; apiKey: string; model: string; models: string[]; apiStyle: "chat_completions" | "responses"; provider: string; priceInPerMTok: number; priceOutPerMTok: number; requestTimeoutMs: number; maxRetries: number; stream: boolean; parallelToolCalls: boolean };
   agent: { maxToolSteps: number; maxConcurrentRunsPerUser: number; toolTimeoutMs: number; maxInputChars: number; maxContextTokens: number; maxOutputTokens: number; sessionIdleSeconds: number; dailyTokenBudget: number; dailyCostBudgetUsd: number; globalDailyCostBudgetUsd: number; reconnectGraceMs: number; maxToolResultChars: number };
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number };
+  mcp: {
+    enabled: boolean;
+    /** Local test auth (x-gbk-test-user header / Bearer test:<user>). Refused outright in production. */
+    testAuth: boolean;
+    /** Absolute path to the .sf2 the render workers load. Empty = auto-detect (dist, then public/). */
+    soundFontPath: string;
+    renderConcurrency: number; renderTimeoutMs: number; maxRenderSeconds: number;
+    /** Per-user caps that bound render cost. */
+    maxRendersPerDay: number; maxCompositions: number;
+    /** Signed artifact download URLs live this long (seconds). */
+    artifactUrlTtlSec: number; artifactRetentionDays: number;
+    /** Hosts allowed to act as CIMD client_id documents (SSRF guard). */
+    cimdHosts: string[];
+    accessTokenTtlSec: number; refreshTokenTtlSec: number; authCodeTtlSec: number;
+  };
 }
 
 const num = (v: string | undefined, d: number) => { const n = Number(v); return v !== undefined && v !== "" && Number.isFinite(n) ? n : d; };
@@ -15,6 +30,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const models = [...new Set([model, ...list(env.LLM_MODELS)].filter(Boolean))];
   const secret = env.SESSION_SECRET ?? "";
   if (env.NODE_ENV === "production" && secret.length < 32) throw new Error("SESSION_SECRET must be set (>= 32 chars) in production");
+  if (env.NODE_ENV === "production" && env.MCP_TEST_AUTH === "1") throw new Error("MCP_TEST_AUTH=1 is forbidden in production (test authentication must fail closed)");
   const style = env.LLM_API_STYLE ?? "chat_completions";
   if (style !== "chat_completions" && style !== "responses") throw new Error(`LLM_API_STYLE must be chat_completions or responses, got ${style}`);
   return {
@@ -29,6 +45,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       globalDailyCostBudgetUsd: num(env.AGENT_GLOBAL_DAILY_COST_BUDGET_USD, 20), reconnectGraceMs: num(env.AGENT_RECONNECT_GRACE_MS, 30_000), maxToolResultChars: num(env.AGENT_MAX_TOOL_RESULT_CHARS, 12_000) },
     security: { sessionSecret: secret || "dev-only-insecure-secret-change-me-please!!", accessCodes: list(env.COMPOSER_ACCESS_CODES), cookieSecure: publicOrigin.startsWith("https://"),
       loginPerMinute: num(env.RATE_LOGIN_PER_MINUTE, 10), messagesPerMinute: num(env.RATE_MESSAGES_PER_MINUTE, 6), ipRequestsPerMinute: num(env.RATE_IP_PER_MINUTE, 120) },
+    mcp: {
+      enabled: env.MCP_ENABLED !== "0",
+      testAuth: env.MCP_TEST_AUTH === "1",
+      soundFontPath: env.GBK_SOUNDFONT_PATH ?? "",
+      renderConcurrency: Math.max(1, Math.min(8, num(env.MCP_RENDER_CONCURRENCY, 2))),
+      renderTimeoutMs: num(env.MCP_RENDER_TIMEOUT_MS, 300_000),
+      maxRenderSeconds: num(env.MCP_MAX_RENDER_SECONDS, 600),
+      maxRendersPerDay: num(env.MCP_MAX_RENDERS_PER_DAY, 200),
+      maxCompositions: num(env.MCP_MAX_COMPOSITIONS_PER_USER, 500),
+      artifactUrlTtlSec: num(env.MCP_ARTIFACT_URL_TTL_SEC, 900),
+      artifactRetentionDays: num(env.MCP_ARTIFACT_RETENTION_DAYS, 30),
+      cimdHosts: list(env.MCP_OAUTH_CIMD_HOSTS).length ? list(env.MCP_OAUTH_CIMD_HOSTS) : ["chatgpt.com"],
+      accessTokenTtlSec: num(env.MCP_ACCESS_TOKEN_TTL_SEC, 3600),
+      refreshTokenTtlSec: num(env.MCP_REFRESH_TOKEN_TTL_SEC, 30 * 86400),
+      authCodeTtlSec: num(env.MCP_AUTH_CODE_TTL_SEC, 600),
+    },
   };
 }
 function hostOf(u?: string) { try { return u ? new URL(u).host : "unconfigured"; } catch { return "invalid"; } }

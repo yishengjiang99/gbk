@@ -103,6 +103,17 @@ export class WorkstationController {
     const s = this.getSession();
     return !!s && s.active && s.projectId === projectId && this.project.id === projectId && this.project.meta?.owner === "agent";
   }
+  /**
+   * Server-side MCP execution only: resume an autonomous session for the ALREADY-LOADED project when it is
+   * agent-owned (the same invariant createProject establishes in the browser). Returns false for user-owned
+   * projects, whose edits keep going through proposals + Accept. Never call this from browser UI code.
+   */
+  resumeAutonomousSession(purpose = "remote MCP session"): boolean {
+    if (this.project.meta?.owner !== "agent") return false;
+    this.session = { id: `ses_${this.project.id}`, projectId: this.project.id, createdAt: Date.now(), expiresAt: Date.now() + 120 * 60_000, active: true, purpose: purpose.slice(0, 200), baseRevision: this.project.revision };
+    this.set({});
+    return true;
+  }
   endSession(reason = "ended by user") {
     if (!this.session) return;
     this.session = null;
