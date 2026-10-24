@@ -3,7 +3,9 @@ import { buildApp } from "../src/app.ts";
 import type { ModelClient } from "../src/agent/model-client.ts";
 import { testConfig } from "./helpers.ts";
 import { WorkstationController } from "../../src/workstation/controller.ts";
-import { BrowserToolBridge } from "../../src/agent/browser-bridge.ts";
+import { BrowserToolBridge, type McpRenderDeps } from "../../src/agent/browser-bridge.ts";
+import { parseSoundFont } from "../../src/audio/soundfont-loader.ts";
+import { readFileSync } from "node:fs";
 import type { ServerMessage } from "../src/bridge/protocol.ts";
 
 export async function startServer(model: ModelClient, over: Record<string, string> = {}) {
@@ -25,7 +27,7 @@ export async function login(base: string, code: string, origin = "http://compose
 export class TestTab {
   ws!: WebSocket; events: ServerMessage[] = []; sessionId = ""; c: WorkstationController; bridge: BrowserToolBridge; executed: string[] = [];
   autoRespond = true;
-  constructor(c?: WorkstationController) { this.c = c ?? new WorkstationController(); this.bridge = new BrowserToolBridge(this.c); }
+  constructor(c?: WorkstationController, renderDeps?: McpRenderDeps) { this.c = c ?? new WorkstationController(); this.bridge = new BrowserToolBridge(this.c, undefined, renderDeps); }
   open(base: string, cookie: string, origin = "http://composer.test", manifest = this.bridge.manifest): Promise<void> {
     return new Promise((ok, fail) => {
       this.ws = new WebSocket(`${base.replace("http", "ws")}/api/agent/ws`, { headers: { cookie, origin } });
@@ -46,4 +48,14 @@ export class TestTab {
     return new Promise((ok, fail) => { const iv = setInterval(() => { const e = this.events.find((x) => x.type === type); if (e) { clearInterval(iv); ok(e as never); } else if (Date.now() - t0 > ms) { clearInterval(iv); fail(new Error(`timeout waiting for ${type}: ${JSON.stringify(this.events.map((x) => x.type))}`)); } }, 10); });
   }
   close() { this.ws.close(); }
+}
+
+let sfCache: McpRenderDeps["soundFont"] | undefined;
+/** A signed-in GBK Studio tab that performs MCP renders (the only place synthesis happens). */
+export async function openStudio(s: { base: string; cfg: { publicOrigin: string } }, code: string) {
+  sfCache ??= parseSoundFont(new Uint8Array(readFileSync(new URL("../../public/static/GeneralUser-GS.sf2", import.meta.url))), "test-sf", "GeneralUser-GS.sf2");
+  const a = await login(s.base, code);
+  const tab = new TestTab(undefined, { soundFont: sfCache, http: (u, i) => fetch(u.replace(s.cfg.publicOrigin, s.base), i) });
+  await tab.open(s.base, a.cookie);
+  return tab;
 }

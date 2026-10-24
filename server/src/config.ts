@@ -10,9 +10,9 @@ export interface Config {
     enabled: boolean;
     /** Local test auth (x-gbk-test-user header / Bearer test:<user>). Refused outright in production. */
     testAuth: boolean;
-    /** Absolute path to the .sf2 the render workers load. Empty = auto-detect (dist, then public/). */
+    /** Absolute path to the bundled .sf2 (read for preset/instrument metadata only; never synthesized on the server). Empty = auto-detect. */
     soundFontPath: string;
-    renderConcurrency: number; renderTimeoutMs: number; maxRenderSeconds: number;
+    renderTimeoutMs: number; maxRenderSeconds: number;
     /** Per-user caps that bound render cost. */
     maxRendersPerDay: number; newAccountRendersPerDay: number; maxCompositions: number;
     /** Signed artifact download URLs live this long (seconds). */
@@ -56,7 +56,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       enabled: env.MCP_ENABLED !== "0",
       testAuth: env.MCP_TEST_AUTH === "1",
       soundFontPath: env.GBK_SOUNDFONT_PATH ?? "",
-      renderConcurrency: Math.max(1, Math.min(8, num(env.MCP_RENDER_CONCURRENCY, 2))),
       renderTimeoutMs: num(env.MCP_RENDER_TIMEOUT_MS, 300_000),
       maxRenderSeconds: num(env.MCP_MAX_RENDER_SECONDS, 600),
       maxRendersPerDay: num(env.MCP_MAX_RENDERS_PER_DAY, 200),

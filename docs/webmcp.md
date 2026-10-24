@@ -6,7 +6,7 @@ no cross-origin exposure (`exposedTo` is never set), and no arbitrary JS/DOM/fil
 
 > **Remote MCP (ChatGPT / Codex):** the same canonical registry now also powers a server-side
 > Streamable-HTTP MCP endpoint at `https://compose.grepawk.com/mcp` with durable compositions,
-> OAuth 2.1, autonomous worker-thread rendering and an MCP Apps player — see
+> OAuth 2.1, rendering in the connected Studio tab over the browser bridge and an MCP Apps player — see
 > [chatgpt-plugin.md](chatgpt-plugin.md). The browser WebMCP surface described here is unchanged.
 
 - Toggle **Enable Agent Tools** in the workstation header; the status pill shows `WebMCP on/off` (real API) or
