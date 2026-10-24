@@ -188,3 +188,42 @@ test("consent cannot be bypassed: GET never mints a code, approval is a single-u
     assert.equal(dloc.searchParams.get("code"), null);
   } finally { await s.app.close(); }
 });
+
+test("sessions rebind to the credentials presented per request: narrower token shrinks scopes live, anonymous sessions upgrade", async () => {
+  const s = await startServer(model());
+  try {
+    const clientId = await register(s);
+    const alice = await login(s.base, "code-a");
+    const full = await authorizeCode(s, alice.cookie, clientId, "gbk:compositions.read gbk:compositions.write gbk:renders.create gbk:artifacts.read");
+    const tokFull = (await (await exchange(s, clientId, full.code, full.verifier)).json()) as Record<string, string>;
+    const readOnly = await authorizeCode(s, alice.cookie, clientId, "gbk:compositions.read");
+    const tokRead = (await (await exchange(s, clientId, readOnly.code, readOnly.verifier)).json()) as Record<string, string>;
+
+    // Session created with the full-scope token can create.
+    const mcp = new McpClient(s.base, { authorization: `Bearer ${tokFull.access_token}` });
+    await mcp.initialize();
+    await mcp.call("gbk_create_composition", { title: "rebind-1" });
+
+    // Same session, same user, narrower token: the write scope is gone on the very next call
+    // (before this fix, the session kept the initialize-time scopes for its whole lifetime).
+    mcp.setHeaders({ authorization: `Bearer ${tokRead.access_token}` });
+    await assert.rejects(mcp.call("gbk_create_composition", { title: "rebind-2" }),
+      (e: Error & { payload?: { error?: { code?: string } } }) => e.payload?.error?.code === "INSUFFICIENT_SCOPE");
+    const list = await mcp.call<{ items: unknown[] }>("gbk_list_compositions", {});
+    assert.equal(list.items.length, 1, "read scope still works on the rebound session");
+
+    // Presenting the full token again restores write access on the same session.
+    mcp.setHeaders({ authorization: `Bearer ${tokFull.access_token}` });
+    await mcp.call("gbk_create_composition", { title: "rebind-3" });
+
+    // Anonymous session: private tools 401, then the SAME session upgrades when a token arrives
+    // (before this fix it 403'd as 'a different user' and forced a reconnect).
+    const anon = new McpClient(s.base);
+    await anon.initialize();
+    const unauth = await anon.callRaw("gbk_create_composition", { title: "nope" });
+    assert.equal(unauth.status, 401);
+    anon.setHeaders({ authorization: `Bearer ${tokFull.access_token}` });
+    const created = await anon.call<{ compositionId: string }>("gbk_create_composition", { title: "upgraded" });
+    assert.ok(created.compositionId);
+  } finally { await s.app.close(); }
+});

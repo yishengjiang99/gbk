@@ -21,9 +21,16 @@ import { COMPOSER_UI_HTML, COMPOSER_UI_URI } from "./ui.ts";
 import { MCP_SERVER_VERSION } from "./service-meta.ts";
 
 export interface McpMetrics { calls: number; errors: number; authFailures: number; byTool: Record<string, number> }
+/**
+ * Mutable per-session authorization holder. Tool handlers read `current` at call time, so the routes
+ * layer can rebind a session to the credentials presented on EACH request: a refreshed token with
+ * narrower scopes takes effect immediately, and an anonymous session can upgrade to authenticated.
+ * The session stays bound to one user — the holder is never switched to a different user.
+ */
+export interface SessionAuth { current: Principal | null }
 export interface McpContext {
   cfg: Config; store: McpStore; service: CompositionService; renders: RenderService;
-  principal: Principal | null; signal: AbortSignal; metrics: McpMetrics;
+  auth: SessionAuth; signal: AbortSignal; metrics: McpMetrics;
   log: (o: object) => void;
 }
 
@@ -53,7 +60,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   async function run<T extends Record<string, unknown>>(tool: string, scope: Scope | null, args: Record<string, unknown>, fn: (p: Principal | null) => Promise<T>): Promise<ReturnType<typeof ok> | ReturnType<typeof fail>> {
     metrics.calls++; metrics.byTool[tool] = (metrics.byTool[tool] ?? 0) + 1;
     try {
-      const p = scope ? requireScope(ctx.principal, scope) : ctx.principal;
+      const p = scope ? requireScope(ctx.auth.current, scope) : ctx.auth.current;
       const key = typeof args.idempotencyKey === "string" ? args.idempotencyKey : null;
       if (key && p) {
         const reqHash = createHash("sha256").update(JSON.stringify({ tool, args })).digest("hex");
@@ -71,7 +78,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
       metrics.errors++;
       const me = toMcpError(e);
       if (me.code === "UNAUTHENTICATED" || me.code === "INSUFFICIENT_SCOPE") metrics.authFailures++;
-      ctx.log({ evt: "mcp_tool_error", tool, code: me.code, message: me.message, user: ctx.principal?.user });
+      ctx.log({ evt: "mcp_tool_error", tool, code: me.code, message: me.message, user: ctx.auth.current?.user });
       return fail(me);
     }
   }

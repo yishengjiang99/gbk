@@ -5,7 +5,10 @@
 // public read-only tool gbk_get_capabilities may run anonymously; every other tools/call requires a
 // principal. A tools/call without one gets HTTP 401 + a WWW-Authenticate challenge pointing at the
 // protected-resource metadata, which is what makes ChatGPT start the OAuth flow. A session is bound to
-// the user it was created with — presenting a different user on the same session id is rejected.
+// the user it was created with — presenting a different user on the same session id is rejected — but
+// its authorization is NOT frozen at initialize: on every request the session is rebound to the
+// credentials actually presented (same user), so refreshed/narrower tokens take effect immediately,
+// and an anonymous session may upgrade to an authenticated one. Idle sessions are evicted.
 import { randomUUID } from "node:crypto";
 import { createReadStream, statSync } from "node:fs";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -16,7 +19,7 @@ import { currentSession } from "../routes/agent.ts";
 import type { McpStore } from "./store.ts";
 import type { CompositionService } from "./service.ts";
 import type { RenderService } from "./render.ts";
-import { createGbkMcpServer, type McpMetrics } from "./server.ts";
+import { createGbkMcpServer, type McpMetrics, type SessionAuth } from "./server.ts";
 import { resolvePrincipal, resourceOf, SCOPES, type Principal } from "./auth.ts";
 import { McpError } from "./errors.ts";
 import { verifyArtifactSignature } from "./urls.ts";
@@ -46,7 +49,9 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
   const challenge = `Bearer resource_metadata="${cfg.publicOrigin}/.well-known/oauth-protected-resource", scope="${SCOPES.join(" ")}"`;
   const sessionUserOf = (req: FastifyRequest) => currentSession(req, sessions)?.user ?? null;
 
-  const transports = new Map<string, { transport: StreamableHTTPServerTransport; user: string | null }>();
+  const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
+  interface SessionEntry { transport: StreamableHTTPServerTransport; user: string | null; auth: SessionAuth; lastSeen: number }
+  const transports = new Map<string, SessionEntry>();
 
   const handle = async (req: FastifyRequest, reply: import("fastify").FastifyReply) => {
     const raw = reply.raw;
@@ -73,25 +78,41 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
     reply.hijack();
     if (sessionId && transports.has(sessionId)) {
       const entry = transports.get(sessionId)!;
-      if ((entry.user ?? null) !== (principal?.user ?? null)) {
-        raw.statusCode = 403; raw.setHeader("content-type", "application/json");
-        raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "session belongs to a different user; start a new MCP session" }, id: null }));
-        return;
+      entry.lastSeen = Date.now();
+      const reqUser = principal?.user ?? null;
+      if (entry.user !== reqUser) {
+        // The only legal transition is anonymous -> authenticated (the OAuth flow completes after
+        // initialize). A different user, or dropping credentials mid-session, is rejected.
+        if (entry.user === null && reqUser !== null) { entry.user = reqUser; entry.auth.current = principal; }
+        else {
+          raw.statusCode = 403; raw.setHeader("content-type", "application/json");
+          raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "session belongs to a different user; start a new MCP session" }, id: null }));
+          return;
+        }
+      } else if (principal) {
+        // Same user: rebind to THIS request's credentials, so scope changes (e.g. a refreshed token
+        // with fewer scopes) apply to the very next tool call instead of living on from initialize.
+        entry.auth.current = principal;
       }
       await entry.transport.handleRequest(req.raw, raw, body);
       return;
     }
     if (!sessionId && req.method === "POST" && method === "initialize") {
+      // Evict idle sessions so abandoned transports cannot accumulate for the process lifetime.
+      for (const [id, e] of transports) {
+        if (Date.now() - e.lastSeen > SESSION_IDLE_MS) { transports.delete(id); void e.transport.close().catch(() => undefined); }
+      }
       const ac = new AbortController();
       // Abort tool work only when the client actually goes away mid-response; the request's own
       // 'close' fires as soon as the body is consumed and must not cancel the call.
       raw.on("close", () => { if (!raw.writableEnded) ac.abort(); });
+      const auth: SessionAuth = { current: principal };
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => { transports.set(id, { transport, user: principal?.user ?? null }); },
+        onsessioninitialized: (id) => { transports.set(id, { transport, user: principal?.user ?? null, auth, lastSeen: Date.now() }); },
       });
       transport.onclose = () => { if (transport.sessionId) transports.delete(transport.sessionId); };
-      const server = createGbkMcpServer({ cfg, store: deps.store, service: deps.service, renders: deps.renders, principal, signal: ac.signal, metrics: deps.metrics, log: deps.log });
+      const server = createGbkMcpServer({ cfg, store: deps.store, service: deps.service, renders: deps.renders, auth, signal: ac.signal, metrics: deps.metrics, log: deps.log });
       await server.connect(transport);
       await transport.handleRequest(req.raw, raw, body);
       return;
