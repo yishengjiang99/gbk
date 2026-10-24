@@ -72,6 +72,77 @@ These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked
 
    Expected: `gbk_list_compositions` finds the latest piece; one edit applies `orchestrate` (semitones -12, bars 9–16) and a `cc_curve` crescendo on CC11; revision increments and other sections are unchanged.
 
+## OpenAI review material (prepared, not submitted)
+
+The test cases and release notes below are also in `plugin.json` under `extensions.com.openai.review` / `publication`, so a ZIP upload imports them. Reviewer credentials are **not** in the package; enter them in the portal's Review details form.
+
+### Positive test cases (5)
+
+1. **Compose a new Baroque fugue and show it in the interactive player.**
+   - Prompt: "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll."
+   - Tools: gbk_create_composition, gbk_show_composition_ui
+   - Expected: A new private composition (baroque, D minor, 16 bars, organ voices) is created and the GBK player shows its piano roll, tracks and CC11 lane.
+2. **Compose, add a part with a targeted edit, and render in the user's browser Studio tab.**
+   - Prompt: "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then render WAV and MIDI."
+   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_render_composition
+   - Expected: A jazz composition is created and a walking_bass part generated. With a signed-in GBK Studio tab open, the render completes with validated WAV and MIDI download links; with no tab, the tool returns status studio_required and a link to open the studio, and the assistant asks the user to open it.
+3. **Edit only a passage of the most recent composition.**
+   - Prompt: "In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo."
+   - Tools: gbk_list_compositions, gbk_get_composition, gbk_edit_composition
+   - Expected: The latest composition is found, the bass is doubled at -12 semitones in bars 9–16 and a CC11 crescendo is added; the revision increments and other sections are reported unchanged.
+4. **Retrieve download links for rendered files.**
+   - Prompt: "Give me the download links for the WAV and MIDI of my jazz piece."
+   - Tools: gbk_list_compositions, gbk_get_artifacts
+   - Expected: Short-lived signed WAV and MIDI download URLs with size and SHA-256 are returned for the latest render.
+5. **Publish only on explicit request.**
+   - Prompt: "Publish my jazz piece as a public share page."
+   - Tools: gbk_list_compositions, gbk_publish_composition
+   - Expected: The composition becomes public and a share page URL is returned. No other composition changes visibility.
+
+### Negative test cases (3)
+
+1. Prompt: "Write lyrics for a summer pop song and have a singer perform them." — Lyrics and sung vocals are out of scope: GBK writes instrumental MIDI only.
+2. Prompt: "Delete all of my GBK compositions." — There is no delete tool; the plugin must not claim to delete or modify unrelated data.
+3. Prompt: "What's the weather in Paris tomorrow?" — Unrelated request; the plugin should not be invoked.
+
+### Release notes
+
+> 1.0.0: first public release. Compose in five styles (baroque, classical, pop, jazz, ambient) with a deterministic, seeded engine; targeted revision-safe edits (parts, transforms, octave doubling, CC curves, tempo, instruments, mix); interactive piano-roll player; WAV and MIDI rendered in the user's own GBK Studio browser tab; compositions private until the user asks to publish.
+
+### Tool annotation justifications
+
+| Tool | readOnly | openWorld | destructive | Justification |
+| --- | --- | --- | --- | --- |
+| `gbk_get_capabilities` | true | false | false | Only returns static capability data; changes nothing and calls nothing outside GBK. |
+| `gbk_create_composition` | false | false | false | Creates a new private composition in the user's GBK account; it overwrites nothing and is not visible outside the account. |
+| `gbk_get_composition` | true | false | false | Reads one of the user's compositions; no changes. |
+| `gbk_list_compositions` | true | false | false | Lists the user's own compositions; no changes. |
+| `gbk_edit_composition` | false | false | false | Writes a new revision of the user's private composition; earlier revisions are kept, so nothing is lost, and nothing becomes public. |
+| `gbk_render_composition` | false | false | false | Creates a render job and WAV/MIDI artifacts in the user's account, rendered in their own Studio tab; it changes no content and publishes nothing. |
+| `gbk_get_render_status` | true | false | false | Reads render job status; no changes. |
+| `gbk_cancel_render` | false | false | false | Stops the user's own queued or running render job; no composition data is deleted and nothing is published. |
+| `gbk_get_artifacts` | true | false | false | Returns signed download links to the user's own files; no changes. |
+| `gbk_open_workstation` | true | false | false | Returns a deep link into GBK Studio; no changes. |
+| `gbk_publish_composition` | false | true | false | Makes the composition publicly viewable on a share page (open world). Called only on explicit user request; not destructive because it deletes nothing. |
+| `gbk_show_composition_ui` | true | false | false | Renders a read-only player for the user's composition; no changes. |
+
+### Domain verification
+
+OpenAI's portal shows a challenge token. The server returns it as plain text at
+`https://compose.grepawk.com/.well-known/openai-apps-challenge` (the route returns 404 until the token is set).
+Steps for the owner:
+1. In the portal (Connect MCP server), copy the exact token.
+2. On the server: add `OPENAI_APPS_CHALLENGE=<token>` to `/etc/gbk-composer.env` (keep mode 600) and run `systemctl restart gbk-composer`.
+3. Check: `curl https://compose.grepawk.com/.well-known/openai-apps-challenge` prints exactly the token. Then click Verify Domain.
+
+### Screenshots and demo recording
+
+These are produced by `GBK_NODE22="npx -y node@22" npx playwright test --config test/e2e/submission.config.ts` against a local stack (the real server and workstation, a test account, and a deterministic test model), so nothing is written to the public gallery:
+- `starter-1-baroque-fugue.png`, `starter-2-jazz-walking-bass.png`, `starter-3-octave-crescendo.png`: one per starter prompt, 706×860 PNG, showing the in-chat player after the same tool calls ChatGPT makes. Prompt 2 was rendered in a connected Studio tab.
+- `gbk-composer-demo.mp4` (about 41 s, 1280×800): a Studio session going from the compose prompt to the live piano roll, the in-browser WAV render, the private-save dialog, and playback.
+
+`review.demo_recording_url` needs a reviewer-accessible URL. Host the video somewhere the owner approves, then add the URL.
+
 ## Privacy and data retention
 
 - **What is stored.** Compositions a user creates through the plugin —

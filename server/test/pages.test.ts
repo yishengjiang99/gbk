@@ -46,3 +46,20 @@ test("plugin.json references the icon, listing URLs, and starter prompts match t
   }
   for (const k of ["privacyPolicyURL", "termsOfServiceURL", "supportURL", "websiteURL"]) assert.match(ui[k], /^https:\/\/compose\.grepawk\.com\//);
 });
+
+test("OpenAI domain verification: 404 until configured, then the exact token as plain text", async () => {
+  const a = await startServer(new ScriptModel([() => reply("x")]));
+  try { assert.equal((await fetch(`${a.base}/.well-known/openai-apps-challenge`)).status, 404); } finally { await a.app.close(); }
+  const b = await startServer(new ScriptModel([() => reply("x")]), { OPENAI_APPS_CHALLENGE: "tok-123" });
+  try { const r = await fetch(`${b.base}/.well-known/openai-apps-challenge`); assert.equal(r.status, 200); assert.equal(await r.text(), "tok-123"); assert.match(r.headers.get("content-type") ?? "", /text\/plain/); }
+  finally { await b.app.close(); }
+});
+
+test("plugin.json review material: exactly 5 positive + 3 negative cases, release notes", () => {
+  const o = plugin.extensions["com.openai"];
+  assert.equal(o.review.test_cases.positive.length, 5); assert.equal(o.review.test_cases.negative.length, 3);
+  for (const c of o.review.test_cases.positive) for (const k of ["description", "prompt", "tools_triggered", "expected_behavior"]) assert.ok(c[k], k);
+  for (const c of o.review.test_cases.negative) for (const k of ["description", "prompt"]) assert.ok(c[k], k);
+  assert.ok(o.publication.release_notes.length > 20);
+  assert.equal(o.review.test_credentials, undefined); assert.equal(o.review.reviewer_instructions, undefined);
+});

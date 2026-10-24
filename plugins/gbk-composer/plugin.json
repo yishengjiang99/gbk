@@ -29,6 +29,59 @@
         "privacyPolicyURL": "https://compose.grepawk.com/privacy",
         "termsOfServiceURL": "https://compose.grepawk.com/terms",
         "supportURL": "https://compose.grepawk.com/support"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Compose a new Baroque fugue and show it in the interactive player.",
+              "prompt": "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.",
+              "tools_triggered": "gbk_create_composition, gbk_show_composition_ui",
+              "expected_behavior": "A new private composition (baroque, D minor, 16 bars, organ voices) is created and the GBK player shows its piano roll, tracks and CC11 lane."
+            },
+            {
+              "description": "Compose, add a part with a targeted edit, and render in the user's browser Studio tab.",
+              "prompt": "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then render WAV and MIDI.",
+              "tools_triggered": "gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_render_composition",
+              "expected_behavior": "A jazz composition is created and a walking_bass part generated. With a signed-in GBK Studio tab open, the render completes with validated WAV and MIDI download links; with no tab, the tool returns status studio_required and a link to open the studio, and the assistant asks the user to open it."
+            },
+            {
+              "description": "Edit only a passage of the most recent composition.",
+              "prompt": "In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo.",
+              "tools_triggered": "gbk_list_compositions, gbk_get_composition, gbk_edit_composition",
+              "expected_behavior": "The latest composition is found, the bass is doubled at -12 semitones in bars 9–16 and a CC11 crescendo is added; the revision increments and other sections are reported unchanged."
+            },
+            {
+              "description": "Retrieve download links for rendered files.",
+              "prompt": "Give me the download links for the WAV and MIDI of my jazz piece.",
+              "tools_triggered": "gbk_list_compositions, gbk_get_artifacts",
+              "expected_behavior": "Short-lived signed WAV and MIDI download URLs with size and SHA-256 are returned for the latest render."
+            },
+            {
+              "description": "Publish only on explicit request.",
+              "prompt": "Publish my jazz piece as a public share page.",
+              "tools_triggered": "gbk_list_compositions, gbk_publish_composition",
+              "expected_behavior": "The composition becomes public and a share page URL is returned. No other composition changes visibility."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Lyrics and sung vocals are out of scope: GBK writes instrumental MIDI only.",
+              "prompt": "Write lyrics for a summer pop song and have a singer perform them."
+            },
+            {
+              "description": "There is no delete tool; the plugin must not claim to delete or modify unrelated data.",
+              "prompt": "Delete all of my GBK compositions."
+            },
+            {
+              "description": "Unrelated request; the plugin should not be invoked.",
+              "prompt": "What's the weather in Paris tomorrow?"
+            }
+          ]
+        }
+      },
+      "publication": {
+        "release_notes": "1.0.0: first public release. Compose in five styles (baroque, classical, pop, jazz, ambient) with a deterministic, seeded engine; targeted revision-safe edits (parts, transforms, octave doubling, CC curves, tempo, instruments, mix); interactive piano-roll player; WAV and MIDI rendered in the user's own GBK Studio browser tab; compositions private until the user asks to publish."
       }
     }
   },
