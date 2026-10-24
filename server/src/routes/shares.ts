@@ -24,12 +24,12 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (!s) return reply.code(401).send({ code: "UNAUTHENTICATED", message: "log in to share" });
     if (!guardWrite(cfg, req, reply, s)) return;
     if (!uploadLimiter.take(s.user) || store.countRecent(s.user, 86_400_000) >= 100) return reply.code(429).send({ code: "RATE_LIMITED", message: "too many shares; try later" });
-    const b = (req.body ?? {}) as { title?: unknown; project?: unknown; parentSlug?: unknown };
+    const b = (req.body ?? {}) as { title?: unknown; project?: unknown; parentSlug?: unknown; public?: unknown };
     let project;
     try { project = sanitizeSharedProject(b.project); } catch (e) { if (e instanceof ShareValidationError) return reply.code(422).send({ code: e.code, message: e.message }); throw e; }
     const title = (typeof b.title === "string" && b.title.trim() ? b.title.trim() : project.name).slice(0, SHARE_LIMITS.titleChars);
     const parentSlug = typeof b.parentSlug === "string" ? b.parentSlug : null;
-    const row = store.create({ owner: s.user, title, projectJson: JSON.stringify(project), parentSlug });
+    const row = store.create({ owner: s.user, title, projectJson: JSON.stringify(project), parentSlug, public: b.public === true });
     req.log.info({ evt: "share_create", user: s.user, slug: row.slug, parent: row.parent_id });
     return { ...store.view(row), url: `${origin}/s/${row.slug}` };
   });

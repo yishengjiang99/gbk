@@ -23,7 +23,7 @@ test("share -> open link (public, no login) -> fork lineage -> unshare -> delete
     const alice = await login(s.base, "code-a"), bob = await login(s.base, "code-b");
     const c = await song();
     assert.equal((await fetch(`${s.base}/api/shares`, { method: "POST", headers: { "content-type": "application/json", origin: "http://composer.test" }, body: JSON.stringify({ project: c.project }) })).status, 401);
-    const r = await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: "Alice's fugue", project: c.project }) });
+    const r = await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: "Alice's fugue", project: c.project, public: true }) });
     assert.equal(r.status, 200); const sh = await r.json();
     assert.match(sh.url, /^http:\/\/composer\.test\/s\/alice-s-fugue-[a-z0-9]{8}$/);
     const wav = new Uint8Array(100); wav.set([..."RIFF"].map((x) => x.charCodeAt(0)), 0); wav.set([..."WAVE"].map((x) => x.charCodeAt(0)), 8);
@@ -40,7 +40,7 @@ test("share -> open link (public, no login) -> fork lineage -> unshare -> delete
     assert.throws(() => viewer.edit([{ op: "addTrack", name: "x", channel: 1 }]), /read-only/i);
     const forked = viewer.fork(); assert.equal(forked.meta?.forkOf, pub.slug);
     viewer.edit([{ op: "addTrack", name: "Bob's oboe", channel: 5 }]);
-    const r2 = await (await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(bob), body: JSON.stringify({ project: viewer.project, parentSlug: forked.meta?.forkOf }) })).json();
+    const r2 = await (await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(bob), body: JSON.stringify({ project: viewer.project, parentSlug: forked.meta?.forkOf, public: true }) })).json();
     assert.deepEqual(r2.parent, { slug: sh.slug, title: "Alice's fugue", owner: "alice" });
     const list = (await (await fetch(`${s.base}/api/shares`)).json()).shares;
     assert.deepEqual(list.map((x: { slug: string }) => x.slug), [r2.slug, sh.slug]); // newest first

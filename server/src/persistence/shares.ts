@@ -44,10 +44,13 @@ export class ShareStore {
     const r = this.db.prepare("SELECT title, short_id FROM shares WHERE id = ?").get(id) as { title: string; short_id: string } | undefined;
     if (r) this.db.prepare("UPDATE shares SET slug = ? WHERE id = ?").run(nameSlug(r.title, r.short_id), id);
   }
-  create(o: { owner: string; title: string; projectJson: string; parentSlug?: string | null }): ShareRow {
+  /** Distinct song owners (used to migrate pre-sign-in users into accounts). */
+  owners(): string[] { return (this.db.prepare("SELECT DISTINCT owner FROM shares").all() as { owner: string }[]).map((r) => r.owner); }
+  /** New songs are private unless the caller passes public: true (an explicit Share/Publish click). */
+  create(o: { owner: string; title: string; projectJson: string; parentSlug?: string | null; public?: boolean }): ShareRow {
     const parent = o.parentSlug ? this.bySlug(o.parentSlug) : null;
     const id = `shr_${randomBytes(9).toString("hex")}`; const sid = shortId();
-    this.db.prepare("INSERT INTO shares (id, slug, short_id, owner, title, project_json, parent_id, created_at, public) VALUES (?,?,?,?,?,?,?,?,1)").run(id, nameSlug(o.title, sid), sid, o.owner, o.title, o.projectJson, parent?.id ?? null, Date.now());
+    this.db.prepare("INSERT INTO shares (id, slug, short_id, owner, title, project_json, parent_id, created_at, public) VALUES (?,?,?,?,?,?,?,?,?)").run(id, nameSlug(o.title, sid), sid, o.owner, o.title, o.projectJson, parent?.id ?? null, Date.now(), o.public ? 1 : 0);
     return this.bySlug(sid)!;
   }
   /** Auto-save: one PRIVATE row per (owner, local project id); later saves overwrite it (latest version only). */

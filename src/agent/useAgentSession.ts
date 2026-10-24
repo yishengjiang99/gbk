@@ -7,7 +7,7 @@ import type { ArtifactRef, HistoryItem, ServerMessage, UsageInfo } from "./proto
 
 export interface ToolStep { callId: string; tool: string; task: string; status: "pending" | "running" | "done" | "failed"; summary?: string; error?: string; progress?: string }
 export interface ChatItem { id: string; role: "user" | "assistant" | "error"; text: string; artifacts?: ArtifactRef[]; steps?: ToolStep[]; runId?: string; retryText?: string }
-export interface AuthState { checked: boolean; authenticated: boolean; user?: string; csrf?: string; enabled?: boolean; error?: string }
+export interface AuthState { checked: boolean; authenticated: boolean; user?: string; name?: string; csrf?: string; enabled?: boolean; error?: string; providers?: ("github" | "google")[]; codeLogin?: boolean; limits?: { newAccount: boolean; dailyTokens: number; dailyRenders: number } | null }
 
 async function api(path: string, init: RequestInit & { csrf?: string } = {}) {
   const headers: Record<string, string> = { ...(init.body ? { "content-type": "application/json" } : {}), ...(init.csrf ? { "x-gbk-csrf": init.csrf } : {}) };
@@ -27,7 +27,7 @@ export function useAgentSession() {
   const client = useRef<BridgeClient | null>(null);
 
   const refreshAuth = useCallback(async () => {
-    try { const { status, body } = await api("/session"); setAuth({ checked: true, authenticated: !!body.authenticated, user: body.user, csrf: body.csrf, enabled: body.enabled !== false, error: status >= 500 ? "server error" : undefined }); }
+    try { const { status, body } = await api("/session"); setAuth({ checked: true, authenticated: !!body.authenticated, user: body.user, name: body.name ?? body.user, csrf: body.csrf, enabled: body.enabled !== false, providers: Array.isArray(body.providers) ? body.providers : [], codeLogin: !!body.loginAvailable, limits: body.limits ?? null, error: status >= 500 ? "server error" : undefined }); }
     catch { setAuth({ checked: true, authenticated: false, error: "Composer server unreachable" }); }
   }, []);
   useEffect(() => { void refreshAuth(); }, [refreshAuth]);

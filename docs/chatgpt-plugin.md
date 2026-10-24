@@ -61,8 +61,8 @@ OAuth 2.1 per the MCP authorization spec, with this server as its own authorizat
   (`MCP_OAUTH_CIMD_HOSTS`, default `chatgpt.com`) and its `redirect_uris` validate. Arbitrary
   hosts are never fetched (SSRF guard). ChatGPT's exact redirect URI is whatever its
   management page shows — register/allowlist that URI; nothing is hardcoded here.
-- **Account linking:** `/oauth/authorize` requires the existing GBK website session
-  (invite-code login). The GBK user from that session becomes the token subject; consent
+- **Account linking:** `/oauth/authorize` requires a GBK website session
+  (Sign in with Google / GitHub, the same accounts as the studio). The GBK user from that session becomes the token subject; consent
   lists the requested scopes. There is no separate MCP account.
 - Refresh tokens rotate; reusing a rotated refresh token revokes the whole token family.
   Revocation: `POST /oauth/revoke`. Access tokens are stored **hashed** (SHA-256).
@@ -109,7 +109,7 @@ prompts below. Locally, `MCP_TEST_AUTH=1 npm run dev:server`-style runs accept
 2. In ChatGPT: **Plugins → Add custom MCP server**, URL `https://compose.grepawk.com/mcp`.
    Accept the risk warning, choose **Create as a plugin**; note the technical id
    (`plugin_asdk_app…`) if you later add an `.app.json` mapping.
-3. First tool use starts OAuth: sign in with a GBK invite code, review the scopes on the
+3. First tool use starts OAuth: sign in to GBK with Google or GitHub, review the scopes on the
    consent page, approve. The redirect URI shown by ChatGPT's management page must be the
    one registered — DCR handles this automatically for ChatGPT-created clients.
 4. Try: “@GBK Compose a 32-bar four-voice Baroque fugue in D minor at 108 BPM with organ

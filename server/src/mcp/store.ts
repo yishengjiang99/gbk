@@ -84,6 +84,8 @@ export class McpStore {
     this.db.prepare("UPDATE mcp_render_jobs SET status='failed', error=?, finished_at=? WHERE status='running'")
       .run(JSON.stringify({ code: "WORKER_INTERRUPTED", message: "render worker stopped mid-job (server restart); submit a new render — retries are safe" }), Date.now());
   }
+  /** Distinct composition owners (used to migrate pre-sign-in users into accounts). */
+  owners(): string[] { return (this.db.prepare("SELECT DISTINCT owner FROM mcp_compositions").all() as { owner: string }[]).map((r) => r.owner); }
   close() { try { this.db.close(); } catch { /* already closed */ } }
 
   // ---- compositions ------------------------------------------------------------

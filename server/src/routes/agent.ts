@@ -1,7 +1,11 @@
-// Session routes: GET /api/session (issues the CSRF cookie), POST /api/login (access code), POST /api/logout.
+// Session routes: GET /api/session (issues the CSRF cookie; lists sign-in providers + the account's limits),
+// POST /api/login (legacy access code, kept so migrated invite users keep working), POST /api/logout.
+// Google / GitHub sign-in lives in ./signin.ts.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
-import type { Config } from "../config.ts";
+import { authProviders, type Config } from "../config.ts";
+import type { AccountStore } from "../persistence/accounts.ts";
+import type { AccountLimits, UsageLedger } from "../agent/limits.ts";
 import { COOKIE, CSRF_COOKIE, cookie, parseCookies, type Session, type SessionStore } from "../security/authentication.ts";
 import { csrfOk, originAllowed } from "../security/authorization.ts";
 import type { RateLimiter } from "../security/rate-limit.ts";
@@ -14,13 +18,17 @@ export function guardWrite(cfg: Config, req: FastifyRequest, reply: FastifyReply
   return true;
 }
 
-export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, loginLimiter: RateLimiter) {
+export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, loginLimiter: RateLimiter, accounts?: AccountStore, limits?: AccountLimits, ledger?: UsageLedger) {
   app.get("/api/session", async (req, reply) => {
     const s = currentSession(req, sessions);
     const csrf = s?.csrf ?? parseCookies(req.headers.cookie)[CSRF_COOKIE] ?? randomBytes(18).toString("base64url");
     reply.header("set-cookie", cookie(CSRF_COOKIE, csrf, cfg, { httpOnly: false }));
     reply.header("cache-control", "no-store");
-    return { authenticated: !!s, user: s?.user ?? null, csrf, enabled: cfg.enabled, loginAvailable: cfg.security.accessCodes.length > 0 };
+    const acct = s && accounts ? accounts.get(s.user) : null;
+    const lim = s && limits ? limits.for(s.user) : null;
+    return { authenticated: !!s, user: s?.user ?? null, name: acct?.name ?? s?.user ?? null, provider: acct?.provider ?? null, csrf, enabled: cfg.enabled,
+      providers: authProviders(cfg), loginAvailable: cfg.security.accessCodes.length > 0,
+      limits: lim ? { newAccount: lim.newAccount, dailyTokens: lim.dailyTokens, dailyRenders: lim.dailyRenders, usedTokensToday: ledger?.snapshot(s!.user).dayTokens ?? null } : null };
   });
   app.post("/api/login", async (req, reply) => {
     if (!guardWrite(cfg, req, reply)) return;
@@ -28,6 +36,7 @@ export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (!loginLimiter.take(`login:${ip}`)) return reply.code(429).send({ code: "RATE_LIMITED", message: "too many login attempts; wait a minute" });
     const user = sessions.checkCode((req.body as { code?: unknown } | null)?.code);
     if (!user) { req.log.warn({ evt: "login_failed", ip }); return reply.code(401).send({ code: "BAD_CODE", message: "invalid access code" }); }
+    if (accounts) { accounts.ensureLegacy(user); accounts.touchLogin(user); }
     const s = sessions.create(user);
     reply.header("set-cookie", [cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: 30 * 86400 }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
     req.log.info({ evt: "login", user });
