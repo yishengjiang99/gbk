@@ -227,3 +227,35 @@ test("sessions rebind to the credentials presented per request: narrower token s
     assert.ok(created.compositionId);
   } finally { await s.app.close(); }
 });
+
+test("loopback redirect (RFC 8252 §7.3): any port authorizes; token exchange requires the exact URI sent", async () => {
+  const s = await startServer(model());
+  try {
+    const reg = await fetch(`${s.base}/oauth/register`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "Codex-like", redirect_uris: ["http://127.0.0.1/callback"] }) });
+    assert.equal(reg.status, 201);
+    const clientId = (await reg.json() as { client_id: string }).client_id;
+    const alice = await login(s.base, "code-a");
+    const v = pkce();
+    const sent = "http://127.0.0.1:52786/callback";
+    const auth = (redirect_uri: string) => fetch(`${s.base}/oauth/authorize?${new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri,
+      code_challenge: v.challenge, code_challenge_method: "S256", resource: "http://composer.test/mcp", scope: "gbk:compositions.read", state: "s" })}`,
+      { headers: { cookie: alice.cookie }, redirect: "manual" });
+    const bad = await auth("http://127.0.0.1:52786/evil");
+    assert.equal(bad.status, 400);
+    assert.equal((await bad.json()).error, "invalid_redirect_uri");
+    const r = await auth(sent);
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    const txn = /name="txn" value="([^"]+)"/.exec(html)![1]; const csrf = /name="csrf" value="([^"]+)"/.exec(html)![1];
+    const p = await postConsent(s, alice.cookie, { txn, csrf, decision: "approve" });
+    const loc = new URL(p.headers.get("location")!);
+    assert.equal(loc.origin + loc.pathname, sent);
+    const code = loc.searchParams.get("code")!;
+    const tok = (redirect_uri: string, c: string) => fetch(`${s.base}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "authorization_code", code: c, redirect_uri, client_id: clientId, code_verifier: v.verifier }) });
+    const wrong = await tok("http://127.0.0.1/callback", code);
+    assert.equal(wrong.status, 400);
+    assert.equal((await wrong.json()).error, "invalid_grant");
+  } finally { await s.app.close(); }
+});
