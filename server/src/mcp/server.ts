@@ -56,6 +56,9 @@ export function artifactView(cfg: Config, a: ArtifactRow) {
 
 export function createGbkMcpServer(ctx: McpContext): McpServer {
   const { cfg, store, service, renders, metrics } = ctx;
+  // The MCP Apps player loads audio + downloads from the public origin (signed artifact URLs).
+  // Sandboxed hosts enforce the resource CSP below — without these domains the player stays silent.
+  const publicOrigin = new URL(cfg.publicOrigin).origin;
   const server = new McpServer({ name: "gbk-composer", version: MCP_SERVER_VERSION }, { capabilities: { tools: {}, resources: {} } });
 
   async function run<T extends Record<string, unknown>>(tool: string, scope: Scope | null, args: Record<string, unknown>, fn: (p: Principal | null) => Promise<T>): Promise<ReturnType<typeof ok> | ReturnType<typeof fail>> {
@@ -217,7 +220,8 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   server.registerResource("gbk-composer-player", COMPOSER_UI_URI, {
     title: "GBK Composer player", description: "Interactive player and piano roll for a GBK composition.",
     mimeType: "text/html;profile=mcp-app",
-  }, async () => ({ contents: [{ uri: COMPOSER_UI_URI, mimeType: "text/html;profile=mcp-app", text: COMPOSER_UI_HTML, _meta: { ui: { prefersBorder: true } } }] }));
+  }, async () => ({ contents: [{ uri: COMPOSER_UI_URI, mimeType: "text/html;profile=mcp-app", text: COMPOSER_UI_HTML,
+    _meta: { ui: { prefersBorder: true, csp: { resourceDomains: [publicOrigin], connectDomains: [publicOrigin] } } } }] }));
 
   server.registerTool("gbk_show_composition_ui", {
     title: "Show the composition player", description: "Render the interactive GBK player (playback, seekable piano roll, track list, CC lanes, WAV/MIDI downloads, Studio link) for a composition inside the host. Call after creating/rendering when the user wants to listen or see the piano roll. Tools remain fully usable without this UI.",

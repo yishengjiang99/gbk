@@ -52,6 +52,13 @@ test("MCP initialize, tools/list with annotations, anonymous capabilities, auth 
     assert.ok(capRes.capabilities.styles.includes("baroque"));
     assert.ok(capRes.capabilities.instruments.some((i) => i.name === "organ"));
 
+    // The MCP Apps player resource declares CSP domains for the artifact origin — sandboxed hosts
+    // block the <audio> element and the download links without them (they point at the public origin).
+    const uiRes = await anon.send("resources/read", { uri: "ui://gbk/composer.html" });
+    const contents = (uiRes.rpc?.result as { contents: { _meta?: { ui?: { csp?: { resourceDomains?: string[]; connectDomains?: string[] } } } }[] }).contents;
+    assert.deepEqual(contents[0]._meta?.ui?.csp?.resourceDomains, ["http://composer.test"]);
+    assert.deepEqual(contents[0]._meta?.ui?.csp?.connectDomains, ["http://composer.test"]);
+
     // Unknown tool and invalid arguments produce errors, not crashes.
     const alice = new McpClient(s.base, { "x-gbk-test-user": "alice" });
     await alice.initialize();

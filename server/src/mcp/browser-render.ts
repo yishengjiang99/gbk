@@ -54,7 +54,10 @@ export class RenderService {
   constructor(private cfg: Config, private store: McpStore, private studio: StudioLookup, private log: (o: object) => void = () => {},
     private rendersPerDay: (owner: string) => number = () => cfg.mcp.maxRendersPerDay) {}
 
-  async start() { /* nothing to warm up: synthesis lives in the browser */ }
+  /** Jobs still queued from before a restart lost their Studio-tab handoff: fail them explicitly (never stuck). */
+  async start() {
+    for (const j of this.store.listJobsByStatus("queued")) this.failJob(j.id, "JOB_INTERRUPTED", "the server restarted before this render reached a Studio tab; submit the render again");
+  }
   async stop() { for (const a of [...this.active.values()]) this.failJob(a.jobId, "SERVER_STOPPING", "server restarted mid-render; submit the render again"); }
 
   studioUrl(compositionId?: string) { void compositionId; return `${this.cfg.publicOrigin}/studio`; }
@@ -140,6 +143,7 @@ export class RenderService {
   }
 
   private completeJob(a: Active, meta: Record<string, unknown>) {
+    if (this.store.getJobAny(a.jobId)?.status !== "running") return; // already terminal (cancelled / timed out)
     const wavBytes = new Uint8Array(readFileSync(a.partPath));
     if (meta.byteLength !== undefined && meta.byteLength !== wavBytes.length) throw new McpError("RENDER_FAILED", `upload incomplete (${wavBytes.length} of ${meta.byteLength} bytes); artifact discarded`);
     const sha = createHash("sha256").update(wavBytes).digest("hex");
@@ -149,21 +153,26 @@ export class RenderService {
     const dir = this.store.artifactsDir;
     const write = (rel: string, bytes: Uint8Array) => { const tmp = join(dir, `${rel}.tmp`); writeFileSync(tmp, bytes); renameSync(tmp, join(dir, rel)); };
     const base = { job_id: a.jobId, composition_id: a.row.id, owner: a.owner, revision: a.row.revision };
-    const wavRel = `${a.jobId}.wav`; renameSync(a.partPath, join(dir, wavRel));
+    const wavRel = `${a.jobId}.wav`;
     const provenance = { rendererVersion: RENDERER_VERSION, sourceRevision: a.row.revision, soundFont: meta.soundFont, renderMs: meta.renderMs, executor: this.executor };
     const fname = a.row.title.replace(/[^\w\- .]/g, "_").slice(0, 60) || "gbk";
-    this.store.addArtifact({ ...base, kind: "wav", filename: `${fname}.wav`, mime_type: "audio/wav", size_bytes: wavBytes.length, sha256: sha, rel_path: wavRel,
+    const rows: Parameters<McpStore["addArtifacts"]>[0] = [{ ...base, kind: "wav", filename: `${fname}.wav`, mime_type: "audio/wav", size_bytes: wavBytes.length, sha256: sha, rel_path: wavRel,
       meta_json: JSON.stringify({ validated: true, sampleRate: info.sampleRate, channels: info.channels, format: info.format, durationSeconds: info.durationSeconds,
-        frames: info.frames, peakDbFS: meta.peakDbFS, rmsDbFS: meta.rmsDbFS, clippedSamples: meta.clippedSamples, loudness: meta.loudness, instruments: meta.instruments, warnings: meta.warnings, noteCount: meta.noteCount, ...provenance }) });
+        frames: info.frames, peakDbFS: meta.peakDbFS, rmsDbFS: meta.rmsDbFS, clippedSamples: meta.clippedSamples, loudness: meta.loudness, instruments: meta.instruments, warnings: meta.warnings, noteCount: meta.noteCount, ...provenance }) }];
+    // Build + validate every payload before writing anything; rows land in one transaction after the files.
+    let midi: Uint8Array | null = null;
     if (a.config.includeMidi) {
-      const midi = serializeSmf(a.snapshot, { soundNrpn: true });
+      midi = serializeSmf(a.snapshot, { soundNrpn: true });
       if (!(midi.length > 14 && String.fromCharCode(...midi.subarray(0, 4)) === "MThd")) throw new McpError("RENDER_FAILED", "MIDI export failed validation (missing MThd header)");
-      const midiRel = `${a.jobId}.mid`; write(midiRel, midi);
       const soundOverrides = a.snapshot.sound?.tracks && Object.keys(a.snapshot.sound.tracks).length
         ? "project has SoundFont voice overrides: additive ones export as SF2 NRPNs; absolute/key-ranged overrides and global effects are audible in the WAV only" : undefined;
-      this.store.addArtifact({ ...base, kind: "midi", filename: `${fname}.mid`, mime_type: "audio/midi", size_bytes: midi.length, sha256: createHash("sha256").update(midi).digest("hex"), rel_path: midiRel,
+      rows.push({ ...base, kind: "midi", filename: `${fname}.mid`, mime_type: "audio/midi", size_bytes: midi.length, sha256: createHash("sha256").update(midi).digest("hex"), rel_path: `${a.jobId}.mid`,
         meta_json: JSON.stringify({ validated: true, format: "SMF type 1", preserves: ["tempo map", "meter map", "program changes", "CC events", "pitch bend", "section markers"], ...(soundOverrides ? { portabilityNote: soundOverrides } : {}), ...provenance }) });
     }
+    renameSync(a.partPath, join(dir, wavRel));
+    if (midi) write(`${a.jobId}.mid`, midi);
+    try { this.store.addArtifacts(rows); }
+    catch (e) { for (const r of rows) { try { rmSync(join(dir, r.rel_path)); } catch { /* gone */ } } throw e; }
     this.finish(a.jobId, "completed", null, 1);
     this.log({ evt: "mcp_render_completed", user: a.owner, jobId: a.jobId, compositionId: a.row.id, revision: a.row.revision, bytes: wavBytes.length, sha256: sha });
   }
@@ -174,7 +183,8 @@ export class RenderService {
   private finish(jobId: string, status: "completed" | "failed" | "cancelled", error: string | null, progress?: number) {
     const a = this.active.get(jobId);
     if (a) { clearTimeout(a.timer); this.active.delete(jobId); try { if (existsSync(a.partPath)) rmSync(a.partPath); } catch { /* gone */ } }
-    this.store.patchJob(jobId, { status, error, finished_at: Date.now(), ...(progress !== undefined ? { progress } : {}) });
+    // Terminal states are final: a late tab reply, timeout or cancel never overwrites one.
+    if (!this.store.transitionJob(jobId, ["queued", "running"], { status, error, finished_at: Date.now(), ...(progress !== undefined ? { progress } : {}) })) return;
     const waiters = this.waiters.get(jobId);
     if (waiters) { this.waiters.delete(jobId); for (const w of waiters) { const row = this.store.getJob(jobId, w.owner); if (row) w.fn(row); } }
   }

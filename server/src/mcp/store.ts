@@ -154,11 +154,30 @@ export class McpStore {
   getJob(id: string, owner: string): RenderJobRow | null {
     return (this.db.prepare("SELECT * FROM mcp_render_jobs WHERE id=? AND owner=?").get(id, owner) as unknown as RenderJobRow) ?? null;
   }
+  /** Owner-free lookup for the render service only — callers enforce ownership before exposing data. */
+  getJobAny(id: string): RenderJobRow | null {
+    return (this.db.prepare("SELECT * FROM mcp_render_jobs WHERE id=?").get(id) as unknown as RenderJobRow) ?? null;
+  }
+  listJobsByStatus(status: JobStatus): RenderJobRow[] {
+    return this.db.prepare("SELECT * FROM mcp_render_jobs WHERE status=? ORDER BY created_at ASC").all(status) as unknown as RenderJobRow[];
+  }
   patchJob(id: string, p: Partial<Pick<RenderJobRow, "status" | "progress" | "error" | "finished_at">>) {
     const sets: string[] = []; const vals: unknown[] = [];
     for (const [k, v] of Object.entries(p)) { sets.push(`${k}=?`); vals.push(v as never); }
     if (!sets.length) return;
     this.db.prepare(`UPDATE mcp_render_jobs SET ${sets.join(",")} WHERE id=?`).run(...vals as never[], id);
+  }
+  /**
+   * Guarded job transition: applies the patch only while the job is in one of `from`. Returns false
+   * (and changes nothing) when the job already left those states — this is what makes terminal states
+   * (completed/failed/cancelled) final against racing worker exits, timeouts and cancels.
+   */
+  transitionJob(id: string, from: JobStatus[], p: Partial<Pick<RenderJobRow, "status" | "progress" | "error" | "finished_at">>): boolean {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(p)) { sets.push(`${k}=?`); vals.push(v as never); }
+    if (!sets.length || !from.length) return false;
+    const ph = from.map(() => "?").join(",");
+    return Number(this.db.prepare(`UPDATE mcp_render_jobs SET ${sets.join(",")} WHERE id=? AND status IN (${ph})`).run(...vals as never[], id, ...(from as never[])).changes) === 1;
   }
   countJobsSince(owner: string, sinceMs: number) {
     return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_render_jobs WHERE owner=? AND created_at>?").get(owner, Date.now() - sinceMs) as { n: number }).n);
@@ -173,11 +192,23 @@ export class McpStore {
       compositions: Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_compositions").get() as { n: number }).n),
       artifacts: Number(art.n), artifactBytes: Number(art.b) };
   }
-  addArtifact(o: Omit<ArtifactRow, "id" | "created_at">): ArtifactRow {
+  private insertArtifact(o: Omit<ArtifactRow, "id" | "created_at">): string {
     const id = newOpaqueId("art");
     this.db.prepare("INSERT INTO mcp_artifacts (id, job_id, composition_id, owner, revision, kind, filename, mime_type, size_bytes, sha256, rel_path, meta_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .run(id, o.job_id, o.composition_id, o.owner, o.revision, o.kind, o.filename, o.mime_type, o.size_bytes, o.sha256, o.rel_path, o.meta_json, Date.now());
-    return this.getArtifact(id, o.owner)!;
+    return id;
+  }
+  addArtifact(o: Omit<ArtifactRow, "id" | "created_at">): ArtifactRow {
+    return this.getArtifact(this.insertArtifact(o), o.owner)!;
+  }
+  /** Atomic multi-insert for render publication: either every artifact row lands or none does. */
+  addArtifacts(list: Omit<ArtifactRow, "id" | "created_at">[]): ArtifactRow[] {
+    this.db.exec("BEGIN");
+    try {
+      const ids = list.map((o) => this.insertArtifact(o));
+      this.db.exec("COMMIT");
+      return ids.map((id, i) => this.getArtifact(id, list[i].owner)!);
+    } catch (e) { this.db.exec("ROLLBACK"); throw e; }
   }
   getArtifact(id: string, owner: string): ArtifactRow | null {
     return (this.db.prepare("SELECT * FROM mcp_artifacts WHERE id=? AND owner=?").get(id, owner) as unknown as ArtifactRow) ?? null;
