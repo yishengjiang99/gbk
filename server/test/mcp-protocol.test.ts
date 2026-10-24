@@ -23,14 +23,14 @@ test("well-known OAuth discovery documents follow RFC 9728 / RFC 8414 + MCP requ
   } finally { await s.app.close(); }
 });
 
-test("MCP initialize, tools/list with annotations, anonymous capabilities, auth challenge, session binding", async () => {
+test("MCP initialize, tools/list with annotations, anonymous capabilities, guest access, session binding", async () => {
   const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
   try {
-    // Unauthenticated tools/call (non-public tool) -> 401 with a discovery challenge.
+    // Calls need an initialized transport, but do not trigger account linking.
     const anon = new McpClient(s.base);
     const challenged = await anon.send("tools/call", { name: "gbk_create_composition", arguments: { title: "x" } });
-    assert.equal(challenged.status, 401);
-    assert.match(challenged.headers.get("www-authenticate") ?? "", /oauth-protected-resource/);
+    assert.equal(challenged.status, 400);
+    assert.equal(challenged.headers.get("www-authenticate"), null);
 
     // Anonymous initialize + tools/list are allowed (discovery surface).
     const init = await anon.initialize();
@@ -75,7 +75,7 @@ test("test-auth header is ignored unless MCP_TEST_AUTH=1 (fail closed)", async (
     const c = new McpClient(s.base, { "x-gbk-test-user": "mallory" });
     await c.initialize(); // initialize is anonymous-allowed, but bound to NO user
     const r = await c.send("tools/call", { name: "gbk_list_compositions", arguments: {} });
-    // The session was created anonymously, and tools/call for a private tool on an anonymous session is a 401.
-    assert.ok(r.status === 401 || (r.rpc?.result as { isError?: boolean })?.isError, `expected refusal, got HTTP ${r.status}`);
+    assert.equal(r.status, 200);
+    assert.deepEqual((r.rpc?.result as { structuredContent: { items: unknown[] } }).structuredContent.items, [], "test header did not establish an account");
   } finally { await s.app.close(); }
 });

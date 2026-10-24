@@ -19,7 +19,8 @@ export async function topShares(limit = 10): Promise<TopShare[]> {
   return (await ok<{ shares: TopShare[] }>(await fetch(`${apiBase()}/shares/top?limit=${limit}`, { credentials: "same-origin" }))).shares;
 }
 export async function getShare(slug: string): Promise<ShareInfo & { project: unknown }> {
-  return ok(await fetch(`${apiBase()}/shares/${encodeURIComponent(slug)}`, { credentials: "same-origin" }));
+  const token = new URLSearchParams(location.hash.slice(1)).get("accessToken");
+  return ok(await fetch(`${apiBase()}/shares/${encodeURIComponent(slug)}`, { credentials: "same-origin", headers: token ? { "x-gbk-project-token": token } : {} }));
 }
 export const mediaUrl = (slug: string, kind: "wav" | "midi" | "mp3") => `${apiBase()}/shares/${encodeURIComponent(slug)}/media/${kind}`;
 

@@ -18,6 +18,7 @@ import type { Config } from "../config.ts";
 import type { ShareStore } from "../persistence/shares.ts";
 import { McpStore, type CompositionRow } from "./store.ts";
 import { McpError, toMcpError } from "./errors.ts";
+import { guestCapability, isGuest } from "./guest.ts";
 import { resolveSoundFontPath } from "./render.ts";
 
 export { RENDERER_VERSION } from "./service-meta.ts";
@@ -97,7 +98,7 @@ export class CompositionService {
         notes: p.notes.filter((n) => n.trackId === t.id).length,
         controllers: [...new Set(p.ccs.filter((e) => e.trackId === t.id).map((e) => e.controller))].sort((a, b) => a - b) })),
       revisions: this.store.listRevisions(row.id, row.owner),
-      projectUrl: `${this.cfg.publicOrigin}/studio?mcp=${row.id}`,
+      projectUrl: isGuest(row.owner) ? this.openWorkstation(row.owner, row.id).url : `${this.cfg.publicOrigin}/studio?mcp=${row.id}`,
     };
   }
   getRow(owner: string, compositionId: string): CompositionRow {
@@ -112,6 +113,8 @@ export class CompositionService {
 
   capabilities() {
     return {
+      authentication: "optional; guest projects require per-project accessToken after creation",
+      guestLimits: { maxSeconds: this.cfg.mcp.guestMaxSeconds, maxBars: 64, maxNotes: 20000, rendersPerProjectPerDay: this.cfg.mcp.guestRendersPerDay, globalCreatesPerDay: this.cfg.mcp.guestCreatesPerDay, globalMutationsPerDay: this.cfg.mcp.guestMutationsPerDay, maxRevisions: this.cfg.mcp.guestMaxRevisions },
       server: "GBK Composer MCP", rendererVersion: RENDERER_VERSION,
       styles: Object.keys(STRATEGIES),
       compositionModes: ["generate_arrangement (seeded, deterministic)", "generate_part", "transform_notes", "orchestrate", "cc_curve", "note_patch", "fugue_section (baroque, Bach generator)"],
@@ -125,6 +128,15 @@ export class CompositionService {
     };
   }
 
+  private checkGuestProject(owner: string, project: Project) {
+    if (!isGuest(owner)) return;
+    if (this.store.guestStorageBytes() + 4 * Buffer.byteLength(JSON.stringify(project)) > this.cfg.mcp.guestMaxStorageBytes)
+      throw new McpError("QUOTA_EXCEEDED", "global guest project storage capacity reached");
+    const duration = tickToSec(project, project.endTick);
+    if (!Number.isFinite(duration) || duration > this.cfg.mcp.guestMaxSeconds || project.notes.length > 20000 || project.ccs.length > 20000 || JSON.stringify(project).length > 2 * 1024 * 1024)
+      throw new McpError("QUOTA_EXCEEDED", `guest project exceeds limits (${this.cfg.mcp.guestMaxSeconds} seconds, 20000 notes/controllers, 2 MiB)`);
+  }
+
   // ---- create ------------------------------------------------------------------------
   async create(owner: string, a: CreateCompositionArgs, signal: AbortSignal): Promise<{ row: CompositionRow; data: Record<string, unknown> }> {
     if (this.store.countCompositions(owner) >= this.cfg.mcp.maxCompositions) throw new McpError("QUOTA_EXCEEDED", `composition limit reached (${this.cfg.mcp.maxCompositions})`);
@@ -135,6 +147,8 @@ export class CompositionService {
     let bars = a.bars;
     if (!bars && a.durationSeconds) bars = Math.max(4, Math.round((a.durationSeconds * tempo / 60) / num));
     bars = Math.min(512, Math.max(1, bars ?? 32));
+    if (isGuest(owner) && (bars > 64 || bars * num * 60 / tempo > this.cfg.mcp.guestMaxSeconds))
+      throw new McpError("QUOTA_EXCEEDED", `guest compositions are limited to 64 bars and ${this.cfg.mcp.guestMaxSeconds} seconds`);
     const { c, tools } = this.controllerFor();
     const created = await this.call(tools, c, "gbk_create_project", {
       name: a.title.slice(0, 128), tempo, timeSignature: a.timeSignature ?? [4, 4], key: a.key,
@@ -146,6 +160,8 @@ export class CompositionService {
       ...(a.instrumentation?.length ? { instrumentation: a.instrumentation } : {}),
     }, signal);
     const project = c.project;
+    this.checkGuestProject(owner, project);
+    if (isGuest(owner) && this.store.guestCompositionCount() >= this.cfg.mcp.guestMaxCompositions) throw new McpError("QUOTA_EXCEEDED", "global guest composition capacity reached");
     const row = this.store.createComposition({ owner, title: project.name, projectJson: JSON.stringify(project), revision: project.revision, source: "mcp" });
     this.log({ evt: "mcp_composition_create", user: owner, compositionId: row.id, revision: row.revision });
     return { row, data: { ...this.summary(row, project), generation: gen.data, createdProjectId: (created.data as { projectId: string }).projectId } };
@@ -156,6 +172,8 @@ export class CompositionService {
     const share = this.shares.bySlug(slug);
     if (!share || (!share.public && share.owner !== owner)) throw new McpError("NOT_FOUND", "no such saved Studio project for this account");
     const project = JSON.parse(share.project_json) as Project;
+    this.checkGuestProject(owner, project);
+    if (this.store.countCompositions(owner) >= this.cfg.mcp.maxCompositions) throw new McpError("QUOTA_EXCEEDED", "composition limit reached");
     project.meta = { ...(project.meta ?? {}), owner: "agent" }; // explicit import => MCP-editable copy; the Studio original is untouched
     const row = this.store.createComposition({ owner, title: project.name || share.title, projectJson: JSON.stringify(project), revision: project.revision ?? 0, source: "studio-import" });
     return { row, data: this.summary(row, project) };
@@ -186,12 +204,22 @@ export class CompositionService {
     const { row, project } = this.getProject(owner, compositionId);
     if (row.revision !== expectedRevision) throw new McpError("STALE_REVISION", `expectedRevision ${expectedRevision} does not match current revision ${row.revision}; re-read the composition and retry`, { currentRevision: row.revision });
     if (!operations.length || operations.length > 32) throw new McpError("INVALID_ARGUMENT", "operations must contain 1..32 typed edit operations");
+    if (isGuest(owner)) {
+      if (this.store.listRevisions(row.id, owner).length >= this.cfg.mcp.guestMaxRevisions)
+        throw new McpError("QUOTA_EXCEEDED", "guest project revision limit reached");
+      // Bound generation work before it runs; final project limits also apply after every operation.
+      for (const op of operations) for (const key of ["bars", "maxBars", "startBar", "endBar", "atBar", "times", "repeats"]) {
+        if (op[key] !== undefined && (typeof op[key] !== "number" || !Number.isFinite(op[key]) || (op[key] as number) < 0 || (op[key] as number) > 64))
+          throw new McpError("QUOTA_EXCEEDED", `guest edit ${key} must be within 0..64`);
+      }
+    }
     const { c, tools } = this.controllerFor(project);
     if (!c.resumeAutonomousSession("remote MCP edit")) throw new McpError("USER_APPROVAL_REQUIRED", "this project is user-owned; import it into MCP (gbk_create_composition with importShareSlug) or edit it in GBK Studio where edits go through Accept");
     const before = structuredClone(project);
     const appliedOps: Record<string, unknown>[] = [];
     for (const op of operations) {
       const label = await this.applyOp(tools, c, op, signal);
+      this.checkGuestProject(owner, c.project);
       appliedOps.push({ type: op.type, ...label });
     }
     const after = c.project;
@@ -270,7 +298,8 @@ export class CompositionService {
   openWorkstation(owner: string, compositionId: string): { url: string; slug: string; note: string } {
     const { row, project } = this.getProject(owner, compositionId);
     const { row: share } = this.shares.upsertAutosave({ owner, projectId: row.id, title: project.name, projectJson: JSON.stringify(project) });
-    return { url: `${this.cfg.publicOrigin}/s/${share.slug}`, slug: share.slug,
+    const fragment = isGuest(owner) ? `#accessToken=${guestCapability(this.cfg, row, "read")}` : "";
+    return { url: `${this.cfg.publicOrigin}/s/${share.slug}${fragment}`, slug: share.slug,
       note: "Opens the exact saved revision as a private Studio song (read-only view; Fork in Studio creates an editable copy). The MCP composition stays the canonical copy until re-imported." };
   }
   publish(owner: string, compositionId: string): { url: string; slug: string } {
@@ -278,6 +307,6 @@ export class CompositionService {
     const opened = this.openWorkstation(owner, compositionId);
     this.shares.setPublic(opened.slug, true);
     this.store.setVisibility(row.id, owner, "public");
-    return { url: opened.url, slug: opened.slug };
+    return { url: `${this.cfg.publicOrigin}/s/${opened.slug}`, slug: opened.slug };
   }
 }

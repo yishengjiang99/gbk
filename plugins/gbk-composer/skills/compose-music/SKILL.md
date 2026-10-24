@@ -9,6 +9,22 @@ Create a new composition through the GBK remote MCP tools. GBK supplies
 deterministic composition, project state, and rendering; you supply the
 musical reasoning.
 
+## Account-free project access
+
+No GBK sign-in is required. Creation returns `compositionId`, `accessToken`
+(edit capability), and `readAccessToken`. Keep the edit token in private
+conversation/tool context and pass it as `accessToken` on every follow-up
+read, edit, render, job-status/cancel, artifact, player, Studio, or publish
+call. It also works in a new MCP session. A job ID alone grants no access.
+Never display the edit token in public output or place it in a URL. The
+Studio URL carries only read access; treat it as a private sharing link.
+Do not claim an ID or an MCP session alone can recover a guest project.
+If the secret is missing, ask for the saved project capability; do not
+create a replacement unless requested. Use `readAccessToken` for read-only
+access. Guest creation retries share an idempotency key within the same
+MCP session; edits/renders use project-scoped retry keys across sessions.
+Stay within `guestLimits` from `gbk_get_capabilities`, including render tail.
+
 ## Available tools
 
 - `gbk_get_capabilities` — styles, modes, instruments, render formats, limits.

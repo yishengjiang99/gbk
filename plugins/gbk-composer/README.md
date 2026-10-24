@@ -14,7 +14,7 @@ can also be opened in GBK Studio at <https://compose.grepawk.com>.
 | Path | Purpose |
 | --- | --- |
 | `plugin.json` | Portable Agent Plugins manifest (name, description, OpenAI interface metadata, example prompts). |
-| `mcp.json` | Remote MCP server declaration: `gbk_composer`, Streamable HTTP, OAuth. |
+| `mcp.json` | Remote MCP server declaration: `gbk_composer`, Streamable HTTP, no sign-in. |
 | `skills/compose-music/SKILL.md` | How to compose a new piece end to end. |
 | `skills/edit-music/SKILL.md` | How to make targeted, revision-safe edits. |
 | `skills/render-music/SKILL.md` | How to render, verify, and deliver WAV/MIDI. |
@@ -34,9 +34,8 @@ This repository ships a local marketplace at
 
 In a client that supports portable Agent Plugins marketplaces, add this
 repository as a marketplace source and install **GBK Composer** from
-**GBK Plugins**. Installation policy is `AVAILABLE` and authentication is
-`ON_INSTALL` — you will be asked to sign in to GBK when the plugin is
-installed (see Auth below).
+**GBK Plugins**. Installation policy is `AVAILABLE`; no GBK account linking
+is required.
 
 ### As a custom MCP server in ChatGPT
 
@@ -44,7 +43,7 @@ installed (see Auth below).
    answers MCP requests.
 2. In ChatGPT, open **Plugins** and add a custom MCP server.
 3. Enter the server URL: `https://compose.grepawk.com/mcp`
-4. Complete the GBK sign-in / account-linking flow (OAuth, see below).
+4. Choose no authentication; create a guest composition without signing in.
 5. Invoke it, for example: "@GBK Compose a 32-bar four-voice Baroque fugue
    in D minor at 108 BPM with organ instrumentation and expressive CC11
    dynamics. Render WAV and MIDI."
@@ -59,33 +58,37 @@ clients using the declaration in `mcp.json`.
 | `gbk_get_capabilities` | Discover styles, instruments, render formats, and limits. |
 | `gbk_create_composition` | Create a durable composition project; returns its ID and revision. |
 | `gbk_get_composition` | Inspect a composition's sections, tracks, notes, and revision. |
-| `gbk_list_compositions` | List the signed-in user's compositions. |
+| `gbk_list_compositions` | List account compositions, or a single capability-authorized guest project. |
 | `gbk_edit_composition` | Revision-safe typed edits (parts, notes, orchestration, CC curves, mix, tempo, sections). |
 | `gbk_render_composition` | Render a saved revision to WAV (and optionally MIDI). |
 | `gbk_get_render_status` | Poll a render job; returns validation data and artifact references. |
 | `gbk_get_artifacts` | Authorized, expiring download URLs for WAV/MIDI artifacts. |
-| `gbk_open_workstation` | Authenticated deep link that opens the exact project in GBK Studio. |
+| `gbk_open_workstation` | Private read-only deep link that opens the exact project in GBK Studio. |
 | `gbk_publish_composition` | Publish a composition publicly — only on the user's explicit request. |
 | `gbk_show_composition_ui` | Show the interactive player and piano-roll component in ChatGPT. |
 
-## Auth summary
+## Account-free access
 
-- The MCP server is a protected resource. Access uses OAuth 2.0
-  authorization code with PKCE, discovered through the standard protected
-  resource / authorization server metadata endpoints.
-- `mcp.json` declares this as `extensions["com.openai"].auth = { "type": "oauth" }`.
-  No static client block is included: the server supports dynamic client
-  registration and Client ID Metadata Documents (CIMD), so ChatGPT/Codex
-  register or identify themselves at connect time.
-- The OAuth flow links the client to the user's existing GBK account (the
-  website's invite-code / session account). Tokens are validated for
-  issuer, audience, scopes, and expiry on every call.
-- Scopes are narrow: compositions read/write, renders create, artifacts
-  read, and shares publish are separate permissions.
-- Private compositions and artifacts are only accessible to their owner;
-  artifact downloads are authorized, expiring URLs checked again at
-  download time. Compositions are private by default and are published
-  only through an explicit publish action.
+`mcp.json` declares `extensions["com.openai"].auth.type = "none"`.
+Creation returns a composition ID plus independent edit and read capabilities.
+Pass the edit capability as `accessToken` on all follow-up tools, including job
+status and cancellation. It survives transport reconnects and server restarts
+as long as the project and server signing secret remain intact. An ID alone
+never grants access. Keep the edit secret private and save it for later edits;
+there is no account-based recovery for a lost guest secret.
+
+Studio links carry only the read capability in a URL fragment, and do not sign
+the visitor in. Public publish URLs contain no capability. Guest compositions
+remain private until explicitly published. Download URLs expire after 15 minutes
+by default; request fresh URLs with `gbk_get_artifacts`. Audio bytes expire after
+30 days by default; render again when needed. OAuth and website sessions remain
+optional for existing account-owned projects.
+
+Guest defaults: 120 seconds (including render tail), 64 generated bars, 20,000
+notes/controllers, 100 revisions, 10 renders per project/day. Global guest
+budgets, a bounded render queue, storage caps and artifact cleanup prevent new
+sessions/projects from bypassing all resource limits. See
+`deploy/compose.env.example` and `docs/chatgpt-plugin.md` for configuration.
 
 ## Notes
 

@@ -23,6 +23,7 @@ import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
 import { RenderService } from "./mcp/render.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
+import { resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
 
 export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
@@ -30,7 +31,7 @@ export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
 export interface AppDeps { model?: ModelClient; persist?: boolean; logger?: boolean | object; fetch?: typeof fetch; now?: () => number }
 export interface McpHandle { store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; close: () => Promise<void> }
 export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; shares: ShareStore; mcp: McpHandle; accounts: AccountStore }> {
-  const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers[\"x-gbk-csrf\"]"] }, bodyLimit: 64 * 1024, trustProxy: "127.0.0.1", disableRequestLogging: false });
+  const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers[\"x-gbk-project-token\"]", "req.headers[\"x-gbk-csrf\"]"] }, bodyLimit: 64 * 1024, trustProxy: "127.0.0.1", disableRequestLogging: false });
   const sessions = new SessionStore(cfg);
   const catalog = new ToolCatalog();
   const persistEarly = deps.persist !== false;
@@ -46,9 +47,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const ipLimiter = new RateLimiter(cfg.security.ipRequestsPerMinute);
   app.addHook("onRequest", async (req, reply) => {
     if (req.url.startsWith("/api/health")) return;
-    // MCP + OAuth discovery are exempt from the per-IP limiter: hosted MCP clients share egress IPs and
-    // poll render status legitimately; abuse is bounded per authenticated user (render quotas, job caps).
-    if (req.url.startsWith("/mcp") || req.url.startsWith("/.well-known/") || req.url.startsWith("/oauth/") || req.url.startsWith("/api/mcp/")) return;
+    // Network throttling supplements durable global guest budgets; IP is never an identity.
     if (!ipLimiter.take(req.ip)) return reply.code(429).header("retry-after", String(ipLimiter.retryAfterSec(req.ip))).send({ code: "RATE_LIMITED", message: "too many requests" });
   });
   app.addHook("onSend", async (_req, reply, payload) => { reply.header("x-content-type-options", "nosniff"); if (!reply.getHeader("cache-control")) reply.header("cache-control", "no-store"); return payload; });
@@ -56,15 +55,17 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   configRoutes(app, cfg);
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
   signinRoutes(app, cfg, sessions, accounts, new RateLimiter(cfg.security.loginPerMinute), deps.fetch);
-  shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model);
   // Remote MCP (ChatGPT/Codex): durable compositions, OAuth, worker-thread rendering, signed artifacts.
   const mcpStore = new McpStore(persist ? join(cfg.dataDir, "mcp.sqlite") : ":memory:", persist ? cfg.dataDir : mkdtempSync(join(tmpdir(), "gbk-mcp-")));
+  shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model, (token, id, owner) => {
+    try { const p = resolveGuestCapability(cfg, mcpStore, token); return p.compositionId === id && p.user === owner; } catch { return false; }
+  });
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   const mcpRenders = new RenderService(cfg, mcpStore, (o) => app.log.info(o), (u) => limits.for(u).dailyRenders);
   // Migration from invite-code login: every access-code user and every existing song/composition owner becomes an
   // established account with the same id, so their songs, compositions and OAuth grants keep working unchanged.
   const legacy = new Set([...cfg.security.accessCodes.map((e) => { const i = e.indexOf(":"); return (i > 0 ? e.slice(0, i) : "user").replace(/[^\w.-]/g, "").slice(0, 40) || "user"; }), ...shares.owners(), ...mcpStore.owners()]);
-  let migrated = 0; for (const u of legacy) if (accounts.ensureLegacy(u)) migrated++;
+  let migrated = 0; for (const u of legacy) if (!u.startsWith("guest:") && accounts.ensureLegacy(u)) migrated++;
   if (migrated) app.log.info({ evt: "accounts_migrated", count: migrated });
   await mcpRenders.start();
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };

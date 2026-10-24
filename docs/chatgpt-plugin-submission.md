@@ -16,7 +16,7 @@ human account owner have not been performed by preparing this packet.
 - **Homepage / website:** https://compose.grepawk.com
 - **Repository:** https://github.com/yishengjiang99/gbk
 - **MCP server:** `gbk_composer` — Streamable HTTP at
-  `https://compose.grepawk.com/mcp`, OAuth authorization
+  `https://compose.grepawk.com/mcp`, no authentication (project capabilities)
 - **Category:** Productivity
 - **Capabilities:** Interactive, Write
 
@@ -32,8 +32,8 @@ human account owner have not been performed by preparing this packet.
 > arrangements — including Baroque fugues, counterpoint, and multi-voice
 > writing — modify individual passages without disturbing the rest, control
 > expression with MIDI CC automation, and export validated stereo WAV and
-> Standard MIDI files. Every composition is saved server-side under your
-> GBK account, can be revised by follow-up prompts, played and inspected in
+> Standard MIDI files. Every composition is saved privately server-side with a project access secret,
+> requires no GBK account, can be revised by follow-up prompts, played and inspected in
 > an interactive player with a piano-roll view, and opened in GBK Studio
 > for full editing.
 
@@ -102,7 +102,7 @@ reviewer asks for demonstration prompts.
   becomes public only when the user explicitly invokes the publish/share
   operation.
 - **Access control.** Private compositions and artifacts are accessible
-  only to their authenticated owner. Artifact downloads are served through
+  only to their account owner or guest project capability holder. Artifact downloads are served through
   authorized, expiring URLs, and authorization is checked again when the
   file is downloaded — not only when the URL is issued. Artifact URLs
   should be treated as short-lived credentials and not shared.
@@ -112,13 +112,13 @@ reviewer asks for demonstration prompts.
 - **No sale of data.** Composition and account data is not sold. Data is
   used to provide the composition, rendering, and storage features the
   user invoked.
-- **Retention.** Compositions, revisions, and artifacts are retained while
-  the user's GBK account exists or until the user deletes them, so that
-  follow-up edits and re-renders remain possible.
-- **Deletion.** A user can delete a composition (and its rendered
-  artifacts) from GBK Studio, or request deletion of their account data by
-  contacting the developer through https://compose.grepawk.com. Deletion
-  removes the project data and its artifacts from primary storage.
+- **Guest capabilities.** Creation returns private edit/read secrets. Keep the edit
+  secret out of public output. The private Studio link grants read access only.
+  Guest recovery requires the saved secret; an account is not required.
+- **Retention.** Artifact bytes expire after the configured retention period
+  (30 days by default). Compositions and bounded revision history remain durable.
+- **Deletion.** No guest deletion tool is exposed yet. Contact the operator through
+  https://compose.grepawk.com for deletion of guest project data.
 - **Model-provider note.** Renders requested through ChatGPT run GBK's
   deterministic composition/rendering engine; they do not invoke GBK's
   website LLM agent, so no additional model-provider processing of the
@@ -138,9 +138,9 @@ the human account owner (or a human with the relevant account access):
 - [ ] **Add the custom MCP server in ChatGPT.** In the owner's ChatGPT
       account: Plugins → add custom MCP server → URL
       `https://compose.grepawk.com/mcp`.
-- [ ] **Complete OAuth linking.** Sign in to GBK in the OAuth flow and link
-      the ChatGPT client to the owner's GBK account; confirm a test
-      composition appears under that account in GBK Studio.
+- [ ] **Verify no-auth access.** Create and render without GBK sign-in. Reconnect
+      and edit with the saved project capability; verify another guest cannot read
+      the project by ID alone and a read token cannot edit or render.
 - [ ] **Run the test prompts above** in the real ChatGPT connection and
       confirm playback, piano roll, downloads, and the Studio deep link.
 - [ ] **Prepare the public submission** with the metadata in this packet,

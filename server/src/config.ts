@@ -13,6 +13,9 @@ export interface Config {
     /** Absolute path to the .sf2 the render workers load. Empty = auto-detect (dist, then public/). */
     soundFontPath: string;
     renderConcurrency: number; renderTimeoutMs: number; maxRenderSeconds: number;
+    maxQueueDepth: number; maxArtifactBytes: number; maxSessions: number;
+    guestMaxSeconds: number; guestRendersPerDay: number; guestCreatesPerDay: number;
+    guestMutationsPerDay: number; guestMaxCompositions: number; guestMaxRevisions: number; guestMaxStorageBytes: number;
     /** Per-user caps that bound render cost. */
     maxRendersPerDay: number; newAccountRendersPerDay: number; maxCompositions: number;
     /** Signed artifact download URLs live this long (seconds). */
@@ -59,6 +62,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       renderConcurrency: Math.max(1, Math.min(8, num(env.MCP_RENDER_CONCURRENCY, 2))),
       renderTimeoutMs: num(env.MCP_RENDER_TIMEOUT_MS, 300_000),
       maxRenderSeconds: num(env.MCP_MAX_RENDER_SECONDS, 600),
+      maxQueueDepth: Math.max(1, Math.floor(num(env.MCP_MAX_QUEUE_DEPTH, 8))),
+      maxArtifactBytes: Math.max(1, num(env.MCP_MAX_ARTIFACT_BYTES, 2 * 1024 ** 3)),
+      maxSessions: Math.max(1, Math.floor(num(env.MCP_MAX_SESSIONS, 1000))),
+      guestMaxStorageBytes: Math.max(1, num(env.MCP_GUEST_MAX_STORAGE_BYTES, 256 * 1024 ** 2)),
+      guestMaxSeconds: Math.max(1, num(env.MCP_GUEST_MAX_SECONDS, 120)),
+      guestRendersPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_RENDERS_PER_DAY, 10))),
+      guestCreatesPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_DAY, 100))),
+      guestMutationsPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_MUTATIONS_PER_DAY, 1000))),
+      guestMaxCompositions: Math.max(1, Math.floor(num(env.MCP_GUEST_MAX_COMPOSITIONS, 1000))),
+      guestMaxRevisions: Math.max(1, Math.floor(num(env.MCP_GUEST_MAX_REVISIONS, 100))),
       maxRendersPerDay: num(env.MCP_MAX_RENDERS_PER_DAY, 200),
       newAccountRendersPerDay: num(env.MCP_NEW_ACCOUNT_RENDERS_PER_DAY, 10),
       maxCompositions: num(env.MCP_MAX_COMPOSITIONS_PER_USER, 500),

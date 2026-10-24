@@ -1,1 +1,1 @@
-{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"gbk_composer":{"extensions":{"com.openai":{"auth":{"type":"oauth"}}},"type":"streamable-http","url":"https://compose.grepawk.com/mcp"}}}
+{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"gbk_composer":{"extensions":{"com.openai":{"auth":{"type":"none"}}},"type":"streamable-http","url":"https://compose.grepawk.com/mcp"}}}

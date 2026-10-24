@@ -50,7 +50,33 @@ open the same composition in GBK Studio afterwards.
 Scopes: `gbk:compositions.read`, `gbk:compositions.write`, `gbk:renders.create`,
 `gbk:artifacts.read`, `gbk:shares.publish`.
 
-## Authentication
+## Account-free access
+
+The plugin declares no authentication. `gbk_create_composition` returns separate
+`accessToken` (edit) and `readAccessToken` capabilities for one guest composition.
+Send `accessToken` on every subsequent tool call, including render status/cancel.
+The token is validated against the stored project and grants no access to any
+other composition, job, or account. Read tokens cannot edit, render, or publish.
+Anonymous list calls return an empty list; with a token they list only that project.
+Keep the edit token private: losing it loses editing access. Creation idempotency
+is scoped to the current transport session; follow-up idempotency is scoped to
+the project and survives new sessions. Guest retry records expire after 24 hours.
+Capabilities survive restarts with the same database and `SESSION_SECRET`; rotating
+that secret invalidates all guest capabilities and signed links.
+
+Studio links carry only read access in the URL fragment, which the browser sends
+in a redacted header to read the private snapshot. Public publish links contain no
+secret. Local Studio editing/playback/export remain available; the website's
+separate hosted LLM chat and account sync still use sign-in.
+
+Guest admission uses persisted global rolling 24-hour creation/mutation budgets,
+per-project render/revision limits, 120-second/64-bar/20,000-event project limits,
+a global queue limit, conservative audio storage reservations, a 256 MiB guest
+project-storage cap, and per-IP throttling. IP is not an identity. Shared client
+egress may require tuning `RATE_IP_PER_MINUTE`. Transport sessions are bounded.
+Artifact retention runs at startup and every minute; expired URLs cannot bypass it.
+
+## Optional account authentication
 
 OAuth 2.1 per the MCP authorization spec, with this server as its own authorization server:
 
@@ -99,7 +125,7 @@ npx @modelcontextprotocol/inspector@latest   # connect to https://compose.grepaw
 ```
 
 With the Inspector: run Initialize, check `tools/list` (12 tools), call
-`gbk_get_capabilities` anonymously, complete the OAuth flow, then run the demonstration
+`gbk_get_capabilities` anonymously, then create a guest project and run the demonstration
 prompts below. Locally, `MCP_TEST_AUTH=1 npm run dev:server`-style runs accept
 `x-gbk-test-user: alice` instead of OAuth.
 
@@ -109,9 +135,7 @@ prompts below. Locally, `MCP_TEST_AUTH=1 npm run dev:server`-style runs accept
 2. In ChatGPT: **Plugins → Add custom MCP server**, URL `https://compose.grepawk.com/mcp`.
    Accept the risk warning, choose **Create as a plugin**; note the technical id
    (`plugin_asdk_app…`) if you later add an `.app.json` mapping.
-3. First tool use starts OAuth: sign in to GBK with Google or GitHub, review the scopes on the
-   consent page, approve. The redirect URI shown by ChatGPT's management page must be the
-   one registered — DCR handles this automatically for ChatGPT-created clients.
+3. Select no authentication. Keep the returned project capability for follow-up calls.
 4. Try: “@GBK Compose a 32-bar four-voice Baroque fugue in D minor at 108 BPM with organ
    instrumentation and expressive CC11 dynamics. Render WAV and MIDI.” Then: “Add stretto
    in the final eight bars, increase the bass presence, and rerender.” Then: “Show me the
@@ -120,16 +144,19 @@ prompts below. Locally, `MCP_TEST_AUTH=1 npm run dev:server`-style runs accept
 ## Connect from Codex
 
 Add the repo marketplace or install `plugins/gbk-composer/` directly; the plugin's
-`mcp.json` points Codex at the same `https://compose.grepawk.com/mcp` endpoint with OAuth.
+`mcp.json` points Codex at the same `https://compose.grepawk.com/mcp` endpoint with no authentication.
 The bundled skills (`compose-music`, `edit-music`, `render-music`) teach the workflow:
 capabilities first, durable create, inspect, targeted revision-safe edits, render, verify
 artifacts before claiming success.
 
 ## Troubleshooting
 
-- **401 on tools/call, no OAuth prompt** — the client didn't get the challenge: check
-  `WWW-Authenticate` on a manual `POST /mcp` and that `/.well-known/oauth-protected-resource`
-  returns this origin's issuer. A mismatched `COMPOSER_PUBLIC_ORIGIN` breaks audience checks.
+- **Guest `NOT_FOUND`** — supply the correct project's `accessToken`; the ID or session
+  alone is insufficient. Do not retry with another project's token.
+- **`QUOTA_EXCEEDED`** — shorten the piece/tail or wait for the daily budget/queue/retention
+  window as indicated. New sessions cannot bypass the global guest budgets.
+- **401 on tools/call** — an explicitly supplied OAuth token is invalid/expired. For
+  guest access, connect without an Authorization header and use project capabilities.
 - **`invalid_grant` at token exchange** — PKCE verifier mismatch, reused/expired code
   (10 min), or `redirect_uri` differing by one character from the authorization request.
 - **Token works, then 401 after refresh** — an old refresh token was replayed; the family
@@ -147,12 +174,12 @@ artifacts before claiming success.
 
 ## Privacy & retention
 
-Compositions and artifacts are private to the owning GBK account by default and are never
-published implicitly; `gbk_publish_composition` (scope `gbk:shares.publish`) is the only
-publishing path and is for explicit user requests. Prompts/titles are user content used only
-as data — never executed (no shell/JS/filesystem access exists in the MCP surface). Artifact
-bytes are retained on disk per `MCP_ARTIFACT_RETENTION_DAYS`; deleting a composition in
-Studio/account flows is the deletion path documented in the submission packet.
+Compositions and artifacts are private to their account owner or project capability
+holder, and are never published implicitly. `gbk_publish_composition` is for explicit
+user requests only. Artifact bytes expire after `MCP_ARTIFACT_RETENTION_DAYS` (30 by
+default); compositions and bounded revisions remain durable. There is no guest deletion
+tool yet; contact the operator for deletion. No edit secrets are included in Studio or
+public URLs. The calling client retains secrets in its tool/conversation context.
 
 ## Status
 

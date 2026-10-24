@@ -23,6 +23,8 @@ import { parseSoundFont } from "../../../src/audio/soundfont-loader.ts";
 import { renderProjectOffline, type OfflineRenderOptions } from "../../../src/audio/offline-renderer.ts";
 import { McpStore, type RenderJobRow, type CompositionRow } from "./store.ts";
 import { McpError } from "./errors.ts";
+import { isGuest } from "./guest.ts";
+import { tickToSec } from "../../../src/workstation/timing.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
 
 export interface RenderConfig {
@@ -67,10 +69,15 @@ export class RenderService {
   executor: "worker" | "inprocess" = "worker";
   private sfPath = "";
   private stopped = false;
+  private fallingBack = false;
+  private inProcessActive = 0;
+  private retentionTimer?: NodeJS.Timeout;
 
   constructor(private cfg: Config, private store: McpStore, private log: (o: object) => void = () => {}, private rendersPerDay: (owner: string) => number = () => cfg.mcp.maxRendersPerDay) {}
 
   async start(): Promise<void> {
+    const prune = () => { try { this.store.pruneArtifacts(this.cfg.mcp.artifactRetentionDays); } catch (e) { this.log({ evt: "mcp_artifact_cleanup_failed", message: (e as Error).message }); } };
+    prune(); this.retentionTimer = setInterval(prune, 60_000); this.retentionTimer.unref();
     try {
       this.sfPath = resolveSoundFontPath(this.cfg);
       const entry = workerEntry();
@@ -78,12 +85,16 @@ export class RenderService {
       this.executor = "worker";
     } catch (e) {
       this.log({ evt: "mcp_render_worker_fallback", message: (e as Error).message });
+      this.fallingBack = true;
+      await Promise.all(this.pool.map((slot) => slot.w.terminate().catch(() => undefined)));
+      this.pool = [];
       this.executor = "inprocess";
       try { this.sfPath = resolveSoundFontPath(this.cfg); } catch { /* renders will fail with the same error, surfaced per job */ }
     }
   }
   async stop(): Promise<void> {
     this.stopped = true;
+    clearInterval(this.retentionTimer);
     for (const t of this.timers.values()) clearTimeout(t);
     await Promise.all(this.pool.map((p) => p.w.terminate().catch(() => undefined)));
     this.pool = [];
@@ -103,7 +114,7 @@ export class RenderService {
     });
     w.on("message", (m: WorkerMsg) => this.onWorkerMessage(slot, m));
     w.on("exit", (code) => {
-      if (this.stopped) return;
+      if (this.stopped || this.fallingBack) return;
       const i = this.pool.indexOf(slot); if (i >= 0) this.pool.splice(i, 1);
       if (slot.jobId) this.failJob(slot.jobId, "WORKER_UNAVAILABLE", `render worker exited (code ${code}) mid-job; no artifact was published — resubmit to retry`);
       void this.spawn().then(() => this.pump()).catch((e) => this.log({ evt: "mcp_render_respawn_failed", message: (e as Error).message }));
@@ -112,7 +123,16 @@ export class RenderService {
 
   // ---- public API ---------------------------------------------------------------------
   submit(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig): RenderJobRow {
-    const limit = this.rendersPerDay(owner);
+    const limit = isGuest(owner) ? this.cfg.mcp.guestRendersPerDay : this.rendersPerDay(owner);
+    const seconds = tickToSec(snapshot, snapshot.endTick) + (config.tailSeconds ?? 3);
+    const maxSeconds = isGuest(owner) ? Math.min(this.cfg.mcp.guestMaxSeconds, this.cfg.mcp.maxRenderSeconds) : this.cfg.mcp.maxRenderSeconds;
+    if (!Number.isFinite(seconds) || seconds > maxSeconds) throw new McpError("QUOTA_EXCEEDED", `render duration exceeds ${maxSeconds} seconds (including tail)`);
+    if (this.store.queueDepth() >= this.cfg.mcp.maxQueueDepth) throw new McpError("QUOTA_EXCEEDED", "global render queue is full; retry later");
+    this.store.pruneArtifacts(this.cfg.mcp.artifactRetentionDays);
+    // Reserve worst-case WAV + MIDI bytes for ALL admitted jobs, even across different guests.
+    const reserve = this.cfg.mcp.maxRenderSeconds * 48000 * 2 * 4 + 8 * 1024 ** 2;
+    if (this.store.metrics().artifactBytes + (this.store.queueDepth() + 1) * reserve > this.cfg.mcp.maxArtifactBytes)
+      throw new McpError("QUOTA_EXCEEDED", "artifact storage capacity reached; retry after older artifacts expire");
     if (this.store.countJobsSince(owner, 86_400_000) >= limit) throw new McpError("QUOTA_EXCEEDED", `daily render limit reached (${limit})`);
     const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, executor: this.executor, rendererVersion: RENDERER_VERSION } });
     this.queue.push({ jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config });
@@ -159,7 +179,11 @@ export class RenderService {
   private pump() {
     if (this.stopped) return;
     while (this.queue.length) {
-      if (this.executor === "inprocess") { const job = this.queue.shift()!; void this.runInProcess(job); continue; }
+      if (this.executor === "inprocess") {
+        if (this.inProcessActive >= this.cfg.mcp.renderConcurrency) return;
+        const job = this.queue.shift()!; this.inProcessActive++;
+        void this.runInProcess(job).finally(() => { this.inProcessActive--; this.pump(); }); continue;
+      }
       const slot = this.pool.find((p) => p.ready && !p.busy);
       if (!slot) return;
       const job = this.queue.shift()!;
@@ -216,6 +240,7 @@ export class RenderService {
     }
   }
   private completeJob(job: Pending, wavBytes: Uint8Array, meta: Record<string, unknown>) {
+    if (this.store.getJob(job.jobId, job.owner)?.status !== "running") return;
     // Re-verify what the worker claims before anything is published.
     const sha = createHash("sha256").update(wavBytes).digest("hex");
     if (sha !== meta.sha256) throw new McpError("RENDER_FAILED", "rendered WAV failed SHA-256 verification against the worker's report; artifact discarded");

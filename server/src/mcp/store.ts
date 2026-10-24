@@ -4,7 +4,7 @@
 // context never carries binary payloads.
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const newOpaqueId = (prefix: string) => `${prefix}_${randomBytes(12).toString("base64url")}`;
@@ -59,6 +59,8 @@ export class McpStore {
         kind TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
         sha256 TEXT NOT NULL, rel_path TEXT NOT NULL, meta_json TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS mcp_art_comp ON mcp_artifacts(composition_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS mcp_guest_usage (bucket TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS mcp_guest_usage_time ON mcp_guest_usage(at);
       CREATE TABLE IF NOT EXISTS mcp_idempotency (
         owner TEXT NOT NULL, key TEXT NOT NULL, tool TEXT NOT NULL, request_hash TEXT NOT NULL,
         result_json TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (owner, key));
@@ -78,15 +80,46 @@ export class McpStore {
         revoked INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS mcp_tokens_family ON mcp_oauth_tokens(family);
     `);
-    // Crash recovery: a job left "running" by a dead process can never complete; fail it explicitly so no
+    // Crash recovery: a job left queued/running by a dead process has no in-memory snapshot and cannot complete; fail it explicitly so no
     // caller waits forever and no partial artifact is ever published for it (artifacts are only inserted
     // after full validation, in the same transaction as the completion update).
-    this.db.prepare("UPDATE mcp_render_jobs SET status='failed', error=?, finished_at=? WHERE status='running'")
+    this.db.prepare("UPDATE mcp_render_jobs SET status='failed', error=?, finished_at=? WHERE status IN ('running','queued')")
       .run(JSON.stringify({ code: "WORKER_INTERRUPTED", message: "render worker stopped mid-job (server restart); submit a new render — retries are safe" }), Date.now());
   }
   /** Distinct composition owners (used to migrate pre-sign-in users into accounts). */
   owners(): string[] { return (this.db.prepare("SELECT DISTINCT owner FROM mcp_compositions").all() as { owner: string }[]).map((r) => r.owner); }
   close() { try { this.db.close(); } catch { /* already closed */ } }
+
+  /** Durable, global guest admission budget; new sessions, IPs and projects cannot reset it. */
+  takeGuestBudget(bucket: string, limit: number): boolean {
+    const cutoff = Date.now() - 86_400_000;
+    this.db.prepare("DELETE FROM mcp_guest_usage WHERE at <= ?").run(cutoff);
+    this.db.prepare("DELETE FROM mcp_idempotency WHERE owner LIKE 'guest:%' AND created_at <= ?").run(cutoff);
+    const result = this.db.prepare(`INSERT INTO mcp_guest_usage (bucket, at)
+      SELECT ?, ? WHERE (SELECT COUNT(*) FROM mcp_guest_usage WHERE bucket=?) < ?`)
+      .run(bucket, Date.now(), bucket, limit);
+    return Number(result.changes) === 1;
+  }
+  guestStorageBytes(): number {
+    // Count both latest projects and immutable revisions, plus retry results. Reserve another
+    // current-project copy for the Studio share snapshot kept in the separate shares database.
+    const row = this.db.prepare(`SELECT
+      (SELECT COALESCE(SUM(2 * length(CAST(project_json AS BLOB))),0) FROM mcp_compositions WHERE owner LIKE 'guest:%') +
+      (SELECT COALESCE(SUM(length(CAST(r.project_json AS BLOB))),0) FROM mcp_revisions r JOIN mcp_compositions c ON c.id=r.composition_id WHERE c.owner LIKE 'guest:%') +
+      (SELECT COALESCE(SUM(length(CAST(result_json AS BLOB))),0) FROM mcp_idempotency WHERE owner LIKE 'guest:%') AS n`).get() as { n: number };
+    return Number(row.n);
+  }
+  guestCompositionCount(): number {
+    return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_compositions WHERE owner LIKE 'guest:%'").get() as { n: number }).n);
+  }
+  pruneArtifacts(retentionDays: number): void {
+    const rows = this.db.prepare("SELECT * FROM mcp_artifacts WHERE created_at <= ?")
+      .all(Date.now() - retentionDays * 86_400_000) as unknown as ArtifactRow[];
+    for (const row of rows) {
+      rmSync(this.artifactAbsPath(row), { force: true });
+      this.db.prepare("DELETE FROM mcp_artifacts WHERE id=?").run(row.id);
+    }
+  }
 
   // ---- compositions ------------------------------------------------------------
   createComposition(o: { owner: string; title: string; projectJson: string; revision: number; source?: string }): CompositionRow {
