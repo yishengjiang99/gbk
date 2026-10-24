@@ -7,6 +7,15 @@ playwright-report
 public/omr-models/
 public/ort-runtime/
 
+# SoundFonts: binaries are fetched pinned + sha256-verified from soundfonts/catalog.json
+# (scripts/fetch-soundfonts.mjs); only the catalog, README and licenses are committed.
+# (public/static/GeneralUser-GS.sf2 predates this and stays committed; the staged
+# TimGM6mb copy and the generated manifest do not.)
+soundfonts/*.sf2
+soundfonts/*.part
+public/static/TimGM6mb.sf2
+public/static/soundfont-manifest.json
+
 # WebMCP origin-trial token (origin-bound, register your own; see docs/webmcp.md)
 webmcp-origin-trial.local.json
 

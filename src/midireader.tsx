@@ -371,6 +371,14 @@ function CcKnob({ label, value, onChange, disabled = false }: CcKnobProps) {
 // MidiReader props
 // ---------------------------------------------------------------------------
 
+export interface SoundfontOption {
+  label: string;
+  title?: string;
+  path: string;
+  bytes?: number;
+  description?: string;
+}
+
 interface MidiReaderProps {
   sf2Ready: boolean;
   sf2Name: string;
@@ -378,6 +386,8 @@ interface MidiReaderProps {
   sf2Error: string;
   onUploadSf2: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onLoadDefaultSf2: () => void;
+  soundfonts?: SoundfontOption[];
+  onSelectSoundfont?: (f: SoundfontOption) => void;
   activeTab: string;
   onSelectTab: (tab: string) => void;
   audioCtxState: string;
@@ -459,6 +469,8 @@ export default function MidiReader({
   sf2Error,
   onUploadSf2,
   onLoadDefaultSf2,
+  soundfonts = [],
+  onSelectSoundfont,
   activeTab,
   onSelectTab,
   audioCtxState,
@@ -2327,6 +2339,28 @@ export default function MidiReader({
           />
           <span>{sf2Loading ? "Loading" : "Default SF2"}</span>
         </button>
+        {soundfonts.length > 1 && onSelectSoundfont && (
+          <select
+            className="toolbarSelect"
+            value={soundfonts.find((f) => f.label === sf2Name)?.path ?? ""}
+            onChange={(e) => {
+              const f = soundfonts.find((x) => x.path === e.target.value);
+              if (f) onSelectSoundfont(f);
+            }}
+            disabled={sf2Loading}
+            aria-label="Bundled SoundFont"
+            title="Bundled SoundFont"
+          >
+            <option value="" disabled>
+              Choose SoundFont…
+            </option>
+            {soundfonts.map((f) => (
+              <option key={f.path} value={f.path}>
+                {(f.title ?? f.label) + (f.bytes ? ` (${Math.round(f.bytes / 1e5) / 10} MB)` : "")}
+              </option>
+            ))}
+          </select>
+        )}
         <span className="toolbarStatusPill">
           <span className="toolbarStatusLabel">Loaded</span>
           <span className="toolbarStatusValue">{sf2Name || "No SoundFont"}</span>

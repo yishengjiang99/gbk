@@ -99,6 +99,9 @@ interface PresetRow {
 interface SampleFile {
   label: string;
   path: string;
+  title?: string;
+  bytes?: number;
+  description?: string;
 }
 
 interface PresetRegionCache {
@@ -117,6 +120,23 @@ const SAMPLE_FILES: SampleFile[] = [
   },
 ];
 const DEFAULT_SF2 = SAMPLE_FILES[0];
+
+// Bundled/server SoundFonts beyond the default come from
+// public/static/soundfont-manifest.json (generated at build time from
+// soundfonts/catalog.json by scripts/prepare-soundfonts.mjs). Manifest paths
+// are either base-relative ("static/<file>", shipped in dist) or absolute
+// ("/soundfonts/<file>", served by compose.grepawk.com outside the releases).
+interface SoundfontManifestEntry {
+  label: string;
+  file: string;
+  path: string;
+  bytes: number;
+  description?: string;
+}
+
+function resolveManifestPath(p: string): string {
+  return p.startsWith("/") ? p : `${import.meta.env.BASE_URL}${p}`;
+}
 
 const QWERTY_NOTE_MAP: Record<string, number> = {
   a: 60, // C4
@@ -658,6 +678,7 @@ function AnalyzerCanvas({ data, mode, testId }: AnalyzerCanvasProps) {
 
 export default function App() {
   const [sf2, setSf2] = useState<SF2Data | null>(null);
+  const [soundfonts, setSoundfonts] = useState<SampleFile[]>(SAMPLE_FILES);
   const [sourceName, setSourceName] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
@@ -845,6 +866,30 @@ export default function App() {
     midiDriverRef.current.setSelectedInput(selectedMidiInput);
   }, [selectedMidiInput]);
 
+  // Populate the SoundFont picker from the build-time manifest (see
+  // soundfonts/catalog.json). Falls back silently to just the default font.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${import.meta.env.BASE_URL}static/soundfont-manifest.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((entries: SoundfontManifestEntry[] | null) => {
+        if (cancelled || !Array.isArray(entries) || entries.length === 0) return;
+        setSoundfonts(
+          entries.map((e) => ({
+            label: e.file,
+            title: e.label,
+            path: resolveManifestPath(e.path),
+            bytes: e.bytes,
+            description: e.description,
+          }))
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (didAutoLoadDefault) return;
     setDidAutoLoadDefault(true);
@@ -857,17 +902,23 @@ export default function App() {
     startMidiDriver();
   }, [sf2, didAutoEnableMidi, midiEnabled]);
 
-  async function parseFromU8(u8: Uint8Array, name: string): Promise<void> {
+  async function parseFromU8(u8: Uint8Array, name: string, url?: string): Promise<void> {
     setLoading(true);
     setError("");
     try {
       setLoadingStage(`Parsing SoundFont: ${name}…`);
       const parsed = parseSF2(u8);
       setSf2(parsed);
-      // Share the parsed font with the headless renderer: the bundled default seeds its cache (no second
-      // download); any other (uploaded) font becomes the active font for offline WAV renders.
-      if (name === DEFAULT_SF2.label) primeSoundFontCache(DEFAULT_SF2.path, parsed.soundFont, name);
-      else setActiveSoundFont(parsed.soundFont, name);
+      // Share the parsed font with the headless renderer: a font loaded from a
+      // known URL seeds its cache (no second download); the bundled default is
+      // the renderer's fallback, any other font becomes the active font for
+      // offline WAV renders.
+      if (url) primeSoundFontCache(url, parsed.soundFont, name);
+      if (name === DEFAULT_SF2.label) {
+        if (!url) primeSoundFontCache(DEFAULT_SF2.path, parsed.soundFont, name);
+      } else {
+        setActiveSoundFont(parsed.soundFont, name);
+      }
       setSourceName(name);
       setSelectedPreset(null);
       setSelectedLayer(null);
@@ -880,17 +931,23 @@ export default function App() {
     }
   }
 
-  async function onSelectSample(path: string, label: string): Promise<void> {
+  async function onSelectSample(path: string, label: string, bytes?: number): Promise<void> {
     setLoading(true);
     setError("");
-    setLoadingStage(`Downloading SoundFont: ${label} (31 MB)…`);
+    const mb = bytes ? Math.max(1, Math.round(bytes / 1e6)) : 31;
+    setLoadingStage(`Downloading SoundFont: ${label} (${mb} MB)…`);
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 30_000);
+    // Scale the download timeout with the font size (~512 KiB/s floor, 30 s min,
+    // 15 min cap) so the 148 MB HQ font is not cut off on slow connections.
+    const timeoutMs = bytes
+      ? Math.min(900_000, Math.max(30_000, Math.ceil(bytes / (512 * 1024)) * 1000))
+      : 30_000;
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(path, { signal: controller.signal });
       if (!res.ok) throw new Error(`Failed to fetch ${label}`);
       const buffer = await res.arrayBuffer();
-      await parseFromU8(new Uint8Array(buffer), label);
+      await parseFromU8(new Uint8Array(buffer), label, path);
     } catch (e) {
       setLoading(false);
       setError(controller.signal.aborted
@@ -1367,6 +1424,8 @@ export default function App() {
           sf2Error={error}
           onUploadSf2={onUploadFile}
           onLoadDefaultSf2={() => onSelectSample(DEFAULT_SF2.path, DEFAULT_SF2.label)}
+          soundfonts={soundfonts}
+          onSelectSoundfont={(f) => onSelectSample(f.path, f.label, f.bytes)}
           activeTab={activeTab}
           onSelectTab={setActiveTab}
           audioCtxState={audioCtxState}

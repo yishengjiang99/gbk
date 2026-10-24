@@ -42,6 +42,11 @@ jobs:
         with:
           path: omr-homr-web/models
           key: omr-models-homr-308-465-v1
+      - name: Cache SoundFonts
+        uses: actions/cache@v4
+        with:
+          path: soundfonts
+          key: soundfonts-v1
       - name: Build
         run: npm run build
         env:

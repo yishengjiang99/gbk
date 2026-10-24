@@ -24,6 +24,14 @@ bash deploy/remote-install.sh /tmp/rel.tgz <release-id>           # releases/<id
 nginx vhost: `deploy/nginx.conf` → `/etc/nginx/sites-available/compose.grepawk.com` (back up first, run `nginx -t` before reloading).
 TLS (once DNS resolves): `certbot --nginx -d compose.grepawk.com`. Ops: `deploy/ops.sh health|logs|releases|rollback|verify-tls`.
 
+## SoundFonts
+Pinned in `soundfonts/catalog.json` (sources, commits, SHA-256s, licenses — see `soundfonts/README.md`). Small fonts
+(GeneralUser GS, TimGM6mb) are fetched at build time and ship in `dist/static/` on both Pages and compose. The large
+FluidR3 GM bank is compose-only: it lives outside the releases in `/var/www/gbk-composer/soundfonts/`, is served at
+`/soundfonts/FluidR3_GM.sf2` (location block in `deploy/nginx.conf` — install/reload nginx after adding it), and
+`deploy/deploy.sh` syncs it there (sha256-checked) on each deploy. The runtime manifest lists it only for compose
+builds (`GBK_SOUNDFONT_SERVER=1`, set by `npm run build:compose`).
+
 ## Tests
 - `npm run test:server` (runtime, bridge, security, shares). This needs Node 22.
 - `npm run test:e2e:composer`: a real server, a deterministic fake OpenAI-compatible model, and a real headless Chrome (no WebMCP). It composes a fugue, renders and validates
