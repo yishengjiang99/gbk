@@ -57,7 +57,45 @@ open the same composition in GBK Studio afterwards.
 Scopes: `gbk:compositions.read`, `gbk:compositions.write`, `gbk:renders.create`,
 `gbk:artifacts.read`, `gbk:shares.publish`.
 
-## Authentication
+## Account-free access (default)
+
+`plugins/gbk-composer/mcp.json` declares `auth.type: "none"`. Without credentials,
+`gbk_create_composition` creates a guest project and returns `compositionId`, a private
+`accessToken` (edit) and a `readAccessToken`. Every follow-up tool (`gbk_get_composition`,
+`gbk_edit_composition`, `gbk_render_composition`, `gbk_get_render_status`, `gbk_cancel_render`,
+`gbk_get_artifacts`, `gbk_open_workstation`, `gbk_publish_composition`, `gbk_show_composition_ui`,
+`gbk_list_compositions`) accepts `accessToken`. Implementation: `server/src/mcp/guest.ts`.
+
+- Capabilities are HMACs (domain-separated, keyed by `SESSION_SECRET`) over the composition id and
+  its unique guest owner. They survive restarts; rotating `SESSION_SECRET` invalidates them all.
+- The id alone grants nothing (`NOT_FOUND`); another project's token or a tampered token too. Read
+  capabilities cannot edit, render or publish (`INSUFFICIENT_SCOPE`). Anonymous list is empty.
+- Studio links (`/s/<slug>#access=<readAccessToken>`) carry only the read capability, in the fragment;
+  the page sends it as `x-gbk-project-token` (redacted from logs). Publish URLs carry none.
+- Rendering is browser-only. A guest `gbk_render_composition` exports the MIDI on the server (no audio)
+  and returns `status: "browser_render"` with `browserRender` = { `widgetTool`, `studioUrl`,
+  `snapshotUrl` (`GET /api/mcp/guest/snapshot`, header `x-gbk-project-token`), `readAccessToken` } so
+  the in-chat player or a Studio tab renders WAV locally. `server/test/mcp-guest.test.ts` asserts the
+  server never constructs an audio context and imports no synthesis module.
+- Limits (env, defaults): `MCP_GUEST_MAX_SECONDS` 180, `MCP_GUEST_MAX_BARS` 64, `MCP_GUEST_MAX_EVENTS`
+  20000, `MCP_GUEST_MAX_REVISIONS` 100, `MCP_GUEST_RENDERS_PER_DAY` 20 per project, durable global
+  rolling-24h `MCP_GUEST_CREATES_PER_DAY` 200 and `MCP_GUEST_MUTATIONS_PER_DAY` 2000,
+  `MCP_GUEST_MAX_COMPOSITIONS` 2000, `MCP_GUEST_MAX_STORAGE_BYTES` 256 MiB, anonymous calls
+  `MCP_GUEST_CALLS_PER_MINUTE` 60 per IP, at most 2000 live MCP sessions, artifact bytes deleted after
+  `MCP_ARTIFACT_RETENTION_DAYS` (hourly sweep; expired URLs return 410).
+- Off switch: `MCP_GUEST=0` restores OAuth-only access (401 + `WWW-Authenticate` challenge).
+- A lost key cannot be recovered. `gbk_delete_composition` (edit key) deletes a guest project with
+  its revisions, jobs, files and Studio snapshot; support deletes by composition id on request.
+- Claim: a signed-in (OAuth / session) client calls `gbk_claim_composition` with the edit key to move
+  the project into the account (library + recovery); the old keys stop working.
+- DoS bounds: per-client create cap `MCP_GUEST_CREATES_PER_CLIENT_PER_DAY` (default 20, keyed by a salted
+  hash of the IP, checked before the global budget so one client cannot drain it), 60 anonymous calls
+  per IP per minute (429), global create/edit budgets, 2000-session cap (429), storage cap
+  (`QUOTA_EXCEEDED` before anything is written). Guests have no server render queue: a guest render
+  request only serializes MIDI and completes immediately, so it cannot occupy queue depth. Covered by
+  `server/test/mcp-guest.test.ts`.
+
+## Optional account authentication
 
 OAuth 2.1 per the MCP authorization spec, with this server as its own authorization server:
 
@@ -106,7 +144,7 @@ npx @modelcontextprotocol/inspector@latest   # connect to https://compose.grepaw
 ```
 
 With the Inspector: run Initialize, check `tools/list` (12 tools), call
-`gbk_get_capabilities` anonymously, complete the OAuth flow, then run the demonstration
+`gbk_get_capabilities` anonymously, create a guest composition (no sign-in) or complete the OAuth flow, then run the demonstration
 prompts below. Locally, `MCP_TEST_AUTH=1 npm run dev:server`-style runs accept
 `x-gbk-test-user: alice` instead of OAuth.
 
@@ -127,7 +165,7 @@ prompts below. Locally, `MCP_TEST_AUTH=1 npm run dev:server`-style runs accept
 ## Connect from Codex
 
 Add the repo marketplace or install `plugins/gbk-composer/` directly; the plugin's
-`mcp.json` points Codex at the same `https://compose.grepawk.com/mcp` endpoint with OAuth.
+`mcp.json` points Codex at the same `https://compose.grepawk.com/mcp` endpoint with no authentication (OAuth optional).
 The bundled skills (`compose-music`, `edit-music`, `render-music`) teach the workflow:
 capabilities first, durable create, inspect, targeted revision-safe edits, render, verify
 artifacts before claiming success.

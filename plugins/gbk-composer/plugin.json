@@ -3,7 +3,7 @@
   "author": {
     "name": "Yisheng Jiang"
   },
-  "description": "Compose and edit structured MIDI music in five styles, shape dynamics with CC automation, preview it in a piano-roll player, and render WAV and MIDI in your GBK Studio browser tab.",
+  "description": "Compose and edit structured MIDI music in five styles, shape dynamics with CC automation, preview and render it in your browser (in-chat player or GBK Studio), and download MIDI. No account needed.",
   "extensions": {
     "com.openai": {
       "interface": {
@@ -19,7 +19,7 @@
         ],
         "developerName": "Yisheng Jiang",
         "displayName": "GBK Composer",
-        "longDescription": "GBK Composer writes and edits real MIDI music from a chat. Ask for a piece in one of five styles (baroque, classical, pop, jazz, ambient) with a key, tempo, meter, length and instruments, and GBK builds a structured, multi-track arrangement with a deterministic, seeded engine. Baroque requests use a Bach-style fugue generator with continuo.\n\nFollow-up prompts change one passage without touching the rest: add a melody, bass, walking bass, chords, arpeggio, drums or counterpoint part; transpose, invert, quantize, humanize or vary notes; double a line at the octave; shape dynamics with CC curves such as a CC11 crescendo; and change tempo, instruments or the mix. Every edit is saved as a new revision.\n\nInstruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.\n\nTo hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. WAV and Standard MIDI renders run in your own browser: keep a signed-in GBK Studio tab open at compose.grepawk.com and GBK renders there, then returns download links. If no Studio tab is open, GBK gives you a link to open one.\n\nCompositions are private to your GBK account. GBK publishes a public share page only when you ask it to.",
+        "longDescription": "GBK Composer writes and edits real MIDI music from a chat. Ask for a piece in one of five styles (baroque, classical, pop, jazz, ambient) with a key, tempo, meter, length and instruments, and GBK builds a structured, multi-track arrangement with a deterministic, seeded engine. Baroque requests use a Bach-style fugue generator with continuo.\n\nFollow-up prompts change one passage without touching the rest: add a melody, bass, walking bass, chords, arpeggio, drums or counterpoint part; transpose, invert, quantize, humanize or vary notes; double a line at the octave; shape dynamics with CC curves such as a CC11 crescendo; and change tempo, instruments or the mix. Every edit is saved as a new revision.\n\nInstruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.\n\nTo hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. Audio is rendered in your own browser, never on GBK's server: play it in the in-chat player, or open the private GBK Studio link to play and export WAV. Standard MIDI files download directly. No account is needed.\n\nEach composition is private and opened only with the access key returned to your chat (or your GBK account, if you sign in). GBK publishes a public share page only when you ask it to.",
         "shortDescription": "Compose and edit MIDI music",
         "websiteURL": "https://compose.grepawk.com/chatgpt",
         "logo": "./assets/icon.png",
@@ -40,10 +40,10 @@
               "expected_behavior": "A new private composition (baroque, D minor, 16 bars, organ voices) is created and the GBK player shows its piano roll, tracks and CC11 lane."
             },
             {
-              "description": "Compose, add a part with a targeted edit, and render in the user's browser Studio tab.",
+              "description": "Compose, add a part with a targeted edit, and render in the user's browser (MIDI download plus in-browser audio).",
               "prompt": "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then render WAV and MIDI.",
               "tools_triggered": "gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_render_composition",
-              "expected_behavior": "A jazz composition is created and a walking_bass part generated. With a signed-in GBK Studio tab open, the render completes with validated WAV and MIDI download links; with no tab, the tool returns status studio_required and a link to open the studio, and the assistant asks the user to open it."
+              "expected_behavior": "A jazz composition is created and a walking_bass part generated. Without sign-in, the render returns status browser_render with a MIDI download link and a browser render handoff (in-chat player or private Studio link) for the audio; with a signed-in GBK Studio tab open, the render completes with validated WAV and MIDI download links."
             },
             {
               "description": "Edit only a passage of the most recent composition.",

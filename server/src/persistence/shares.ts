@@ -83,6 +83,9 @@ export class ShareStore {
     else this.db.prepare("UPDATE shares SET midi = ? WHERE id = ?").run(bytes, this.idOf(slugv));
   }
   setPublic(slugv: string, pub: boolean) { this.db.prepare("UPDATE shares SET public = ? WHERE id = ?").run(pub ? 1 : 0, this.idOf(slugv)); }
+  /** MCP project lifecycle: drop or re-own the private Studio snapshot(s) of one MCP composition. */
+  deleteByProject(owner: string, projectId: string) { this.db.prepare("DELETE FROM shares WHERE owner = ? AND project_id = ?").run(owner, projectId); }
+  reassignProject(fromOwner: string, toOwner: string, projectId: string) { this.db.prepare("UPDATE shares SET owner = ? WHERE owner = ? AND project_id = ?").run(toOwner, fromOwner, projectId); }
   delete(slugv: string) { this.db.prepare("DELETE FROM shares WHERE id = ?").run(this.idOf(slugv)); }
   list(o: { owner?: string; limit: number; offset: number }): ShareView[] {
     const rows = (o.owner

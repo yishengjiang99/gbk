@@ -10,7 +10,7 @@
 // returns the original result; the same key with a different request is IDEMPOTENCY_CONFLICT.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v3";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Config } from "../config.ts";
 import type { McpStore, ArtifactRow } from "./store.ts";
 import type { CompositionService, EditOperation } from "./service.ts";
@@ -20,6 +20,7 @@ import { McpError, toMcpError } from "./errors.ts";
 import { signArtifactUrl } from "./urls.ts";
 import { COMPOSER_UI_HTML, COMPOSER_UI_URI } from "./ui.ts";
 import { MCP_SERVER_VERSION } from "./service-meta.ts";
+import { guestCapability, guestOwner, resolveGuestCapability, GUEST_EDIT_SCOPES } from "./guest.ts";
 
 export interface McpMetrics { calls: number; errors: number; authFailures: number; byTool: Record<string, number> }
 /**
@@ -28,7 +29,8 @@ export interface McpMetrics { calls: number; errors: number; authFailures: numbe
  * narrower scopes takes effect immediately, and an anonymous session can upgrade to authenticated.
  * The session stays bound to one user — the holder is never switched to a different user.
  */
-export interface SessionAuth { current: Principal | null }
+/** `client` = salted hash of the caller's IP for the current request (per-client guest caps; never stored raw). */
+export interface SessionAuth { current: Principal | null; client?: string }
 export interface McpContext {
   cfg: Config; store: McpStore; service: CompositionService; renders: RenderService;
   auth: SessionAuth; signal: AbortSignal; metrics: McpMetrics;
@@ -45,6 +47,7 @@ const fail = (e: McpError) => ({
 });
 
 const COMPOSITION_ID = z.string().min(1).max(128).describe("Durable composition id returned by gbk_create_composition");
+const ACCESS_TOKEN = z.string().min(1).max(256).optional().describe("Private project capability returned by gbk_create_composition when used without sign-in. Required on every follow-up call for that project (accessToken = edit; readAccessToken = read-only). The composition id alone grants nothing. Never show the edit token publicly or put it in a URL.");
 const IDEMPOTENCY = z.string().min(8).max(128).optional().describe("Retry key: replays with the same key and same arguments return the original result instead of applying twice");
 
 export function artifactView(cfg: Config, a: ArtifactRow) {
@@ -61,23 +64,59 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   const publicOrigin = new URL(cfg.publicOrigin).origin;
   const server = new McpServer({ name: "gbk-composer", version: MCP_SERVER_VERSION }, { capabilities: { tools: {}, resources: {} } });
 
+  // Per-transport-session salt: guest create retries (same idempotencyKey) map to the same guest owner only
+  // within this session; a key replayed from another session is never a credential.
+  const guestSession = randomUUID();
+  /** Resolve who is calling: an explicit project capability wins; else the account principal; else a new guest (create only). */
+  function principalFor(tool: string, scope: Scope | null, args: Record<string, unknown>): Principal | null | { empty: true } {
+    if (typeof args.accessToken === "string") {
+      const g = resolveGuestCapability(cfg, store, args.accessToken);
+      if (args.compositionId !== undefined && args.compositionId !== g.compositionId) throw new McpError("NOT_FOUND", "accessToken does not authorize this composition");
+      return g;
+    }
+    const current = ctx.auth.current;
+    if (current || !scope || !cfg.mcp.guestEnabled) return current;
+    if (tool === "gbk_create_composition") return { user: guestOwner(cfg, guestSession, args.idempotencyKey as string | undefined), via: "guest", scopes: [...GUEST_EDIT_SCOPES] };
+    if (tool === "gbk_list_compositions") return { empty: true };
+    throw new McpError("NOT_FOUND", "private project: pass the accessToken returned by gbk_create_composition (the composition id alone grants no access), or sign in");
+  }
+  async function guestAdmission(tool: string, scope: Scope | null, p: Principal | null) {
+    if (p?.via !== "guest" || !scope || scope === "gbk:compositions.read" || scope === "gbk:artifacts.read") return;
+    // Per-client cap first, so one anonymous client cannot drain the shared global budget.
+    if (tool === "gbk_create_composition" && !store.takeGuestBudget(`creates:${ctx.auth.client ?? "unknown"}`, cfg.mcp.guestCreatesPerClientPerDay)) throw new McpError("QUOTA_EXCEEDED", `account-free creation limit for this network reached (${cfg.mcp.guestCreatesPerClientPerDay} per day); retry tomorrow or sign in`);
+    if (tool === "gbk_create_composition" && !store.takeGuestBudget("creates", cfg.mcp.guestCreatesPerDay)) throw new McpError("QUOTA_EXCEEDED", "the daily budget for account-free compositions is used up; retry tomorrow or sign in");
+    if (!store.takeGuestBudget("mutations", cfg.mcp.guestMutationsPerDay)) throw new McpError("QUOTA_EXCEEDED", "the daily budget for account-free edits is used up; retry tomorrow or sign in");
+  }
+  /** Creation is the only response that ever carries the edit capability. */
+  function present(tool: string, p: Principal | null, out: Record<string, unknown>): Record<string, unknown> {
+    if (tool !== "gbk_create_composition" || p?.via !== "guest" || typeof out.compositionId !== "string") return out;
+    const row = service.getRow(p.user, out.compositionId);
+    return { ...out, accessToken: guestCapability(cfg, row, "edit"), readAccessToken: guestCapability(cfg, row, "read"),
+      projectUrl: service.openWorkstation(p.user, row.id).url,
+      accessNote: "No GBK account was used. Keep compositionId + accessToken private and pass accessToken on every follow-up call (it works in new sessions). readAccessToken and the Studio link are read-only. A lost accessToken cannot be recovered." };
+  }
+
   async function run<T extends Record<string, unknown>>(tool: string, scope: Scope | null, args: Record<string, unknown>, fn: (p: Principal | null) => Promise<T>): Promise<ReturnType<typeof ok> | ReturnType<typeof fail>> {
     metrics.calls++; metrics.byTool[tool] = (metrics.byTool[tool] ?? 0) + 1;
     try {
-      const p = scope ? requireScope(ctx.auth.current, scope) : ctx.auth.current;
+      const who = principalFor(tool, scope, args);
+      if (who && "empty" in who) return ok({ items: [], note: "Account-free projects have no directory: pass a project's accessToken to list it, or sign in to list account compositions." });
+      const p = scope ? requireScope(who, scope) : who;
       const key = typeof args.idempotencyKey === "string" ? args.idempotencyKey : null;
       if (key && p) {
         const reqHash = createHash("sha256").update(JSON.stringify({ tool, args })).digest("hex");
         const prev = store.getIdempotent(p.user, key);
         if (prev) {
           if (prev.tool !== tool || prev.request_hash !== reqHash) throw new McpError("IDEMPOTENCY_CONFLICT", "idempotencyKey was already used with different arguments");
-          return ok(JSON.parse(prev.result_json) as Record<string, unknown>);
+          return ok(present(tool, p, JSON.parse(prev.result_json) as Record<string, unknown>));
         }
+        await guestAdmission(tool, scope, p);
         const out = await fn(p);
         store.putIdempotent(p.user, key, tool, reqHash, out);
-        return ok(out);
+        return ok(present(tool, p, out));
       }
-      return ok(await fn(p));
+      await guestAdmission(tool, scope, p);
+      return ok(present(tool, p, await fn(p)));
     } catch (e) {
       metrics.errors++;
       const me = toMcpError(e);
@@ -90,6 +129,13 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     readOnlyHint: readOnly, destructiveHint: false, idempotentHint: idempotent, openWorldHint: false,
   });
 
+  /** Everything a browser (in-chat player widget or Studio tab) needs to render audio locally. Read capability only. */
+  function browserRenderFor(owner: string, compositionId: string, revision: number) {
+    const row = service.getRow(owner, compositionId);
+    return { mode: "browser", revision, widgetTool: "gbk_show_composition_ui", studioUrl: service.openWorkstation(owner, compositionId).url,
+      snapshotUrl: `${publicOrigin}/api/mcp/guest/snapshot`, snapshotAuthHeader: "x-gbk-project-token", readAccessToken: guestCapability(cfg, row, "read") };
+  }
+
   // ---- discovery (public, read-only) ----------------------------------------------------------------
   server.registerTool("gbk_get_capabilities", {
     title: "GBK capabilities", description: "Use this when you need to know what GBK Composer supports: the five styles (baroque, classical, pop, jazz, ambient), edit operations, instrument names and their SoundFont presets, audible MIDI controllers, render formats and per-account limits. Call it before composing instead of guessing. Read-only; no sign-in required.",
@@ -98,7 +144,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- compositions ----------------------------------------------------------------------------------
   server.registerTool("gbk_create_composition", {
-    title: "Create a composition", description: "Use this when the user asks for a new piece of music. Creates a private, durable GBK composition with the deterministic, seeded arrangement engine (style, key, tempo, meter, bars or duration, instrumentation, voices, sections). Returns the composition id, revision, structure summary and Studio URL. No browser tab is required to compose. Rendering is a separate step (gbk_render_composition) that runs in the user's connected Studio tab.",
+    title: "Create a composition", description: "Use this when the user asks for a new piece of music. Creates a private, durable GBK composition with the deterministic, seeded arrangement engine (style, key, tempo, meter, bars or duration, instrumentation, voices, sections). Returns the composition id, revision, structure summary and Studio URL. Works without sign-in: then it also returns a private accessToken (edit) and readAccessToken that every follow-up call for this project must pass. No browser tab is required to compose. Rendering is a separate step (gbk_render_composition) that runs in the user's connected Studio tab.",
     inputSchema: {
       title: z.string().min(1).max(128),
       style: z.enum(["baroque", "classical", "pop", "jazz", "ambient"]).optional().describe("baroque uses the Bach fugue generator + continuo"),
@@ -125,20 +171,20 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("gbk_get_composition", {
     title: "Get a composition", description: "Use this to inspect an existing composition before editing or describing it. Structured summary: sections, tracks, instrumentation, controllers, revision history. Optionally include paginated notes for a bar range.",
-    inputSchema: { compositionId: COMPOSITION_ID, startBar: z.number().int().min(1).optional(), endBar: z.number().int().min(1).optional(),
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, startBar: z.number().int().min(1).optional(), endBar: z.number().int().min(1).optional(),
       includeNotes: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(1000).optional() },
     annotations: annotations(true, true),
   }, async (a) => run("gbk_get_composition", "gbk:compositions.read", a as Record<string, unknown>, async (p) => service.get(p!.user, a.compositionId, a)));
 
   server.registerTool("gbk_list_compositions", {
     title: "List your compositions", description: "Use this to find the user's existing GBK compositions (for example \"my last piece\"), most recently updated first. Returns ids, titles and revisions.",
-    inputSchema: { limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() },
+    inputSchema: { accessToken: ACCESS_TOKEN, limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() },
     annotations: annotations(true, true),
   }, async (a) => run("gbk_list_compositions", "gbk:compositions.read", a as Record<string, unknown>, async (p) => ({ items: service.list(p!.user, a.limit, a.offset) })));
 
   server.registerTool("gbk_edit_composition", {
     title: "Edit a composition", description: "Use this when the user wants to change an existing composition. Applies typed, deterministic edit operations to one passage or aspect of an existing composition. Requires expectedRevision (optimistic concurrency): on STALE_REVISION, re-read with gbk_get_composition and retry. Operations: generate_part {track, startBar, endBar, kind: melody|bass|walking_bass|chords|arpeggio|alberti|drums|counterpoint, seed?}, transform_notes {track, startBar, endBar, transform: transpose|invert|retrograde|repeat|sequence|quantize|humanize|articulation|phrase_dynamics|variation, ...}, orchestrate {sourceTrack, targetTrack, startBar, endBar, semitones?, velocityScale?} (e.g. octave doubling), cc_curve {track|trackIds, controller, startBar, endBar, shape: crescendo|decrescendo|swell|linear|smoothstep|exponential, from?, to?, peak?}, note_patch {add?, remove?, update?}, cc_patch {track, controller, startBar, endBar, points:[{tick,value}]}, set_mix {track, volume?, pan?, expression?, mute?, solo?}, set_instrument {track, program, bankMsb?, bankLsb?}, set_tempo {bpm}, set_sections {sections}, generate_arrangement {style, ...}, generate_fugue_section {key, voices, atBar, ...}. Unrelated sections are left untouched; the result reports untouchedSectionsUnchanged.",
-    inputSchema: { compositionId: COMPOSITION_ID, expectedRevision: z.number().int().min(0),
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, expectedRevision: z.number().int().min(0),
       operations: z.array(z.record(z.string(), z.unknown())).min(1).max(32), idempotencyKey: IDEMPOTENCY },
     annotations: annotations(false),
   }, async (a) => run("gbk_edit_composition", "gbk:compositions.write", a as Record<string, unknown>, async (p) => {
@@ -148,8 +194,8 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- rendering --------------------------------------------------------------------------------------
   server.registerTool("gbk_render_composition", {
-    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV plus a Standard MIDI File. The server never synthesizes audio. Synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required with an open-the-studio-to-render link (studioUrl) — ask the user to open it, then call again. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
-    inputSchema: { compositionId: COMPOSITION_ID, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
+    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV plus a Standard MIDI File. The server never synthesizes audio. Without sign-in (accessToken): MIDI is exported immediately and status is browser_render with a browserRender handoff (in-chat player via gbk_show_composition_ui, or a read-only Studio link) where audio renders in the user's browser. Signed-in: synthesis runs in the user's connected GBK Studio browser tab (canonical SF2 offline renderer); if no tab is connected, returns status studio_required with an open-the-studio-to-render link (studioUrl) — ask the user to open it, then call again. Returns a durable job; with waitSeconds it waits up to that long and returns the completed result with authorized artifact URLs when the render finishes in time.",
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
       sampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(), channels: z.union([z.literal(1), z.literal(2)]).optional(),
       format: z.enum(["pcm16", "float32"]).optional(), normalize: z.enum(["loudness", "peak", "off"]).optional(),
       targetLufs: z.number().min(-40).max(-5).optional().describe("Loudness target (default -16 LUFS, peak ceiling -1 dBTP)"),
@@ -169,6 +215,13 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     const row = service.getRow(user, a.compositionId);
     const config: RenderConfig = { ...DEFAULT_RENDER_CONFIG, sampleRate: a.sampleRate ?? 44100, channels: a.channels ?? 2, format: a.format ?? "pcm16",
       normalize: a.normalize ?? "loudness", targetLufs: a.targetLufs, tailSeconds: a.tailSeconds ?? 3, includeMidi: a.includeMidi ?? true };
+    if (p!.via === "guest") {
+      // Account-free: the server never synthesizes. Export MIDI now; audio renders in the user's browser.
+      const job = renders.midiOnlyJob(user, { ...row, revision: rowRev }, snapshot, config, service.exportMidi(snapshot), cfg.mcp.guestRendersPerDay);
+      return { ...renders.jobView(user, job), status: "browser_render", audio: "not rendered on the server",
+        browserRender: browserRenderFor(user, row.id, rowRev),
+        message: "MIDI is ready (signed download URL in artifacts). Audio renders only in a browser: call gbk_show_composition_ui to play/render it in the in-chat player, or give the user browserRender.studioUrl (read-only private link) to open GBK Studio and play or export WAV there. Never claim a WAV exists until one is listed." };
+    }
     const sub = renders.submit(user, { ...row, revision: rowRev }, snapshot, config);
     if ("studioRequired" in sub) return { status: "studio_required", compositionId: a.compositionId, revision: rowRev, studioUrl: sub.studioUrl,
       message: `Rendering runs in your browser, and no GBK Studio tab is connected for this account. Open the studio to render: ${sub.studioUrl} — keep it open (signed in), then call gbk_render_composition again.` };
@@ -180,7 +233,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("gbk_get_render_status", {
     title: "Render status", description: "Use this to poll a render job started by gbk_render_composition: progress, completion state, validation data and artifact references.",
-    inputSchema: { jobId: z.string().min(1).max(128), waitSeconds: z.number().min(0).max(120).optional() },
+    inputSchema: { accessToken: ACCESS_TOKEN, jobId: z.string().min(1).max(128), waitSeconds: z.number().min(0).max(120).optional() },
     annotations: annotations(true, true),
   }, async (a) => run("gbk_get_render_status", "gbk:artifacts.read", a as Record<string, unknown>, async (p) => {
     let job = renders.status(p!.user, a.jobId);
@@ -190,12 +243,12 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("gbk_cancel_render", {
     title: "Cancel a render", description: "Cancel a queued or running render job. No partial artifact is published for a cancelled job.",
-    inputSchema: { jobId: z.string().min(1).max(128) }, annotations: annotations(false, true),
+    inputSchema: { accessToken: ACCESS_TOKEN, jobId: z.string().min(1).max(128) }, annotations: annotations(false, true),
   }, async (a) => run("gbk_cancel_render", "gbk:renders.create", a as Record<string, unknown>, async (p) => renders.jobView(p!.user, renders.cancel(p!.user, a.jobId))));
 
   server.registerTool("gbk_get_artifacts", {
     title: "Get artifacts", description: "Use this when the user wants to download a composition's files. Authorized download references (short-lived signed URLs, re-checked at access) and metadata for a composition's WAV and MIDI artifacts.",
-    inputSchema: { compositionId: COMPOSITION_ID }, annotations: annotations(true, true),
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN }, annotations: annotations(true, true),
   }, async (a) => run("gbk_get_artifacts", "gbk:artifacts.read", a as Record<string, unknown>, async (p) => {
     service.getRow(p!.user, a.compositionId);
     const all = store.listArtifacts(a.compositionId, p!.user);
@@ -208,13 +261,30 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   // ---- studio / publishing -------------------------------------------------------------------------------
   server.registerTool("gbk_open_workstation", {
     title: "Open in GBK Studio", description: "Use this when the user wants to open or keep editing a composition in GBK Studio, or needs a Studio tab for rendering. Returns an authenticated deep link that opens this exact composition revision in GBK Studio (private by default; Fork inside Studio to edit a copy there).",
-    inputSchema: { compositionId: COMPOSITION_ID }, annotations: annotations(true, true),
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN }, annotations: annotations(true, true),
   }, async (a) => run("gbk_open_workstation", "gbk:compositions.read", a as Record<string, unknown>, async (p) => service.openWorkstation(p!.user, a.compositionId)));
 
   server.registerTool("gbk_publish_composition", {
     title: "Publish a composition", description: "Publish a composition as a public GBK share page. This is the ONLY tool that makes a composition public, and it must be called only when the user explicitly asks to publish/share publicly.",
-    inputSchema: { compositionId: COMPOSITION_ID }, annotations: { ...annotations(false, true), openWorldHint: true },
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN }, annotations: { ...annotations(false, true), openWorldHint: true },
   }, async (a) => run("gbk_publish_composition", "gbk:shares.publish", a as Record<string, unknown>, async (p) => service.publish(p!.user, a.compositionId)));
+
+  server.registerTool("gbk_delete_composition", {
+    title: "Delete a composition", description: "Use this only when the user explicitly asks to permanently delete an account-free (guest) composition. Requires that project's edit accessToken (the read token cannot delete). Removes the composition, its revisions, render jobs, MIDI/WAV files and private Studio link. Cannot be undone. Account compositions are deleted from GBK Studio instead.",
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, async (a) => run("gbk_delete_composition", "gbk:compositions.write", a as Record<string, unknown>, async (p) => service.deleteGuest(p!.user, a.compositionId)));
+
+  server.registerTool("gbk_claim_composition", {
+    title: "Claim into your account", description: "Use this when a signed-in user wants to keep an account-free composition in their GBK account (recovery, library). Requires the session to be signed in (OAuth) AND the project's edit accessToken. Moves the project, its revisions and files to the account; the old access keys stop working.",
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: z.string().min(1).max(256).describe("The project's edit accessToken") },
+    annotations: annotations(false, true),
+  }, async (a) => run("gbk_claim_composition", "gbk:compositions.write", a as Record<string, unknown>, async (p) => {
+    const account = ctx.auth.current;
+    if (!account || account.via === "guest") throw new McpError("UNAUTHENTICATED", "sign in to GBK (connect your account) to claim this project");
+    requireScope(account, "gbk:compositions.write");
+    return service.claim(p!.user, account.user, a.compositionId);
+  }));
 
   // ---- MCP Apps UI -----------------------------------------------------------------------------------------
   server.registerResource("gbk-composer-player", COMPOSER_UI_URI, {
@@ -225,7 +295,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("gbk_show_composition_ui", {
     title: "Show the composition player", description: "Use this when the user wants to listen to, see, or download a composition. Shows the interactive GBK player (playback, seekable piano roll, track list, CC lanes, WAV/MIDI downloads, Studio link) for a composition inside the host. Call after creating/rendering when the user wants to listen or see the piano roll. Tools remain fully usable without this UI.",
-    inputSchema: { compositionId: COMPOSITION_ID },
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN },
     annotations: annotations(true, true),
     _meta: { ui: { resourceUri: COMPOSER_UI_URI }, "openai/outputTemplate": COMPOSER_UI_URI },
   }, async (a) => run("gbk_show_composition_ui", "gbk:compositions.read", a as Record<string, unknown>, async (p) => {
@@ -250,6 +320,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
           durationSeconds: (JSON.parse(latest.wav.meta_json) as { durationSeconds?: number }).durationSeconds ?? s.durationSec } } : {}),
         ...(latest.midi ? { midi: { downloadUrl: artifactView(cfg, latest.midi).downloadUrl, sizeBytes: latest.midi.size_bytes, sha256: latest.midi.sha256 } } : {}) },
       projectUrl: opened.url,
+      ...(p!.via === "guest" || user.startsWith("guest:") ? { browserRender: browserRenderFor(user, row.id, row.revision) } : {}),
     };
   }));
 

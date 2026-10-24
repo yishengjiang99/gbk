@@ -4,7 +4,7 @@
 // context never carries binary payloads.
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const newOpaqueId = (prefix: string) => `${prefix}_${randomBytes(12).toString("base64url")}`;
@@ -59,6 +59,8 @@ export class McpStore {
         kind TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
         sha256 TEXT NOT NULL, rel_path TEXT NOT NULL, meta_json TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS mcp_art_comp ON mcp_artifacts(composition_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS mcp_guest_usage (bucket TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS mcp_guest_usage_time ON mcp_guest_usage(bucket, at);
       CREATE TABLE IF NOT EXISTS mcp_idempotency (
         owner TEXT NOT NULL, key TEXT NOT NULL, tool TEXT NOT NULL, request_hash TEXT NOT NULL,
         result_json TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (owner, key));
@@ -87,6 +89,64 @@ export class McpStore {
   /** Distinct composition owners (used to migrate pre-sign-in users into accounts). */
   owners(): string[] { return (this.db.prepare("SELECT DISTINCT owner FROM mcp_compositions").all() as { owner: string }[]).map((r) => r.owner); }
   close() { try { this.db.close(); } catch { /* already closed */ } }
+
+  // ---- guest admission (durable across sessions, IPs and restarts) ---------------------------
+  /** Take one unit from a global rolling-24h guest budget; false when exhausted. */
+  takeGuestBudget(bucket: string, limit: number): boolean {
+    const cutoff = Date.now() - 86_400_000;
+    this.db.prepare("DELETE FROM mcp_guest_usage WHERE at <= ?").run(cutoff);
+    this.db.prepare("DELETE FROM mcp_idempotency WHERE owner LIKE 'guest:%' AND created_at <= ?").run(cutoff);
+    const r = this.db.prepare("INSERT INTO mcp_guest_usage (bucket, at) SELECT ?, ? WHERE (SELECT COUNT(*) FROM mcp_guest_usage WHERE bucket=?) < ?").run(bucket, Date.now(), bucket, limit);
+    return Number(r.changes) === 1;
+  }
+  /** Bytes held by guest projects: latest copies (x2 for the Studio snapshot), revisions, retry results and artifacts. */
+  guestStorageBytes(): number {
+    const row = this.db.prepare(`SELECT
+      (SELECT COALESCE(SUM(2 * length(CAST(project_json AS BLOB))),0) FROM mcp_compositions WHERE owner LIKE 'guest:%') +
+      (SELECT COALESCE(SUM(length(CAST(project_json AS BLOB))),0) FROM mcp_revisions WHERE composition_id IN (SELECT id FROM mcp_compositions WHERE owner LIKE 'guest:%')) +
+      (SELECT COALESCE(SUM(length(CAST(result_json AS BLOB))),0) FROM mcp_idempotency WHERE owner LIKE 'guest:%') +
+      (SELECT COALESCE(SUM(size_bytes),0) FROM mcp_artifacts WHERE owner LIKE 'guest:%') AS n`).get() as { n: number };
+    return Number(row.n);
+  }
+  guestCompositionCount(): number {
+    return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_compositions WHERE owner LIKE 'guest:%'").get() as { n: number }).n);
+  }
+  /** Permanently delete one composition with its revisions, jobs, artifacts (rows + bytes) and retry records. */
+  deleteComposition(id: string, owner: string): boolean {
+    const arts = this.db.prepare("SELECT * FROM mcp_artifacts WHERE composition_id=? AND owner=?").all(id, owner) as unknown as ArtifactRow[];
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("DELETE FROM mcp_artifacts WHERE composition_id=? AND owner=?").run(id, owner);
+      this.db.prepare("DELETE FROM mcp_render_jobs WHERE composition_id=? AND owner=?").run(id, owner);
+      this.db.prepare("DELETE FROM mcp_revisions WHERE composition_id=? AND composition_id IN (SELECT id FROM mcp_compositions WHERE owner=?)").run(id, owner);
+      const n = Number(this.db.prepare("DELETE FROM mcp_compositions WHERE id=? AND owner=?").run(id, owner).changes);
+      if (owner.startsWith("guest:")) this.db.prepare("DELETE FROM mcp_idempotency WHERE owner=?").run(owner);
+      this.db.exec("COMMIT");
+      for (const a of arts) rmSync(this.artifactAbsPath(a), { force: true });
+      return n === 1;
+    } catch (e) { this.db.exec("ROLLBACK"); throw e; }
+  }
+  /** Move one composition (and its jobs/artifacts) to a new owner: guest project -> account (claim). */
+  reassignComposition(id: string, fromOwner: string, toOwner: string): boolean {
+    this.db.exec("BEGIN");
+    try {
+      const n = Number(this.db.prepare("UPDATE mcp_compositions SET owner=?, updated_at=? WHERE id=? AND owner=?").run(toOwner, Date.now(), id, fromOwner).changes);
+      if (n === 1) {
+        this.db.prepare("UPDATE mcp_render_jobs SET owner=? WHERE composition_id=? AND owner=?").run(toOwner, id, fromOwner);
+        this.db.prepare("UPDATE mcp_artifacts SET owner=? WHERE composition_id=? AND owner=?").run(toOwner, id, fromOwner);
+        this.db.prepare("DELETE FROM mcp_idempotency WHERE owner=?").run(fromOwner);
+      }
+      this.db.exec("COMMIT");
+      return n === 1;
+    } catch (e) { this.db.exec("ROLLBACK"); throw e; }
+  }
+
+  /** Delete artifact bytes + rows older than the retention window. Returns how many were removed. */
+  pruneArtifacts(retentionDays: number): number {
+    const rows = this.db.prepare("SELECT * FROM mcp_artifacts WHERE created_at <= ?").all(Date.now() - retentionDays * 86_400_000) as unknown as ArtifactRow[];
+    for (const row of rows) { rmSync(this.artifactAbsPath(row), { force: true }); this.db.prepare("DELETE FROM mcp_artifacts WHERE id=?").run(row.id); }
+    return rows.length;
+  }
 
   // ---- compositions ------------------------------------------------------------
   createComposition(o: { owner: string; title: string; projectJson: string; revision: number; source?: string }): CompositionRow {
@@ -139,9 +199,6 @@ export class McpStore {
   countCompositions(owner: string) { return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_compositions WHERE owner=?").get(owner) as { n: number }).n); }
   setVisibility(id: string, owner: string, v: "private" | "public") {
     this.db.prepare("UPDATE mcp_compositions SET visibility=?, updated_at=? WHERE id=? AND owner=?").run(v, Date.now(), id, owner);
-  }
-  deleteComposition(id: string, owner: string): boolean {
-    return Number(this.db.prepare("DELETE FROM mcp_compositions WHERE id=? AND owner=?").run(id, owner).changes) === 1;
   }
 
   // ---- render jobs + artifacts ---------------------------------------------------

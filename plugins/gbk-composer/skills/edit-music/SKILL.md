@@ -9,6 +9,26 @@ Modify an existing composition in place. The same `compositionId` must be
 retained, only the intended passage changes, and unrelated material stays
 exactly as it was.
 
+## Account-free project access
+
+No GBK sign-in is required. Without one, `gbk_create_composition` returns
+`compositionId`, `accessToken` (private edit capability) and `readAccessToken`
+(read-only). Pass `accessToken` on every follow-up call for that project:
+read, edit, render, render status/cancel, artifacts, player, Studio link and
+publish. It also works in a new MCP session. The composition id or job id alone
+grants nothing, and `readAccessToken` cannot edit, render or publish.
+
+- Keep the edit token in private tool context. Never show it in public output
+  or put it in a URL. Studio links carry only the read capability (after `#`).
+- If the token is missing, ask the user for it; there is no recovery and no
+  account to fall back on. Do not silently create a replacement project.
+- Stay within `guestLimits` from `gbk_get_capabilities` (length, bars, notes,
+  revisions, render requests per day). `QUOTA_EXCEEDED` is final for today;
+  say so instead of retrying in a loop.
+- Signed-in (OAuth) users keep account-owned projects and need no token. To
+  keep a guest project, a signed-in user can call `gbk_claim_composition` with
+  the edit token. Delete only on explicit request: `gbk_delete_composition`.
+
 ## Available tools
 
 - `gbk_list_compositions` — find the user's compositions.

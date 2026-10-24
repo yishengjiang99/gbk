@@ -28,6 +28,18 @@ export interface Config {
     /** Hosts allowed to act as CIMD client_id documents (SSRF guard). */
     cimdHosts: string[];
     accessTokenTtlSec: number; refreshTokenTtlSec: number; authCodeTtlSec: number; consentTtlSec: number;
+    /** Account-free MCP projects (MCP_GUEST=0 is the off switch: then every private tool needs OAuth again). */
+    guestEnabled: boolean;
+    guestMaxSeconds: number; guestMaxBars: number; guestMaxEvents: number; guestMaxRevisions: number;
+    /** MIDI exports / browser-render handoffs per guest project per rolling day. */
+    guestRendersPerDay: number;
+    /** Durable global rolling-24h budgets: new sessions/IPs/projects cannot reset them. */
+    guestCreatesPerDay: number; guestMutationsPerDay: number;
+    guestMaxCompositions: number; guestMaxStorageBytes: number;
+    /** Per-IP throttle for anonymous tool calls (supplements the global budgets; IP is never an identity). */
+    guestCallsPerMinute: number;
+    /** Per-client creation cap (rolling 24h, keyed by a salted hash of the client IP), far below the global cap. */
+    guestCreatesPerClientPerDay: number;
   };
 }
 
@@ -77,6 +89,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       refreshTokenTtlSec: num(env.MCP_REFRESH_TOKEN_TTL_SEC, 30 * 86400),
       authCodeTtlSec: num(env.MCP_AUTH_CODE_TTL_SEC, 600),
       consentTtlSec: num(env.MCP_CONSENT_TTL_SEC, 600),
+      guestEnabled: env.MCP_GUEST !== "0",
+      guestMaxSeconds: Math.max(1, num(env.MCP_GUEST_MAX_SECONDS, 180)),
+      guestMaxBars: Math.max(1, Math.floor(num(env.MCP_GUEST_MAX_BARS, 64))),
+      guestMaxEvents: Math.max(1, Math.floor(num(env.MCP_GUEST_MAX_EVENTS, 20000))),
+      guestMaxRevisions: Math.max(1, Math.floor(num(env.MCP_GUEST_MAX_REVISIONS, 100))),
+      guestRendersPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_RENDERS_PER_DAY, 20))),
+      guestCreatesPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_DAY, 200))),
+      guestMutationsPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_MUTATIONS_PER_DAY, 2000))),
+      guestMaxCompositions: Math.max(1, Math.floor(num(env.MCP_GUEST_MAX_COMPOSITIONS, 2000))),
+      guestMaxStorageBytes: Math.max(1, num(env.MCP_GUEST_MAX_STORAGE_BYTES, 256 * 1024 ** 2)),
+      guestCallsPerMinute: Math.max(1, Math.floor(num(env.MCP_GUEST_CALLS_PER_MINUTE, 60))),
+      guestCreatesPerClientPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_CLIENT_PER_DAY, 20))),
     },
   };
 }

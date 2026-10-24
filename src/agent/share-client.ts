@@ -19,7 +19,9 @@ export async function topShares(limit = 10): Promise<TopShare[]> {
   return (await ok<{ shares: TopShare[] }>(await fetch(`${apiBase()}/shares/top?limit=${limit}`, { credentials: "same-origin" }))).shares;
 }
 export async function getShare(slug: string): Promise<ShareInfo & { project: unknown }> {
-  return ok(await fetch(`${apiBase()}/shares/${encodeURIComponent(slug)}`, { credentials: "same-origin" }));
+  // Private links to account-free MCP projects carry a read-only capability in the URL fragment (#access=...).
+  const token = typeof location !== "undefined" ? new URLSearchParams(location.hash.slice(1)).get("access") : null;
+  return ok(await fetch(`${apiBase()}/shares/${encodeURIComponent(slug)}`, { credentials: "same-origin", headers: token ? { "x-gbk-project-token": token } : {} }));
 }
 export const mediaUrl = (slug: string, kind: "wav" | "midi" | "mp3") => `${apiBase()}/shares/${encodeURIComponent(slug)}/media/${kind}`;
 

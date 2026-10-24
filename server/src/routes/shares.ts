@@ -14,7 +14,7 @@ const RIFF = (b: Uint8Array) => b.length > 44 && String.fromCharCode(...b.subarr
 const MP3 = (b: Uint8Array) => b.length > 4 && ((b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0));
 const MTHD = (b: Uint8Array) => b.length > 14 && String.fromCharCode(...b.subarray(0, 4)) === "MThd";
 
-export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: ShareStore, uploadLimiter: RateLimiter, model?: ModelClient) {
+export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: ShareStore, uploadLimiter: RateLimiter, model?: ModelClient, guestCanRead?: (token: string, projectId: string, owner: string) => boolean) {
   const origin = cfg.publicOrigin;
   const autosaveLimiter = new RL(40), titleLimiter = new RL(10);
   app.addContentTypeParser(["audio/wav", "audio/midi", "audio/mpeg", "application/octet-stream"], { parseAs: "buffer", bodyLimit: SHARE_LIMITS.wavBytes }, (_req, body, done) => done(null, body));
@@ -69,6 +69,8 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
   const visible = (req: FastifyRequest, slug: string) => {
     const row = store.bySlug(slug); if (!row) return null;
     if (row.public) return row;
+    const token = req.headers["x-gbk-project-token"];
+    if (typeof token === "string" && row.project_id && guestCanRead?.(token, row.project_id, row.owner)) return row;
     const s = currentSession(req, sessions); return s && s.user === row.owner ? row : null;
   };
   app.get("/api/shares/:slug", async (req, reply) => {

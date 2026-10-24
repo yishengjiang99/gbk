@@ -23,8 +23,9 @@ test("well-known OAuth discovery documents follow RFC 9728 / RFC 8414 + MCP requ
   } finally { await s.app.close(); }
 });
 
-test("MCP initialize, tools/list with annotations, anonymous capabilities, auth challenge, session binding", async () => {
-  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
+test("MCP initialize, tools/list with annotations, anonymous capabilities, auth challenge (guest projects off), session binding", async () => {
+  // MCP_GUEST=0 is the off switch: account-free projects disabled -> private tools need OAuth again.
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1", MCP_GUEST: "0" });
   try {
     // Unauthenticated tools/call (non-public tool) -> 401 with a discovery challenge.
     const anon = new McpClient(s.base);
@@ -38,7 +39,7 @@ test("MCP initialize, tools/list with annotations, anonymous capabilities, auth 
     const list = await anon.send("tools/list", {});
     const tools = (list.rpc?.result as { tools: { name: string; annotations?: Record<string, boolean>; inputSchema: unknown }[] }).tools;
     const names = tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ["gbk_cancel_render", "gbk_create_composition", "gbk_edit_composition", "gbk_get_artifacts", "gbk_get_capabilities",
+    assert.deepEqual(names, ["gbk_cancel_render", "gbk_claim_composition", "gbk_create_composition", "gbk_delete_composition", "gbk_edit_composition", "gbk_get_artifacts", "gbk_get_capabilities",
       "gbk_get_composition", "gbk_get_render_status", "gbk_list_compositions", "gbk_open_workstation", "gbk_publish_composition",
       "gbk_render_composition", "gbk_show_composition_ui"].sort());
     const caps = tools.find((t) => t.name === "gbk_get_capabilities")!;
@@ -82,7 +83,8 @@ test("test-auth header is ignored unless MCP_TEST_AUTH=1 (fail closed)", async (
     const c = new McpClient(s.base, { "x-gbk-test-user": "mallory" });
     await c.initialize(); // initialize is anonymous-allowed, but bound to NO user
     const r = await c.send("tools/call", { name: "gbk_list_compositions", arguments: {} });
-    // The session was created anonymously, and tools/call for a private tool on an anonymous session is a 401.
-    assert.ok(r.status === 401 || (r.rpc?.result as { isError?: boolean })?.isError, `expected refusal, got HTTP ${r.status}`);
+    // The session is anonymous: the ignored header establishes no account, so the guest list is empty.
+    assert.equal(r.status, 200);
+    assert.deepEqual((r.rpc?.result as { structuredContent: { items: unknown[] } }).structuredContent.items, [], "test header must not establish an account");
   } finally { await s.app.close(); }
 });

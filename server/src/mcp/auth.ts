@@ -26,7 +26,7 @@ export const ALL_SCOPES: Scope[] = [...SCOPES];
 export interface Principal {
   user: string;
   scopes: Scope[];
-  via: "oauth" | "session" | "test";
+  via: "oauth" | "session" | "test" | "guest";
   clientId?: string;
 }
 
