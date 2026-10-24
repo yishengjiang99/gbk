@@ -5,6 +5,8 @@ export interface Config {
   adminUsers: string[]; port: number; host: string; dataDir: string; enabled: boolean;
   /** Public ChatGPT plugin listing URL. Unset = the /chatgpt page shows "coming soon" instead of an install button. */
   chatgptPluginUrl: string;
+  /** OpenAI plugin portal domain-verification token served at /.well-known/openai-apps-challenge (OPENAI_APPS_CHALLENGE). */
+  openaiAppsChallenge: string;
   llm: { baseUrl: string; apiKey: string; model: string; models: string[]; apiStyle: "chat_completions" | "responses"; provider: string; priceInPerMTok: number; priceOutPerMTok: number; requestTimeoutMs: number; maxRetries: number; stream: boolean; parallelToolCalls: boolean };
   agent: { maxToolSteps: number; maxConcurrentRunsPerUser: number; toolTimeoutMs: number; renderTimeoutMs: number; maxInputChars: number; maxContextTokens: number; maxOutputTokens: number; sessionIdleSeconds: number; dailyTokenBudget: number; newAccountDailyTokenBudget: number; dailyCostBudgetUsd: number; globalDailyCostBudgetUsd: number; reconnectGraceMs: number; maxToolResultChars: number };
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number };
@@ -41,7 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (style !== "chat_completions" && style !== "responses") throw new Error(`LLM_API_STYLE must be chat_completions or responses, got ${style}`);
   return {
     publicOrigin, allowedOrigins: [publicOrigin, ...list(env.COMPOSER_EXTRA_ORIGINS)], adminUsers: list(env.COMPOSER_ADMIN_USERS), port: num(env.PORT, 8080), host: env.HOST ?? "127.0.0.1",
-    dataDir: env.COMPOSER_DATA_DIR ?? "./composer-data", enabled: env.COMPOSER_ENABLED !== "0", chatgptPluginUrl: (env.CHATGPT_PLUGIN_URL ?? "").trim(),
+    dataDir: env.COMPOSER_DATA_DIR ?? "./composer-data", enabled: env.COMPOSER_ENABLED !== "0", chatgptPluginUrl: (env.CHATGPT_PLUGIN_URL ?? "").trim(), openaiAppsChallenge: (env.OPENAI_APPS_CHALLENGE ?? "").trim(),
     llm: { baseUrl: (env.LLM_BASE_URL ?? "").replace(/\/$/, ""), apiKey: env.LLM_API_KEY ?? "", model, models, apiStyle: style, provider: env.LLM_PROVIDER_NAME ?? hostOf(env.LLM_BASE_URL),
       priceInPerMTok: num(env.LLM_PRICE_INPUT_PER_MTOK, 3), priceOutPerMTok: num(env.LLM_PRICE_OUTPUT_PER_MTOK, 15), requestTimeoutMs: num(env.LLM_REQUEST_TIMEOUT_MS, 120_000), maxRetries: num(env.LLM_MAX_RETRIES, 3),
       stream: env.LLM_STREAM !== "0", parallelToolCalls: env.LLM_PARALLEL_TOOL_CALLS !== "0" },

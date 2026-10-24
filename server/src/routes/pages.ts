@@ -116,3 +116,8 @@ export function pageRoutes(app: FastifyInstance, cfg: Config) {
   app.get("/sitemap.xml", async (_r, reply) => reply.type("application/xml; charset=utf-8").send(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${["/", "/explore", ...PAGE_PATHS].map((p) => `  <url><loc>${cfg.publicOrigin}${p}</loc></url>`).join("\n")}\n</urlset>\n`));
 }
+
+/** OpenAI plugin domain verification: serve the exact portal token as plain text (OPENAI_APPS_CHALLENGE). 404 until set. */
+export function openaiChallengeRoute(app: FastifyInstance, token: string) {
+  app.get("/.well-known/openai-apps-challenge", async (_r, reply) => token ? reply.type("text/plain; charset=utf-8").header("cache-control", "no-store").send(token) : reply.code(404).send("not configured"));
+}

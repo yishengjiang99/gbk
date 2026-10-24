@@ -16,7 +16,7 @@ import { ConversationStore } from "./persistence/conversations.ts";
 import { ShareStore } from "./persistence/shares.ts";
 import { AgentHub } from "./bridge/websocket.ts";
 import { healthRoutes } from "./routes/health.ts";
-import { pageRoutes } from "./routes/pages.ts";
+import { pageRoutes, openaiChallengeRoute } from "./routes/pages.ts";
 import { configRoutes } from "./routes/config.ts";
 import { agentRoutes } from "./routes/agent.ts";
 import { shareRoutes } from "./routes/shares.ts";
@@ -58,6 +58,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   healthRoutes(app, cfg, () => ({ connections: hub.registry.size, activeRuns: hub.activeRuns }), VERSION);
   configRoutes(app, cfg);
   pageRoutes(app, cfg);
+  openaiChallengeRoute(app, cfg.openaiAppsChallenge);
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
   signinRoutes(app, cfg, sessions, accounts, new RateLimiter(cfg.security.loginPerMinute), deps.fetch);
   shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model);
