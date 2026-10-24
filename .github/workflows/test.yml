@@ -22,9 +22,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: sudo apt-get install -y moreutils >/dev/null
-      - run: python3 .github/instr.py
-      - name: server tests (diagnostic, mcp-workflow)
-        timeout-minutes: 12
-        run: timeout 240 node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test --test-reporter=spec server/test/mcp-workflow.test.ts 2>&1 | ts '%H:%M:%S' || true
-        shell: bash
+      - run: npm run typecheck
+      - run: npm test
+        timeout-minutes: 15
+      - run: npm run test:server
+        timeout-minutes: 15
