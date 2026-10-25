@@ -1,4 +1,5 @@
 // On-screen piano + computer-keyboard + Web MIDI input for the selected track, with record arm.
+import { AddTrackButton } from "./AddTrack.tsx";
 import { useEffect, useMemo, useReducer } from "react";
 import type { WorkstationController } from "../../workstation/controller.ts";
 import { LiveInputSession, keyAction, isTypingTarget, KEY_NOTE_OFFSETS } from "../../workstation/live-input.ts";
@@ -60,7 +61,7 @@ export function LiveKeyboard({ workstation }: { workstation: WorkstationControll
     <div className="ws-keys" data-testid="live-keyboard">
       <div className="ws-row ws-dim">
         {ws.project.tracks.length === 0
-          ? <span className="ws-warn" data-testid="live-no-track">No tracks yet: add a track to play (the keyboard plays the selected track).</span>
+          ? <span className="ws-warn" data-testid="live-no-track">No tracks yet: add a track to play. <AddTrackButton testId="keys-add-track" /></span>
           : <label>Track <select aria-label="Keyboard track" data-testid="live-track" value={s.trackId ?? ""} onChange={(e) => workstation.setSelection({ trackIds: [e.target.value] })}>
               {ws.project.tracks.map((t) => <option key={t.id} value={t.id}>{t.name} (ch{t.channel + 1})</option>)}
             </select></label>}

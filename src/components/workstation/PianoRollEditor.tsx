@@ -16,7 +16,8 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
   const wrap = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
-  const drag = useRef<null | { kind: "select" | "move" | "resize"; startTick: number; startPitch: number; noteIds: string[]; dTick: number; dPitch: number; x0: number }>(null);
+  const drag = useRef<null | { kind: "select" | "move" | "resize"; startTick: number; startPitch: number; noteIds: string[]; dTick: number; dPitch: number; x0: number; hadNotes?: boolean; moved?: boolean }>(null);
+  const clickAdded = useRef(0);
   const sel = project.selection;
   const rowH = height / (view.highPitch - view.lowPitch + 1);
   const diff = useMemo(() => (proposal ? diffNotes(proposal.original, proposal.candidate) : null), [proposal]);
@@ -131,7 +132,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
       drag.current = { kind: nearEnd ? "resize" : "move", startTick: tickAt(px), startPitch: pitchAt(py), noteIds: ids, dTick: 0, dPitch: 0, x0: px };
     } else {
       const t = snap(tickAt(px));
-      drag.current = { kind: "select", startTick: t, startPitch: pitchAt(py), noteIds: [], dTick: 0, dPitch: 0, x0: px };
+      drag.current = { kind: "select", startTick: t, startPitch: pitchAt(py), noteIds: [], dTick: 0, dPitch: 0, x0: px, hadNotes: sel.noteIds.length > 0 };
       workstation.setSelection({ startTick: t, endTick: t, noteIds: [] });
     }
   };
@@ -144,14 +145,23 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
       return;
     }
     if (d.kind === "select") {
+      if (Math.abs(px - d.x0) > 4) d.moved = true;
       const t = snap(tickAt(px)); const [a, b] = t < d.startTick ? [t, d.startTick] : [d.startTick, t];
       const noteIds = project.notes.filter((n) => n.tick >= a && n.tick < b && trackById.get(n.trackId)?.visible !== false).map((n) => n.id);
       workstation.setSelection({ startTick: a, endTick: b, noteIds });
     } else { d.dTick = snap(tickAt(px) - d.startTick); d.dPitch = pitchAt(py) - d.startPitch; }
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e?: React.PointerEvent) => {
     const d = drag.current; drag.current = null; if (!d) return;
-    if (d.kind === "select") return;
+    if (d.kind === "select") {
+      // A plain click (no drag) on empty space with an explicitly selected track and no selected notes adds a note.
+      const track = project.tracks.find((t) => t.id === sel.trackIds[0]);
+      if (!d.moved && !d.hadNotes && track && track.visible && e) {
+        const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
+        if (px >= KEY_W) { clickAdded.current = Date.now(); workstation.userEdit([{ op: "addNotes", notes: [{ trackId: track.id, channel: track.channel, tick: snap(tickAt(px)), duration: project.ppq, pitch: pitchAt(py), velocity: 90 }] }], { label: "add note" }); }
+      }
+      return;
+    }
     if (!d.dTick && !d.dPitch) return;
     const byId = new Map(project.notes.map((n) => [n.id, n]));
     const updates = d.noteIds.map((id) => { const n = byId.get(id)!; return d.kind === "move"
@@ -160,6 +170,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     try { workstation.userEdit([{ op: "updateNotes", updates }], { label: d.kind === "move" ? "move notes" : "resize notes" }); } catch (err) { console.warn(err); }
   };
   const onDoubleClick = (e: React.MouseEvent) => {
+    if (Date.now() - clickAdded.current < 700) return; // the first click of this double-click already added the note
     const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
     const n = noteAt(px, py);
     if (n) { workstation.userEdit([{ op: "removeNotes", ids: [n.id] }], { label: "delete note" }); return; }
@@ -190,7 +201,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
   return (
     <div ref={wrap} className="ws-roll" style={{ position: "relative", height }} data-scroll-tick={Math.round(view.scrollTick)} data-visible-ticks={Math.round((width - KEY_W) / view.pxPerTick)}>
       <canvas ref={canvas} style={{ width: "100%", height, display: "block", touchAction: "none" }} tabIndex={0} role="application"
-        aria-label="Piano roll editor. Drag to select a range, drag notes to move, drag note end to resize, double-click to add or delete, arrows transpose/scroll, alt+arrows nudge, +/- zoom, Delete removes."
+        aria-label="Piano roll editor. Drag to select a range, drag notes to move, drag note end to resize, click empty space to add a note on the selected track, double-click to add or delete, arrows transpose/scroll, alt+arrows nudge, +/- zoom, Delete removes."
         data-testid="piano-roll" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onKeyDown={onKeyDown} onWheel={onWheel} onPointerLeave={() => setHover(null)} />
       {hover && <div className="ws-tooltip" style={{ left: hover.x + 12, top: hover.y + 12 }}>{hover.text}</div>}
     </div>

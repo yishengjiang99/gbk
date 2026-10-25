@@ -277,3 +277,30 @@ test("Keys is a floating draggable window: default closed, opens, drags, closes"
   await page.getByTestId("keys-window-min").click(); await expect(page.getByTestId("live-keyboard")).toHaveCount(0);
   await page.getByTestId("keys-window-close").click(); await expect(win).toHaveCount(0);
 });
+
+test("guest: New project -> + Track -> click piano roll adds a note -> Play plays", async ({ page }) => {
+  test.skip(test.info().project.name !== "chrome-no-webmcp" && test.info().project.name !== "mobile", "desktop Chrome + mobile");
+  const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
+  page.on("dialog", (d) => d.accept());
+  await page.getByTestId("new-project").click();
+  await expect.poll(async () => (await ws(page)).tracks.length).toBe(0);
+  await expect(page.getByTestId("roll-empty")).toBeVisible();
+  await page.getByTestId("roll-add-track").click();
+  const inst = page.getByTestId("add-track-instrument"); await expect(inst).toBeVisible();
+  await expect(inst).toHaveValue("0"); await expect(inst.locator("option:checked")).toContainText(/piano/i);
+  await expect.poll(() => inst.locator("option").count(), { timeout: 60_000 }).toBeGreaterThan(100); // GM list from the SoundFont
+  await page.getByTestId("add-track-confirm").click();
+  await expect.poll(async () => (await ws(page)).tracks.length).toBe(1);
+  const s = await ws(page); expect(s.programs).toEqual([0]); expect(s.readOnly).toBeFalsy();
+  await expect(page.getByTestId("roll-empty")).toHaveCount(0);
+  const roll = page.getByTestId("piano-roll"); const b = (await roll.boundingBox())!;
+  await roll.click({ position: { x: b.width * 0.3, y: b.height * 0.5 } });
+  await expect.poll(async () => (await ws(page)).notes).toBe(1);
+  await expect(page.getByTestId("ws-play").first()).toBeEnabled({ timeout: 120_000 });
+  await page.getByTestId("ws-play").first().click();
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__gbkWorkstation.state.transport.playing), { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => +(await page.getByTestId("ws-pos").first().getAttribute("data-pos-tick") ?? 0), { timeout: 20_000 }).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+  expect(errors).toEqual([]);
+});

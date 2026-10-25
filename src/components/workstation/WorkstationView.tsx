@@ -16,6 +16,7 @@ function useMedia(q: string) {
   useEffect(() => { const mq = matchMedia(q); const f = () => setM(mq.matches); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); }, [q]);
   return m;
 }
+const TRACK_BTN = "add-track";
 const LANE_H = 48, LANE_BLOCK = LANE_H + 40, ROLL_MIN = 120;
 import { followScroll } from "../../workstation/follow.ts";
 import { useWorkstation, workstation } from "./useWorkstation.ts";
@@ -25,6 +26,7 @@ import { AgentPanel, useAgentToolsToggle } from "./AgentPanel.tsx";
 import { LiveKeyboard } from "./LiveKeyboard.tsx";
 import { FloatingWindow } from "./FloatingWindow.tsx";
 import { selectedTrackId } from "../../workstation/live-input.ts";
+import { AddTrackButton } from "./AddTrack.tsx";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { VideoExportButton } from "./VideoExport.tsx";
@@ -190,7 +192,8 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
       </FloatingWindow>}
       <div className="ws-body">
         {!narrow && <nav className="ws-tracks ws-flow" aria-label="Tracks">
-          {p.tracks.length === 0 && <p className="ws-dim">Open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
+          <div className="ws-row ws-tracks-head"><AddTrackButton testId={TRACK_BTN} /></div>
+          {p.tracks.length === 0 && <p className="ws-dim">Add a track to write notes, or open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
           {p.meta?.key && <div className="ws-dim" data-testid="ws-key">Key: {p.meta.key}{p.meta.sections?.length ? ` · ${p.meta.sections.length} sections` : ""}</div>}
           {p.tracks.map((t) => {
             const ov = state.overrides[t.id];
@@ -215,7 +218,8 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           })}
         </nav>}
         <main className="ws-main" ref={mainRef}>
-          <div className="ws-roll-slot" ref={rollRef}>
+          <div className="ws-roll-slot" ref={rollRef} style={{ position: "relative" }}>
+            {p.tracks.length === 0 && <div className="ws-roll-empty" data-testid="roll-empty"><span className="ws-dim">No tracks yet.</span><AddTrackButton cta testId="roll-add-track" /></div>}
             <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={Math.max(ROLL_MIN, Math.floor(rollBox.h))} onManualScroll={() => setFollow(false)} onWidth={(px) => { rollPx.current = px; }} />
           </div>
           <div className="ws-lanes">
@@ -244,7 +248,8 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           </div>
           <div className={`ws-tabbody ${activeTab === "Composer" ? "ws-tab-composer" : "ws-flow"}`} role="tabpanel" aria-label={activeTab}>
             {activeTab === "Tracks" && <nav className="ws-tracks" aria-label="Tracks">
-          {p.tracks.length === 0 && <p className="ws-dim">Open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
+          <div className="ws-row ws-tracks-head"><AddTrackButton testId={TRACK_BTN} /></div>
+          {p.tracks.length === 0 && <p className="ws-dim">Add a track to write notes, or open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
           {p.meta?.key && <div className="ws-dim" data-testid="ws-key">Key: {p.meta.key}{p.meta.sections?.length ? ` · ${p.meta.sections.length} sections` : ""}</div>}
           {p.tracks.map((t) => {
             const ov = state.overrides[t.id];
