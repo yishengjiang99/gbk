@@ -27,7 +27,7 @@ export function useAgentToolsToggle() {
 export function AgentPanel({ state, focusProposal, setFocus }: { state: WorkstationState; focusProposal: Proposal | null; setFocus: (id: string | null) => void }) {
   const [approval, setApproval] = useState<{ p: Proposal; resolve: (ok: boolean) => void } | null>(null);
   useEffect(() => {
-    workstation.approvalHandler = (p) => new Promise<boolean>((resolve) => { setFocus(p.id); setApproval({ p, resolve }); });
+    workstation.approvalHandler = (p) => new Promise<boolean>((resolve) => { setFocus(p.id); setApproval({ p, resolve }); dispatchEvent(new CustomEvent("gbk-approval-request")); });
     return () => { workstation.approvalHandler = null; };
   }, [setFocus]);
   const pending = state.proposals.filter((p) => p.status === "pending");

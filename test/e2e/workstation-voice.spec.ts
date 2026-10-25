@@ -70,6 +70,7 @@ test("agent sound design: longer release + more reverb, A/B, accept, audible dif
   expect(bad.ok).toBe(false); expect(bad.error!.code).toBe("INVALID_ARGUMENT");
   const pr = await tool(page, "gbk_propose_voice_patch", { trackId: target.id, summary: "longer release, wetter", edits: [{ param: "volEnvRelease", mode: "set", value: Math.max(2.5, rel0 * 3) }, { param: "reverbSend", mode: "set", value: 80 }] });
   expect(pr.ok, JSON.stringify(pr.error)).toBe(true);
+  await page.getByTestId("tab-sound").click(); // a new proposal focuses the Agent tab; the A/B diff lives on Sound
   await expect(page.getByTestId("sound-diff")).toContainText("volEnvRelease");
   await expect(page.getByTestId("adsr-graph-b")).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/gbk-voice-02-proposal-diff.png` });
@@ -77,9 +78,9 @@ test("agent sound design: longer release + more reverb, A/B, accept, audible dif
   const b = await tool(page, "gbk_preview_proposal", { proposalId: pr.data.proposalId, variant: "B" });
   console.log("preview A", a.ok, a.error?.code, "B", b.ok, b.error?.code);
   expect(a.ok && b.ok).toBe(true);
-  const done = await startTool(page, "gbk_commit_proposal", { proposalId: pr.data.proposalId });
+  const done = await startTool(page, "gbk_commit_proposal", { proposalId: pr.data.proposalId }); // the approval request brings up the Agent tab
   await page.getByTestId(`proposal-${pr.data.proposalId}`).getByRole("button", { name: "Accept" }).click();
-  expect((await done()).ok).toBe(true);
+  const dr = await done(); expect(dr.ok, JSON.stringify(dr.error)).toBe(true);
 
   const fx = await tool(page, "gbk_set_effects", { roomSize: 0.9, reverbLevel: 0.8, summary: "bigger hall" });
   expect(fx.ok).toBe(true);

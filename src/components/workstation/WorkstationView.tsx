@@ -76,6 +76,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   // Phones open on the roll (Tracks); the Composer tab takes the full screen height when chosen.
   const want = tab ?? (phone ? "Tracks" : composer ? "Composer" : "Agent");
   const activeTab = tabs.includes(want) ? want : tabs[0];
+  useEffect(() => { const on = () => setTab("Agent"); addEventListener("gbk-approval-request", on); return () => removeEventListener("gbk-approval-request", on); }, []);
   const pendingCount = state.proposals.filter((x) => x.status === "pending").length;
   const lastPending = useRef(pendingCount);
   useEffect(() => { if (pendingCount > lastPending.current && !composer) setTab("Agent"); lastPending.current = pendingCount; }, [pendingCount]);
@@ -275,7 +276,8 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           })}
             </nav>}
             {composer && <div hidden={activeTab !== "Composer"} className="ws-tabfill"><ComposerPanel project={p} readOnly={workstation.readOnlyReason} /></div>}
-            {activeTab === "Agent" && <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />}
+            {/* Always mounted (hidden off-tab) so agent commits can always ask for approval; a request brings the tab up. */}
+            <div hidden={activeTab !== "Agent"}><AgentPanel state={state} focusProposal={focus} setFocus={setFocus} /></div>
             {activeTab === "Sound" && <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />}
             {activeTab === "Files" && <><div className="ws-row"><VideoExportButton /></div><ArtifactPanel /></>}
           </div>
