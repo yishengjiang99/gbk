@@ -203,19 +203,19 @@ export class Ranker {
     return { version, n: tr.length, holdout: ho.length, auc: a.c, auc_skip: a.s, promoted: promote, previous: cur?.version ?? null, previous_auc: b?.c ?? null, previous_auc_skip: b?.s ?? null, ms: Date.now() - t0, model };
   }
   /** Point-in-time training rows (features as of each impression's hour + its session), split at `split`. */
-  dataset(imps: { actor: string; session: string; share_id: string; listen_ratio: number; completed: number; fast_skip: number; replay: number; created_at: number }[], split: number) {
-    const cache = new Map<string, Map<string, Record<string, number>>>(); const tr: Row[] = [], ho: Row[] = [];
+  dataset(imps: { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number }[], split: number) {
+    const cache = new Map<string, Map<string, { f: Record<string, number>; song: Song }>>(); const tr: Row[] = [], ho: Row[] = [];
     for (const i of imps) {
       const hr = Math.floor(Number(i.created_at) / 3_600_000) * 3_600_000; const key = `${i.actor}\u0001${i.session}\u0001${hr}`;
-      let m = cache.get(key); if (!m) { if (cache.size > 2000) cache.clear(); m = new Map(this.features(i.actor, i.session, hr).map((x) => [x.song.id, x.f as Record<string, number>])); cache.set(key, m); }
-      const f = m.get(i.share_id); if (!f) continue; const l = labels(i);
-      (Number(i.created_at) >= split ? ho : tr).push({ x: FEATURES.map((k) => f[k]), c: l.complete, s: l.skip, at: Number(i.created_at), actor: i.actor, session: i.session, share_id: i.share_id });
+      let m = cache.get(key); if (!m) { if (cache.size > 2000) cache.clear(); m = new Map(this.features(i.actor, i.session, hr).map((x) => [x.song.id, { f: x.f as Record<string, number>, song: x.song }])); cache.set(key, m); }
+      const e = m.get(i.share_id); if (!e) continue; const l = labels(i); const at = Number(i.created_at);
+      (at >= split ? ho : tr).push({ x: FEATURES.map((k) => e.f[k]), c: l.complete, s: l.skip, g: signal(i), dur: e.song.dur, fresh: at - e.song.published_at < FRESH_WINDOW_H * 3_600_000, at, actor: i.actor, session: i.session, share_id: i.share_id });
     }
     return { tr, ho };
   }
 }
 export interface TrainResult { version: string; n: number; holdout: number; auc: number | null; auc_skip: number | null; promoted: boolean; previous: string | null; previous_auc: number | null; previous_auc_skip: number | null; ms: number; model: Model }
-export type Row = { x: number[]; c: number; s: number; at: number; actor: string; session: string; share_id: string };
+export type Row = { x: number[]; c: number; s: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
 export const HOLDOUT_DAYS = 3;
 export function lin(x: number[], w: Weights) { return w.bias + x.reduce((a, v, j) => a + v * (w[FEATURES[j]] ?? 0), 0); }
 function fitLR(data: { x: number[]; y: number }[]): Weights {

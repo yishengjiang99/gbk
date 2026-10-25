@@ -139,3 +139,19 @@ test("ranking v2 / phase 5: no repeats within a session over 5 pages, no dup/dro
   for (let k = 0; k < 6; k++) { const out = rk.rank({ actor: k % 2 ? actor : null, session: null, seed: k }).ids; const lbs = out.map((id) => lab.get(id) ?? []);
     for (let i = 3; i < out.length; i++) for (const l of lbs[i]) assert.ok(![1, 2, 3].every((j) => lbs[i - j].includes(l)), `label run of 4 on ${l} at ${i}`); }
 });
+
+test("ranking v2 / phase 6: offline eval — AUC per head, NDCG@10 per session, new-song share; promoted vs candidate vs heuristic; CLI runs read-only", async () => {
+  const fx = fixture({ file: true }); const r = rand(21);
+  const songs = Array.from({ length: 30 }, (_, i) => fx.song({ owner: `o${i % 6}`, score: i / 30, ageH: i < 3 ? 10 : 24 * 10 }));
+  for (let k = 0; k < 1200; k++) { const s = Math.floor(r() * 30); fx.imp({ actor: `a${Math.floor(r() * 40)}`, song: songs[s], at: fx.now() - Math.floor(r() * 9 * D) - HR, good: r() < 0.2 + s / 40 }); }
+  const rk = new Ranker(fx.db, fx.now); assert.ok(rk.train());
+  const { evalRange, ndcg } = await import("../src/ranking/eval.ts");
+  assert.equal(ndcg([2, 1, 0]), 1); assert.ok(ndcg([0, 1, 2])! < 1); assert.equal(ndcg([0, 0]), null);
+  const rep = evalRange(fx.db, fx.now() - 3 * D, fx.now(), fx.now());
+  assert.deepEqual(rep.map((x) => x.name), ["promoted", "heuristic"]);
+  for (const x of rep) { assert.ok(x.n > 0 && x.sessions > 0); assert.ok(x.auc_complete! > 0 && x.auc_complete! < 1); assert.ok(x.ndcg10! > 0 && x.ndcg10! <= 1); assert.ok(x.new_share_top10! >= 0 && x.new_share_top10! <= 1); }
+  assert.ok(rep[0].auc_complete! > 0.55, `learned model beats chance on popularity-driven labels (${rep[0].auc_complete})`);
+  const { execFileSync } = await import("node:child_process");
+  const out = execFileSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--import", "tsx/esm", "scripts/rank-eval.ts", "--db", fx.file, "--json"], { cwd: new URL("../..", import.meta.url).pathname, encoding: "utf8" });
+  assert.deepEqual(JSON.parse(out).models.map((m: { name: string }) => m.name), ["promoted", "heuristic"]);
+});

@@ -45,3 +45,6 @@ Compare models by `model_version`.
 The privacy page (`/privacy`, section "Listening activity and your feed") says that listening activity personalizes the feed. It is not sold or shared with advertisers, it is kept for 60 days, and it is deleted with the account.
 
 > GBDT: not used. Evaluate a GBDT head with `scripts/rank-eval.ts` once there are more than 20k impressions.
+
+## Offline eval
+`node --disable-warning=ExperimentalWarning --import tsx/esm scripts/rank-eval.ts --db /var/lib/gbk-composer/shares.sqlite --from 2026-10-20 --to 2026-10-25 [--json]` (read-only; defaults: last 3 days, `$COMPOSER_DATA_DIR/shares.sqlite`). It compares the promoted model, the latest candidate and HEURISTIC on impressions in the range, with point-in-time features: holdout AUC per head, NDCG@10 per session (replays each session's shown songs re-ranked by the model, gain = `signal()`), and the share of < 48 h songs in the top 10. Code: `server/src/ranking/eval.ts`.
