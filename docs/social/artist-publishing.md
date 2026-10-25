@@ -35,7 +35,7 @@ Check it: `GET /api/songs/<slug>` or open `https://compose.grepawk.com/u/<handle
 
 ## Edit / remove
 - Rename or unpublish: `PATCH /api/shares/<slug>` `{ "title": "...", "public": false }`.
-- Delete: `DELETE /api/shares/<slug>` (also removes its ratings, comments and tags).
+- Delete: `DELETE /api/shares/<slug>` (also removes its ratings, comments and tags). Send no body and no `content-type: application/json` header (an empty JSON body is rejected with 400).
 
 ## Limits
 10 shares/minute and 100 songs/day per account; comments 10/min; ratings 60/min. 429 responses carry `retry-after`.
