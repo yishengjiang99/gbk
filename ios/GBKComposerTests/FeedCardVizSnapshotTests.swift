@@ -70,17 +70,29 @@ final class FeedCardVizSnapshotTests: XCTestCase {
         return image
     }
 
-    /// Average of `region` (in points) as 0...1 RGB.
-    private func pixels(_ image: UIImage, _ region: CGRect) -> [(CGFloat, CGFloat, CGFloat)] {
-        let cg = image.cgImage!, s = image.scale
-        let r = CGRect(x: region.minX * s, y: region.minY * s, width: region.width * s, height: region.height * s).integral
-        let crop = cg.cropping(to: r)!
-        let w = crop.width, h = crop.height
+    /// RGBA bytes of the whole image.
+    private func bytes(_ image: UIImage) -> [UInt8] {
+        let cg = image.cgImage!
+        let w = cg.width, h = cg.height
         var px = [UInt8](repeating: 0, count: w * h * 4)
+        let info = CGImageAlphaInfo.premultipliedLast.rawValue
         let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        ctx.draw(crop, in: CGRect(x: 0, y: 0, width: w, height: h))
-        return stride(from: 0, to: px.count, by: 4).map { (CGFloat(px[$0]) / 255, CGFloat(px[$0 + 1]) / 255, CGFloat(px[$0 + 2]) / 255) }
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return px
+    }
+
+    private func changedPixels(_ x: UIImage, _ y: UIImage) -> Int {
+        let a = bytes(x), b = bytes(y)
+        var n = 0
+        var i = 0
+        while i + 2 < min(a.count, b.count) {
+            var d = 0
+            for k in 0..<3 { d += abs(Int(a[i + k]) - Int(b[i + k])) }
+            if d > 30 { n += 1 }
+            i += 4
+        }
+        return n
     }
 
     private func card(_ song: Song, _ playback: CardPlayback?) -> some View {
@@ -116,8 +128,7 @@ final class FeedCardVizSnapshotTests: XCTestCase {
             let live = try render(card(Self.song(), Self.playingBack()), name: "feed-viz-playing-\(name)", style: style,
                                   size: CGSize(width: 393, height: 760))
             // Same card, same size: playing must paint bars + waveform, so many pixels differ from the idle frame.
-            let a = pixels(idle, CGRect(x: 0, y: 0, width: 393, height: 760)), b = pixels(live, CGRect(x: 0, y: 0, width: 393, height: 760))
-            let changed = zip(a, b).filter { abs($0.0 - $1.0) + abs($0.1 - $1.1) + abs($0.2 - $1.2) > 0.12 }.count
+            let changed = changedPixels(idle, live)
             XCTAssertGreaterThan(changed, 20_000, "\(name): playing card must draw spectrum + waveform")
         }
     }
