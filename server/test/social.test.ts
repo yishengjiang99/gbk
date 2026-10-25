@@ -81,3 +81,26 @@ test("for_you: never 3 in a row from one author, including across page boundarie
     assert.ok(firstRun === -1 || firstRun > bobLast, `run of 3 before bob ran out: ${owners.join(",")}`);
   } finally { await s.app.close(); }
 });
+
+test("owner 'delete' report shortcut: only @yishengjiang (by user id) hides; admins/others file normal reports", async () => {
+  const s = await startServer(new ScriptModel([() => reply("x")]), { COMPOSER_ADMIN_USERS: "alice,carol", COMPOSER_ACCESS_CODES: "alice:code-a,bob:code-b,carol:code-c,yj:code-y" });
+  try {
+    const alice = await login(s.base, "code-a"), carol = await login(s.base, "code-c"), yj = await login(s.base, "code-y");
+    // carol (an admin) takes display name "yishengjiang" – must not count; yj takes the handle
+    await fetch(`${s.base}/api/me/settings`, { method: "PATCH", headers: H(carol), body: JSON.stringify({ display_name: "yishengjiang" }) });
+    assert.equal((await (await fetch(`${s.base}/api/me/settings`, { method: "PATCH", headers: H(yj), body: JSON.stringify({ handle: "yishengjiang" }) })).json()).handle_changed, true);
+    const r0 = await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: "Victim", project: await project("Victim"), public: true }) }); const slug = (await r0.json()).slug as string;
+    const cm = await (await fetch(`${s.base}/api/shares/${slug}/comments`, { method: "POST", headers: H(alice), body: JSON.stringify({ body: "bad" }) })).json();
+    const rep = async (who: typeof alice, kind: string, target: string, reason: string) => (await fetch(`${s.base}/api/reports`, { method: "POST", headers: H(who), body: JSON.stringify({ kind, target, reason }) })).json();
+    for (const who of [alice, carol]) { const x = await rep(who, "comment", String(cm.id), "delete"); assert.equal(x.deleted, undefined); }
+    assert.equal((await (await fetch(`${s.base}/api/shares/${slug}/comments`)).json()).items.length, 1, "normal reports don't hide");
+    assert.equal((await rep(yj, "comment", String(cm.id), "spam")).deleted, undefined, "owner with other reason = normal");
+    const d = await rep(yj, "comment", String(cm.id), " Delete "); assert.equal(d.deleted, true); assert.equal(d.message, "Deleted");
+    assert.equal((await (await fetch(`${s.base}/api/shares/${slug}/comments`)).json()).items.length, 0);
+    const ds = await rep(yj, "song", slug, "delete"); assert.equal(ds.message, "Deleted");
+    assert.equal((await fetch(`${s.base}/api/songs/${slug}`)).status, 404);
+    // reversible: owner can republish
+    assert.equal((await fetch(`${s.base}/api/shares/${slug}`, { method: "PATCH", headers: H(alice), body: JSON.stringify({ public: true }) })).status, 200);
+    assert.equal((await fetch(`${s.base}/api/songs/${slug}`)).status, 200);
+  } finally { await s.app.close(); }
+});

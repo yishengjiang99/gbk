@@ -209,7 +209,7 @@ function BrowseSheet({ onPick }: { onPick: (f: { label?: string; tag?: string })
 function ReportSheet({ what, target, label, done }: { what: "song" | "comment" | "user"; target: string; label: string; done: (msg: string) => void }) {
   const [reason, setReason] = useState(""); const [err, setErr] = useState("");
   return (
-    <form data-testid="report-sheet" onSubmit={async (e) => { e.preventDefault(); try { await social.report(what, target, reason); done("Thanks, we'll review it."); } catch (x) { setErr((x as Error).message); } }}>
+    <form data-testid="report-sheet" onSubmit={async (e) => { e.preventDefault(); try { const r = await social.report(what, target, reason); done(r.deleted ? "Deleted" : "Thanks, we'll review it."); } catch (x) { setErr((x as Error).message); } }}>
       <p>Report {label}?</p>
       <textarea data-testid="report-reason" rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What's wrong? (optional)" />
       {err && <div className="so-err">{err}</div>}

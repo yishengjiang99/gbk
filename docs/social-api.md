@@ -256,3 +256,6 @@ Per user + IP, in-memory: comments 10/min, ratings 60/min, DMs 20/min, reports 1
 - Admin: `GET /api/admin/metrics?days=7`.
 
 See docs/social/ranking.md.
+
+### Owner "delete" report shortcut (live)
+`POST /api/reports` from the account whose handle is `@yishengjiang` (matched by that profile's user id, not display name, not other admins) with `reason` equal to `delete` (trimmed, case-insensitive) on a `comment` or `song` hides it at once (comment `hidden` flag / song unpublished; reversible by the admin queue or republishing), resolves its open reports, and answers `{ ok, id, deleted: true, message: "Deleted" }`. Anyone else filing "delete" gets a normal report.

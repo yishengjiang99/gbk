@@ -32,7 +32,7 @@ export const social = {
   play: (slug: string) => call<{ play_count: number }>("POST", `/shares/${encodeURIComponent(slug)}/play`).catch(() => null),
   user: (handle: string, cursor?: string | null) => call<{ user: SUser; songs: Song[]; next_cursor: string | null }>("GET", `/users/${encodeURIComponent(handle)}${qs({ cursor })}`),
   settings: (o: { display_name?: string; handle?: string; dm_policy?: string }) => call<Me>("PATCH", "/me/settings", o),
-  report: (kind: "comment" | "song" | "user" | "message", target: string, reason: string) => call<{ ok: true; id: string }>("POST", "/reports", { kind, target, reason }),
+  report: (kind: "comment" | "song" | "user" | "message", target: string, reason: string) => call<{ ok: true; id: string; deleted?: boolean; message?: string }>("POST", "/reports", { kind, target, reason }),
   adminReports: (status = "open") => call<{ items: { id: string; kind: string; target: string; reason: string; reporter: string; status: string; created_at: number; preview: { text: string; by: string; song: string | null; hidden: boolean } | null }[]; next_cursor: string | null }>("GET", `/admin/reports${qs({ status })}`),
   resolve: (id: string, action: "hide" | "dismiss") => call<{ ok: true }>("POST", `/admin/reports/${encodeURIComponent(id)}`, { action }),
 };

@@ -24,6 +24,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |
+| Owner "delete" report shortcut (@yishengjiang only, reversible hide, "Deleted" reply) | done |
 | Report sheet `POST /api/reports` | done (live API) |
 | Block `POST /api/blocks/:handle` | wired; route is P4, shows "not available" on 404 |
 | Profile: `GET /api/me` + `GET /api/users/:handle` | done (live API; `/api/me` needs a token) |

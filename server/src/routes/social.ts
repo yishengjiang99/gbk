@@ -17,6 +17,7 @@ export const MODEL_VERSION = "heur-1";
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const lim = (v: unknown, d = 20, max = 50) => Math.min(max, Math.max(1, Number(v) || d));
 
+export const OWNER_HANDLE = "yishengjiang";
 export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker, iap?: import("../persistence/iap.ts").IapStore) {
   const origin = cfg.publicOrigin;
   const L = { comment: new RateLimiter(10), rating: new RateLimiter(60), report: new RateLimiter(10, 3_600_000), play: new RateLimiter(120) };
@@ -197,6 +198,14 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     if (!exists) return reply.code(404).send({ code: "NOT_FOUND", message: "nothing to report" });
     if (limited(reply, L.report, s.user)) return;
     const id = social.report({ reporter: s.user, kind, target, reason }); req.log.info({ evt: "report_create", kind, id });
+    // Owner shortcut: a report whose reason is exactly "delete" from @yishengjiang (matched by user id) hides the target
+    // immediately (reversible: comment hidden flag / song unpublished) and resolves the report.
+    const owner = social.byHandle(OWNER_HANDLE)?.user_id;
+    if (owner && s.user === owner && reason.toLowerCase() === "delete" && (kind === "comment" || kind === "song")) {
+      if (kind === "comment") social.removeComment(Number(target), "hidden"); else shares.setPublic(target, false);
+      social.resolveReport(id, "hidden"); req.log.info({ evt: "report_owner_delete", kind, id });
+      return { ok: true, id: String(id), deleted: true, message: "Deleted" };
+    }
     return { ok: true, id: String(id) };
   });
   const admin = (req: FastifyRequest, reply: FastifyReply, write: boolean) => { const s = auth(req, reply, write); if (!s) return null; if (!cfg.adminUsers.includes(s.user)) { void reply.code(403).send({ code: "FORBIDDEN", message: "admin only" }); return null; } return s; };
