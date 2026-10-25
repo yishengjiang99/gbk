@@ -20,6 +20,9 @@ final class FeedPlayer: ObservableObject {
     private var fadeTask: Task<Void, Never>?
     /// Called once per new item started (used to count plays).
     var onStart: ((String) -> Void)?
+    /// Spectrum for the active item; cards pull from it per frame.
+    let analyzer = SpectrumAnalyzer()
+    private var tapTask: Task<Void, Never>?
 
     nonisolated static func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
@@ -54,6 +57,7 @@ final class FeedPlayer: ObservableObject {
             currentSlug = slug
             onStart?(slug)
             loopOnEnd(item, player: incoming)
+            attachTap(to: item)
             if hadPrevious { crossfade(from: outgoing, to: incoming) } else { outgoing.pause(); incoming.volume = 1 }
         } else {
             active.play()
@@ -79,6 +83,33 @@ final class FeedPlayer: ObservableObject {
             outgoing.replaceCurrentItem(with: nil)
             if !Task.isCancelled { incoming.volume = 1 }
             _ = self
+        }
+    }
+
+    /// Seconds into the active item, read directly from AVPlayer (no published state). nil when `slug` isn't active.
+    func currentSeconds(for slug: String) -> Double? {
+        guard slug == currentSlug else { return nil }
+        let t = CMTimeGetSeconds(active.currentTime())
+        return t.isFinite ? t : nil
+    }
+
+    /// Duration of the active item once known.
+    func durationSeconds(for slug: String) -> Double? {
+        guard slug == currentSlug, let item = active.currentItem else { return nil }
+        let d = CMTimeGetSeconds(item.duration)
+        return d.isFinite && d > 0 ? d : nil
+    }
+
+    /// Install an MTAudioProcessingTap (via AVAudioMix) on the item's audio track for the spectrum.
+    private func attachTap(to item: AVPlayerItem) {
+        tapTask?.cancel()
+        let sink = AudioTapSink()
+        analyzer.sink = sink
+        analyzer.reset()
+        tapTask = Task { @MainActor in
+            guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first, !Task.isCancelled,
+                  let mix = sink.makeAudioMix(for: track) else { return }
+            item.audioMix = mix
         }
     }
 

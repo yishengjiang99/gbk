@@ -18,7 +18,7 @@ struct RatingView: View {
                 .disabled(busy || song.isMine || !auth.isSignedIn)
                 .accessibilityLabel("\(star) stars")
             }
-            Text(summary).font(.caption).foregroundStyle(.secondary).padding(.leading, 4)
+            Text(summary).font(.caption).foregroundStyle(Theme.textSecondary).padding(.leading, 4)
         }
         .foregroundStyle(Theme.accent)
         .help(error ?? "")

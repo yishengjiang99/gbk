@@ -32,7 +32,7 @@ struct UserProfileView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(u.displayName ?? u.handle).font(.title2.bold()).foregroundStyle(Theme.accent)
-                        Text("@\(u.handle)").foregroundStyle(.secondary)
+                        Text("@\(u.handle)").foregroundStyle(Theme.textSecondary)
                         HStack(spacing: 12) {
                             Label("\(u.songCount ?? 0) songs", systemImage: "music.note")
                             if let r = u.ratingAvg { Label(String(format: "%.1f", r), systemImage: "star.fill") }
@@ -44,12 +44,12 @@ struct UserProfileView: View {
                 ForEach(model.songs) { s in
                     VStack(alignment: .leading) {
                         Text(s.title).font(.headline)
-                        Text((s.labels + s.tags.map { "#\($0)" }).joined(separator: " ")).font(.caption).foregroundStyle(.secondary)
+                        Text((s.labels + s.tags.map { "#\($0)" }).joined(separator: " ")).font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 if !model.done { ProgressView().task { await model.load(handle: handle, reset: false) } }
             }
-            if let e = model.error { Text(e).foregroundStyle(.secondary) }
+            if let e = model.error { Text(e).foregroundStyle(Theme.textSecondary) }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background.ignoresSafeArea())

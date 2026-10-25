@@ -5,7 +5,8 @@
 - Swap `MockAuthService` fallbacks out once iOS-1 routes ship (`/api/auth/apple`, `/api/auth/google/native`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/web-code`, `DELETE /api/me`) and P5 push routes ship.
 - Google Sign-In SDK integration (needs iOS OAuth client id).
 - SF2 playback on `SF2Engine`: copy the sequencer and MIDI parsing from earsheet's `Packages/SF2Player`.
-- Piano-roll preview rendering on feed cards (prod `preview` shape).
+- Web: add a dark palette (prefers-color-scheme) to social.css; iOS dark variants live in Assets.xcassets and can be copied.
+- Web: decide whether finished notes should vanish at the playhead (iOS does) and whether to add the oscilloscope.
 - Inbox/DMs and blocks list (P4), notifications (P5).
 - Align `docs/social-api.md` with prod for `preview`, `/api/session`, and 404 error bodies.
 

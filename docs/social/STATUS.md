@@ -9,6 +9,8 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | M0 scaffold (tabs, theme, API client, Keychain auth store, push manager, feed player, deep links, studio web view) | done |
 | Feed: `GET /api/feed` cursor paging, For you/New/Top chips, label menu, tag filter, `/t/<tag>` deep link | done (live API) |
 | Feed crossfade: 400 ms equal-power (cos/sin) on scroll settle, two AVPlayers (matches web) | done |
+| Feed card visuals: row 1 windowed piano roll (playhead 25%, 4 s window = 1 s behind / 3 s ahead, finished notes vanish, active notes brightened 45% + glow, black-key row stripes, loops); row 2 48 log-spaced spectrum bars (40 Hz–16 kHz, instant attack, 150 ms decay) + oscilloscope, both from one MTAudioProcessingTap; TimelineView(.animation)+Canvas, active card only, paused with audio | done (constants from web LiveRoll.tsx; device run unverified) |
+| Dark Mode: all colours in asset colour sets with light/dark variants, no hard-coded white/black; previews + light/dark snapshot tests uploaded as the `ios-snapshots` CI artifact | done (dark palette defined on iOS; web has no dark palette yet) |
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |
@@ -31,3 +33,8 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 - `GET /api/session` returns `{ authenticated, user, name, provider, csrf, enabled, providers, loginAvailable, reviewerLogin, limits }`, not `{ user, csrf, me }`.
 - 404s for unbuilt routes use Fastify's `{ message, error, statusCode }`, not `{ code, message }`.
 - `/t/<tag>` is a tag deep link (the M0 app treated it as a thread; fixed).
+
+### Feed visuals vs web (2026-10-25)
+
+Mirrors `src/components/social/LiveRoll.tsx`: PLAYHEAD_X 0.25, WINDOW_SEC 4, BARS 48, BAR_DECAY_MS 150, F_LO 40 / F_HI 16000, bar hue 200→340°, active note `brighten(0.45)` + glow, inactive alpha 0.85, note height 0.85 row, pitch span ≥ 12.
+Differences: iOS hides notes once they finish (per the iOS card spec), while web LiveRoll still draws them in the 1 s left of the playhead. iOS also adds the Export video's black-key row stripes. The Export video itself uses an 8 s window with the playhead at 30%; the feed cards use the LiveRoll values. Bars are scaled from dB like the AnalyserNode defaults (-100…-30 dB). The oscilloscope is iOS only for now.

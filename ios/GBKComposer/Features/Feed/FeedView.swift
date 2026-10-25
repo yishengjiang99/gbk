@@ -60,7 +60,7 @@ struct FeedView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(model.items) { song in
                             FeedCardView(song: song,
-                                         isPlaying: player.isPlaying && player.currentSlug == song.slug,
+                                         playback: playback(for: song),
                                          onTap: { player.toggle() },
                                          onRated: { model.update($0) },
                                          onComments: { commentsFor = song },
@@ -134,12 +134,23 @@ struct FeedView: View {
                     }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Capsule().fill(Color.white.opacity(0.7)))
+                .background(Capsule().fill(Theme.chip))
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
         .foregroundStyle(Theme.accent)
+    }
+
+    /// Only the visible, active card animates.
+    private func playback(for song: Song) -> CardPlayback? {
+        guard player.currentSlug == song.slug else { return nil }
+        let slug = song.slug
+        let p = player
+        return CardPlayback(time: { [weak p] in p?.currentSeconds(for: slug) },
+                            duration: { [weak p] in p?.durationSeconds(for: slug) },
+                            analyzer: p.analyzer,
+                            isPlaying: p.isPlaying)
     }
 
     private func playVisible(_ slug: String?) {
@@ -159,8 +170,8 @@ struct Chip: View {
         Button(action: action) {
             Text(title).font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 6)
-                .foregroundStyle(selected ? Color.white : Theme.accent)
-                .background(Capsule().fill(selected ? Theme.accent : Color.white.opacity(0.7)))
+                .foregroundStyle(selected ? Theme.onAccent : Theme.accent)
+                .background(Capsule().fill(selected ? Theme.accent : Theme.chip))
         }
         .buttonStyle(.plain)
     }

@@ -6,15 +6,17 @@ struct SignInView: View {
     var reason: String
     @State private var message: String?
     @State private var showReviewer = false
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "music.note.house.fill").font(.system(size: 56)).foregroundStyle(Theme.accent)
-            Text(reason).font(.headline).multilineTextAlignment(.center)
+            Text(reason).font(.headline).multilineTextAlignment(.center).foregroundStyle(Theme.text)
             SignInWithAppleButton(.signIn, onRequest: { AppleSignIn.configure($0) }) { result in
                 Task { await run { try await AppleSignIn.handle(result, auth: auth) } }
             }
-            .signInWithAppleButtonStyle(.black)
+            .signInWithAppleButtonStyle(scheme == .dark ? .white : .black) // Apple HIG: white button on dark backgrounds
+            .id(scheme)
             .frame(height: 48)
             Button {
                 Task { await run { try await GoogleSignIn.signIn(auth: auth) } }
@@ -22,7 +24,9 @@ struct SignInView: View {
                 Label("Sign in with Google", systemImage: "g.circle").frame(maxWidth: .infinity, minHeight: 48)
             }
             .buttonStyle(.borderedProminent)
-            if let message { Text(message).font(.footnote).foregroundStyle(.secondary) }
+            .tint(Theme.accent)
+            .foregroundStyle(Theme.onAccent)
+            if let message { Text(message).font(.footnote).foregroundStyle(Theme.textSecondary) }
             Button("Sign in with a review account") { showReviewer = true }
                 .font(.footnote)
                 .foregroundStyle(Theme.accent)
@@ -38,3 +42,19 @@ struct SignInView: View {
         catch { message = "Sign-in was cancelled." }
     }
 }
+
+#if DEBUG
+#Preview("Sign in · Light") {
+    SignInView(reason: "Sign in to see your profile and songs.")
+        .environmentObject(AuthStore.shared)
+        .background(Theme.background)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Sign in · Dark") {
+    SignInView(reason: "Sign in to see your profile and songs.")
+        .environmentObject(AuthStore.shared)
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
+}
+#endif

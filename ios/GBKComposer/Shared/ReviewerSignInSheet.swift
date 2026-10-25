@@ -17,7 +17,7 @@ struct ReviewerSignInSheet: View {
                         .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Password", text: $password).textContentType(.password)
                 } footer: { Text("For app-review accounts only.") }
-                if let error { Section { Text(error).foregroundStyle(.red) } }
+                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
                 Button {
                     Task { await submit() }
                 } label: {

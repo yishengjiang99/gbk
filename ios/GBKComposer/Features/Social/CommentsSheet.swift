@@ -33,7 +33,7 @@ struct CommentsSheet: View {
                 if !done {
                     ProgressView().frame(maxWidth: .infinity).task { await loadMore() }
                 } else if items.isEmpty {
-                    Text("No comments yet.").foregroundStyle(.secondary)
+                    Text("No comments yet.").foregroundStyle(Theme.textSecondary)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -48,7 +48,7 @@ struct CommentsSheet: View {
 
     @ViewBuilder private var composer: some View {
         VStack(spacing: 4) {
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let error { Text(error).font(.footnote).foregroundStyle(Theme.destructive) }
             if auth.isSignedIn {
                 HStack {
                     TextField("Add a comment", text: $draft, axis: .vertical).lineLimit(1...4)
@@ -56,7 +56,7 @@ struct CommentsSheet: View {
                         .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 500)
                 }
             } else {
-                Text("Sign in to comment.").font(.footnote).foregroundStyle(.secondary)
+                Text("Sign in to comment.").font(.footnote).foregroundStyle(Theme.textSecondary)
             }
         }
         .padding().background(.ultraThinMaterial)
