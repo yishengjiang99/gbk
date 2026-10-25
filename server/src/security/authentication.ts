@@ -76,6 +76,10 @@ export class SessionStore {
     this.db.prepare("UPDATE web_sessions SET last_seen = ? WHERE id_hash = ?").run(t, hashId(s.id));
   }
   destroy(id: string) { this.db.prepare("DELETE FROM web_sessions WHERE id_hash = ?").run(hashId(id)); }
+  /** Sign a user out everywhere (account deletion). */
+  destroyUser(user: string) { this.db.prepare("DELETE FROM web_sessions WHERE user = ?").run(user); }
+  /** Raw session id from a cookie/bearer value (after signature check). */
+  idOf(raw: string) { return this.fromCookie(raw)?.id ?? null; }
   isLive(id: string) { return !!this.load(id); }
   sweep() { return Number(this.db.prepare("DELETE FROM web_sessions WHERE last_seen + ttl_ms < ?").run(this.now()).changes); }
 }

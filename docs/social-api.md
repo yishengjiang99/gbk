@@ -20,7 +20,7 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
 - **Cursor format.** `next_cursor` is an opaque base64url string; never parse or build it. Same filters must be resent with it.
 - **Backward compatibility.** `GET /api/shares` (offset pagination, camelCase `ShareView`) stays unchanged; new social fields live only on the new endpoints.
 - **Deep links.** `https://compose.grepawk.com/s/<slug>` (song), `/u/<handle>` (profile), `/t/<tag>` (tag), `/inbox/<handle>` (DM thread).
-  `GET /.well-known/apple-app-site-association` (iOS-1) lists paths `/s/*`, `/u/*`, `/t/*` for the app id.
+  `GET /.well-known/apple-app-site-association` (live; 404 until `IOS_APP_IDS` is set) lists paths `/s/*`, `/u/*`, `/t/*` for the app id.
 - **Text.** All user text is plain text; clients must render it as text (no HTML/markdown).
 
 ### Objects
@@ -57,13 +57,13 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 | Method + path | Phase | Notes |
 |---|---|---|
 | `GET /api/session` | live | `{ user, csrf, me }` (web) |
-| `POST /api/auth/apple` | iOS-1 | `{ identityToken, nonce, displayName? }`. Verifies Apple JWT (JWKS, `aud` = bundle id, `sha256(nonce)` = claim). → `TokenPair` |
-| `POST /api/auth/google/native` | iOS-1 | `{ idToken }` (`aud` = iOS client id). → `TokenPair` |
-| `POST /api/auth/refresh` | iOS-1 | `{ refresh_token }` → `TokenPair` (rotating; old refresh token revoked) |
-| `POST /api/auth/logout` | iOS-1 | revokes the presented access + refresh tokens |
-| `POST /api/auth/web-code` | iOS-1 | bearer → `{ code, expires_in: 60 }` one-time code |
-| `GET /api/auth/web-code/redeem?code=&return=/studio` | iOS-1 | sets the cookie session in the WKWebView, 302 to `return` (same-origin path only). Single use, 60 s |
-| `DELETE /api/me` | iOS-1 | deletes account, songs, comments, ratings, messages, devices; → `{ ok: true }` (App Store 5.1.1(v)) |
+| `POST /api/auth/apple` | live (503 `APPLE_UNAVAILABLE` until `APPLE_BUNDLE_ID` is set) | `{ identityToken, nonce, displayName? }`. Verifies Apple JWT (JWKS, `aud` = bundle id, `sha256(nonce)` = claim). → `TokenPair` |
+| `POST /api/auth/google/native` | live | `{ idToken }` (`aud` = iOS client id). → `TokenPair` |
+| `POST /api/auth/refresh` | live | `{ refresh_token }` → `TokenPair` (rotating, single use; the old access token is revoked too; re-using a spent refresh token revokes all of the user's refresh tokens → `401 INVALID_REFRESH`, sign in again) |
+| `POST /api/auth/logout` | live | revokes the presented access + refresh tokens |
+| `POST /api/auth/web-code` | live | bearer → `{ code, expires_in: 60 }` one-time code |
+| `GET /api/auth/web-code/redeem?code=&return=/studio` | live | sets the cookie session in the WKWebView, 302 to `return` (same-origin path only). Single use, 60 s |
+| `DELETE /api/me` | live | deletes account, songs, comments, ratings, messages, devices; → `{ ok: true }` (App Store 5.1.1(v)) |
 
 `TokenPair` = `{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, me: Me }`.
 `Me` = `User` + `{ "id": "...", "dm_policy": "all|off", "handle_changed": false, "is_admin": false }`.
@@ -128,10 +128,14 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 |---|---|---|
 | `GET /api/notifications?cursor=` | signed-in | `{ items: [{ id, kind: "comment|rating|fork|dm", actor: User, song_slug?, created_at, read }], unread }` |
 | `POST /api/notifications/read` | signed-in | `{ ids? }` (all if omitted) |
-| `POST /api/push/register` | signed-in | `{ installId, token: "<APNs hex>", environment: "production|sandbox" }` → `{ ok }` (upsert by installId; modeled on earsheet devices.ts) |
-| `POST /api/push/unregister` | signed-in | `{ installId }` → `{ ok }` (call on logout) |
+| `POST /api/push/register` | signed-in (live) | `{ installId, token: "<APNs hex>", environment: "production|sandbox" }` → `{ ok }` (upsert by installId; modeled on earsheet devices.ts) |
+| `POST /api/push/unregister` | signed-in (live) | `{ installId }` → `{ ok }` (call on logout) |
 
-APNs sender (token-based .p8 auth, ported from earsheet apns.ts) fires on new DM, comment on your song, fork of your song.
+APNs sender (token-based .p8 auth, ported from earsheet apns.ts) fires on: comment on your song, public fork of your song (live), new DM (P4).
+Payload: `{ aps: { alert: { title, body }, sound }, kind: "comment|fork|dm", link }`. Dead tokens (410/BadDeviceToken) are dropped.
+
+Server env (all optional; never commit values): `APPLE_BUNDLE_ID`, `GOOGLE_IOS_CLIENT_IDS` (comma list; the web `GOOGLE_CLIENT_ID` is also accepted as audience),
+`IOS_APP_IDS` (e.g. `TEAMID.com.grepawk.gbk`, enables AASA), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8` or `APNS_P8_PATH`, `APNS_TOPIC` (defaults to bundle id).
 APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.com/inbox/<handle>" }`. No email notifications.
 
 ## Rate limits

@@ -5,13 +5,13 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-export type Provider = "github" | "google" | "legacy";
+export type Provider = "github" | "google" | "apple" | "legacy";
 export interface Account { id: string; provider: Provider; provider_id: string; name: string; email: string | null; created_at: number; last_login: number | null }
 export interface UsageRow { tokens: number; cost: number; renders: number }
 
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 /** Account ids follow the existing user-name alphabet ([\w.-], max 40) so no downstream store needs a migration. */
-export const accountIdFor = (provider: Exclude<Provider, "legacy">, providerId: string) => `${provider === "github" ? "gh" : "g"}-${providerId.replace(/[^\w.-]/g, "")}`.slice(0, 40);
+export const accountIdFor = (provider: Exclude<Provider, "legacy">, providerId: string) => `${provider === "github" ? "gh" : provider === "apple" ? "ap" : "g"}-${providerId.replace(/[^\w.-]/g, "")}`.slice(0, 40);
 
 export class AccountStore {
   private db: DatabaseSync;
@@ -50,5 +50,7 @@ export class AccountStore {
       ON CONFLICT(user, day) DO UPDATE SET tokens = tokens + excluded.tokens, cost = cost + excluded.cost, renders = renders + excluded.renders`)
       .run(user, day(this.now()), Math.round(d.tokens ?? 0), d.cost ?? 0, d.renders ?? 0);
   }
+  /** Account deletion (App Store 5.1.1(v)): the account row and its usage. */
+  delete(id: string) { this.db.prepare("DELETE FROM usage WHERE user = ?").run(id); this.db.prepare("DELETE FROM accounts WHERE id = ?").run(id); }
   close() { this.db.close(); }
 }

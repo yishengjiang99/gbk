@@ -13,7 +13,7 @@ import { isGuest } from "../mcp/guest.ts";
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const lim = (v: unknown, d = 20, max = 50) => Math.min(max, Math.max(1, Number(v) || d));
 
-export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore) {
+export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify) {
   const origin = cfg.publicOrigin;
   const L = { comment: new RateLimiter(10), rating: new RateLimiter(60), report: new RateLimiter(10, 3_600_000), play: new RateLimiter(120) };
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
@@ -134,6 +134,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     if (limited(reply, L.comment, s.user)) return;
     if (social.countComments(s.user, 86_400_000) >= 100) return reply.code(429).send({ code: "RATE_LIMITED", message: "daily comment limit reached" });
     const c = social.addComment(r.id, s.user, body); req.log.info({ evt: "comment_create", user: s.user, slug: r.slug });
+    if (r.owner !== s.user && !social.blocked(r.owner, s.user)) notify?.(r.owner, { kind: "comment", title: `@${prof(s.user).handle} commented on ${r.title}`, body, link: `${origin}/s/${r.slug}` });
     return comment(c, s.user, r.owner);
   });
   app.delete("/api/comments/:id", async (req, reply) => {
@@ -176,4 +177,5 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     if (action === "hide") { if (rep.kind === "comment") social.removeComment(Number(rep.target_id), "hidden"); if (rep.kind === "song") shares.setPublic(rep.target_id, false); }
     social.resolveReport(rep.id, action === "hide" ? "hidden" : "dismissed"); return { ok: true };
   });
+  return { me };
 }

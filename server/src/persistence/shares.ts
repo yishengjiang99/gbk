@@ -98,6 +98,8 @@ export class ShareStore {
   /** MCP project lifecycle: drop or re-own the private Studio snapshot(s) of one MCP composition. */
   deleteByProject(owner: string, projectId: string) { this.db.prepare("DELETE FROM shares WHERE owner = ? AND project_id = ?").run(owner, projectId); }
   reassignProject(fromOwner: string, toOwner: string, projectId: string) { this.db.prepare("UPDATE shares SET owner = ? WHERE owner = ? AND project_id = ?").run(toOwner, fromOwner, projectId); }
+  /** Account deletion: every song of one owner (social rows go via the cleanup trigger). */
+  deleteOwner(owner: string) { this.db.prepare("DELETE FROM shares WHERE owner = ?").run(owner); }
   delete(slugv: string) { this.db.prepare("DELETE FROM shares WHERE id = ?").run(this.idOf(slugv)); }
   list(o: { owner?: string; limit: number; offset: number }): ShareView[] {
     const rows = (o.owner
