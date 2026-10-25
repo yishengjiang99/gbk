@@ -151,8 +151,11 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
         onPointerDown={(e) => { const el = e.currentTarget; e.preventDefault(); el.focus(); el.setPointerCapture?.(e.pointerId); scrubAt(el, e.clientX); }}
         onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture?.(e.pointerId)) scrubAt(e.currentTarget, e.clientX); }} />
     </div>);
+  const [roHint, setRoHint] = useState<string | null>(null);
+  useEffect(() => { let t: ReturnType<typeof setTimeout> | undefined; const f = () => { setRoHint("Read-only shared song — press Fork to edit your own copy."); clearTimeout(t); t = setTimeout(() => setRoHint(null), 2500); }; workstation.readOnlyHintListeners.add(f); return () => { workstation.readOnlyHintListeners.delete(f); clearTimeout(t); }; }, []);
   return (
     <div className="ws" data-testid="workstation">
+      {roHint && <div role="status" aria-live="polite" data-testid="readonly-hint" style={{ position: "fixed", left: "50%", bottom: 80, transform: "translateX(-50%)", zIndex: 1000, pointerEvents: "none", background: "rgba(20,20,28,.92)", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 14 }}>{roHint}</div>}
       <header className="ws-header">
         <strong className="ws-title">{composer ? "GBK Composer" : "GBK Workstation"}</strong>
         {composer && onExplore && <button onClick={onExplore} data-testid="nav-explore">Explore</button>}
@@ -197,7 +200,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
                   <span className="ws-dim">ch{t.channel + 1} · {count}</span>
                 </div>
                 <div className="ws-row">
-                  <label><input type="checkbox" checked={t.visible} onChange={(e) => workstation.edit([{ op: "updateTrack", trackId: t.id, visible: e.target.checked }], { label: "toggle visibility" })} />show</label>
+                  <label><input type="checkbox" checked={t.visible} onChange={(e) => workstation.userEdit([{ op: "updateTrack", trackId: t.id, visible: e.target.checked }], { label: "toggle visibility" })} />show</label>
                   <label><input type="checkbox" checked={t.mix.mute} onChange={(e) => workstation.setTrackMixDefault(t.id, { mute: e.target.checked })} />M</label>
                   <label><input type="checkbox" checked={t.mix.solo} onChange={(e) => workstation.setTrackMixDefault(t.id, { solo: e.target.checked })} />S</label>
                 </div>
@@ -251,7 +254,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
                   <span className="ws-dim">ch{t.channel + 1} · {count}</span>
                 </div>
                 <div className="ws-row">
-                  <label><input type="checkbox" checked={t.visible} onChange={(e) => workstation.edit([{ op: "updateTrack", trackId: t.id, visible: e.target.checked }], { label: "toggle visibility" })} />show</label>
+                  <label><input type="checkbox" checked={t.visible} onChange={(e) => workstation.userEdit([{ op: "updateTrack", trackId: t.id, visible: e.target.checked }], { label: "toggle visibility" })} />show</label>
                   <label><input type="checkbox" checked={t.mix.mute} onChange={(e) => workstation.setTrackMixDefault(t.id, { mute: e.target.checked })} />M</label>
                   <label><input type="checkbox" checked={t.mix.solo} onChange={(e) => workstation.setTrackMixDefault(t.id, { solo: e.target.checked })} />S</label>
                 </div>

@@ -83,7 +83,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
   const commitPoint = (tick: number, value: number) => {
     if (!track) return;
     if (typeof lane !== "number") return; // bend/pressure editing: drawn via pointer only (uses notes API in future)
-    workstation.edit([{ op: "setCC", trackId, channel: track.channel, controller: lane, startTick: tick, endTick: tick, mode: "merge", points: [{ tick, value }] }], { label: `CC${lane} point` });
+    workstation.userEdit([{ op: "setCC", trackId, channel: track.channel, controller: lane, startTick: tick, endTick: tick, mode: "merge", points: [{ tick, value }] }], { label: `CC${lane} point` });
   };
   const hit = (px: number, py: number) => pts.find((p) => Math.abs(x(p.tick) - px) < 5 && Math.abs(yv(p.value) - py) < 6);
 
@@ -91,7 +91,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const r = cv.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top; if (px < KEY_W) return;
     (e.target as Element).setPointerCapture(e.pointerId);
     const h = hit(px, py);
-    if (h && (e.altKey || e.button === 2)) { if (typeof lane === "number") workstation.edit([{ op: "removeCC", ids: [h.id] }], { label: `delete CC${lane} point` }); return; }
+    if (h && (e.altKey || e.button === 2)) { if (typeof lane === "number") workstation.userEdit([{ op: "removeCC", ids: [h.id] }], { label: `delete CC${lane} point` }); return; }
     if (h) { dragPt.current = h; return; }
     if (e.shiftKey) { drawPts.current = [{ tick: tickAt(px), value: valAt(py) }]; return; }
     commitPoint(tickAt(px), valAt(py));
@@ -105,10 +105,10 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const r = cv.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
     if (drawPts.current && track && typeof lane === "number") {
       const d = drawPts.current; drawPts.current = null;
-      if (d.length > 1) workstation.edit([{ op: "setCC", trackId, channel: track.channel, controller: lane, startTick: d[0].tick, endTick: d[d.length - 1].tick, mode: "replace", points: d }], { label: `draw CC${lane}` });
+      if (d.length > 1) workstation.userEdit([{ op: "setCC", trackId, channel: track.channel, controller: lane, startTick: d[0].tick, endTick: d[d.length - 1].tick, mode: "replace", points: d }], { label: `draw CC${lane}` });
     } else if (dragPt.current && typeof lane === "number" && track) {
       const p = dragPt.current; dragPt.current = null; const t = tickAt(px), v = valAt(py);
-      workstation.edit([{ op: "removeCC", ids: [p.id] }, { op: "setCC", trackId, channel: track.channel, controller: lane, startTick: t, endTick: t, mode: "merge", points: [{ tick: t, value: v }] }], { label: `move CC${lane} point` });
+      workstation.userEdit([{ op: "removeCC", ids: [p.id] }, { op: "setCC", trackId, channel: track.channel, controller: lane, startTick: t, endTick: t, mode: "merge", points: [{ tick: t, value: v }] }], { label: `move CC${lane} point` });
     }
     drawPts.current = null; dragPt.current = null;
   };
