@@ -38,7 +38,7 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         Task { await toggle() }
     }
 
-    static func isTrusted(_ origin: WKSecurityOrigin) -> Bool {
+    nonisolated static func isTrusted(_ origin: WKSecurityOrigin) -> Bool {
         (origin.protocol == "https" && origin.host == "compose.grepawk.com") || origin.protocol == "file"
     }
 
@@ -144,7 +144,7 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         return try? await webView.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page)
     }
 
-    static func jsonString(_ v: Any) -> String {
+    nonisolated static func jsonString(_ v: Any) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: v, options: [.fragmentsAllowed])) ?? Data("null".utf8)
         return String(decoding: data, as: UTF8.self)
     }
