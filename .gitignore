@@ -14,6 +14,8 @@ public/ort-runtime/
 soundfonts/*.sf2
 soundfonts/*.part
 public/static/TimGM6mb.sf2
+public/static/Nostalgic_Rock_Guitar.sf2
+public/static/SMS_Drum_kit.sf2
 public/static/soundfont-manifest.json
 
 # WebMCP origin-trial token (origin-bound, register your own; see docs/webmcp.md)

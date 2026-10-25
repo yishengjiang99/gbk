@@ -32,7 +32,9 @@ const timBytes = readIf(new URL("../../soundfonts/TimGM6mb.sf2", import.meta.url
 const fluidInstalled = existsSync(new URL("../../soundfonts/FluidR3_GM.sf2", import.meta.url).pathname)
   || existsSync("/var/www/gbk-composer/soundfonts/FluidR3_GM.sf2");
 
-interface FontView { id: string; label: string; delivery: string; path: string; default: boolean; active: boolean; available: boolean; bytes: number }
+interface FontView { id: string; label: string; delivery: string; path: string; default: boolean; active: boolean; available: boolean; bytes: number; description: string;
+  info?: { name?: string; comment?: string; copyright?: string; engineer?: string };
+  presets?: { bank: number; program: number; name: string }[]; presetCount?: number }
 interface RenderedJob {
   status: string; renderedOn?: string; config: { soundFont?: string; executor: string };
   artifacts: { kind: string; sha256: string; meta: { soundFont?: string; validated?: boolean } }[];
@@ -43,21 +45,40 @@ test("gbk_list_soundfonts returns the pinned catalog with honest availability; c
   try {
     const alice = asUser(s, "alice"); await alice.initialize();
     const { fonts, defaultFontId } = await alice.call<{ fonts: FontView[]; defaultFontId: string }>("gbk_list_soundfonts", {});
-    assert.deepEqual(fonts.map((f) => f.id), ["generaluser-gs", "timgm6mb", "fluidr3-gm"]);
+    assert.deepEqual(fonts.map((f) => f.id), ["generaluser-gs", "timgm6mb", "fluidr3-gm", "nostalgic-rock-guitar", "sms-drum-kit"]);
     assert.equal(defaultFontId, "generaluser-gs");
     const gu = fonts[0];
     assert.equal(gu.default, true); assert.equal(gu.active, true);
     assert.equal(gu.available, true, "the committed public/static GeneralUser copy is always present");
     assert.equal(gu.delivery, "bundled"); assert.equal(gu.path, "static/GeneralUser-GS.sf2");
+    // Descriptions and metadata are read from the SF2 binary itself when installed:
+    // GeneralUser carries a long ICMT license comment, which becomes its description.
+    assert.equal(gu.info?.name, "GeneralUser GS 2.0.2");
+    assert.equal(gu.info?.copyright, "1997-2025 by S. Christian Collins");
+    assert.equal(gu.presetCount, 287);
+    assert.match(gu.description, /License v2\.0/);
     const fluid = fonts[2];
     assert.equal(fluid.delivery, "server"); assert.equal(fluid.path, "/soundfonts/FluidR3_GM.sf2");
     assert.equal(fluid.available, fluidInstalled);
+    // The vendored specialty banks are committed in-repo, so they are always installed;
+    // with no ICMT in their binaries, the listing describes them from name + presets + credits.
+    const guitar = fonts[3];
+    assert.equal(guitar.available, true);
+    assert.deepEqual(guitar.presets, [{ bank: 0, program: 0, name: "Nostalgic Rock" }]);
+    assert.equal(guitar.info?.copyright, "Libre");
+    assert.match(guitar.description, /Nostalgic Rock Guitar\.sf2: 1 preset/);
+    assert.match(guitar.description, /Libre/);
+    const drums = fonts[4];
+    assert.equal(drums.available, true);
+    assert.deepEqual(drums.presets, [{ bank: 128, program: 0, name: "Drums" }]);
+    assert.equal(drums.info?.engineer, "SylvataDaSylveon");
+    assert.match(drums.description, /bank 128 program 0 "Drums"/);
     // The tool output matches the catalog module's own view of this deployment.
     const direct = listSoundFonts(testConfig({}));
     assert.deepEqual(fonts.map((f) => [f.id, f.available]), direct.map((f) => [f.id, f.available]));
 
     const caps = await alice.call<{ capabilities: { soundFonts: FontView[]; soundFont: string } }>("gbk_get_capabilities", {});
-    assert.equal(caps.capabilities.soundFonts.length, 3);
+    assert.equal(caps.capabilities.soundFonts.length, 5);
     assert.match(caps.capabilities.soundFont, /gbk_list_soundfonts/);
   } finally { await s.app.close(); }
 });
@@ -84,6 +105,19 @@ test("headless server render honors soundFont: selected font renders, provenance
       await assert.rejects(guest.call("gbk_render_composition", { compositionId: g.compositionId, accessToken: g.accessToken, soundFont: "timgm6mb" }),
         (e: unknown) => errCode(e) === "NOT_FOUND");
     }
+
+    // The vendored single-preset guitar bank renders a piece whose instruments it
+    // actually has (program 0 only): every track resolves to its one preset.
+    const gp = await guest.call<{ compositionId: string; accessToken: string }>("gbk_create_composition", { title: "SF guitar render", style: "classical", bars: 2, tempo: 120, seed: 5, instrumentation: ["piano"] });
+    const gtr = await guest.call<RenderedJob>("gbk_render_composition", { compositionId: gp.compositionId, accessToken: gp.accessToken, soundFont: "nostalgic-rock-guitar", waitSeconds: 110, tailSeconds: 1 });
+    assert.equal(gtr.status, "completed", JSON.stringify(gtr));
+    assert.equal(gtr.config.soundFont, "nostalgic-rock-guitar");
+    assert.equal(gtr.artifacts.find((x) => x.kind === "wav")!.meta.soundFont, "Nostalgic_Rock_Guitar.sf2");
+    // …and it honestly fails a piece whose instruments the bank does not have:
+    // the job fails with INSTRUMENT_NOT_FOUND instead of silently substituting.
+    const cantPlay = await guest.call<RenderedJob & { error: { code: string } }>("gbk_render_composition", { compositionId: g.compositionId, accessToken: g.accessToken, soundFont: "nostalgic-rock-guitar", waitSeconds: 110, tailSeconds: 1 });
+    assert.equal(cantPlay.status, "failed");
+    assert.equal(cantPlay.error.code, "INSTRUMENT_NOT_FOUND");
   } finally { await s.app.close(); }
 });
 

@@ -135,6 +135,11 @@ Procedure:
 6. Build and verify: `npm run fetch:soundfonts` (add `--server` to also fetch server fonts), then `npm run build`. Check `public/static/soundfont-manifest.json` lists the font and `dist/static/` holds the bundled bytes. Then in the built app: switch to the new font in the SoundFont menu picker, play a MIDI (live path), and run one offline render (engine path) — both must sound. For compose, after deploying, `curl` the live manifest and the font URL.
 7. Commit only `catalog.json`, the license text, and (if the rationale is non-obvious) a note in `soundfonts/README.md`. The generated manifest is a build artifact; never hand-edit it.
 
+Exceptions and notes:
+
+- **Vendored uploads** — a user-provided font with no upstream URL is committed under `soundfonts/vendor/` and its catalog entry carries `"vendored": "soundfonts/vendor/<file>"` instead of `url`/`sourceRef` (fetch copies it sha-verified, like a download). Single-preset specialty banks (e.g. one guitar, one drum kit) are allowed despite the GM-layout criterion — they exist so a render can deliberately use that one sound; record what the binary itself states (INFO copyright/engineer) as the license summary.
+- **Descriptions come from the binary** — `gbk_list_soundfonts` reads each installed font's SF2 INFO chunk + preset directory (`readSf2Binary` in `server/src/mcp/soundfonts.ts`) and derives its description from them; the catalog `description` is only the fallback for fonts not installed, plus the picker blurb. Keep catalog descriptions short and factual regardless.
+
 ## Project-Specific Caveats
 
 - [`vite.config.js`](/Users/yishengj/synth/vite.config.js) currently sets `base: "/gbk/"`. That is correct for GitHub Pages deployment but can matter if prompts involve asset URL handling.

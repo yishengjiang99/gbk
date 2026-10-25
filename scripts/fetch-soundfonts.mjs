@@ -76,6 +76,16 @@ for (const font of catalog.fonts) {
     skipped++;
     continue;
   }
+  // Vendored fonts (user-provided uploads) are committed in-repo and have no
+  // upstream URL: copy the vendored binary, sha-verified like a download.
+  if (font.vendored) {
+    const vendoredPath = join(root, font.vendored);
+    if (!(await shaOk(vendoredPath, font.sha256))) throw new Error(`vendored SoundFont missing or sha256 mismatch: ${vendoredPath}`);
+    copyFileSync(vendoredPath, dest);
+    console.log(`seed   ${font.file} (from vendored ${font.vendored}, sha256 ok)`);
+    skipped++;
+    continue;
+  }
   const tmp = `${dest}.part`;
   rmSync(tmp, { force: true });
   console.log(`fetch  ${font.file} (${(font.bytes / 1e6).toFixed(1)} MB) <- ${font.url}`);

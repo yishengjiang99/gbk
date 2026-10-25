@@ -5,8 +5,9 @@ gbk plays everything through its own SoundFont 2 synth (`sf2-parser.ts` /
 layout. SF3 files (Ogg-compressed samples) are *not* supported by the parser and
 were excluded during selection.
 
-Fonts are **not committed as binaries** (except the historic default, below).
-They follow the repo's OMR-model pattern: `catalog.json` pins each font's
+Fonts are **not committed as binaries** (except the historic default, below,
+and small user-provided uploads under `vendor/`). They follow the repo's
+OMR-model pattern: `catalog.json` pins each font's
 source repo, commit and SHA-256; `scripts/fetch-soundfonts.mjs` downloads and
 verifies them into this directory (gitignored `*.sf2`) at build time, and
 `scripts/prepare-soundfonts.mjs` (part of `npm run build`) stages the bundled
@@ -22,6 +23,8 @@ which the app fetches at runtime to populate the SoundFont picker
 | GeneralUser GS v2.0.2 | 32.3 MB | bundled `static/` | Default. GM/GS, 261 presets + 13 drum kits. |
 | TimGM6mb | 6.0 MB | bundled `static/` | Light GM bank — ~5× faster to load. |
 | FluidR3 GM | 148.4 MB | server `/soundfonts/` | HQ GM bank. compose.grepawk.com only (see below). |
+| Nostalgic Rock Guitar | 3.3 MB | bundled `static/` | Specialty: single rock-guitar preset (bank 0, program 0). Vendored upload. |
+| SMS Drum Kit | 0.07 MB | bundled `static/` | Specialty: single GM drum kit (bank 128, program 0). Vendored upload. |
 
 Sources, pinned commits, SHA-256s and license summaries: `catalog.json`.
 Full license texts: `licenses/`. Selection notes:
@@ -36,6 +39,13 @@ Full license texts: `licenses/`. Selection notes:
 - **FluidR3 GM** — the Debian `fluid-soundfont` bank (Frank Wen, MIT-style
   license), fetched from the Git LFS blob in https://github.com/ikskuh/zyclone
   @ `ae63975f…`; its LFS oid is the pinned sha256.
+- **Nostalgic Rock Guitar / SMS Drum Kit** — user-provided uploads (2026-10-25),
+  committed under `vendor/` (catalog field `vendored`, no upstream URL);
+  `fetch-soundfonts.mjs` copies them into place sha-verified, like a download.
+  Guitar: embedded ICOP "Libre", engineer credit Yingchun Soul / FreePats.
+  Drums: no license stated in the binary; engineer credit SylvataDaSylveon.
+  Both are single-preset specialty banks, not GM banks — the MCP listing
+  (`gbk_list_soundfonts`) describes them from their own SF2 INFO/preset data.
 
 Evaluated and not used: MuseScore_General.sf2 (MIT but 208 MB), FatBoy /
 Arachno / the wrightflyer/SF2_SoundFonts collection (no clear redistribution
