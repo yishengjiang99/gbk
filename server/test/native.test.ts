@@ -63,7 +63,7 @@ test("native: google exchange, bearer, refresh rotation + reuse detection, web-c
     assert.deepEqual(sent.map((x) => [x.token, x.payload.kind]), [[tok, "comment"], [tok, "fork"]]);
     // AASA
     const aasa = await (await fetch(`${s.base}/.well-known/apple-app-site-association`)).json();
-    assert.deepEqual(aasa.applinks.details[0].components.map((c: Record<string, string>) => c["/"]), ["/s/*", "/u/*", "/t/*"]);
+    assert.deepEqual(aasa.applinks.details[0].components.map((c: Record<string, string>) => c["/"]), ["/s/*", "/u/*", "/t/*", "/feed", "/explore"]);
     // delete account: songs gone, tokens dead
     assert.equal((await fetch(`${s.base}/api/me`, { method: "DELETE", headers: A2 })).status, 200);
     assert.equal((await fetch(`${s.base}/api/songs/${song.slug}`)).status, 404);

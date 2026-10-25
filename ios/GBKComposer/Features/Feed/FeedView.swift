@@ -41,6 +41,16 @@ final class FeedViewModel: ObservableObject {
         }
     }
 
+    /// Deep link: put `slug` at the top of the feed (fetching `GET /api/songs/:slug` when it isn't loaded yet).
+    /// Returns false when the song can't be found or has no audio.
+    func focus(slug: String, fetch: (String) async throws -> Song = { try await APIClient.shared.send(Endpoints.song($0), as: Song.self) }) async -> Bool {
+        if items.contains(where: { $0.slug == slug }) { return true }
+        guard let song = try? await fetch(slug), song.mp3URL != nil else { return false }
+        items.removeAll { $0.slug == song.slug }
+        items.insert(song, at: 0)
+        return true
+    }
+
     func update(_ song: Song) {
         if let i = items.firstIndex(where: { $0.slug == song.slug }) { items[i] = song }
     }
@@ -74,6 +84,8 @@ struct FeedView: View {
                                          onTag: { model.query.tag = $0; tagText = $0 })
                             .frame(width: geo.size.width, height: geo.size.height)
                             .id(song.slug)
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("feedCard-\(song.slug)")
                             .task { await model.loadMoreIfNeeded(current: song) }
                         }
                     }
@@ -103,6 +115,7 @@ struct FeedView: View {
         .task {
             player.onStart = { slug in Task { _ = try? await APIClient.shared.send(Endpoints.play(slug), as: [String: Int].self) } }
             if model.items.isEmpty { await model.reload() }
+            if let link = router.pending { await open(link) } // cold start: the link arrived before this view
         }
         .onChange(of: visibleSlug) { _, slug in playVisible(slug) }
         .onChange(of: model.items.map(\.slug)) { _, slugs in
@@ -111,7 +124,7 @@ struct FeedView: View {
             }
         }
         .onChange(of: router.pending) { _, link in
-            if case .tag(let name)? = link { tagText = name; model.query.tag = name; router.pending = nil }
+            if let link { Task { await open(link) } }
         }
         .onChange(of: scenePhase) { _, phase in
             // Decided: the feed pauses when the app leaves the foreground (matches web pausing when the tab is hidden).
@@ -151,6 +164,19 @@ struct FeedView: View {
         }
         .scrollIndicators(.hidden)
         .foregroundStyle(Theme.accent)
+    }
+
+    private func open(_ link: DeepLink) async {
+        switch link {
+        case .tag(let name): router.pending = nil; tagText = name; model.query.tag = name
+        case .feed: router.pending = nil
+        case .share(let slug):
+            router.pending = nil
+            guard await model.focus(slug: slug) else { return }
+            visibleSlug = slug
+            playVisible(slug)
+        case .user, .inbox: break
+        }
     }
 
     /// Only the visible, active card animates.

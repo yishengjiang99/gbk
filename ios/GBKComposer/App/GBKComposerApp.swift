@@ -20,6 +20,7 @@ struct GBKComposerApp: App {
                 .task { if !Self.isUnitTestHost { await auth.ensureAnonymousSession() } }
                 .onOpenURL { router.handle($0) }
                 .task { PurchaseStore.shared.start() }
+                .onAppear { router.handleLaunchArguments() }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL { router.handle(url) }
                 }

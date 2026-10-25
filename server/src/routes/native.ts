@@ -159,7 +159,7 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
   app.get("/.well-known/apple-app-site-association", async (_req, reply) => {
     if (!cfg.native.iosAppIds.length) return reply.code(404).send({ code: "NOT_FOUND", message: "no iOS app configured" });
     reply.header("content-type", "application/json").header("cache-control", "public, max-age=3600");
-    return { applinks: { details: [{ appIDs: cfg.native.iosAppIds, components: [{ "/": "/s/*" }, { "/": "/u/*" }, { "/": "/t/*" }] }] }, webcredentials: { apps: cfg.native.iosAppIds } };
+    return { applinks: { details: [{ appIDs: cfg.native.iosAppIds, components: [{ "/": "/s/*" }, { "/": "/u/*" }, { "/": "/t/*" }, { "/": "/feed" }, { "/": "/explore" }] }] }, webcredentials: { apps: cfg.native.iosAppIds } };
   });
   return { pair };
 }
