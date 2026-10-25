@@ -120,3 +120,20 @@ test("auto-save is PRIVATE: invisible to others/anonymous until the owner publis
     assert.equal((await (await fetch(`${s.base}/api/shares/${a1.slug}`)).json()).forks, 0, "private forks are not counted publicly");
   } finally { await s.app.close(); }
 });
+
+test("wav meta whitelist: unknown keys dropped, bytes is server-computed; metadata reads skip blobs", async () => {
+  const { pickWavMeta } = await import("../src/routes/shares.ts");
+  assert.deepEqual(pickWavMeta({ durationSeconds: 3, sampleRate: 48000, channels: 2, bytes: 1, evil: "<x>", sha256: "nope", stale: true }), { durationSeconds: 3, sampleRate: 48000, channels: 2, stale: true });
+  assert.deepEqual(pickWavMeta([1]), {}); assert.deepEqual(pickWavMeta({ durationSeconds: Infinity }), {});
+  const s = await startServer(new ScriptModel([() => reply("x")]));
+  try {
+    const alice = await login(s.base, "code-a"); const c = await song();
+    const sh = await (await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: "M", project: c.project, public: true }) })).json();
+    const wav = new Uint8Array(64); wav.set([..."RIFF"].map((x) => x.charCodeAt(0)), 0); wav.set([..."WAVE"].map((x) => x.charCodeAt(0)), 8); wav[63] = 7;
+    assert.equal((await fetch(`${s.base}/api/shares/${sh.slug}/media/wav`, { method: "PUT", headers: { ...H(alice), "content-type": "audio/wav", "x-gbk-wav-meta": JSON.stringify({ bytes: 999999, sampleRate: 44100, injected: 1 }) }, body: wav })).status, 200);
+    const pub = await (await fetch(`${s.base}/api/shares/${sh.slug}`)).json();
+    assert.deepEqual(pub.wav, { sampleRate: 44100, bytes: 64 }); assert.equal(pub.hasWav, true); assert.equal(pub.hasMp3, false);
+    const got = new Uint8Array(await (await fetch(`${s.base}/api/shares/${sh.slug}/media/wav`)).arrayBuffer());
+    assert.equal(got.length, 64); assert.equal(got[63], 7);
+  } finally { await s.app.close(); }
+});

@@ -17,6 +17,11 @@ export const nameSlug = (title: string, id: string) => { const k = kebabTitle(ti
 /** Short id from any slug form: a bare 8-char id or the trailing "-xxxxxxxx" of a name slug. */
 export const shortIdOf = (s: string) => { const m = /(?:^|-)([a-z0-9]{8})$/.exec(String(s)); return m ? m[1] : null; };
 
+const META_COLS = "id, slug, short_id, owner, title, project_json, parent_id, created_at, public, wav_meta, project_id, updated_at, midi IS NOT NULL AS hm, wav IS NOT NULL AS hw, mp3 IS NOT NULL AS h3";
+type MetaRow = Omit<ShareRow, "midi" | "wav" | "mp3"> & { hm: number; hw: number; h3: number };
+const MARK = new Uint8Array(1);
+const toRow = ({ hm, hw, h3, ...r }: MetaRow): ShareRow => ({ ...r, midi: hm ? MARK : null, wav: hw ? MARK : null, mp3: h3 ? MARK : null });
+
 export class ShareStore {
   private db: DatabaseSync;
   constructor(file: string) {
@@ -69,14 +74,19 @@ export class ShareStore {
   /** Renaming (or publishing with a title) also moves the canonical slug; the old one keeps resolving via its short id. */
   setTitle(slugv: string, title: string) { const id = this.idOf(slugv); this.db.prepare("UPDATE shares SET title = ?, updated_at = ? WHERE id = ?").run(title, Date.now(), id); this.reslug(id); }
   /** Resolve any slug form: exact canonical slug, bare short id (legacy links), or any "<words>-<shortid>" (stale names). */
+  /** Metadata only: media columns come back as 1-byte presence markers, never the BLOBs (use media() for bytes). */
   bySlug(s: string): ShareRow | null {
     const v = String(s).slice(0, 128);
-    const exact = this.db.prepare("SELECT * FROM shares WHERE slug = ?").get(v) as unknown as ShareRow | undefined; if (exact) return exact;
+    const exact = this.db.prepare(`SELECT ${META_COLS} FROM shares WHERE slug = ?`).get(v) as unknown as MetaRow | undefined; if (exact) return toRow(exact);
     const sid = shortIdOf(v); if (!sid) return null;
-    return (this.db.prepare("SELECT * FROM shares WHERE short_id = ?").get(sid) as unknown as ShareRow) ?? null;
+    const r = this.db.prepare(`SELECT ${META_COLS} FROM shares WHERE short_id = ?`).get(sid) as unknown as MetaRow | undefined; return r ? toRow(r) : null;
   }
   private idOf(s: string) { return this.bySlug(s)?.id ?? "\u0000"; }
-  byId(id: string): ShareRow | null { return (this.db.prepare("SELECT * FROM shares WHERE id = ?").get(id) as unknown as ShareRow) ?? null; }
+  byId(id: string): ShareRow | null { const r = this.db.prepare(`SELECT ${META_COLS} FROM shares WHERE id = ?`).get(id) as unknown as MetaRow | undefined; return r ? toRow(r) : null; }
+  /** The one place media BLOBs are read: a single column for one row. */
+  media(id: string, kind: "midi" | "wav" | "mp3"): Uint8Array | null {
+    const r = this.db.prepare(`SELECT ${kind} AS b FROM shares WHERE id = ?`).get(id) as { b: Uint8Array | null } | undefined; return r?.b ?? null;
+  }
   setMedia(slugv: string, kind: "midi" | "wav" | "mp3", bytes: Uint8Array, meta?: unknown) {
     if (kind === "mp3") this.db.prepare("UPDATE shares SET mp3 = ? WHERE id = ?").run(bytes, this.idOf(slugv));
     else if (kind === "wav") this.db.prepare("UPDATE shares SET wav = ?, wav_meta = ? WHERE id = ?").run(bytes, meta ? JSON.stringify(meta).slice(0, 4000) : null, this.idOf(slugv));

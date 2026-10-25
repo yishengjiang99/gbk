@@ -49,7 +49,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     else return reply.code(404).send({ code: "NOT_FOUND", message: "kind must be wav, mp3 or midi" });
     const metaHdr = req.headers["x-gbk-wav-meta"];
     let meta: unknown = null; if (typeof metaHdr === "string") { try { meta = JSON.parse(metaHdr.slice(0, 2000)); } catch { meta = null; } }
-    store.setMedia(slug, kind, new Uint8Array(buf), kind === "wav" ? { bytes: buf.length, ...(meta && typeof meta === "object" ? meta : {}) } : undefined);
+    store.setMedia(row.slug, kind, new Uint8Array(buf), kind === "wav" ? { ...pickWavMeta(meta), bytes: buf.length } : undefined);
     return { ok: true, bytes: buf.length };
   });
 
@@ -82,7 +82,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
   app.get("/api/shares/:slug/media/:kind", async (req, reply) => {
     const { slug, kind } = req.params as { slug: string; kind: string };
     const row = visible(req, slug);
-    const bytes = row ? (kind === "wav" ? row.wav : kind === "midi" ? row.midi : kind === "mp3" ? row.mp3 : null) : null;
+    const bytes = row && (kind === "wav" || kind === "midi" || kind === "mp3") ? store.media(row.id, kind) : null;
     if (!row || !bytes) return reply.code(404).send({ code: "NOT_FOUND", message: "no such media" });
     reply.header("content-type", kind === "wav" ? "audio/wav" : kind === "mp3" ? "audio/mpeg" : "audio/midi").header("x-content-type-options", "nosniff").header("content-disposition", `inline; filename="${row.slug}.${kind === "midi" ? "mid" : kind}"`).header("cache-control", "public, max-age=300");
     return reply.send(Buffer.from(bytes));
@@ -149,4 +149,15 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (!row || row.owner !== s.user) return reply.code(404).send({ code: "NOT_FOUND", message: "no such share of yours" });
     store.delete(row.slug); req.log.info({ evt: "share_delete", user: s.user, slug: row.slug }); return { ok: true, deleted: row.slug };
   });
+}
+
+/** Only the WAV metadata keys clients actually send (share-client/autosave); `bytes` is always server-computed. */
+export function pickWavMeta(m: unknown): Record<string, unknown> {
+  if (!m || typeof m !== "object" || Array.isArray(m)) return {};
+  const o = m as Record<string, unknown>; const out: Record<string, unknown> = {};
+  const num = (k: string, lo: number, hi: number) => { const v = o[k]; if (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi) out[k] = v; };
+  num("durationSeconds", 0, 86_400); num("sampleRate", 1, 768_000); num("channels", 1, 64); num("revision", 0, Number.MAX_SAFE_INTEGER);
+  if (typeof o.sha256 === "string" && /^[0-9a-f]{64}$/i.test(o.sha256)) out.sha256 = o.sha256;
+  if (typeof o.stale === "boolean") out.stale = o.stale;
+  return out;
 }
