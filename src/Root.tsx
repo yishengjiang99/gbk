@@ -35,7 +35,8 @@ export default function Root() {
     sessionStorage.setItem("gbk.focusComposer", "1"); if (prompt) sessionStorage.setItem("gbk.composerDraft", prompt);
     navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50);
   }, []);
-  const explore = composer === true && (route.view === "feed" || route.view === "profile" || route.view === "inbox" || route.view === "admin");
+  // Social routes render the Feed from the first paint: only a confirmed "no Composer server" (static Pages build) falls back to the studio.
+  const explore = composer !== false && (route.view === "feed" || route.view === "profile" || route.view === "inbox" || route.view === "admin");
   useEffect(() => { document.documentElement.classList.toggle("studio-fit", !explore); return () => document.documentElement.classList.remove("studio-fit"); }, [explore]);
   return (
     <>

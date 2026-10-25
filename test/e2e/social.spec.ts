@@ -155,3 +155,20 @@ test("social feed crossfade: 400ms equal-power fade on settle, one fading voice 
     for (const s of slugs) await owner.request.delete(`/api/shares/${s}`, { headers: oh }); await owner.close();
   }
 });
+
+test("first paint on / is the Feed shell, never the studio; /studio still loads directly", async ({ page }) => {
+  // Hold /api/config so the "is the Composer server here" probe is still pending at first paint.
+  let release!: () => void; const held = new Promise<void>((r) => { release = r; });
+  await page.route("**/api/config", async (route) => { await held; await route.continue(); });
+  await page.addInitScript(() => { (window as unknown as { __studioSeen: boolean }).__studioSeen = false;
+    new MutationObserver(() => { const ws = document.querySelector("[data-testid=workstation], .ws-root, [data-testid=composer-input]"); if (ws && (ws as HTMLElement).offsetParent !== null) (window as unknown as { __studioSeen: boolean }).__studioSeen = true; }).observe(document, { subtree: true, childList: true, attributes: true }); });
+  await page.goto("/");
+  await expect(page.getByTestId("social-app")).toBeVisible();
+  release();
+  await expect(page.getByTestId("feed")).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __studioSeen: boolean }).__studioSeen)).toBe(false);
+  await page.unroute("**/api/config");
+  await page.goto("/studio");
+  await expect(page.getByTestId("social-app")).toHaveCount(0);
+  await expect(page.getByTestId("composer-input").or(page.getByTestId("tab-composer")).first()).toBeVisible();
+});
