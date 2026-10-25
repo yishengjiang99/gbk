@@ -108,3 +108,34 @@ test("ranking v2 / phase 4: candidate sources with quotas; a fresh 0-score song 
   assert.equal(QUOTAS.fresh, Infinity); assert.deepEqual([...SOURCES], ["coeng", "affinity", "artists", "trending", "fresh", "cold"]);
   assert.ok(rk.rank({ actor: null, session: null, seed: 1 }).sources.size > 0);
 });
+
+test("ranking v2 / phase 5: no repeats within a session over 5 pages, no dup/drop; label runs <= 3 on any label; near-dups 1 per page; cold slot in the first 8", () => {
+  const fx = fixture(); const r = rand(11); const L = ["lofi", "jazz", "classical", "pop", "ambient"];
+  const ids = Array.from({ length: 120 }, (_, i) => fx.song({ owner: `o${i % 12}`, title: `T${i}`, labels: [L[i % 5], L[(i + 1) % 5]], tags: [`t${i % 7}`], score: r() * 3, ageH: 24 * 5 + i }));
+  // near-duplicates: same owner + same title, and same owner + same remix source
+  const d1 = fx.song({ owner: "dup", title: "Same", score: 9 }), d2 = fx.song({ owner: "dup", title: "same ", score: 9 }), d3 = fx.song({ owner: "dup", title: "X", parent: ids[0], score: 9 }), d4 = fx.song({ owner: "dup", title: "Y", parent: ids[0], score: 9 });
+  const newSong = fx.song({ owner: "fresh", title: "Brand new", labels: ["jazz"], score: 0, ageH: 2 });
+  const actor = "inst:viewer-0001", session = "sess-five-pages";
+  for (let k = 0; k < 30; k++) fx.imp({ actor, song: ids[Math.floor(r() * ids.length)], at: fx.now() - (k + 1) * 3_600_000 * 24, good: r() < 0.5, session: "old-session" });
+  const rk = new Ranker(fx.db, fx.now); const seed = 42; const t0 = fx.now();
+  const first = rk.rank({ actor, session, seed, asOf: t0 }).ids;
+  // cold slot: the new song is within the first 8 for a warm and a cold actor
+  assert.ok(first.slice(0, 8).includes(newSong), "cold slot in first 8 (warm)");
+  assert.ok(rk.rank({ actor: null, session: null, seed: 3 }).ids.slice(0, 8).includes(newSong), "cold slot in first 8 (cold)");
+  // 5 pages of 10; user watches page k before fetching k+1 (session impressions after t0 must not shift pages)
+  const shown: string[] = [];
+  for (let p = 0; p < 5; p++) {
+    fx.set(t0 + (p + 1) * 60_000);
+    const page = rk.rank({ actor, session, seed, asOf: t0 }).ids.slice(p * 10, p * 10 + 10); shown.push(...page);
+    for (const id of page) fx.imp({ actor, session, song: id, at: fx.now(), good: true });
+    const nd = page.filter((id) => [d1, d2].includes(id)).length, np = page.filter((id) => [d3, d4].includes(id)).length; assert.ok(nd <= 1 && np <= 1, "near-dups at most 1 per page");
+  }
+  assert.equal(new Set(shown).size, shown.length, "no dup across pages"); assert.deepEqual(shown, first.slice(0, 50), "no drop: pages = one list");
+  // new session as of later: already-seen songs of this session are excluded
+  const later = rk.rank({ actor, session, seed: 7, asOf: fx.now() + 1 }).ids; assert.ok(!later.some((id) => shown.includes(id)), "no repeats within the session");
+  assert.ok(rk.rank({ actor, session: "other", seed: 7, asOf: fx.now() + 1 }).ids.some((id) => shown.includes(id)), "other sessions unaffected");
+  // label runs: never 4 consecutive sharing any label; artist runs <= 2
+  const lab = new Map(ids.map((id, i) => [id, [L[i % 5], L[(i + 1) % 5]]]));
+  for (let k = 0; k < 6; k++) { const out = rk.rank({ actor: k % 2 ? actor : null, session: null, seed: k }).ids; const lbs = out.map((id) => lab.get(id) ?? []);
+    for (let i = 3; i < out.length; i++) for (const l of lbs[i]) assert.ok(![1, 2, 3].every((j) => lbs[i - j].includes(l)), `label run of 4 on ${l} at ${i}`); }
+});

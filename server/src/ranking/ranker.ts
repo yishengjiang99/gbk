@@ -26,6 +26,8 @@ export const SOURCES = ["coeng", "affinity", "artists", "trending", "fresh", "co
 export type Source = (typeof SOURCES)[number];
 /** Per-source candidate quotas (fresh: everything < FRESH_WINDOW_H, uncapped). */
 export const QUOTAS: Record<Source, number> = { coeng: 200, affinity: 250, artists: 150, trending: 300, fresh: Infinity, cold: 400 };
+/** Cold start: one slot per COLD_BLOCK for a song < 48 h old with < COLD_K impressions. Near-dups: >= NEAR_DUP_GAP apart (max page size), so at most 1 per page. */
+export const COLD_K = 50, COLD_BLOCK = 8, NEAR_DUP_GAP = 50;
 export const POOL_MAX = 1000, CATALOG_MAX = 5000, FRESH_WINDOW_H = 48;
 interface Ctx { t: number; pref: Map<string, number>; sess: Map<string, number>; seen: Map<string, number>; co: Map<string, number>; artists: Map<string, number>; history: number; maxScore: number; maxCo: number }
 const keysOf = (s: Song) => [...s.tags.map((x) => `t:${x}`), ...s.labels.map((x) => `l:${x}`), `a:${s.owner}`, ...s.fam.map((x) => `f:${x}`)];
@@ -132,25 +134,50 @@ export class Ranker {
     return lin(x, w);
   }
 
-  /** Full ranked id list for an actor; deterministic for a given seed (pages stay consistent). `sources` is for debugging only (not logged). */
-  rank(o: { actor: string | null; session: string | null; seed: number; viewer?: string | null }): { ids: string[]; owners: Map<string, string>; version: string; cold: boolean; sources: Map<string, Source[]> } {
-    const songs = this.songs(); const c = this.context(o.actor, o.session, this.now(), songs); const r = rng(o.seed); const cold = c.history === 0;
+  /** Full ranked id list for an actor; deterministic for (seed, asOf) so pages never duplicate or drop songs: the
+   *  catalog, features and the session's already-seen set are all taken as of `asOf` (the first page's time).
+   *  `sources` is for debugging only (not logged). */
+  rank(o: { actor: string | null; session: string | null; seed: number; viewer?: string | null; asOf?: number }): { ids: string[]; owners: Map<string, string>; version: string; cold: boolean; sources: Map<string, Source[]> } {
+    const t = o.asOf ?? this.now(); const songs = this.songs().filter((s) => s.published_at <= t);
+    const c = this.context(o.actor, o.session, t, songs); const r = rng(o.seed); const cold = c.history === 0;
     const { pool, sources } = this.candidates(c, songs);
+    // no repeats within a session (iOS passes ?session=; web does not, so this is a no-op there)
+    if (o.actor && o.session) for (const x of this.db.prepare("SELECT DISTINCT share_id FROM impressions WHERE actor = ? AND session = ? AND created_at < ?").all(o.actor, o.session, t) as { share_id: string }[]) pool.delete(x.share_id);
     const scored = songs.filter((s) => pool.has(s.id)).map((s) => ({ s, v: this.value(this.feat(c, s), s.dur) + (s.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
     scored.sort((a, b) => b.v - a.v);
-    // exploration: ~EPSILON of the slots go to random lower-ranked (often new / untried) songs
-    const out: typeof scored = []; const rest = [...scored];
-    while (rest.length) { const explore = r() < EPSILON && rest.length > 3; const i = explore ? 1 + Math.floor(r() * (rest.length - 1)) : 0; out.push(rest.splice(i, 1)[0]); }
-    // diversity re-rank: greedy, never > MAX_AUTHOR_RUN same artist or > MAX_LABEL_RUN same first label in a row
-    const res: Song[] = []; const left = out.map((x) => x.s);
+    // cold-start candidates: < FRESH_WINDOW_H old with < COLD_K impressions in total (as of t)
+    const young = scored.filter((x) => t - x.s.published_at < FRESH_WINDOW_H * 3_600_000).map((x) => x.s.id);
+    const imps = new Map<string, number>(); if (young.length) for (const x of this.db.prepare(`SELECT share_id, COUNT(*) AS n FROM impressions WHERE share_id IN (${young.map(() => "?").join(",")}) AND created_at < ? GROUP BY share_id`).all(...young, t) as { share_id: string; n: number }[]) imps.set(x.share_id, Number(x.n));
+    const isCold = (s: Song) => t - s.published_at < FRESH_WINDOW_H * 3_600_000 && (imps.get(s.id) ?? 0) < COLD_K;
+    // exploration: ~EPSILON of the slots go to random lower-ranked (often new / untried) songs. In every block of
+    // COLD_BLOCK slots one slot goes to a cold-start song (if any is left); it is taken out of the epsilon budget.
+    const out: Song[] = []; const rest = scored.map((x) => x.s); let blockCold = false, debt = 0;
+    while (rest.length) {
+      const slot = out.length; if (slot % COLD_BLOCK === 0) blockCold = false;
+      let explore = r() < EPSILON && rest.length > 3; if (explore && debt > 0) { debt--; explore = false; }
+      const ci = blockCold ? -1 : rest.findIndex(isCold); let i: number;
+      if (ci === 0 || (ci > 0 && explore)) i = ci; // the cold slot uses this exploration draw
+      else if (ci > 0 && slot % COLD_BLOCK === COLD_BLOCK - 1) { i = ci; debt++; } // forced at the block end, repaid from the next draw
+      else i = explore ? 1 + Math.floor(r() * (rest.length - 1)) : 0;
+      const s = rest.splice(i, 1)[0]; if (isCold(s)) blockCold = true; out.push(s);
+    }
+    // diversity re-rank (greedy): never > MAX_AUTHOR_RUN in a row by one artist, never > MAX_LABEL_RUN in a row sharing
+    // any label, and near-duplicates (same owner + same remix source or same title) at least NEAR_DUP_GAP apart.
+    const res: Song[] = []; const left = out;
+    const near = (a: Song, b: Song) => a.owner === b.owner && ((!!a.parent && a.parent === b.parent) || a.title.trim().toLowerCase() === b.title.trim().toLowerCase());
     const ok = (s: Song) => { const n = res.length; const a = res.slice(Math.max(0, n - MAX_AUTHOR_RUN)); const l = res.slice(Math.max(0, n - MAX_LABEL_RUN));
-      return !(a.length === MAX_AUTHOR_RUN && a.every((x) => x.owner === s.owner)) && !(s.labels[0] && l.length === MAX_LABEL_RUN && l.every((x) => x.labels[0] === s.labels[0])); };
+      if (a.length === MAX_AUTHOR_RUN && a.every((x) => x.owner === s.owner)) return false;
+      if (l.length === MAX_LABEL_RUN && s.labels.some((lb) => l.every((x) => x.labels.includes(lb)))) return false;
+      return !res.slice(Math.max(0, n - NEAR_DUP_GAP + 1)).some((x) => near(x, s)); };
+    const okLoose = (s: Song) => { const n = res.length; const a = res.slice(Math.max(0, n - MAX_AUTHOR_RUN)); const l = res.slice(Math.max(0, n - MAX_LABEL_RUN));
+      return !(a.length === MAX_AUTHOR_RUN && a.every((x) => x.owner === s.owner)) && !(l.length === MAX_LABEL_RUN && s.labels.some((lb) => l.every((x) => x.labels.includes(lb)))); };
     while (left.length) {
       // Feasibility: if one artist dominates what is left, place them now (when allowed) so the tail is not forced into a run > MAX_AUTHOR_RUN.
       const cnt = new Map<string, number>(); for (const x of left) cnt.set(x.owner, (cnt.get(x.owner) ?? 0) + 1);
-      const [top, c] = [...cnt.entries()].sort((x, y) => y[1] - x[1])[0]; const others = left.length - c;
-      let i = c > MAX_AUTHOR_RUN * others ? left.findIndex((x) => x.owner === top && ok(x)) : -1;
+      const [top, cn] = [...cnt.entries()].sort((x, y) => y[1] - x[1])[0]; const others = left.length - cn;
+      let i = cn > MAX_AUTHOR_RUN * others ? left.findIndex((x) => x.owner === top && ok(x)) : -1;
       if (i === -1) i = left.findIndex(ok);
+      if (i === -1) i = left.findIndex(okLoose); // near-dup gap is the first rule to give when nothing else fits
       res.push(left.splice(i === -1 ? 0 : i, 1)[0]);
     }
     return { ids: res.map((s) => s.id), owners: new Map(res.map((s) => [s.id, s.owner])), version: this.version, cold, sources };

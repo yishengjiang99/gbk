@@ -78,14 +78,16 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     const t = tag ?? q.tag; if (t !== undefined && !TAG_RE.test(t)) return reply.code(400).send({ code: "INVALID_TAG", message: "bad tag" });
     // Personalized For you (no filters): ranked list + offset cursor carrying the seed, so pages stay consistent.
     if (sort === "for_you" && !label && t === undefined && ranker) {
-      const v = viewerOf(req); const n = lim(q.limit); const c = decCursor<{ r?: number; p?: number; sd?: number }>(q.cursor);
+      const v = viewerOf(req); const n = lim(q.limit); const c = decCursor<{ r?: number; p?: number; sd?: number; t?: number }>(q.cursor);
       const ck = parseCookies(req.headers.cookie).gbk_gid; const inst = String(req.headers["x-gbk-install"] ?? "");
       const actor = v ?? (ck && /^[A-Za-z0-9_-]{8,64}$/.test(ck) ? `gid:${ck}` : /^[A-Za-z0-9_-]{8,64}$/.test(inst) ? `inst:${inst}` : null);
       const session = typeof (req.query as { session?: string }).session === "string" ? (req.query as { session: string }).session.slice(0, 64) : null;
       const seed = c?.r === 1 && typeof c.sd === "number" ? c.sd : Math.floor(Math.random() * 2 ** 31); const p0 = c?.r === 1 && typeof c.p === "number" ? Math.max(0, c.p) : 0;
-      const rk = ranker.rank({ actor, session, seed, viewer: v });
+      // t: the first page's time; later pages rank as of it so they never duplicate or drop songs (older cursors: now)
+      const asOf = c?.r === 1 && typeof c.t === "number" ? Math.min(Date.now(), c.t) : Date.now();
+      const rk = ranker.rank({ actor, session, seed, viewer: v, asOf });
       const page = rk.ids.slice(p0, p0 + n).map((id) => shares.byId(id)).filter((r): r is ShareRow => !!r && !!r.public);
-      return { items: page.map((r) => song(r, v)), next_cursor: p0 + n < rk.ids.length ? encCursor({ r: 1, p: p0 + n, sd: seed }) : null, model_version: rk.version };
+      return { items: page.map((r) => song(r, v)), next_cursor: p0 + n < rk.ids.length ? encCursor({ r: 1, p: p0 + n, sd: seed, t: asOf }) : null, model_version: rk.version };
     }
     const f = social.feed({ sort, label, tag: t, cursor: q.cursor, limit: lim(q.limit) }); const v = viewerOf(req);
     // Light diversity on For you: never more than 2 consecutive songs by one author, across pages too. We read a
