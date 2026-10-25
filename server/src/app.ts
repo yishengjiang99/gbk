@@ -87,7 +87,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   // Remote MCP (ChatGPT/Codex): durable compositions, OAuth, Studio-tab rendering, signed artifacts.
   const mcpStore = new McpStore(persist ? join(cfg.dataDir, "mcp.sqlite") : ":memory:", persist ? cfg.dataDir : mkdtempSync(join(tmpdir(), "gbk-mcp-")));
   // Private Studio links for account-free MCP projects carry the read capability (sent as x-gbk-project-token).
-  shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model, (token, projectId, owner) => {
+  shareRoutes(app, cfg, sessions, shares, new RateLimiter(cfg.security.sharesPerMinute), model, (token, projectId, owner) => {
     try { const g = resolveGuestCapability(cfg, mcpStore, token); return g.compositionId === projectId && g.user === owner; } catch { return false; }
   }, (id) => {
     social.markPublished(id);

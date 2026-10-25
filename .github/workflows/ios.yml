@@ -41,6 +41,10 @@ jobs:
           ')
           echo "Using simulator $UDID"
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Use the software keyboard in the simulator
+        run: |
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
       - name: Build
         run: |
           xcodebuild build -project GBKComposer.xcodeproj -scheme GBKComposer \
