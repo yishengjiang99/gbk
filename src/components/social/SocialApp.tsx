@@ -38,7 +38,7 @@ function Chips({ song, onFilter }: { song: Song; onFilter: (f: { label?: string;
 function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter, onOpen }: { idx: number; song: Song; me: Me | null; playing: boolean; viz: () => VizSource; onPlay: (s: Song) => void; onUpdate: (s: Song) => void; onSheet: (s: Sheet) => void; onFilter: (f: { label?: string; tag?: string }) => void; onOpen: (slug: string, fork: boolean) => void }) {
   return (
     <article className="so-card" data-testid="feed-card" data-slug={song.slug} data-idx={idx} data-playing={playing ? "1" : "0"}>
-      <div className="so-rollwrap" onClick={() => onPlay(song)}>{song.preview ? <LiveRoll p={song.preview} playing={playing} source={viz} /> : <div className="so-noroll" />}<span className="so-playbadge" data-testid="card-play">{playing ? "❚❚" : "▶"}</span></div>
+      <div className="so-rollwrap" onClick={() => onPlay(song)}>{song.preview ? <LiveRoll p={song.preview} playing={playing} source={viz} /> : <div className="so-noroll" />}<button type="button" className="so-playbadge" data-testid="card-play" aria-label={playing ? "Pause" : "Play"} aria-pressed={playing} onClick={(e) => { e.stopPropagation(); onPlay(song); }}><span aria-hidden="true">{playing ? "❚❚" : "▶"}</span></button></div>
       <div className="so-side">
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
         <button aria-label="Open in Studio" data-testid="card-open" onClick={() => { markAction(song.slug, "open_studio"); onOpen(song.slug, false); }}>✎<small>open</small></button>

@@ -365,3 +365,18 @@ test("social studio iOS hum bridge: gbkNative hum shows the prompt-bar button, g
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("hum-bridge.png") });
 });
+
+test("social feed play button is accessible: aria-label Play/Pause + aria-pressed", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin; const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const title = `A11y ${test.info().project.name} ${Date.now() % 100000}`; const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title, project, public: true } })).json();
+  expect((await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: silentWav() })).ok()).toBeTruthy();
+  try {
+  await page.goto("/feed?sort=new");
+  const b = page.getByTestId("feed-card").filter({ hasText: title }).getByTestId("card-play"); await expect(b).toBeVisible();
+  await expect(b).toHaveAttribute("aria-label", /^(Play|Pause)$/); await expect(b).toHaveAttribute("aria-pressed", /^(true|false)$/);
+  expect(await b.evaluate((e) => e.tagName)).toBe("BUTTON");
+  const was = await b.getAttribute("aria-pressed"); await b.click();
+  await expect(b).toHaveAttribute("aria-pressed", was === "true" ? "false" : "true");
+  await expect(b).toHaveAttribute("aria-label", was === "true" ? "Play" : "Pause");
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});
