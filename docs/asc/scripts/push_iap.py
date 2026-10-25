@@ -20,7 +20,7 @@ SHOT = ROOT / "docs/asc/screenshots/iap/paywall.png"
 BASE = "https://api.appstoreconnect.apple.com"
 DRY = "--dry-run" in sys.argv; VERIFY = "--verify" in sys.argv; NOSHOT = "--no-screenshot" in sys.argv
 PERIOD = {"P1M": "ONE_MONTH", "P1Y": "ONE_YEAR"}
-REVIEW_NOTE = ("Open the Profile tab and tap 'Get Pro' (or the crown on the Create tab). No sign-in needed; "
+REVIEW_NOTE = ("Open the Profile tab and tap 'Get Pro'. No sign-in needed; "
                "guests can buy. All products unlock the same Pro limits (10x Studio agent budget, 120 renders/hour).")
 
 def catalog():

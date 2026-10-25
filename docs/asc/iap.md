@@ -19,7 +19,7 @@ to 600 s (vs 30/h, 300 s). Family Sharing off. Prices in other storefronts: ASC 
   listener started at launch, `Transaction.currentEntitlements`, Restore (`AppStore.sync()`).
 - `appAccountToken`: account id when it is a UUID (guest random-username accounts and signed-in), else a random per-install UUID
   in the Keychain. No login required to buy.
-- `Features/Store/PaywallView.swift`: sheet opened from Profile ("Get Pro"), the crown on the Create tab, and any Studio WebView link
+- `Features/Store/PaywallView.swift`: sheet opened from Profile ("Get Pro") and any Studio WebView link (nothing native floats over the WebView)
   to `/pricing`, `grepawk.com/api/compose/checkout` or `*.stripe.com` (Stripe is blocked in-app per guideline 3.1.1).
 - After each verified transaction the app POSTs the JWS (below); the transaction is finished only after the server answers.
   Until the endpoint exists, a 404 falls back to `MockIAPVerifier` (unlock from on-device StoreKit verification).

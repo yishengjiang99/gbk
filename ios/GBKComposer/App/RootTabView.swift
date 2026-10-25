@@ -16,10 +16,6 @@ struct RootTabView: View {
                 .tabItem { Label("Feed", systemImage: "play.rectangle.on.rectangle") }
                 .tag(AppTab.feed)
             StudioWebView()
-                .overlay(alignment: .topTrailing) {
-                    ProButton().buttonStyle(.borderedProminent).tint(Theme.accent).foregroundStyle(Theme.onAccent)
-                        .controlSize(.small).padding(.trailing, 12).padding(.top, 4)
-                }
                 .tabItem { Label("Create", systemImage: "plus.circle.fill") }
                 .tag(AppTab.create)
             InboxView()
