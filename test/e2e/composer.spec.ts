@@ -304,3 +304,34 @@ test("guest: New project -> + Track -> click piano roll adds a note -> Play play
   expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test("mobile composer view fits the viewport width (no horizontal scroll)", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
+  await page.goto("/studio"); await signIn(page);
+  for (const [w, h] of [[390, 844], [375, 667], [430, 932]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto("/studio");
+    await expect(page.getByTestId("workstation")).toBeVisible();
+    await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Strings", channel: 0, id: "t_str", program: 48 }], { label: "seed" }); });
+    await page.getByTestId("tab-composer").click();
+    await expect(page.getByTestId("composer-panel")).toBeVisible();
+    for (let i = 0; i < 4; i++) await page.getByRole("button", { name: "+ lane" }).click();
+    await expect(page.locator(".ws-lane").first()).toBeVisible();
+    await expect(page.getByTestId("composer-input")).toBeVisible();
+    for (const t of ["tracks", "composer", "agent", "sound", "files"]) { const b = (await page.getByTestId(`tab-${t}`).boundingBox())!; expect(b.x).toBeGreaterThanOrEqual(0); expect(b.x + b.width).toBeLessThanOrEqual(w + 0.5); }
+    const m = await page.evaluate(() => {
+      const W = innerWidth;
+      // an element "escapes" if it extends past the viewport and no ancestor (inside the viewport) clips it
+      const bad = [...document.querySelectorAll(".ws *")].filter((e) => { const r = e.getBoundingClientRect(); if (!r.width || r.right <= W + 0.5) return false;
+        for (let a = e.parentElement; a && a !== document.body; a = a.parentElement) { const o = getComputedStyle(a).overflowX; if (o !== "visible" && a.getBoundingClientRect().right <= W + 0.5) return false; } return true; })
+        .map((e) => `${e.tagName}.${e.className}`);
+      // iOS Safari auto-zooms (and stays zoomed, overflowing the width) when a focused control's font is < 16px
+      const small = [...document.querySelectorAll(".ws input, .ws select, .ws textarea")].filter((e) => (e as HTMLElement).offsetParent && parseFloat(getComputedStyle(e).fontSize) < 16).map((e) => e.getAttribute("aria-label") ?? e.tagName);
+      return { sw: document.documentElement.scrollWidth, W, bad, small };
+    });
+    if (w === 390) await page.screenshot({ path: `${SHOTS}/composer-mobile-${test.info().project.name}.png` });
+    expect(m.bad, `${w}x${h}`).toEqual([]);
+    expect(m.small, `${w}x${h} controls under 16px`).toEqual([]);
+    expect(m.sw).toBeLessThanOrEqual(m.W);
+  }
+});

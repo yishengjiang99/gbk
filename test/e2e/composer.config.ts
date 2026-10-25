@@ -21,6 +21,7 @@ export default defineConfig({
   projects: [
     { name: "chrome-no-webmcp", use: { ...devices["Desktop Chrome"], channel: process.env.PW_CHROME_CHANNEL ?? "chrome", viewport: { width: 1500, height: 950 } } },
     { name: "mobile", use: { ...devices["Pixel 7"] }, grep: /mobile/ },
+    { name: "mobile-webkit", use: { ...devices["iPhone 13"] }, grep: /mobile composer view/ },
     { name: "firefox", use: { ...devices["Desktop Firefox"] }, grep: /smoke/ },
     { name: "webkit", use: { ...devices["Desktop Safari"] }, grep: /smoke/ },
   ],

@@ -176,3 +176,32 @@ html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-
 .ws-roll-empty > * { pointer-events: auto; }
 .ws-addtrack-cta { font-size: 16px; padding: 8px 18px; min-height: 40px; }
 @media (max-width: 600px) { .ws-addtrack, .ws-addtrack-form button { min-height: 36px; } }
+/* Phone composer view: everything fits the viewport width (no horizontal page scroll). Composer mirrors FinalCut's
+   mobile chat (grepawk.com): chat fills the panel, one-row rounded pill input pinned at the bottom, 16px text
+   (no iOS zoom), 36px round send, 4px/8px gutters + safe-area inset. */
+.ws, .ws-body, .ws-main, .ws-side, .ws-tabbody, .ws-tabfill, .ws-lanes, .ws-lane, .cmp, .cmp > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.ws-lane-head { flex-wrap: wrap; min-width: 0; }
+.ws-lane-head select { min-width: 0; max-width: 100%; flex: 0 1 auto; }
+.ws-lane-head .ws-dim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-lanes > .ws-row { min-width: 0; }
+.cmp-input textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.cmp-bubble { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .ws-tabs { overflow: hidden; }
+  .ws-tabs button { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+  /* iOS Safari zooms the page in when a focused control's text is < 16px, and stays zoomed -> the view overflows. */
+  .ws input, .ws select, .ws textarea { font-size: 16px; }
+  .ws-lane-head select { max-width: 9.5rem; }
+  .ws-lane-head input[type=number] { width: 4.2em !important; }
+  .ws-lanes > .ws-row { font-size: 12px; }
+  .ws-lane-pager { margin-left: 0; }
+  .ws-tab-composer .cmp { padding: 0 8px calc(4px + env(safe-area-inset-bottom)); gap: 4px; }
+  .ws-tab-composer .cmp-messages { column-width: auto; columns: auto; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; overscroll-behavior: contain; }
+  .ws-tab-composer .cmp-starters button { font-size: 11.5px; padding: 6px 11px; border-radius: 999px; }
+  .cmp-input { align-items: flex-end; gap: 4px; padding: 3px 4px; border: 1px solid #3a4a6b; border-radius: 22px; background: #26314a; }
+  .cmp-input:focus-within { border-color: #6aa6ff; }
+  .cmp-input textarea { flex: 1 1 auto; height: 36px; min-height: 36px; max-height: 120px; padding: 7px 8px; font-size: 16px; line-height: 1.4; border: 0; background: transparent; border-radius: 18px; outline: none; }
+  .cmp-input textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cmp-input button[type=submit] { flex: none; width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 0; background: #2f6fd6; border-color: #6aa6ff; color: #fff; }
+  .cmp-input button[type=submit]::before { content: "↑"; font-size: 18px; line-height: 36px; }
+}
