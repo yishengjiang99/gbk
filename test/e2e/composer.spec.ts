@@ -11,7 +11,7 @@ const ws = (page: Page) => page.evaluate(() => { const c = (globalThis as any)._
 
 async function signIn(page: Page, code = "e2e-code") {
   // Phones open on the Tracks tab; the composer lives behind its tab there.
-  await expect(page.getByTestId("workstation").or(page.getByTestId("explore-page")).first()).toBeVisible();
+  await expect(page.getByTestId("workstation").or(page.getByTestId("social-app")).first()).toBeVisible();
   const tab = page.getByTestId("tab-composer"); if (await tab.isVisible() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
   await expect(page.getByTestId("composer-login")).toBeVisible();
   await page.getByLabel("Access code").fill(code); await page.getByRole("button", { name: "Sign in" }).click();
@@ -25,8 +25,8 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   page.on("pageerror", (e) => console.log("pageerror", e.message));
   await page.goto("/");
   expect(await page.evaluate(() => [!!(document as any).modelContext, !!(navigator as any).modelContext])).toEqual([false, false]);
-  await expect(page.getByTestId("explore-page")).toBeVisible();
-  await page.getByTestId("compose-cta").click();
+  await expect(page.getByTestId("social-app")).toBeVisible();
+  await page.getByTestId("tab-create").click();
   await expect(page).toHaveURL(/\/studio$/);
   await expect(page.getByTestId("workstation")).toBeVisible();
   await signIn(page);
@@ -103,10 +103,11 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   expect(link).toMatch(/\/s\/midnight-fugue-in-d-minor-dark-cello-[a-z0-9]{8}$/); expect(link).toContain(privSlug!.slice(-8));
   const anon = await browser.newContext(); const v2 = await anon.newPage();
   await v2.goto("/");
-  await expect(v2.getByTestId("share-card").first()).toBeVisible();
-  await expect(v2.getByTestId("share-card").first()).toContainText("Midnight Fugue in D Minor (dark cello)");
+  await v2.getByTestId("chip-new").click();
+  await expect(v2.getByTestId("feed-card").first()).toBeVisible();
+  await expect(v2.getByTestId("feed-card").first()).toContainText("Midnight Fugue in D Minor (dark cello)");
   expect(await v2.getByTestId("my-songs").count()).toBe(0); // logged out: no My songs
-  await expect(v2.getByTestId("share-card").first().getByTestId("card-audio")).toBeVisible(); // shared WAV preview
+  await expect(v2.getByTestId("feed-card").first().getByTestId("card-play")).toBeVisible(); // shared audio preview
   await v2.goto(new URL(link!).pathname);
   await expect(v2.getByTestId("readonly-banner")).toBeVisible({ timeout: 30_000 });
   const shared = await ws(v2);
@@ -115,19 +116,17 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await expect(v2.getByTestId("forked-from")).toBeVisible();
   expect((await ws(v2)).readOnly).toBeNull();
   await v2.screenshot({ path: `${SHOTS}/composer-e2e-forked.png` });
-  await page.goto("/"); await expect(page.getByTestId("share-card").first()).toBeVisible();
-  const top = page.getByTestId("top-card").first(); await expect(top).toBeVisible();
+  await page.goto("/"); await expect(page.getByTestId("feed-card").first()).toBeVisible();
+  const top = page.getByTestId("feed-card").first();
   expect(await top.getByTestId("card-pianoroll").locator("rect").count()).toBeGreaterThan(0);
-  await expect(top.getByTestId("top-link")).toHaveAttribute("href", /\/s\/[a-z0-9-]+-[a-z0-9]{8}$/);
-  await expect(page.getByTestId("launch-video")).toHaveAttribute("preload", "metadata");
   await page.screenshot({ path: `${SHOTS}/composer-e2e-explore.png` });
   await anon.close();
 });
 
 test("mobile viewport: explore + composer panel usable", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("explore-page")).toBeVisible();
-  await page.getByTestId("compose-cta").click();
+  await expect(page.getByTestId("social-app")).toBeVisible();
+  await page.getByTestId("tab-create").click();
   await signIn(page, "e2e-code-2");
   await expect(page.getByTestId("composer-input")).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/composer-e2e-mobile.png` });
@@ -206,8 +205,8 @@ test("share link always opens the shared song (startup default/restore must not 
 });
 
 test("theme: landing background is uniform full height; Keys track picker is dark", async ({ page }) => {
-  await page.goto("/"); await expect(page.getByTestId("explore-page")).toBeVisible();
-  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(22, 27, 36)");
+  await page.goto("/"); await expect(page.getByTestId("social-app")).toBeVisible();
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector(".so-app")!).backgroundColor)).toBe("rgb(238, 243, 247)");
   await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
   // The track picker only renders when the project has a track (a fresh phone session can start empty).
   await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_keys", program: 0 }], { label: "seed" }); });
@@ -241,18 +240,13 @@ test("studio fits the viewport: no vertical scrolling of the page or any panel",
   }
 });
 
-test("landing scrolls normally (studio-only fit), wheel + touch", async ({ page }) => {
-  // short viewports so the landing overflows even with an empty song list (fresh e2e data dir)
+test("feed landing fits the viewport: no page scroll, no horizontal overflow; studio-fit only in studio", async ({ page }) => {
   for (const [w, h] of [[1280, 480], [390, 560]]) {
     await page.setViewportSize({ width: w, height: h });
-    await page.goto("/"); await expect(page.getByTestId("explore-page")).toBeVisible();
-    await page.waitForFunction(() => document.scrollingElement!.scrollHeight > innerHeight + 50, null, { timeout: 20_000 });
+    await page.goto("/"); await expect(page.getByTestId("social-app")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.classList.contains("studio-fit"))).toBe(false);
-    await page.mouse.move(w / 2, h / 2); await page.mouse.wheel(0, 100000);
-    await expect.poll(() => page.evaluate(() => Math.ceil(scrollY + innerHeight) >= document.scrollingElement!.scrollHeight - 2)).toBe(true);
-    await page.evaluate(() => scrollTo(0, 0));
-    // touch-style scroll: the document is a normal scroller (overflow not hidden)
-    expect(await page.evaluate(() => getComputedStyle(document.body).overflowY)).not.toBe("hidden");
+    expect(await page.evaluate(() => document.scrollingElement!.scrollWidth)).toBeLessThanOrEqual(w);
+    await expect(page.getByTestId("tabs")).toBeInViewport();
   }
   await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.classList.contains("studio-fit"))).toBe(true);

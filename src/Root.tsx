@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import App from "./App";
 import { WorkstationView } from "./components/workstation/WorkstationView.tsx";
-import { ExplorePage } from "./components/explore/ExplorePage.tsx";
+import { SocialApp } from "./components/social/SocialApp.tsx";
+import "./components/social/social.css";
 import { parseRoute, navigate, appUrl, type Route } from "./agent/routes.ts";
 import { apiBase } from "./agent/bridge-client.ts";
 import { openShared } from "./agent/share-client.ts";
@@ -34,11 +35,11 @@ export default function Root() {
     sessionStorage.setItem("gbk.focusComposer", "1"); if (prompt) sessionStorage.setItem("gbk.composerDraft", prompt);
     navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50);
   }, []);
-  const explore = composer === true && route.view === "explore";
+  const explore = composer === true && (route.view === "feed" || route.view === "profile" || route.view === "inbox" || route.view === "admin");
   useEffect(() => { document.documentElement.classList.toggle("studio-fit", !explore); return () => document.documentElement.classList.remove("studio-fit"); }, [explore]);
   return (
     <>
-      {explore && <ExplorePage onCompose={compose} onOpen={(slug, fork) => navigate(`s/${slug}${fork ? "?fork=1" : ""}`)} />}
+      {explore && <SocialApp route={route as import("./agent/routes.ts").SocialRoute} onOpen={(slug, fork) => navigate(`s/${slug}${fork ? "?fork=1" : ""}`)} />}
       {/* While the player modal is open the workstation is inert + hidden from the a11y tree (proper modal semantics). */}
       <div hidden={explore || undefined} aria-hidden={playerOpen || undefined} ref={(el) => { if (el) { if (playerOpen) el.setAttribute("inert", ""); else el.removeAttribute("inert"); } }}>
         {shareErr && <div className="cmp-error" role="alert">{shareErr}</div>}

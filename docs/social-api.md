@@ -8,7 +8,7 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
 
 ## Conventions
 
-- **Auth.** Either the web session cookie (`gbk_session`, set by Google/GitHub OAuth at `/api/auth/:provider`) or
+- **Auth.** Either the web session cookie (`gbk_cs`, set by Google/GitHub OAuth at `/api/auth/:provider`) or
   `Authorization: Bearer <token>`. Bearer tokens are session tokens returned by the token-exchange endpoints below.
   - Cookie writes need same-origin `Origin` + `x-gbk-csrf` header (value from `GET /api/session`).
   - Bearer writes need neither (no ambient credentials). Never send both.
@@ -36,7 +36,7 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
   "labels": ["classical"], "tags": ["fugue", "piano"],
   "rating_avg": 4.5, "rating_count": 8, "comment_count": 3, "play_count": 120, "fork_count": 1,
   "my_rating": 5,                       // null if not rated / guest (only visible to the rater)
-  "media": { "mp3": "https://…/api/shares/<slug>/media/mp3", "midi": "https://…/media/midi" }, // null when absent
+  "media": { "mp3": "https://…/api/shares/<slug>/media/mp3", "wav": "https://…/media/wav", "midi": "https://…/media/midi" }, // null when absent
   "preview": { "notes": [[pitch, start, dur, track]], "duration": 32.0 }, // piano-roll preview, may be null
   "prompt_shared": false, "prompt_text": null,   // P3; text only when owner opted in
   "parent_slug": null, "is_mine": false
@@ -51,7 +51,7 @@ Tags: max 10, lowercase `a-z0-9-`, 2–24 chars.
 
 ## Auth & session (iOS-1 unless noted)
 
-Every `/api/*` route accepts `Authorization: Bearer <access_token>` (P1: bearer = server session token; write routes skip Origin/CSRF for bearer).
+Every `/api/*` route accepts `Authorization: Bearer <access_token>` (live since P1: bearer = the web session token value; write routes skip Origin/CSRF for bearer).
 Tokens are minted by the existing `/oauth` token machinery (same signing, same `user` id as web accounts).
 
 | Method + path | Phase | Notes |
@@ -81,8 +81,10 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 | Method + path | Who | Notes |
 |---|---|---|
 | `GET /api/feed?sort=for_you|new|top&label=&tag=&cursor=&limit=` | anyone | `{ items: Song[], next_cursor }`. Default `for_you` (ranked score, `wip` excluded unless `label=wip`). |
-| `GET /api/shares/:slug` | anyone (public) / owner | Song detail (`project` included for the studio) |
-| `PATCH /api/shares/:slug` | owner | `{ title?, public?, labels?, tags?, prompt_shared?, prompt_text? }` → Song |
+| `GET /api/songs/:slug` | anyone (public) / owner | Song (exact feed item shape) |
+| `GET /api/shares/:slug` | anyone (public) / owner | legacy detail incl. `project` JSON for the studio (unchanged) |
+| `PATCH /api/shares/:slug` | owner | `{ title?, public? }` (unchanged; `public: true` = publish) |
+| `PATCH /api/songs/:slug/meta` | owner | `{ labels?, tags?, prompt_shared?, prompt_text? }` → Song |
 | `POST /api/shares/:slug/play` | anyone | count a play (deduped per user/IP per hour) → `{ play_count }` |
 | `GET /api/tags/top?limit=` | anyone | `{ tags: [{ tag, count }] }`, plus `labels: [{label,count}]` |
 | `GET /api/tags/:tag?cursor=` | anyone | same shape as feed |

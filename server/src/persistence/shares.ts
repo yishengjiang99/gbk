@@ -24,6 +24,8 @@ const toRow = ({ hm, hw, h3, ...r }: MetaRow): ShareRow => ({ ...r, midi: hm ? M
 
 export class ShareStore {
   private db: DatabaseSync;
+  /** Shared connection for the social tables (same file, same transaction scope). */
+  get database() { return this.db; }
   constructor(file: string) {
     if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
@@ -114,6 +116,13 @@ export class ShareStore {
     });
   }
   private previewCache = new Map<string, PianoRollPreview>();
+  /** Cached piano-roll preview for one song. */
+  preview(id: string): PianoRollPreview | null {
+    const r = this.db.prepare("SELECT project_json, updated_at, created_at FROM shares WHERE id = ?").get(id) as { project_json: string; updated_at: number | null; created_at: number } | undefined; if (!r) return null;
+    const key = `${id}:${r.updated_at ?? r.created_at}`; let p = this.previewCache.get(key);
+    if (!p) { try { p = buildPreview(JSON.parse(r.project_json)); } catch { p = buildPreview({}); } this.previewCache.set(key, p); if (this.previewCache.size > 500) this.previewCache.delete(this.previewCache.keys().next().value!); }
+    return p;
+  }
   countRecent(owner: string, sinceMs: number) { return Number((this.db.prepare("SELECT COUNT(*) AS n FROM shares WHERE owner = ? AND created_at > ?").get(owner, Date.now() - sinceMs) as { n: number }).n); }
   view(r: ShareRow): ShareView {
     const p = r.parent_id ? this.byId(r.parent_id) : null;

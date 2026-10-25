@@ -14,7 +14,7 @@ const RIFF = (b: Uint8Array) => b.length > 44 && String.fromCharCode(...b.subarr
 const MP3 = (b: Uint8Array) => b.length > 4 && ((b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0));
 const MTHD = (b: Uint8Array) => b.length > 14 && String.fromCharCode(...b.subarray(0, 4)) === "MThd";
 
-export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: ShareStore, uploadLimiter: RateLimiter, model?: ModelClient, guestCanRead?: (token: string, projectId: string, owner: string) => boolean) {
+export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: ShareStore, uploadLimiter: RateLimiter, model?: ModelClient, guestCanRead?: (token: string, projectId: string, owner: string) => boolean, onPublish?: (id: string) => void) {
   const origin = cfg.publicOrigin;
   const autosaveLimiter = new RL(40), titleLimiter = new RL(10);
   app.addContentTypeParser(["audio/wav", "audio/midi", "audio/mpeg", "application/octet-stream"], { parseAs: "buffer", bodyLimit: SHARE_LIMITS.wavBytes }, (_req, body, done) => done(null, body));
@@ -30,6 +30,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const title = (typeof b.title === "string" && b.title.trim() ? b.title.trim() : project.name).slice(0, SHARE_LIMITS.titleChars);
     const parentSlug = typeof b.parentSlug === "string" ? b.parentSlug : null;
     const row = store.create({ owner: s.user, title, projectJson: JSON.stringify(project), parentSlug, public: b.public === true });
+    if (row.public) onPublish?.(row.id);
     req.log.info({ evt: "share_create", user: s.user, slug: row.slug, parent: row.parent_id });
     return { ...store.view(row), url: `${origin}/s/${row.slug}` };
   });
@@ -137,7 +138,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (b.public !== undefined && typeof b.public !== "boolean") return reply.code(400).send({ code: "INVALID_ARGUMENT", message: "public must be boolean" });
     if (b.title !== undefined && (typeof b.title !== "string" || !b.title.trim())) return reply.code(400).send({ code: "INVALID_ARGUMENT", message: "title must be a non-empty string" });
     if (typeof b.title === "string") store.setTitle(row.slug, b.title.trim().slice(0, SHARE_LIMITS.titleChars));
-    if (typeof b.public === "boolean") store.setPublic(row.slug, b.public);
+    if (typeof b.public === "boolean") { store.setPublic(row.slug, b.public); if (b.public) onPublish?.(row.id); }
     req.log.info({ evt: "share_update", user: s.user, slug: row.slug, public: b.public });
     const fresh = store.byId(row.id)!; return { ...store.view(fresh), url: `${origin}/s/${fresh.slug}` };
   });

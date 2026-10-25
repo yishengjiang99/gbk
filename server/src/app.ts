@@ -31,6 +31,8 @@ import { CompositionService } from "./mcp/service.ts";
 import { RenderService, resolveSoundFontPath } from "./mcp/browser-render.ts";
 import { ServerRenderPool } from "./mcp/server-render.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
+import { SocialStore } from "./persistence/social.ts";
+import { socialRoutes } from "./routes/social.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
 
@@ -78,7 +80,10 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   // Private Studio links for account-free MCP projects carry the read capability (sent as x-gbk-project-token).
   shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model, (token, projectId, owner) => {
     try { const g = resolveGuestCapability(cfg, mcpStore, token); return g.compositionId === projectId && g.user === owner; } catch { return false; }
-  });
+  }, (id) => social.markPublished(id));
+  const social = new SocialStore(shares.database, deps.now);
+  socialRoutes(app, cfg, sessions, shares, accounts, social);
+  const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless
   // clients) they run on the server in worker threads (SERVER_RENDER=0 turns that off).
@@ -97,7 +102,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
   const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); sessions.close(); } };
+    close: async () => { clearInterval(pruneTimer); clearInterval(rescoreTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);

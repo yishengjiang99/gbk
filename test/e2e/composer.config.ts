@@ -10,7 +10,7 @@ const WEB = 5181, API = 8781, MODEL = 8799;
 const origin = `http://127.0.0.1:${WEB}`;
 const node22 = process.env.GBK_NODE22 ?? "node";
 export default defineConfig({
-  testDir: ".", testMatch: /e2e\/composer\.spec\.ts$/, timeout: 600_000, expect: { timeout: 20_000 }, workers: 1,
+  testDir: ".", testMatch: /e2e\/(composer|social)\.spec\.ts$/, timeout: 600_000, expect: { timeout: 20_000 }, workers: 1,
   use: { baseURL: `${origin}/`, trace: "retain-on-failure" },
   webServer: [
     { command: `${node22} --import tsx/esm server/test/fake-model.ts`, url: `http://127.0.0.1:${MODEL}/healthz`, reuseExistingServer: false, cwd: "../..", env: { FAKE_MODEL_PORT: String(MODEL) }, timeout: 30_000, ignoreHTTPSErrors: true },
@@ -20,8 +20,8 @@ export default defineConfig({
   ],
   projects: [
     { name: "chrome-no-webmcp", use: { ...devices["Desktop Chrome"], channel: process.env.PW_CHROME_CHANNEL ?? "chrome", viewport: { width: 1500, height: 950 } } },
-    { name: "mobile", use: { ...devices["Pixel 7"] }, grep: /mobile/ },
-    { name: "mobile-webkit", use: { ...devices["iPhone 13"] }, grep: /mobile composer view/ },
+    { name: "mobile", use: { ...devices["Pixel 7"] }, grep: /mobile|social/ },
+    { name: "mobile-webkit", use: { ...devices["iPhone 13"] }, grep: /mobile composer view|social/ },
     { name: "firefox", use: { ...devices["Desktop Firefox"] }, grep: /smoke/ },
     { name: "webkit", use: { ...devices["Desktop Safari"] }, grep: /smoke/ },
   ],
