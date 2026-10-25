@@ -10,10 +10,10 @@ struct GBKComposerApp: App {
     var body: some Scene {
         WindowGroup {
             RootTabView()
+                .signInPrompting() // must sit inside .environmentObject(auth): SignInPrompt reads AuthStore
                 .environmentObject(auth)
                 .environmentObject(router)
                 .tint(Theme.accent)
-                .signInPrompting()
                 .task { await auth.ensureAnonymousSession() }
                 .onOpenURL { router.handle($0) }
                 .task { PurchaseStore.shared.start() }
