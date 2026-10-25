@@ -1,0 +1,28 @@
+GBK Music Composer is a feed of short musical pieces you can listen to, rate, and remix in a studio.
+
+HOW IT WORKS
+1. Swipe through the feed to hear new pieces, each with its piano roll.
+2. Open a piece in the studio to see the prompt and notes behind it.
+3. Remix it, export WAV or MIDI, and share it back to the feed.
+
+MADE TO BE REMIXED
+Every piece shows the prompt that made it. Tap Remix to start from it and make it your own. Forks credit the original composer.
+
+FEATURES
+• Vertical audio feed with Following and For You tabs
+• Web studio with SoundFont playback and WAV/MIDI export
+• Ratings and comments on every piece
+• Direct messages and an inbox for replies, forks and comments
+• Sign in with Apple or Google
+• Block, mute and report for any user or message
+
+WHO IT'S FOR
+Composers, songwriters, students and anyone who likes hearing new music and tinkering with it.
+
+GOOD TO KNOW
+• Listening and browsing work without an account; posting, rating, comments and messages need one.
+• AI and render limits reset daily.
+• The first in-browser render downloads a ~32 MB SoundFont.
+
+PRIVACY
+We collect only what is needed to run your account and deliver notifications. See https://compose.grepawk.com/privacy. You can delete your account from the support page.
