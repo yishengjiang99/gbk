@@ -23,7 +23,7 @@ test("social feed: rate, comment, tag filter, report, profile (mobile + desktop)
     await page.goto("/feed?sort=new");
     const card = page.getByTestId("feed-card").filter({ hasText: title }).first();
     await expect(card).toBeVisible();
-    await expect(card.getByTestId("card-pianoroll")).toBeVisible();
+    await expect(card.getByTestId("card-pianoroll").or(card.getByTestId("card-liveroll"))).toBeVisible();
     // rating
     await card.getByTestId("star-4").click();
     await expect(card.getByTestId("rating-summary")).toHaveText("4.0 (1)");
@@ -171,4 +171,79 @@ test("first paint on / is the Feed shell, never the studio; /studio still loads 
   await page.goto("/studio");
   await expect(page.getByTestId("social-app")).toHaveCount(0);
   await expect(page.getByTestId("composer-input").or(page.getByTestId("tab-composer")).first()).toBeVisible();
+});
+
+function toneWav(sec = 3, rate = 22050) {
+  const b = silentWav(sec, rate); for (let i = 0; i < sec * rate; i++) b.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 12000), 44 + i * 2); return b;
+}
+test("social feed live roll + spectrum: active card animates in sync, lit notes, bars move while playing, flat when paused", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `Live Roll ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json();
+  expect((await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: toneWav() })).ok()).toBeTruthy();
+  try {
+    await page.goto("/feed?sort=new");
+    const card = page.getByTestId("feed-card").first(); await expect(card).toHaveAttribute("data-slug", sh.slug);
+    const roll = card.getByTestId("card-liveroll"), spec = card.getByTestId("card-spectrum");
+    await expect(roll).toBeVisible(); await expect(page.getByTestId("feed-card").nth(1).getByTestId("card-liveroll")).toHaveCount(0);
+    await page.getByTestId("tap-to-play").click(); await expect(card).toHaveAttribute("data-playing", "1");
+    const f1 = Number(await roll.getAttribute("data-frames")); await page.waitForTimeout(500);
+    expect(Number(await roll.getAttribute("data-frames"))).toBeGreaterThan(f1 + 5);
+    await expect.poll(async () => Number(await roll.getAttribute("data-t")), { timeout: 3000 }).toBeGreaterThan(0.2);
+    await expect.poll(async () => Number(await roll.getAttribute("data-lit")), { timeout: 4000 }).toBeGreaterThan(0);
+    await expect.poll(async () => Number(await spec.getAttribute("data-energy")), { timeout: 4000 }).toBeGreaterThan(0);
+    await expect.poll(async () => Number(await card.getByTestId("card-scope").getAttribute("data-amp")), { timeout: 4000 }).toBeGreaterThan(2);
+    const dpr = await roll.evaluate((c: HTMLCanvasElement) => c.width / c.clientWidth); expect(dpr).toBeCloseTo(await page.evaluate(() => Math.min(3, devicePixelRatio)), 1);
+    await card.getByTestId("card-play").click(); await expect(card).toHaveAttribute("data-playing", "0");
+    await expect(spec).toHaveAttribute("data-energy", "0");
+    const f2 = Number(await roll.getAttribute("data-frames")); await page.waitForTimeout(400);
+    expect(Number(await roll.getAttribute("data-frames"))).toBe(f2);
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});
+
+test("social feed light + dark schemes: palette applied, live card readable (screenshots)", async ({ page, browser, baseURL }, info) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `Scheme ${info.project.name} ${Date.now() % 100000}`, project, public: true } })).json();
+  expect(sh.slug).toBeTruthy();
+  await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: toneWav() });
+  await owner.request.patch(`/api/songs/${sh.slug}/meta`, { headers: oh, data: { labels: ["ambient"], tags: ["night"] } });
+  const lum = (c: string) => { const [r, g, b] = c.match(/\d+/g)!.map(Number); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  try {
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto("/feed?sort=new");
+      const card = page.getByTestId("feed-card").first(); await expect(card).toHaveAttribute("data-slug", sh.slug);
+      await page.getByTestId("tap-to-play").click(); await expect(card).toHaveAttribute("data-playing", "1");
+      await page.waitForTimeout(800);
+      const [bg, fg] = await page.getByTestId("social-app").evaluate((e) => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color]);
+      const cardBg = await card.evaluate((e) => getComputedStyle(e).backgroundColor);
+      if (scheme === "dark") { expect(lum(bg)).toBeLessThan(40); expect(lum(fg)).toBeGreaterThan(200); expect(lum(cardBg)).toBeLessThan(60); }
+      else { expect(lum(bg)).toBeGreaterThan(220); expect(lum(fg)).toBeLessThan(80); }
+      const px = await card.getByTestId("card-liveroll").evaluate((c: HTMLCanvasElement) => Array.from(c.getContext("2d")!.getImageData(2, 2, 1, 1).data.slice(0, 3)));
+      expect(scheme === "dark" ? px[0] < 40 : px[0] > 220).toBeTruthy();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+      const shot = info.outputPath(`feed-${scheme}.png`); await page.screenshot({ path: shot }); await info.attach(`feed-${scheme}`, { path: shot, contentType: "image/png" });
+    }
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});
+
+test("feed impressions: settling on cards logs dwell/skip events with model_version via beacon", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const slugs: string[] = [];
+  for (const t of ["Imp Two", "Imp One"]) { const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json(); slugs.unshift(sh.slug); }
+  try {
+    await page.goto("/feed?sort=new");
+    await expect(page.getByTestId("feed-card").first()).toHaveAttribute("data-slug", slugs[0]);
+    const req = page.waitForRequest((r) => r.url().endsWith("/api/events") && r.method() === "POST");
+    await page.getByTestId("feed").evaluate((f) => f.scrollBy({ top: f.clientHeight }));
+    await expect(page.getByTestId("feed")).toHaveAttribute("data-active", "1");
+    await page.evaluate(() => { const g = (window as unknown as { __gbkImpressions: { end: () => void; flush: () => void } }).__gbkImpressions; g.end(); g.flush(); });
+    const body = JSON.parse((await req).postData() ?? "{}");
+    expect(body.client).toBe("web"); expect(body.session).toMatch(/^[0-9a-f]{24}$/);
+    const first = body.events.find((e: { song: string }) => e.song === slugs[0]);
+    expect(first).toMatchObject({ position: 0, feed: "new", model_version: "heur-1", fast_skip: true });
+    expect(body.events.some((e: { song: string; position: number }) => e.song === slugs[1] && e.position === 1)).toBeTruthy();
+  } finally { for (const s of slugs) await owner.request.delete(`/api/shares/${s}`, { headers: oh }); await owner.close(); }
 });

@@ -10,6 +10,8 @@ import { RateLimiter } from "../security/rate-limit.ts";
 import { currentSession, guardWrite } from "./agent.ts";
 import { isGuest } from "../mcp/guest.ts";
 
+/** Ranker that produced the feed; clients echo it on every impression (docs/social/ranking.md). */
+export const MODEL_VERSION = "heur-1";
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const lim = (v: unknown, d = 20, max = 50) => Math.min(max, Math.max(1, Number(v) || d));
 
@@ -98,7 +100,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
         next = encCursor({ ...("k" in base ? base : {}), o: owners().slice(-2), x: x.slice(-200) });
       }
     }
-    return { items: rows.map((r) => song(r, v)), next_cursor: next };
+    return { items: rows.map((r) => song(r, v)), next_cursor: next, model_version: MODEL_VERSION };
   };
   app.get("/api/feed", (req, reply) => feed(req, reply));
   app.get("/api/tags/top", async (req) => social.topTags(lim((req.query as { limit?: string }).limit, 30, 100)));

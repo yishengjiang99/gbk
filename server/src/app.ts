@@ -39,6 +39,8 @@ import { nativeRoutes } from "./routes/native.ts";
 import { currentSession } from "./routes/agent.ts";
 import { authExtraRoutes } from "./routes/auth-extra.ts";
 import { socialRoutes } from "./routes/social.ts";
+import { eventRoutes } from "./routes/events.ts";
+import { EventStore } from "./persistence/events.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
 
@@ -95,6 +97,8 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const native = new NativeStore(persist ? join(cfg.dataDir, "native.sqlite") : ":memory:", deps.now);
   const notify = createNotifier(cfg, native, (o) => app.log.info(o), deps.apns);
   const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify);
+  const events = new EventStore(shares.database, deps.now);
+  eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers);
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
     const s = currentSession(req, sessions); const row = shares.bySlug((req.params as { slug: string }).slug);

@@ -49,38 +49,47 @@ export const KEYBOARD_W = 90;
 const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(p % 12);
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-export function drawFrame(ctx: Ctx, m: VideoModel, t: number, o: VideoOptions = DEFAULT_VIDEO) {
-  const { width: W, height: H } = o;
-  const { BG, GRID, BAR, TEXT, DIM, ROW, SECTION, HEAD, WHITE, BLACK, PROG, OUTLINE } = PALETTES[o.theme ?? "dark"];
-  const top = 150, bottom = H - 70, rollH = bottom - top;
-  const rows = m.pitchHi - m.pitchLo + 1, rowH = rollH / rows;
-  const pxPerSec = (W - KEYBOARD_W) / o.windowSeconds;
-  const headX = KEYBOARD_W + (W - KEYBOARD_W) * o.playheadFrac;
+export type RollPalette = (typeof PALETTES)["light"];
+export { PALETTES };
+export interface RollBox { left: number; top: number; width: number; bottom: number; keyboardW: number; windowSeconds: number; playheadFrac: number; sections?: boolean; minRows?: number; litFill?: (color: string) => string }
+/** The moving roll (rows, bars, sections, notes, keyboard, playhead) inside a box. Shared by Export video and feed cards. */
+export function drawRoll(ctx: Ctx, m: VideoModel, t: number, b: RollBox, P: RollPalette) {
+  const { GRID, BAR, ROW, SECTION, HEAD, WHITE, BLACK, OUTLINE } = P;
+  const { top, bottom } = b; const W = b.left + b.width, KW = b.left + b.keyboardW, rollH = bottom - top;
+  const span = Math.max(b.minRows ?? 1, m.pitchHi - m.pitchLo + 1), lo = m.pitchLo - Math.floor((span - (m.pitchHi - m.pitchLo + 1)) / 2);
+  const rowH = rollH / span;
+  const pxPerSec = (W - KW) / b.windowSeconds;
+  const headX = KW + (W - KW) * b.playheadFrac;
   const x = (s: number) => headX + (s - t) * pxPerSec;
-  const y = (pitch: number) => bottom - (pitch - m.pitchLo + 1) * rowH;
-  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
-  for (let pch = m.pitchLo; pch <= m.pitchHi; pch++) if (isBlack(pch)) { ctx.fillStyle = ROW; ctx.fillRect(KEYBOARD_W, y(pch), W, rowH); }
-  // bar lines + section bands
-  for (const [i, bt] of m.barTimes.entries()) { const bx = x(bt); if (bx < KEYBOARD_W || bx > W) continue; ctx.fillStyle = i % 4 === 0 ? BAR : GRID; ctx.fillRect(Math.round(bx), top, 1, rollH); }
+  const y = (pitch: number) => bottom - (pitch - lo + 1) * rowH;
+  for (let pch = lo; pch < lo + span; pch++) if (isBlack(pch)) { ctx.fillStyle = ROW; ctx.fillRect(KW, y(pch), W - KW, rowH); }
+  for (const [i, bt] of m.barTimes.entries()) { const bx = x(bt); if (bx < KW || bx > W) continue; ctx.fillStyle = i % 4 === 0 ? BAR : GRID; ctx.fillRect(Math.round(bx), top, 1, rollH); }
   ctx.textBaseline = "top";
-  for (const s of m.sections) { const sx = x(s.t); if (sx > W || sx < KEYBOARD_W - 400) continue; ctx.fillStyle = SECTION; ctx.fillRect(Math.round(sx), top - 34, 2, rollH + 34); ctx.font = "600 22px sans-serif"; ctx.fillText(s.name, Math.round(sx) + 8, top - 32); }
-  // notes
-  const lit = new Map<number, string>();
+  if (b.sections !== false) for (const s of m.sections) { const sx = x(s.t); if (sx > W || sx < KW - 400) continue; ctx.fillStyle = SECTION; ctx.fillRect(Math.round(sx), top - 34, 2, rollH + 34); ctx.font = "600 22px sans-serif"; ctx.fillText(s.name, Math.round(sx) + 8, top - 32); }
+  const lit = new Map<number, string>(); let litCount = 0;
   for (const n of m.notes) {
     const x0 = x(n.t0), x1 = x(n.t1);
-    if (x1 < KEYBOARD_W || x0 > W) continue;
+    if (x1 < KW || x0 > W) continue;
     const on = n.t0 <= t + 1e-9 && n.t1 > t;
     const color = m.tracks[n.track]?.color ?? "#ccc";
     ctx.globalAlpha = on ? 1 : n.t1 <= t ? 0.35 : 0.75;
-    ctx.fillStyle = color;
-    const nx = Math.max(KEYBOARD_W, x0);
+    ctx.fillStyle = on && b.litFill ? b.litFill(color) : color;
+    const nx = Math.max(KW, x0);
     ctx.fillRect(nx, y(n.pitch) + 1, Math.max(2, x1 - nx - 1), Math.max(2, rowH - 2));
-    if (on) { ctx.globalAlpha = 1; ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2; ctx.strokeRect(nx, y(n.pitch) + 1, Math.max(2, x1 - nx - 1), Math.max(2, rowH - 2)); lit.set(n.pitch, color); }
+    if (on) { litCount++; ctx.globalAlpha = 1; ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2; ctx.strokeRect(nx, y(n.pitch) + 1, Math.max(2, x1 - nx - 1), Math.max(2, rowH - 2)); lit.set(n.pitch, color); }
   }
   ctx.globalAlpha = 1;
-  // keyboard (lit keys in track color)
-  for (let pch = m.pitchLo; pch <= m.pitchHi; pch++) { ctx.fillStyle = lit.get(pch) ?? (isBlack(pch) ? BLACK : WHITE); ctx.fillRect(0, y(pch), KEYBOARD_W - 4, rowH - 1); }
+  if (b.keyboardW > 0) for (let pch = lo; pch < lo + span; pch++) { ctx.fillStyle = lit.get(pch) ?? (isBlack(pch) ? BLACK : WHITE); ctx.fillRect(b.left, y(pch), b.keyboardW - 4, rowH - 1); }
   ctx.fillStyle = HEAD; ctx.fillRect(Math.round(headX) - 1, top, 2, rollH);
+  return litCount;
+}
+
+export function drawFrame(ctx: Ctx, m: VideoModel, t: number, o: VideoOptions = DEFAULT_VIDEO) {
+  const { width: W, height: H } = o;
+  const P = PALETTES[o.theme ?? "dark"]; const { BG, GRID, TEXT, DIM, SECTION, PROG } = P;
+  const top = 150, bottom = H - 70;
+  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+  drawRoll(ctx, m, t, { left: 0, top, width: W, bottom, keyboardW: KEYBOARD_W, windowSeconds: o.windowSeconds, playheadFrac: o.playheadFrac }, P);
   // header
   ctx.fillStyle = TEXT; ctx.font = "700 48px sans-serif"; ctx.fillText(m.title, 40, 28);
   ctx.fillStyle = DIM; ctx.font = "400 24px sans-serif"; ctx.fillText(m.subtitle, 40, 88);

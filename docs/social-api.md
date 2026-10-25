@@ -12,7 +12,10 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
   `Authorization: Bearer <token>`. Bearer tokens are session tokens returned by the token-exchange endpoints below.
   - Cookie writes need same-origin `Origin` + `x-gbk-csrf` header (value from `GET /api/session`).
   - Bearer writes need neither (no ambient credentials). Never send both.
-- **Errors.** `{ "code": "UPPER_SNAKE", "message": "human text" }` with HTTP 400/401/403/404/409/413/422/429.
+- **Errors.** App errors are `{ "code": "UPPER_SNAKE", "message": "human text" }` with HTTP 400/401/403/404/409/413/422/429.
+  Unknown `/api/*` routes (including routes of phases not yet shipped) return 404 `{ "code": "NOT_FOUND", "message": "Route GET:/api/x not found", "error": "Not Found", "statusCode": 404 }`.
+  Framework errors (bad JSON, body too large, schema validation) keep Fastify's shape `{ "statusCode", "error", "message", "code"? }` where `code` may be an `FST_ERR_*` string or absent.
+  Clients should read `message` always, `code` when present, and fall back to the HTTP status.
   `401 UNAUTHENTICATED`, `403 FORBIDDEN|BLOCKED|DMS_OFF`, `404 NOT_FOUND`, `422 INVALID_*`, `429 RATE_LIMITED` (+ `retry-after` seconds).
 - **Pagination.** Cursor based: response has `next_cursor` (opaque string, `null` at end). Pass `?cursor=<next_cursor>`; `limit` 1–50, default 20.
 - **Time.** Epoch milliseconds (`created_at`, …), UTC.
@@ -37,7 +40,9 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
   "rating_avg": 4.5, "rating_count": 8, "comment_count": 3, "play_count": 120, "fork_count": 1,
   "my_rating": 5,                       // null if not rated / guest (only visible to the rater)
   "media": { "mp3": "https://…/api/shares/<slug>/media/mp3", "wav": "https://…/media/wav", "midi": "https://…/media/midi" }, // null when absent
-  "preview": { "notes": [[pitch, start, dur, track]], "duration": 32.0 }, // piano-roll preview, may be null
+  "preview": { "tracks": ["#4fc3f7", "#e57373"], "lo": 48, "hi": 84, "end": 7680, "notes": [[track, start, len, pitch]] }, // may be null
+  // preview: tracks = color per track index; lo/hi = pitch range; end = song length in ticks; notes = [trackIndex, start 0..1000, length 0..1000, MIDI pitch]
+  // (start/length are normalized to the song length, up to 240 notes sampled evenly). Map to seconds with the audio duration: s = start / 1000 * duration.
   "prompt_shared": false, "prompt_text": null,   // P3; text only when owner opted in
   "parent_slug": null, "is_mine": false
 }
@@ -56,7 +61,7 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 
 | Method + path | Phase | Notes |
 |---|---|---|
-| `GET /api/session` | live | `{ user, csrf, me }` (web) |
+| `GET /api/session` | live | `{ authenticated, user, name, provider, csrf, enabled, providers, loginAvailable, reviewerLogin, limits }`. `user` is the account id or null, `provider` e.g. `"google"`. Fetch `GET /api/me` for the social profile |
 | `POST /api/auth/apple` | live; client id = bundle `com.grepawk.moviefone` by default (`APPLE_BUNDLE_ID` overrides; empty disables → 503 `APPLE_UNAVAILABLE`) | `{ identityToken, nonce, displayName? }`. Verifies Apple JWT (JWKS, `aud` = bundle id, `sha256(nonce)` = claim). → `TokenPair` |
 | `POST /api/auth/google/native` | live | `{ idToken }` (`aud` = iOS client id). → `TokenPair` |
 | `GET /api/auth/apple/web?return=` | live (503 until `APPLE_SERVICES_ID`) | web Sign in with Apple (form_post to `POST /api/auth/apple/callback`, id_token verified, nonce bound to a state cookie) |
@@ -145,6 +150,8 @@ Reads with a guest or full bearer add viewer fields (`my_rating`, `is_mine`, `ca
 
 ## Blocks, inbox & DMs (P4)
 
+Blocks ship with P4. Until P4 is deployed these routes return the 404 `NOT_FOUND` shape above.
+
 | Method + path | Who | Notes |
 |---|---|---|
 | `POST /api/blocks/:handle` / `DELETE` | signed-in | block is mutual for DMs, hides their comments for you |
@@ -180,6 +187,52 @@ APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.co
 - Preload the active card's audio plus the next and previous cards.
 - The first tap unlocks audio (iOS). After that, settling on a card autoplays it. Pause everything when the tab or app is hidden.
 - Web applies gain through Web Audio GainNodes, because iOS Safari ignores `HTMLMediaElement.volume`.
+
+- **Active card visuals (only the active card animates):**
+  - Row 1 is a piano roll windowed like Export video (the shared `drawRoll`). `PLAYHEAD_X = 0.25` of the width, `WINDOW_SEC = 4`. Only the notes sounding now and the next few seconds are drawn, scrolling toward the playhead.
+  - Sounding notes are lit with a brighter track color: mix the color toward white by 0.45 in light mode, 0.35 in dark, plus the `--so-note-outline` stroke. Past notes use alpha 0.35, upcoming notes 0.75. At least 12 pitch rows.
+  - Row 2 is split. Left: `BARS = 48` log-spaced spectrum bars from 40 Hz to 16 kHz (AnalyserNode `fftSize` 2048, smoothing 0). Each bar takes the max bin, with instant attack and exponential decay `exp(-dt/150ms)`, colored with a gradient from `--so-spec-from` to `--so-spec-to`. Right: a time-domain waveform oscilloscope in `--so-wave`.
+  - The audio loops, so the roll wraps (notes repeat at ±duration). Animation runs with requestAnimationFrame while the card is playing and the tab is visible; bars go flat when paused. Canvases render at devicePixelRatio (capped at 3).
+- **Palette:** light is the default; dark follows `prefers-color-scheme: dark`. Canvas colors are read from these CSS vars (on `.so-app`). Dark values follow the iOS asset colour sets (BackgroundTop, Surface, TextPrimary/Secondary, AccentColor, Border, Chip, RollRow, Playhead, BarStart/BarEnd, Waveform, Destructive):
+
+| Var | Light | Dark |
+|---|---|---|
+| `--so-overlay` | `rgba(255,255,255,.92)` | `rgba(22,40,58,.92)` |
+| `--so-scrim` | `rgba(17,35,49,.4)` | `rgba(0,0,0,.6)` |
+| `--so-accent` | `#2d6a93` | `#61a6d1` |
+| `--so-roll-bg` | `#f8fcff` | `#0f1d2a` |
+| `--so-border-strong` | `#c9dbe8` | `#26425a` |
+| `--so-text` | `#16324a` | `#e6f0f8` |
+| `--so-border` | `#d5e5f0` | `#26425a` |
+| `--so-chip` | `#eef3f7` | `#1c3247` |
+| `--so-border-hover` | `#b6cfe1` | `#3b4f61` |
+| `--so-dim` | `#5f7a90` | `#93acc0` |
+| `--so-ok-bg` | `#eefbf8` | `#10302a` |
+| `--so-sel-bg` | `#d5e7f5` | `#173149` |
+| `--so-ok-border` | `#9fd3c9` | `#2f6f62` |
+| `--so-accent-2` | `#61a6d1` | `#4c9bd6` |
+| `--so-warn-bg` | `#fff4d6` | `#3a2e10` |
+| `--so-bg` | `#fdfefe` | `#0b1620` |
+| `--so-warn-border` | `#f0c96a` | `#7a6020` |
+| `--so-star` | `#f0a020` | `#ffc94d` |
+| `--so-hover` | `#e7f0f7` | `#1c2630` |
+| `--so-sel-2` | `#e3eff8` | `#1a2e42` |
+| `--so-divider` | `#e3eef6` | `#222c36` |
+| `--so-muted-border` | `#c9d6e0` | `#34414d` |
+| `--so-danger` | `#bf1f2f` | `#ff6b81` |
+| `--so-warn-text` | `#8a5a00` | `#f0c96a` |
+| `--so-ok-text` | `#1f6f60` | `#5fd3bb` |
+| `--so-surface` | `#fff` | `#16283a` |
+| `--so-roll-row` | `#e3ecf4` | `#132433` |
+| `--so-roll-grid` | `#e3edf5` | `#1b242e` |
+| `--so-roll-bar` | `#c9dbe8` | `#2a3644` |
+| `--so-playhead` | `#ff4081` | `#ff5c93` |
+| `--so-note-outline` | `#16324a` | `#ffffff` |
+| `--so-key-white` | `#f7f7f7` | `#c9d1d9` |
+| `--so-key-black` | `#3a3f4a` | `#21262d` |
+| `--so-spec-from` | `#39b2ef` | `#4cbaf0` |
+| `--so-spec-to` | `#ef3976` | `#f25f90` |
+| `--so-wave` | `#2d6a93` | `#9fd3c9` |
 
 ## Rate limits
 

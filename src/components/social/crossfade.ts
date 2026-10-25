@@ -10,7 +10,7 @@ interface Voice { src: string; el: HTMLAudioElement; gain: GainNode | null; raf?
 export type FadeState = { current: string | null; fading: string | null };
 
 export class Crossfader {
-  private ctx: AudioContext | null = null;
+  private ctx: AudioContext | null = null; analyser: AnalyserNode | null = null;
   private pool = new Map<string, Voice>();
   private current: Voice | null = null; private fading: Voice | null = null;
   unlocked = false;
@@ -21,7 +21,7 @@ export class Crossfader {
     const el = document.createElement("audio"); el.preload = "auto"; el.loop = true; el.setAttribute("playsinline", ""); el.src = src; el.dataset.src = src; this.host.appendChild(el);
     v = { src, el, gain: null }; this.pool.set(src, v); this.wire(v); return v;
   }
-  private wire(v: Voice) { if (!this.ctx || v.gain) return; try { const g = this.ctx.createGain(); this.ctx.createMediaElementSource(v.el).connect(g).connect(this.ctx.destination); v.gain = g; } catch { v.gain = null; } }
+  private wire(v: Voice) { if (!this.ctx || v.gain) return; try { if (!this.analyser) { this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 2048; this.analyser.smoothingTimeConstant = 0; this.analyser.connect(this.ctx.destination); } const g = this.ctx.createGain(); this.ctx.createMediaElementSource(v.el).connect(g).connect(this.analyser); v.gain = g; } catch { v.gain = null; } }
   private set(v: Voice, x: number) { if (v.gain) { v.gain.gain.cancelScheduledValues(0); v.gain.gain.value = x; } else v.el.volume = x; }
   private ramp(v: Voice, dir: "in" | "out", done?: () => void) {
     this.cancel(v); const c = curve(dir);
@@ -59,6 +59,8 @@ export class Crossfader {
     const keep = new Set(srcs.filter((s): s is string => !!s)); for (const s of keep) this.voice(s);
     for (const [s, v] of this.pool) if (!keep.has(s) && v !== this.current && v !== this.fading) { this.hard(v); v.el.removeAttribute("src"); v.el.remove(); this.pool.delete(s); }
   }
+  /** The element of the current (fading-in or playing) voice. */
+  get currentEl() { return this.current?.el ?? null; }
   get playingCount() { let n = 0; for (const v of this.pool.values()) if (!v.el.paused) n++; return n; }
   dispose() { this.stop(); for (const v of this.pool.values()) { v.el.removeAttribute("src"); v.el.remove(); } this.pool.clear(); void this.ctx?.close().catch(() => undefined); }
 }

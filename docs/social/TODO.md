@@ -20,7 +20,8 @@
 - Give the App Store Connect issuer ID (ASC > Users and Access > Integrations > App Store Connect API, shown above the keys list) so it can be set as `APP_STORE_CONNECT_ISSUER_ID`; key 95M27GJTV7 returned 401 with every issuer UUID found on the box. Then confirm Push, Sign in with Apple and Associated Domains on `com.grepawk.moviefone` and run ios-release.yml.
 - App Review notes: reviewer account `openai-reviewer` (password in server config; enter it in App Store Connect review notes) — confirm REVIEWER_LOGIN_ENABLED stays on during review.
 - Approve TestFlight submission (`.github/workflows/ios-release.yml` is workflow_dispatch only and has never been run).
-- AASA at `/.well-known/apple-app-site-association` (server, iOS-1): app id `83D36RPMUM.com.grepawk.moviefone` (iOS bundle is now com.grepawk.moviefone).
+- AASA at `/.well-known/apple-app-site-association` (server, iOS-1): app id `83D36RPMUM.com.grepawk.moviefone` (bundle changed to com.grepawk.moviefone).
+- Switch the ASC record's bundle ID (app 6826906431, 'GBK Music Composer') from com.grepawk.moviefone to com.grepawk.gbk; the API cannot change an existing record's bundle ID. If ASC won't allow it (a build was uploaded under moviefone), create a new app record for com.grepawk.gbk.
 - Enter the review password for `openai-reviewer` in ASC App Review Information, and fill App Privacy / age rating from `docs/asc/app-review.md`.
 - Approve the listing copy and screenshots in `docs/asc/` (screenshots are mockups, not simulator captures).
 - Server push (P5) reuses the existing team-wide APNs key; configure it on the server only, never copy key material.
