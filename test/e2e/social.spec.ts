@@ -344,3 +344,24 @@ test("hardware MIDI keyboard: button next to Keys/Hum, mocked Web MIDI plays + r
   expect(n).toEqual({ notes: [60], cc1: 1, cc64: 0, bends: 1 });
   await expect(page.getByTestId("composer-input")).toBeInViewport();
 });
+
+test("social studio iOS hum bridge: gbkNative hum shows the prompt-bar button, gbkHum.apply adds a 'Hummed melody' track, composer input stays visible", async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as { gbkNative: unknown }).gbkNative = { platform: "ios", version: 1, capabilities: ["hum"] }; (window as unknown as { __humMsgs: unknown[] }).__humMsgs = [];
+    (window as unknown as { webkit: unknown }).webkit = { messageHandlers: { hum: { postMessage: (m: unknown) => (window as unknown as { __humMsgs: unknown[] }).__humMsgs.push(m) } } }; });
+  await page.goto("/studio");
+  const btn = page.getByTestId("composer-panel").getByTestId("hum-btn"); await expect(btn).toBeVisible({ timeout: 30_000 }); await expect(page.getByTestId("hum-btn")).toHaveCount(1);
+  await btn.click(); expect(await page.evaluate(() => (window as unknown as { __humMsgs: unknown[] }).__humMsgs)).toEqual([{ type: "toggle" }]);
+  await page.evaluate(() => (window as unknown as { gbkHum: { onState: (s: object) => void } }).gbkHum.onState({ phase: "recording", elapsed: 12, progress: 0 })); await expect(btn).toHaveText("⏺ 0:12 Stop");
+  const ctx = await page.evaluate(() => (window as unknown as { gbkHum: { context: () => { ppq: number; tracks: { channel: number }[] } } }).gbkHum.context());
+  const ch = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10].find((c) => !ctx.tracks.some((t) => t.channel === c))!;
+  const ops = [{ op: "addTrack", id: "hume2e", name: "Hummed melody", channel: ch, program: 0, bankMsb: 0, bankLsb: 0, role: "melody" },
+    { op: "addNotes", notes: [60, 62, 64].map((p, i) => ({ trackId: "hume2e", channel: ch, tick: i * ctx.ppq, duration: ctx.ppq, pitch: p, velocity: 100 })) }];
+  const r = await page.evaluate((o) => (window as unknown as { gbkHum: { apply: (o: unknown, x: object) => unknown } }).gbkHum.apply(o, { label: "hum a melody", selectTrackId: "hume2e" }), ops);
+  expect(r).toMatchObject({ ok: true, trackId: "hume2e", notes: 3 });
+  expect(await page.evaluate((o) => (window as unknown as { gbkHum: { apply: (o: unknown) => { ok: boolean } } }).gbkHum.apply(o).ok, ops)).toBe(false);
+  await page.evaluate(() => (window as unknown as { gbkHum: { onState: (s: object) => void } }).gbkHum.onState({ phase: "idle" }));
+  await expect(page.getByText("Hummed melody").first()).toBeVisible();
+  const input = page.getByTestId("composer-input"); await expect(input).toBeVisible(); await expect(input).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("hum-bridge.png") });
+});

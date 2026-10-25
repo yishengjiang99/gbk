@@ -1,6 +1,7 @@
 import { WorkstationController } from "./controller.ts";
 import { bindController, playerBridge } from "./player-bridge.ts";
 import { enableAutosave, restoreLatest } from "./persistence.ts";
+import { installHumBridge } from "../hum/native-bridge.ts";
 
 // One controller per page, shared by React UI and WebMCP. Survives HMR via globalThis.
 const g = globalThis as { __gbkWorkstation?: WorkstationController };
@@ -8,6 +9,7 @@ export const workstation: WorkstationController = g.__gbkWorkstation ?? (g.__gbk
 if (!(g as { __gbkBound?: boolean }).__gbkBound) {
   (g as { __gbkBound?: boolean }).__gbkBound = true;
   bindController(workstation);
+  if (typeof window !== "undefined") installHumBridge(workstation); // iOS native Hum (docs/social/hum-bridge.md)
   // Opening a shared song (/s/<slug>): skip the autosave restore and the player's startup song so the share wins.
   const shareRoute = typeof location !== "undefined" && /\/s\/[A-Za-z0-9_-]+\/?$/.test(location.pathname);
   if (shareRoute) playerBridge.holdStartupLoads = true;

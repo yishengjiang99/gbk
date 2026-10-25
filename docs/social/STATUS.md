@@ -69,6 +69,7 @@ Differences: iOS hides notes once they finish (per the iOS card spec), while web
   - `showReadOnlyHint(reason)` → `readOnlyHintListeners`.
   - `onState({ phase: "idle" | "recording" | "transcribing", elapsed, progress })` → button label (`⏺ m:ss Stop` / `🎤 NN%` / `🎤 Hum`).
 - Reference implementation of the web side: `ios/GBKComposer/Resources/HumTest/hum-harness.html`.
+- **Web side live** (`src/hum/native-bridge.ts`, spec `docs/social/hum-bridge.md`): `apply` validates humToOps-shaped ops and adds a new "Hummed melody" track; returns `{ ok, trackId, notes, revision }`.
 
 ## Issue triage (2026-10-25)
 | Issue | State | Owner | Next step |

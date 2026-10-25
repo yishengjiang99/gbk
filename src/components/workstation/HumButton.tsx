@@ -10,10 +10,24 @@ import { HumRecorder, MAX_HUM_SECONDS } from "../../hum/record.ts";
 import { transcribe } from "../../hum/transcribe.ts";
 import { humToOps } from "../../hum/notes-to-ops.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
+import { nativeHum, type HumState } from "../../hum/native-bridge.ts";
+
+/** iOS app: the native recorder/transcriber does the work; this button only toggles it and shows its state. */
+export function NativeHumButton() {
+  const [st, setSt] = useState<HumState>({ phase: "idle", elapsed: 0, progress: 0 });
+  useEffect(() => { const f = (e: Event) => setSt((e as CustomEvent<HumState>).detail); window.addEventListener("gbk:hum-state", f); return () => window.removeEventListener("gbk:hum-state", f); }, []);
+  const toggle = () => (window as unknown as { webkit?: { messageHandlers?: { hum?: { postMessage: (m: unknown) => void } } } }).webkit?.messageHandlers?.hum?.postMessage({ type: "toggle" });
+  const s = Math.floor(st.elapsed);
+  return <button type="button" className="cmp-hum" data-testid="hum-btn" data-native="1" data-phase={st.phase} disabled={st.phase === "transcribing"} aria-label={st.phase === "recording" ? "Stop" : st.phase === "transcribing" ? "Transcribing" : "Hum"} onClick={toggle}>
+    {st.phase === "recording" ? `⏺ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} Stop` : st.phase === "transcribing" ? `🎤 ${Math.round(st.progress * 100)}%` : "🎤 Hum"}</button>;
+}
 
 type Phase = "idle" | "recording" | "transcribing";
 
 export function HumButton() {
+  return nativeHum() ? null : <WebHumButton />; // iOS: the native button lives in the composer prompt bar
+}
+function WebHumButton() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState(0);

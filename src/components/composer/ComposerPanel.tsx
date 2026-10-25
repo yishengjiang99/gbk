@@ -1,3 +1,5 @@
+import { NativeHumButton } from "../workstation/HumButton.tsx";
+import { nativeHum } from "../../hum/native-bridge.ts";
 import { songAutosaver } from "../../agent/autosave.ts";
 // AI Composer panel: prompt -> server agent -> real gbk_* tools in THIS page via the authenticated bridge.
 import { useEffect, useRef, useState } from "react";
@@ -48,7 +50,7 @@ export function ComposerPanel({ project, readOnly, dock = false }: { project: Pr
         <form className="cmp-input" onSubmit={(e) => { e.preventDefault(); const t = text.trim(); if (!t) { input.current?.focus(); return; } sessionStorage.setItem("gbk.composerDraft", text); needSignIn("Sign in to compose with the AI. It's free, with a daily limit.", { kind: "compose", text: t }); }}>
           <textarea ref={input} data-testid="composer-input" value={text} rows={3} maxLength={12000} placeholder="Describe a song…" aria-label="Describe a song"
             onChange={(e) => { setText(e.target.value); sessionStorage.setItem("gbk.composerDraft", e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} />
-          <button type="submit" data-testid="composer-send">Send</button>
+          {nativeHum() && <NativeHumButton />}<button type="submit" data-testid="composer-send">Send</button>
         </form>
         {s.auth.error && <div className="cmp-error">{s.auth.error}</div>}
         </>
@@ -64,7 +66,7 @@ export function ComposerPanel({ project, readOnly, dock = false }: { project: Pr
         <form className="cmp-input" onSubmit={(e) => { e.preventDefault(); submit(); }}>
           <textarea ref={input} data-testid="composer-input" value={text} rows={3} maxLength={12000} placeholder={readOnly ? "Fork this song to edit it with the AI…" : project.tracks.length ? "Type a change… (Enter to send, Shift+Enter for a new line)" : "Describe the music to compose…"}
             onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
-          <button type="submit" data-testid="composer-send" disabled={busy || !text.trim() || s.conn.state !== "connected"}>Send</button>
+          {nativeHum() && <NativeHumButton />}<button type="submit" data-testid="composer-send" disabled={busy || !text.trim() || s.conn.state !== "connected"}>Send</button>
         </form>
         <ComposerSettings info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} onLogout={() => void s.logout()} onReset={s.reset} />
       </>)}
