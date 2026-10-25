@@ -39,7 +39,7 @@ export interface AppDeps { model?: ModelClient; persist?: boolean; logger?: bool
 export interface McpHandle { store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; close: () => Promise<void> }
 export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; shares: ShareStore; mcp: McpHandle; accounts: AccountStore; clientErrors: ClientErrorStore }> {
   const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers[\"x-gbk-project-token\"]", "req.headers[\"x-gbk-csrf\"]"] }, bodyLimit: 64 * 1024, trustProxy: "127.0.0.1", disableRequestLogging: false });
-  const sessions = new SessionStore(cfg);
+  const sessions = new SessionStore(cfg, deps.now, deps.persist !== false ? join(cfg.dataDir, "sessions.sqlite") : ":memory:");
   const catalog = new ToolCatalog();
   const persistEarly = deps.persist !== false;
   const accounts = new AccountStore(persistEarly ? join(cfg.dataDir, "accounts.sqlite") : ":memory:", deps.now);
@@ -95,13 +95,14 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
   const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); } };
+    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);
     else socket.destroy();
   });
-  const sweep = setInterval(() => sessions.sweep(), 60_000); sweep.unref?.();
+  const sweepSessions = () => { try { sessions.sweep(); } catch (e) { app.log.warn({ evt: "session_sweep_failed", message: (e as Error).message }); } };
+  sweepSessions(); const sweep = setInterval(sweepSessions, 3_600_000); sweep.unref?.();
   app.addHook("preClose", async () => { clearInterval(sweep); for (const c of hub.wss.clients) c.terminate(); });
   return { app, hub, sessions, ledger, shares, mcp, accounts, clientErrors };
 }

@@ -23,7 +23,10 @@ export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: Session
   app.get("/api/session", async (req, reply) => {
     const s = currentSession(req, sessions);
     const csrf = s?.csrf ?? parseCookies(req.headers.cookie)[CSRF_COOKIE] ?? randomBytes(18).toString("base64url");
-    reply.header("set-cookie", cookie(CSRF_COOKIE, csrf, cfg, { httpOnly: false }));
+    // Sliding login: re-issue the session cookie so its Max-Age follows the server-side expiry.
+    const cookies = [cookie(CSRF_COOKIE, csrf, cfg, { httpOnly: false })];
+    if (s) cookies.push(cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: sessions.maxAgeSec(s) }));
+    reply.header("set-cookie", cookies);
     reply.header("cache-control", "no-store");
     const acct = s && accounts ? accounts.get(s.user) : null;
     const lim = s && limits ? limits.for(s.user) : null;
@@ -39,7 +42,7 @@ export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (!user) { req.log.warn({ evt: "login_failed", ip }); return reply.code(401).send({ code: "BAD_CODE", message: "invalid access code" }); }
     if (accounts) { accounts.ensureLegacy(user); accounts.touchLogin(user); }
     const s = sessions.create(user);
-    reply.header("set-cookie", [cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: 30 * 86400 }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
+    reply.header("set-cookie", [cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: sessions.maxAgeSec(s) }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
     req.log.info({ evt: "login", user });
     return { ok: true, user, csrf: s.csrf };
   });
