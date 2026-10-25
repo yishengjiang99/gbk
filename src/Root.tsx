@@ -24,7 +24,7 @@ export default function Root() {
   useEffect(() => {
     if (route.view !== "share") return;
     setShareErr("");
-    void openShared(route.slug, route.fork).then((sh) => { if (sh.slug && sh.slug !== route.slug) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); setShareErr(`Could not open shared song: ${(e as Error).message}`); });
+    void openShared(route.slug, route.fork).then((sh) => { setShareTitle(sh.title); if (sh.slug && sh.slug !== route.slug) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); setShareErr(`Could not open shared song: ${(e as Error).message}`); });
   }, [route]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && playerOpen) setPlayerOpen(false); };
@@ -52,4 +52,13 @@ export default function Root() {
       </div>
     </>
   );
+}
+
+/** Share pages (/s/<slug>): "<song title> · GBK Composer" in the tab and og:title (SPA; nginx serves static index.html). */
+export function setShareTitle(title: string) {
+  const t = `${(title || "Untitled").trim()} · GBK Composer`;
+  document.title = t;
+  let m = document.querySelector<HTMLMetaElement>('meta[property="og:title"]');
+  if (!m) { m = document.createElement("meta"); m.setAttribute("property", "og:title"); document.head.appendChild(m); }
+  m.content = t;
 }
