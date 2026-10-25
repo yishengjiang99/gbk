@@ -43,7 +43,7 @@ test("ranking: personalized For you learns from dwell/skips, session-aware, pagi
 });
 
 // ---- v2 unit tests on synthetic fixtures (rank-fixture.ts) ----
-import { Ranker, trainInWorker, FEATURES, HEURISTIC, SKIP_LAMBDA, labels, projectSeconds } from "../src/ranking/ranker.ts";
+import { Ranker, trainInWorker, FEATURES, HEURISTIC, SKIP_LAMBDA, labels, projectSeconds, QUOTAS, SOURCES } from "../src/ranking/ranker.ts";
 import { fixture, rand, H as HR, D } from "./rank-fixture.ts";
 
 const randomWorld = (fx: ReturnType<typeof fixture>, seed: number, n = 1600) => {
@@ -93,4 +93,18 @@ test("ranking v2 / phase 3: labels (replay / ratio >= 0.9 complete), two-head va
   const a = fx.song({ owner: "x", seconds: 170 }); fx.song({ owner: "y", seconds: 20 });
   fx.db.prepare("INSERT INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES ('lr2-20261024', ?, 1, 0.7, ?, 1)").run(JSON.stringify({ complete: { ...z, bias: 2 }, skip: { ...z, bias: -3 } }), fx.now());
   rk.reload(); assert.equal(rk.version, "lr2-20261024"); const r = rk.rank({ actor: null, session: null, seed: 1 }); assert.equal(r.ids[0], a, "longer likely-complete song first"); assert.equal(r.version, "lr2-20261024");
+});
+
+test("ranking v2 / phase 4: candidate sources with quotas; a fresh 0-score song is in the pool of a > 1000-song catalog", () => {
+  const fx = fixture(); fx.db.exec("BEGIN");
+  for (let i = 0; i < 1100; i++) fx.song({ owner: `o${i % 40}`, labels: [["lofi", "jazz", "classical", "pop"][i % 4]], score: 1 + i / 100, ageH: 24 * 20 });
+  const fresh = fx.song({ owner: "newbie", score: 0, ageH: 1 }); fx.db.exec("COMMIT");
+  const rk = new Ranker(fx.db, fx.now);
+  for (const actor of [null, "a-warm"]) {
+    const r = rk.rank({ actor, session: null, seed: 5 });
+    assert.ok(r.ids.length <= 1000 + 1 && r.ids.length >= 1000, `pool capped (${r.ids.length})`); assert.ok(r.ids.includes(fresh), "fresh song always in the pool");
+    assert.deepEqual(r.sources.get(fresh)?.includes("fresh"), true);
+  }
+  assert.equal(QUOTAS.fresh, Infinity); assert.deepEqual([...SOURCES], ["coeng", "affinity", "artists", "trending", "fresh", "cold"]);
+  assert.ok(rk.rank({ actor: null, session: null, seed: 1 }).sources.size > 0);
 });

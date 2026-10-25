@@ -1,6 +1,6 @@
 // Personalized "For you" ranking (docs/social/ranking.md). Small and in-process:
-//   1. candidate generation: item-item co-engagement, content affinity (tags/labels/artist/instrument family),
-//      trending (popularity score), fresh uploads; cold start = popularity + freshness.
+//   1. candidate generation: named sources with quotas (coeng, affinity, artists, trending, fresh < 48 h always in,
+//      cold = popularity + freshness for actors with no history); union capped at POOL_MAX.
 //   2. pointwise value: expected listen value from two nightly LR heads (lr2: P(complete), P(fast skip)) once a
 //      model passes the promotion gate, otherwise HEURISTIC weights · features.
 //   3. re-rank: freshness boost, ~12% epsilon exploration, diversity (max 2 in a row per artist, max 3 per label).
@@ -22,7 +22,15 @@ export const EPSILON = 0.12, MAX_AUTHOR_RUN = 2, MAX_LABEL_RUN = 3, MIN_TRAIN = 
 export const signal = (i: { dwell_ms: number; completed: number; fast_skip: number; actions: string }) =>
   (i.fast_skip ? -1 : 0) + (i.completed ? 1 : 0) + (i.dwell_ms >= 10_000 ? 0.5 : 0) + (i.actions !== "[]" ? 1.5 : 0);
 
-interface Song { id: string; owner: string; score: number; published_at: number; tags: string[]; labels: string[]; fam: string[]; dur: number }
+export const SOURCES = ["coeng", "affinity", "artists", "trending", "fresh", "cold"] as const;
+export type Source = (typeof SOURCES)[number];
+/** Per-source candidate quotas (fresh: everything < FRESH_WINDOW_H, uncapped). */
+export const QUOTAS: Record<Source, number> = { coeng: 200, affinity: 250, artists: 150, trending: 300, fresh: Infinity, cold: 400 };
+export const POOL_MAX = 1000, CATALOG_MAX = 5000, FRESH_WINDOW_H = 48;
+interface Ctx { t: number; pref: Map<string, number>; sess: Map<string, number>; seen: Map<string, number>; co: Map<string, number>; artists: Map<string, number>; history: number; maxScore: number; maxCo: number }
+const keysOf = (s: Song) => [...s.tags.map((x) => `t:${x}`), ...s.labels.map((x) => `l:${x}`), `a:${s.owner}`, ...s.fam.map((x) => `f:${x}`)];
+const sq = (m: Map<string, number>, s: Song) => { let v = 0; for (const k of keysOf(s)) v += m.get(k) ?? 0; return Math.tanh(v / 3); };
+interface Song { id: string; owner: string; title: string; parent: string | null; score: number; published_at: number; tags: string[]; labels: string[]; fam: string[]; dur: number }
 /** Song length in seconds from project_json (last note end through the tempo map); null if unknown. */
 export function projectSeconds(p: { ppq?: number; tempos?: { tick: number; microPerQuarter: number }[]; notes?: { tick: number; duration: number }[] }): number | null {
   const ppq = p.ppq || 480; const end = Math.max(0, ...(p.notes ?? []).map((n) => n.tick + n.duration)); if (!end) return null;
@@ -48,35 +56,40 @@ export class Ranker {
   }
   /** Latest promoted model (lr2 two-head); a legacy single-head row or none counts as "no model" for the gate. */
   private promoted() { const m = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted IS NULL OR promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined; const w = m ? JSON.parse(m.weights) as Weights | Model : null; return m && w && "complete" in w ? { version: m.version, model: w } : null; }
+  /** Catalog: public non-wip songs, the top CATALOG_MAX by score plus every song published in the last FRESH_WINDOW_H. */
   private songs(): Song[] {
     // Cheap freshness key so a just-published / unpublished song shows up (or disappears) immediately.
     const k = this.db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(published_at, created_at)), 0) AS m, COALESCE(SUM(score), 0) AS sc FROM shares WHERE public = 1").get() as { n: number; m: number; sc: number };
     const key = `${k.n}:${k.m}:${Math.round(Number(k.sc))}`;
     if (this.cache && this.cache.key === key && this.now() - this.cache.at < 30_000) return this.cache.songs;
-    const rows = this.db.prepare(`SELECT s.id, s.owner, s.score, COALESCE(s.published_at, s.created_at) AS pub, s.labels, s.project_json AS project FROM shares s
-      WHERE s.public = 1 AND NOT EXISTS (SELECT 1 FROM json_each(s.labels) WHERE value = 'wip') ORDER BY s.score DESC LIMIT 1000`).all() as { id: string; owner: string; score: number; pub: number; labels: string; project: string | null }[];
+    const nowt = this.now();
+    const rows = this.db.prepare(`SELECT s.id, s.owner, s.title, s.parent_id, s.score, COALESCE(s.published_at, s.created_at) AS pub, s.labels, s.project_json AS project FROM shares s
+      WHERE s.public = 1 AND NOT EXISTS (SELECT 1 FROM json_each(s.labels) WHERE value = 'wip') AND (s.id IN (SELECT id FROM shares WHERE public = 1 ORDER BY score DESC LIMIT ?) OR COALESCE(s.published_at, s.created_at) > ?)
+      ORDER BY s.score DESC`).all(CATALOG_MAX, nowt - FRESH_WINDOW_H * 3_600_000) as { id: string; owner: string; title: string; parent_id: string | null; score: number; pub: number; labels: string; project: string | null }[];
     const tags = new Map<string, string[]>(); for (const t of this.db.prepare("SELECT share_id, tag FROM share_tags").all() as { share_id: string; tag: string }[]) (tags.get(t.share_id) ?? tags.set(t.share_id, []).get(t.share_id)!).push(t.tag);
-    const fam = (p: string | null) => { try { const j = JSON.parse(p ?? "{}") as { tracks?: { program?: number; channel?: number }[] }; return [...new Set((j.tracks ?? []).map((t) => t.channel === 9 ? "drums" : `gm${Math.floor((t.program ?? 0) / 8)}`))]; } catch { return []; } };
-    const secs = (p: string | null) => { try { return projectSeconds(JSON.parse(p ?? "{}")); } catch { return null; } };
-    const songs = rows.map((r) => ({ id: r.id, owner: r.owner, score: Number(r.score), published_at: Number(r.pub), tags: tags.get(r.id) ?? [], labels: JSON.parse(r.labels || "[]") as string[], fam: fam(r.project), dur: secs(r.project) ?? NaN }));
+    const fam = (j: { tracks?: { program?: number; channel?: number }[] }) => [...new Set((j.tracks ?? []).map((t) => t.channel === 9 ? "drums" : `gm${Math.floor((t.program ?? 0) / 8)}`))];
+    const songs: Song[] = rows.map((r) => { let j: Parameters<typeof projectSeconds>[0] & { tracks?: { program?: number; channel?: number }[] } = {}; try { j = JSON.parse(r.project ?? "{}"); } catch { /* bad json */ }
+      return { id: r.id, owner: r.owner, title: r.title, parent: r.parent_id, score: Number(r.score), published_at: Number(r.pub), tags: tags.get(r.id) ?? [], labels: JSON.parse(r.labels || "[]") as string[], fam: fam(j), dur: projectSeconds(j) ?? NaN }; });
     const known = songs.map((x) => x.dur).filter((d) => Number.isFinite(d)).sort((a, b) => a - b); const median = known.length ? known[Math.floor(known.length / 2)] : 60;
     for (const x of songs) if (!Number.isFinite(x.dur)) x.dur = median;
     this.cache = { at: this.now(), key, songs }; return songs;
   }
   invalidate() { this.cache = null; }
 
-  /** Per-song feature vectors for one actor (and current session), point-in-time: only impressions before `asOf`. */
-  features(actor: string | null, session: string | null, asOf?: number) {
-    const songs = this.songs(); const t = asOf ?? this.now();
+  /** Actor context, point-in-time: only impressions before `asOf`. */
+  private context(actor: string | null, session: string | null, t: number, songs: Song[]): Ctx {
     const hist = actor ? this.db.prepare("SELECT share_id, dwell_ms, completed, fast_skip, actions, session, created_at FROM impressions WHERE actor = ? AND created_at > ? AND created_at < ? ORDER BY id DESC LIMIT 500").all(actor, t - 60 * 86_400_000, t) as { share_id: string; dwell_ms: number; completed: number; fast_skip: number; actions: string; session: string; created_at: number }[] : [];
     const byId = new Map(songs.map((s) => [s.id, s]));
-    const pref = new Map<string, number>(), sess = new Map<string, number>(), seen = new Map<string, number>(), liked: string[] = [];
+    const pref = new Map<string, number>(), sess = new Map<string, number>(), seen = new Map<string, number>(), liked: string[] = [], artists = new Map<string, number>();
     for (const h of hist) {
       const s = byId.get(h.share_id); const w = signal(h); seen.set(h.share_id, (seen.get(h.share_id) ?? 0) + 1); if (w > 0) liked.push(h.share_id);
-      if (!s) continue; const keys = [...s.tags.map((x) => `t:${x}`), ...s.labels.map((x) => `l:${x}`), `a:${s.owner}`, ...s.fam.map((x) => `f:${x}`)];
+      if (!s) continue; const keys = keysOf(s);
       const decay = Math.exp(-(t - h.created_at) / (14 * 86_400_000));
       for (const k of keys) pref.set(k, (pref.get(k) ?? 0) + w * decay);
       if (session && h.session === session) for (const k of keys) sess.set(k, (sess.get(k) ?? 0) + w);
+      // artists source: positive engagement, plus explicit like/follow actions
+      const acts = h.actions === "[]" ? [] : (JSON.parse(h.actions) as string[]);
+      if (w > 0 || acts.includes("like") || acts.includes("follow")) artists.set(s.owner, (artists.get(s.owner) ?? 0) + w * decay + (acts.includes("follow") ? 2 : acts.includes("like") ? 1 : 0));
     }
     // item-item co-engagement: songs positively engaged by actors who positively engaged what this actor liked
     const co = new Map<string, number>();
@@ -85,9 +98,32 @@ export class Ranker {
       for (const r of this.db.prepare(`SELECT i2.share_id AS id, COUNT(DISTINCT i2.actor) AS n FROM impressions i1 JOIN impressions i2 ON i2.actor = i1.actor AND i2.share_id <> i1.share_id
         WHERE i1.share_id IN (${ph}) AND i1.actor <> ? AND (i1.completed = 1 OR i1.actions <> '[]') AND (i2.completed = 1 OR i2.actions <> '[]') AND i1.created_at > ? AND i1.created_at < ? AND i2.created_at < ? GROUP BY i2.share_id ORDER BY n DESC LIMIT 200`).all(...ids, actor!, t - 30 * 86_400_000, t, t) as { id: string; n: number }[]) co.set(r.id, Number(r.n));
     }
-    const maxScore = Math.max(1e-9, ...songs.map((s) => s.score)), maxCo = Math.max(1, ...co.values());
-    const sq = (m: Map<string, number>, s: Song) => { const keys = [...s.tags.map((x) => `t:${x}`), ...s.labels.map((x) => `l:${x}`), `a:${s.owner}`, ...s.fam.map((x) => `f:${x}`)]; let v = 0; for (const k of keys) v += m.get(k) ?? 0; return Math.tanh(v / 3); };
-    return songs.map((s) => ({ song: s, f: { affinity: sq(pref, s), coeng: (co.get(s.id) ?? 0) / maxCo, popularity: s.score / maxScore, freshness: Math.pow(0.5, Math.max(0, t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000)), session: sq(sess, s), seen: Math.min(1, (seen.get(s.id) ?? 0) / 2) }, history: hist.length }));
+    return { t, pref, sess, seen, co, artists, history: hist.length, maxScore: Math.max(1e-9, ...songs.map((s) => s.score)), maxCo: Math.max(1, ...co.values()) };
+  }
+  private feat(c: Ctx, s: Song) {
+    return { affinity: sq(c.pref, s), coeng: (c.co.get(s.id) ?? 0) / c.maxCo, popularity: s.score / c.maxScore, freshness: Math.pow(0.5, Math.max(0, c.t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000)), session: sq(c.sess, s), seen: Math.min(1, (c.seen.get(s.id) ?? 0) / 2) };
+  }
+  /** Per-song feature vectors for one actor (and current session), point-in-time: only impressions before `asOf`. */
+  features(actor: string | null, session: string | null, asOf?: number) {
+    const songs = this.songs(); const c = this.context(actor, session, asOf ?? this.now(), songs);
+    return songs.map((s) => ({ song: s, f: this.feat(c, s), history: c.history }));
+  }
+  /** Candidate generation: named sources, each capped by its QUOTAS entry; `fresh` always contributes in full.
+   *  Union capped at POOL_MAX (fresh first), backfilled by score. Returns the pool and a song -> sources map. */
+  candidates(c: Ctx, songs: Song[]) {
+    const src = new Map<string, Source[]>(); const add = (name: Source, ids: string[]) => { for (const id of ids.slice(0, QUOTAS[name])) (src.get(id) ?? src.set(id, []).get(id)!).push(name); };
+    const top = (xs: Song[], f: (s: Song) => number) => xs.map((s) => [s, f(s)] as const).filter((x) => x[1] > 0).sort((a, b) => b[1] - a[1]).map((x) => x[0].id);
+    const fresh = songs.filter((s) => c.t - s.published_at < FRESH_WINDOW_H * 3_600_000).sort((a, b) => b.published_at - a.published_at).map((s) => s.id);
+    add("fresh", fresh);
+    add("coeng", [...c.co.entries()].sort((a, b) => b[1] - a[1]).map((x) => x[0]));
+    add("affinity", top(songs, (s) => sq(c.pref, s)));
+    add("artists", top(songs, (s) => c.artists.get(s.owner) ?? 0));
+    add("trending", songs.map((s) => s.id)); // songs() is score-ordered
+    if (c.history === 0) add("cold", top(songs, (s) => s.score / c.maxScore + Math.pow(0.5, Math.max(0, c.t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000))));
+    const pool = new Set<string>(fresh); // fresh is never cut by the cap
+    for (const id of src.keys()) { if (pool.size >= POOL_MAX) break; pool.add(id); }
+    for (const s of songs) { if (pool.size >= POOL_MAX) break; if (!pool.has(s.id)) { pool.add(s.id); (src.get(s.id) ?? src.set(s.id, []).get(s.id)!).push("trending"); } }
+    return { pool, sources: src };
   }
   /** Score: with a learned model, expected listen value P(complete)·min(dur,180)/180 − SKIP_LAMBDA·P(fast skip); else HEURISTIC w·f. */
   value(f: Record<string, number>, durS = 60, m: Model | null = this.model, w = this.weights) {
@@ -96,14 +132,15 @@ export class Ranker {
     return lin(x, w);
   }
 
-  /** Full ranked id list for an actor; deterministic for a given seed (pages stay consistent). */
-  rank(o: { actor: string | null; session: string | null; seed: number; viewer?: string | null }): { ids: string[]; owners: Map<string, string>; version: string; cold: boolean } {
-    const fs = this.features(o.actor, o.session); const r = rng(o.seed); const cold = !fs.length || fs[0].history === 0;
-    const scored = fs.map((x) => ({ s: x.song, v: this.value(x.f, x.song.dur) + (x.song.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
+  /** Full ranked id list for an actor; deterministic for a given seed (pages stay consistent). `sources` is for debugging only (not logged). */
+  rank(o: { actor: string | null; session: string | null; seed: number; viewer?: string | null }): { ids: string[]; owners: Map<string, string>; version: string; cold: boolean; sources: Map<string, Source[]> } {
+    const songs = this.songs(); const c = this.context(o.actor, o.session, this.now(), songs); const r = rng(o.seed); const cold = c.history === 0;
+    const { pool, sources } = this.candidates(c, songs);
+    const scored = songs.filter((s) => pool.has(s.id)).map((s) => ({ s, v: this.value(this.feat(c, s), s.dur) + (s.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
     scored.sort((a, b) => b.v - a.v);
     // exploration: ~EPSILON of the slots go to random lower-ranked (often new / untried) songs
-    const out: typeof scored = []; const pool = [...scored];
-    while (pool.length) { const explore = r() < EPSILON && pool.length > 3; const i = explore ? 1 + Math.floor(r() * (pool.length - 1)) : 0; out.push(pool.splice(i, 1)[0]); }
+    const out: typeof scored = []; const rest = [...scored];
+    while (rest.length) { const explore = r() < EPSILON && rest.length > 3; const i = explore ? 1 + Math.floor(r() * (rest.length - 1)) : 0; out.push(rest.splice(i, 1)[0]); }
     // diversity re-rank: greedy, never > MAX_AUTHOR_RUN same artist or > MAX_LABEL_RUN same first label in a row
     const res: Song[] = []; const left = out.map((x) => x.s);
     const ok = (s: Song) => { const n = res.length; const a = res.slice(Math.max(0, n - MAX_AUTHOR_RUN)); const l = res.slice(Math.max(0, n - MAX_LABEL_RUN));
@@ -116,7 +153,7 @@ export class Ranker {
       if (i === -1) i = left.findIndex(ok);
       res.push(left.splice(i === -1 ? 0 : i, 1)[0]);
     }
-    return { ids: res.map((s) => s.id), owners: new Map(res.map((s) => [s.id, s.owner])), version: this.version, cold };
+    return { ids: res.map((s) => s.id), owners: new Map(res.map((s) => [s.id, s.owner])), version: this.version, cold, sources };
   }
 
   /** Nightly: fit two LR heads, P(complete) and P(fast skip), on point-in-time features (as of each impression's
