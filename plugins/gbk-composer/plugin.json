@@ -43,7 +43,7 @@
               "description": "Compose, add a part with a targeted edit, and render it in the in-chat player (no Studio tab).",
               "prompt": "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.",
               "tools_triggered": "gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_show_composition_ui",
-              "expected_behavior": "A jazz composition is created and a walking_bass part generated; the GBK in-chat player is shown. Pressing Render in the player synthesizes the WAV in the user's browser with progress and Stop, plays it in the chat, and saves validated WAV and MIDI download links. Without sign-in the WAV render and download work in the player (saved to the project when the player has the project's accessToken); if the model calls gbk_render_composition instead, it returns browser_render (MIDI download plus the in-chat player handoff) or, for a signed-in user with no Studio tab, studio_required, and the assistant points the user to the player's Render button."
+              "expected_behavior": "A jazz composition is created and a walking_bass part generated; the GBK in-chat player is shown. Pressing Render in the player synthesizes the WAV in the user's browser with progress and Stop, plays it in the chat, and saves validated WAV and MIDI download links. Without sign-in the WAV render and download work in the player (saved to the project when the player has the project's accessToken). If the model calls gbk_render_composition instead, the WAV and MIDI are rendered on GBK's server (no Studio tab needed) and returned as signed download links."
             },
             {
               "description": "Edit only a passage of the most recent composition.",
@@ -82,7 +82,7 @@
         "demo_recording_url": "https://yishengjiang99.github.io/gbk/submission/gbk-composer-demo.mp4"
       },
       "publication": {
-        "release_notes": "1.0.0: first public release. Compose in five styles (baroque, classical, pop, jazz, ambient) with a deterministic, seeded engine; targeted revision-safe edits (parts, transforms, octave doubling, CC curves, tempo, instruments, mix); interactive piano-roll player; WAV and MIDI rendered in the user's own GBK Studio browser tab; compositions private until the user asks to publish."
+        "release_notes": "1.0.0: first public release. Compose in five styles (baroque, classical, pop, jazz, ambient) with a deterministic, seeded engine; targeted revision-safe edits (parts, transforms, octave doubling, CC curves, tempo, instruments, mix); interactive piano-roll player; WAV and MIDI rendered in the in-chat player in the user's browser, or on GBK's server for clients without a browser; compositions private until the user asks to publish."
       }
     }
   },

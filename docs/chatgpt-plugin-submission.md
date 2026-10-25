@@ -35,7 +35,7 @@ human account owner have not been performed by preparing this packet.
 >
 > Instruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.
 >
-> No account is needed. To hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. Press Render and the WAV is synthesized right in your browser with the GBK SoundFont engine, plays in the chat, and can be downloaded; GBK also exports a Standard MIDI file. Audio is never rendered on GBK's server, and no Studio tab is needed.
+> No account is needed. To hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. Press Render and the WAV is synthesized right in your browser with the GBK SoundFont engine, plays in the chat, and can be downloaded; GBK also exports a Standard MIDI file. No Studio tab is needed. Clients without a browser (such as Codex) get the WAV and MIDI rendered on GBK's server instead.
 >
 > Each composition is private and opened only with the access key returned to your chat. GBK publishes a public share page only when you ask it to.
 
@@ -59,7 +59,7 @@ programming and experimentation.
 
 ## Test prompts
 
-These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked by `server/test/mcp-listing.test.ts`). Rendering runs in the user's browser: the in-chat player's Render button needs no Studio tab or extra sign-in (a connected Studio tab also works for `gbk_render_composition`).
+These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked by `server/test/mcp-listing.test.ts`). The in-chat player's Render button synthesizes audio in the user's browser and needs no Studio tab or extra sign-in. `gbk_render_composition` renders WAV and MIDI on GBK's server (or in a connected Studio tab, if there is one).
 
 1. > Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.
 
@@ -67,7 +67,7 @@ These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked
 
 2. > Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.
 
-   Expected: A jazz composition is created, a `walking_bass` part is generated via `gbk_edit_composition`, and the in-chat player is shown (`gbk_show_composition_ui`). Pressing Render synthesizes the WAV in the browser (progress %, Stop), plays it, and saves WAV + MIDI download links. If the model calls `gbk_render_composition` with no Studio tab, it gets `studio_required` and points the user to the player's Render button.
+   Expected: A jazz composition is created, a `walking_bass` part is generated via `gbk_edit_composition`, and the in-chat player is shown (`gbk_show_composition_ui`). Pressing Render synthesizes the WAV in the browser (progress %, Stop), plays it, and saves WAV + MIDI download links. If the model calls `gbk_render_composition` instead, the WAV and MIDI are rendered on GBK's server and returned as signed download links.
 
 3. > In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo.
 
@@ -85,8 +85,8 @@ The test cases and release notes below are also in `plugin.json` under `extensio
    - Expected: A new private composition (baroque, D minor, 16 bars, organ voices) is created and the GBK player shows its piano roll, tracks and CC11 lane.
 2. **Compose, add a part with a targeted edit, and render it in the in-chat player (no Studio tab).**
    - Prompt: "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat."
-   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_show_composition_ui (player calls gbk_widget_render_start / gbk_widget_render_finish); gbk_render_composition only with a Studio tab
-   - Expected: A jazz composition is created and a walking_bass part generated; the GBK in-chat player is shown. Pressing Render in the player synthesizes the WAV in the user's browser with progress and Stop, plays it in the chat, and saves validated WAV and MIDI download links. If the model calls gbk_render_composition with no Studio tab connected, it returns status studio_required and the assistant points the user to the in-chat player's Render button.
+   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_show_composition_ui (player calls gbk_widget_render_start / gbk_widget_render_finish); optionally gbk_render_composition (server render)
+   - Expected: A jazz composition is created and a walking_bass part generated; the GBK in-chat player is shown. Pressing Render in the player synthesizes the WAV in the user's browser with progress and Stop, plays it in the chat, and saves validated WAV and MIDI download links. If the model calls gbk_render_composition instead, it renders the WAV and MIDI on GBK's server (no Studio tab needed) and returns signed download links.
 3. **Edit only a passage of the most recent composition.**
    - Prompt: "In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo."
    - Tools: gbk_list_compositions, gbk_get_composition, gbk_edit_composition
@@ -108,7 +108,7 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 
 ### Release notes
 
-> 1.0.0: first public release. Compose in five styles (baroque, classical, pop, jazz, ambient) with a deterministic, seeded engine; targeted revision-safe edits (parts, transforms, octave doubling, CC curves, tempo, instruments, mix); interactive piano-roll player; WAV and MIDI rendered in the user's own GBK Studio browser tab; compositions private until the user asks to publish.
+> 1.0.0: first public release. Compose in five styles (baroque, classical, pop, jazz, ambient) with a deterministic, seeded engine; targeted revision-safe edits (parts, transforms, octave doubling, CC curves, tempo, instruments, mix); interactive piano-roll player; WAV and MIDI rendered in the in-chat player in the user's browser, or on GBK's server for clients without a browser; compositions private until the user asks to publish.
 
 ### Tool annotation justifications
 
@@ -140,7 +140,7 @@ GBK normally uses Google sign-in only. For app review there is one username/pass
 1. In ChatGPT, connect GBK Composer. The OAuth page at `https://compose.grepawk.com/oauth/authorize` asks the user to sign in.
 2. Click **Reviewer sign-in**, enter `openai-reviewer` and the password, and submit. You return to the same authorization request.
 3. Approve the consent screen. ChatGPT is now connected as the reviewer account, which has the same daily AI and render limits as any new account.
-4. Rendering runs in the browser. For test cases that render, open `https://compose.grepawk.com/studio` in a browser tab, sign in there through **Reviewer sign-in** in the AI Composer panel, and keep the tab open.
+4. No Studio tab is needed. The in-chat player's Render button renders in the browser, and `gbk_render_composition` renders on GBK's server.
 
 Server settings: `REVIEWER_LOGIN_ENABLED=1` and `REVIEWER_PASSWORD_HASH` (an scrypt hash) in `/etc/gbk-composer.env`. To turn reviewer login off, unset `REVIEWER_LOGIN_ENABLED` and restart `gbk-composer`; the link then disappears and the endpoints return 404. Failed attempts are limited to 5 per IP every 15 minutes.
 
@@ -156,7 +156,7 @@ Steps for the owner:
 ### Screenshots and demo recording
 
 These are produced by `GBK_NODE22="npx -y node@22" npx playwright test --config test/e2e/submission.config.ts` against a local stack (the real server and workstation, a test account, and a deterministic test model), so nothing is written to the public gallery:
-- `starter-1-baroque-fugue.png`, `starter-2-jazz-walking-bass.png`, `starter-3-octave-crescendo.png`: one per starter prompt, 706×860 PNG, showing the in-chat player after the same tool calls ChatGPT makes. Prompt 2 was rendered in a connected Studio tab.
+- `starter-1-baroque-fugue.png`, `starter-2-jazz-walking-bass.png`, `starter-3-octave-crescendo.png`: one per starter prompt, 706×860 PNG, showing the in-chat player after the same tool calls ChatGPT makes. Each was rendered by pressing Render in the player (the Done state is shown).
 - `gbk-composer-demo.mp4` (about 41 s, 1280×800): a Studio session going from the compose prompt to the live piano roll, the in-browser WAV render, the private-save dialog, and playback.
 
 Demo recording (`review.demo_recording_url`): https://yishengjiang99.github.io/gbk/submission/gbk-composer-demo.mp4. The video and screenshots are in `public/submission/`, so they ship with the GitHub Pages build.
