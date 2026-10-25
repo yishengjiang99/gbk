@@ -5,7 +5,7 @@ import type { Config } from "../config.ts";
 import type { SessionStore } from "../security/authentication.ts";
 import type { ShareStore, ShareRow } from "../persistence/shares.ts";
 import type { AccountStore } from "../persistence/accounts.ts";
-import { SocialStore, normLabels, normTags, badText, LABELS, TAG_RE, type CommentRow } from "../persistence/social.ts";
+import { SocialStore, encCursor, decCursor, normLabels, normTags, badText, LABELS, TAG_RE, type CommentRow } from "../persistence/social.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import { currentSession, guardWrite } from "./agent.ts";
 import { isGuest } from "../mcp/guest.ts";
@@ -70,10 +70,35 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     const label = q.label && (LABELS as readonly string[]).includes(q.label) ? q.label : undefined;
     const t = tag ?? q.tag; if (t !== undefined && !TAG_RE.test(t)) return reply.code(400).send({ code: "INVALID_TAG", message: "bad tag" });
     const f = social.feed({ sort, label, tag: t, cursor: q.cursor, limit: lim(q.limit) }); const v = viewerOf(req);
-    // Light diversity on For you: no more than 2 consecutive songs by one author within a page.
-    let rows = f.ids.map((id) => shares.byId(id)!);
-    if (sort === "for_you") { const out: ShareRow[] = [], held: ShareRow[] = []; for (const r of rows) { const n = out.length; if (n >= 2 && out[n - 1].owner === r.owner && out[n - 2].owner === r.owner) held.push(r); else out.push(r); } rows = [...out, ...held]; }
-    return { items: rows.map((r) => song(r, v)), next_cursor: f.next };
+    // Light diversity on For you: never more than 2 consecutive songs by one author, across pages too. We read a
+    // look-ahead window, pick greedily, and the cursor carries the last two authors (o) plus the ids already shown
+    // past the cursor position (x) so deferred songs come on a later page instead of being dropped.
+    let rows = f.ids.map((id) => shares.byId(id)!); let next = f.next;
+    if (sort === "for_you") {
+      const c0 = decCursor<{ o?: unknown; x?: unknown }>(q.cursor) ?? {};
+      const hist = (Array.isArray(c0.o) ? c0.o : []).filter((x): x is string => typeof x === "string").slice(-2);
+      const shown = new Set((Array.isArray(c0.x) ? c0.x : []).filter((x): x is string => typeof x === "string"));
+      const n = lim(q.limit); const w = social.feed({ sort, label, tag: t, cursor: q.cursor, limit: n * 3 + shown.size });
+      const win = w.rows.filter((r) => !shown.has(r.id)).map((r) => ({ ...r, row: shares.byId(r.id)! }));
+      const out: typeof win = []; const owners = () => [...hist, ...out.map((r) => r.row.owner)];
+      const bad = (o: string) => { const t2 = owners(); return t2.length >= 2 && t2[t2.length - 1] === o && t2[t2.length - 2] === o; };
+      while (out.length < n && out.length < win.length) {
+        const pick = win.find((r) => !out.includes(r) && !bad(r.row.owner)) ?? (w.more ? null : win.find((r) => !out.includes(r)));
+        if (!pick) break; out.push(pick);
+      }
+      rows = out.map((r) => r.row);
+      const firstSkip = win.findIndex((r) => !out.includes(r));
+      const restAfter = firstSkip === -1 ? [] : win.slice(firstSkip);
+      const hasMore = w.more || restAfter.length > 0;
+      if (!hasMore || !out.length) next = null;
+      else {
+        const pos = firstSkip === -1 ? win[win.length - 1] : firstSkip > 0 ? win[firstSkip - 1] : null;
+        const base = pos ? { k: pos.k, id: pos.id } : (decCursor<{ k?: number; id?: string }>(q.cursor) ?? {});
+        const x = [...shown, ...restAfter.filter((r) => out.includes(r)).map((r) => r.id)].filter((id) => firstSkip !== -1 && win.slice(firstSkip).some((r) => r.id === id) || shown.has(id));
+        next = encCursor({ ...("k" in base ? base : {}), o: owners().slice(-2), x: x.slice(-200) });
+      }
+    }
+    return { items: rows.map((r) => song(r, v)), next_cursor: next };
   };
   app.get("/api/feed", (req, reply) => feed(req, reply));
   app.get("/api/tags/top", async (req) => social.topTags(lim((req.query as { limit?: string }).limit, 30, 100)));

@@ -61,3 +61,37 @@ test("social feed: rate, comment, tag filter, report, profile (mobile + desktop)
     await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close();
   }
 });
+
+function silentWav(sec = 2, rate = 8000) {
+  const n = sec * rate, b = Buffer.alloc(44 + n * 2);
+  b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVE", 8); b.write("fmt ", 12); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n * 2, 40); return b;
+}
+test("social feed autoplay: tap unlocks audio, active card plays, snapping to the next card switches playback", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const slugs: string[] = [];
+  for (const t of ["Autoplay Two", "Autoplay One"]) {
+    const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json();
+    expect((await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: silentWav() })).ok()).toBeTruthy();
+    slugs.push(sh.slug);
+  }
+  try {
+    await page.goto("/feed?sort=new");
+    const cards = page.getByTestId("feed-card");
+    await expect(cards.first()).toHaveAttribute("data-slug", slugs[1]);
+    await expect(page.getByTestId("tap-to-play")).toBeVisible();
+    await page.getByTestId("tap-to-play").click();
+    await expect(cards.first()).toHaveAttribute("data-playing", "1");
+    await expect(page.getByTestId("feed")).toHaveAttribute("data-unlocked", "1");
+    // snap to the next card: it becomes active and plays; the first stops
+    await page.getByTestId("feed").evaluate((f) => f.scrollBy({ top: f.clientHeight }));
+    await expect(page.getByTestId("feed")).toHaveAttribute("data-active", "1");
+    await expect(cards.nth(1)).toHaveAttribute("data-playing", "1");
+    await expect(cards.first()).toHaveAttribute("data-playing", "0");
+    const snap = await page.getByTestId("feed").evaluate((f) => [getComputedStyle(f).scrollSnapType, Math.round(f.scrollTop / f.clientHeight * 100)]);
+    expect(String(snap[0])).toContain("mandatory"); expect(snap[1]).toBe(100);
+  } finally {
+    for (const s of slugs) await owner.request.delete(`/api/shares/${s}`, { headers: oh }); await owner.close();
+  }
+});

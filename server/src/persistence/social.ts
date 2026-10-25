@@ -98,7 +98,7 @@ export class SocialStore {
   rescoreAll() { for (const r of this.db.prepare("SELECT id FROM shares WHERE public = 1 ORDER BY published_at DESC LIMIT 5000").all() as { id: string }[]) this.rescore(r.id); }
 
   // ---- feed ----
-  feed(o: { sort: "for_you" | "new" | "top"; label?: string; tag?: string; owner?: string; cursor?: string | null; limit: number }): { ids: string[]; next: string | null } {
+  feed(o: { sort: "for_you" | "new" | "top"; label?: string; tag?: string; owner?: string; cursor?: string | null; limit: number }): { ids: string[]; next: string | null; rows: { id: string; k: number }[]; more: boolean } {
     const where = ["s.public = 1"]; const args: (string | number)[] = [];
     if (o.label) { where.push("EXISTS (SELECT 1 FROM json_each(s.labels) WHERE value = ?)"); args.push(o.label); }
     else if (o.sort === "for_you" && !o.owner) where.push("NOT EXISTS (SELECT 1 FROM json_each(s.labels) WHERE value = 'wip')");
@@ -110,7 +110,7 @@ export class SocialStore {
     const rows = this.db.prepare(`SELECT s.id, ${key} AS k FROM shares s WHERE ${where.join(" AND ")} ORDER BY k DESC, s.id DESC LIMIT ?`).all(...args, o.limit + 1) as { id: string; k: number }[];
     const more = rows.length > o.limit; const page = rows.slice(0, o.limit);
     const last = page[page.length - 1];
-    return { ids: page.map((r) => r.id), next: more && last ? encCursor({ k: Number(last.k), id: last.id }) : null };
+    return { ids: page.map((r) => r.id), next: more && last ? encCursor({ k: Number(last.k), id: last.id }) : null, rows: page.map((r) => ({ id: r.id, k: Number(r.k) })), more };
   }
   topTags(limit: number) {
     const tags = this.db.prepare("SELECT t.tag, COUNT(*) AS count FROM share_tags t JOIN shares s ON s.id = t.share_id AND s.public = 1 GROUP BY t.tag ORDER BY count DESC, t.tag LIMIT ?").all(limit) as { tag: string; count: number }[];

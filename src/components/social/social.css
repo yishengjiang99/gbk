@@ -60,3 +60,5 @@
 .so-sentinel{padding:12px;text-align:center;color:#5f7a90;font-size:12px;min-height:20px}
 .so-toast{position:fixed;left:50%;top:64px;transform:translateX(-50%);background:#16324a;color:#fff;padding:8px 14px;border-radius:10px;z-index:40;font-size:13px;max-width:90vw}
 .pub-tags{display:flex;flex-wrap:wrap;gap:4px}
+.so-feed{position:relative}
+.so-unlock{position:sticky;top:10px;left:0;margin:0 auto -44px;display:block;z-index:5;border:0;border-radius:20px;padding:10px 16px;background:#16324a;color:#fff;font:inherit;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)}

@@ -64,3 +64,20 @@ test("social P1: publish meta, feed cursor, ratings, comments, bearer, reports, 
     const legacy = await (await fetch(`${s.base}/api/shares`)).json(); assert.ok(legacy.shares[0].createdAt && legacy.shares[0].owner);
   } finally { await s.app.close(); }
 });
+
+test("for_you: never 3 in a row from one author, including across page boundaries", async () => {
+  const s = await startServer(new ScriptModel([() => reply("x")]));
+  try {
+    const alice = await login(s.base, "code-a"), bob = await login(s.base, "code-b");
+    const p = await project("x");
+    for (let i = 0; i < 7; i++) assert.equal((await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: `A${i}`, project: p, public: true }) })).status, 200);
+    for (let i = 0; i < 3; i++) await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(bob), body: JSON.stringify({ title: `B${i}`, project: p, public: true }) });
+    const owners: string[] = []; const slugs: string[] = []; let cur: string | null = null; let pages = 0;
+    do { const f = await (await fetch(`${s.base}/api/feed?limit=2${cur ? `&cursor=${cur}` : ""}`)).json(); owners.push(...f.items.map((i: { author: { handle: string } }) => i.author.handle)); slugs.push(...f.items.map((i: { slug: string }) => i.slug)); cur = f.next_cursor; pages++; } while (cur && pages < 20);
+    assert.equal(owners.length, 10); assert.equal(new Set(slugs).size, 10, "no duplicates or drops across pages");
+    // bob's 3 songs are newest (highest score) so they lead; after that alice dominates and must be broken up while bob lasts
+    const firstRun = owners.findIndex((o, i) => i >= 2 && owners[i - 1] === o && owners[i - 2] === o);
+    const bobLast = owners.lastIndexOf("bob");
+    assert.ok(firstRun === -1 || firstRun > bobLast, `run of 3 before bob ran out: ${owners.join(",")}`);
+  } finally { await s.app.close(); }
+});
