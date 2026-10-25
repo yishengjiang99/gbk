@@ -130,4 +130,5 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
     reply.header("content-type", "application/json").header("cache-control", "public, max-age=3600");
     return { applinks: { details: [{ appIDs: cfg.native.iosAppIds, components: [{ "/": "/s/*" }, { "/": "/u/*" }, { "/": "/t/*" }] }] }, webcredentials: { apps: cfg.native.iosAppIds } };
   });
+  return { pair };
 }

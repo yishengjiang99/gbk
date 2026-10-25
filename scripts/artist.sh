@@ -7,7 +7,8 @@ set -euo pipefail
 HOST=${DEPLOY_HOST:-root@64.23.239.208}; KEY=${SSH_KEY:-/home/box/.ssh/id_ed25519}; DIR=/home/box/gbk-artists
 cmd=$1; h=$2; [[ "$h" =~ ^[a-z0-9_]{3,20}$ ]] || { echo "bad handle" >&2; exit 2; }
 q() { printf '%q' "$1"; }
-remote="cd /var/www/gbk-composer/current && set -a && . /etc/gbk-composer.env && set +a && export COMPOSER_DATA_DIR=/var/lib/gbk-composer NODE_ENV=production && runuser -u www-data -- node --disable-warning=ExperimentalWarning server/dist/artist.mjs"
+# systemd loads the env file exactly like the service does (no shell parsing of secret values, nothing echoed).
+remote="systemd-run --quiet --pipe --wait --collect -p User=www-data -p Group=www-data -p EnvironmentFile=/etc/gbk-composer.env -p WorkingDirectory=/var/www/gbk-composer/current -E COMPOSER_DATA_DIR=/var/lib/gbk-composer -E NODE_ENV=production /usr/bin/node --disable-warning=ExperimentalWarning server/dist/artist.mjs"
 case "$cmd" in
   create)
     umask 077; mkdir -p "$DIR"; chmod 700 "$DIR"; tmp=$(mktemp "$DIR/.$h.XXXX")

@@ -59,6 +59,10 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 | `GET /api/session` | live | `{ user, csrf, me }` (web) |
 | `POST /api/auth/apple` | live (503 `APPLE_UNAVAILABLE` until `APPLE_BUNDLE_ID` is set) | `{ identityToken, nonce, displayName? }`. Verifies Apple JWT (JWKS, `aud` = bundle id, `sha256(nonce)` = claim). → `TokenPair` |
 | `POST /api/auth/google/native` | live | `{ idToken }` (`aud` = iOS client id). → `TokenPair` |
+| `GET /api/auth/apple/web?return=` | live (503 until `APPLE_SERVICES_ID`) | web Sign in with Apple (form_post to `POST /api/auth/apple/callback`, id_token verified, nonce bound to a state cookie) |
+| `GET /api/auth/sms/config` | live | `{ enabled, turnstileSiteKey, countries }` |
+| `POST /api/auth/sms/start` | live (503 until Twilio + Turnstile keys) | `{ phone, turnstileToken }` → `{ ok: true }` (generic). Turnstile is checked before any SMS; country allowlist `SMS_COUNTRY_PREFIXES` (default `+1`); limits 5/h per IP, 3/15 min + 10/day per phone, 200/h global |
+| `POST /api/auth/sms/verify` | live (503 until configured) | `{ phone, code, client?: "native" }` → web: cookie session `{ ok, csrf }`; native: `TokenPair`. 5 checks / 15 min per phone |
 | `POST /api/auth/refresh` | live | `{ refresh_token }` → `TokenPair` (rotating, single use; the old access token is revoked too; re-using a spent refresh token revokes all of the user's refresh tokens → `401 INVALID_REFRESH`, sign in again) |
 | `POST /api/auth/logout` | live | revokes the presented access + refresh tokens |
 | `POST /api/auth/web-code` | live | bearer → `{ code, expires_in: 60 }` one-time code |
@@ -134,7 +138,7 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 APNs sender (token-based .p8 auth, ported from earsheet apns.ts) fires on: comment on your song, public fork of your song (live), new DM (P4).
 Payload: `{ aps: { alert: { title, body }, sound }, kind: "comment|fork|dm", link }`. Dead tokens (410/BadDeviceToken) are dropped.
 
-Server env (all optional; never commit values): `APPLE_BUNDLE_ID`, `GOOGLE_IOS_CLIENT_IDS` (comma list; the web `GOOGLE_CLIENT_ID` is also accepted as audience),
+Server env (all optional; never commit values): `APPLE_SERVICES_ID`, `TWILIO_ACCOUNT_SID`, `TWILIO_VERIFY_SID`, `TWILIO_AUTH_TOKEN` (or `TWILIO_API_KEY` + `TWILIO_API_SECRET`), `TURNSTILE_SECRET`, `TURNSTILE_SITE_KEY`, `SMS_COUNTRY_PREFIXES`, `APPLE_BUNDLE_ID`, `GOOGLE_IOS_CLIENT_IDS` (comma list; the web `GOOGLE_CLIENT_ID` is also accepted as audience),
 `IOS_APP_IDS` (e.g. `TEAMID.com.grepawk.gbk`, enables AASA), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8` or `APNS_P8_PATH`, `APNS_TOPIC` (defaults to bundle id).
 APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.com/inbox/<handle>" }`. No email notifications.
 

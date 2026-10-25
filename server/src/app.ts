@@ -36,6 +36,7 @@ import { NativeStore } from "./persistence/native.ts";
 import { createNotifier } from "./push/notifier.ts";
 import type { ApnsSender } from "./push/apns.ts";
 import { nativeRoutes } from "./routes/native.ts";
+import { authExtraRoutes } from "./routes/auth-extra.ts";
 import { socialRoutes } from "./routes/social.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
@@ -93,7 +94,8 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const native = new NativeStore(persist ? join(cfg.dataDir, "native.sqlite") : ":memory:", deps.now);
   const notify = createNotifier(cfg, native, (o) => app.log.info(o), deps.apns);
   const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify);
-  nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, me: socialApi.me, fetch: deps.fetch });
+  const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, me: socialApi.me, fetch: deps.fetch });
+  authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless

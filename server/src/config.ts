@@ -13,6 +13,8 @@ export interface Config {
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number };
   /** Sign-in. A provider is offered only when both its client id and secret are set. */
   /** Native iOS client: Sign in with Apple, Google ID tokens, APNs, universal links. All optional; unset = feature answers 503/404. */
+  /** Web Sign in with Apple (Services ID) and SMS sign-in (Twilio Verify + Turnstile). Unset = 503. */
+  signin2: { appleServicesId: string; twilio: { accountSid: string; user: string; secret: string; verifySid: string } | null; turnstileSecret: string; turnstileSiteKey: string; smsPrefixes: string[] };
   native: { appleBundleId: string; googleClientIds: string[]; iosAppIds: string[]; apns: { keyId: string; teamId: string; privateKey: string; topic: string } };
   auth: { github: { clientId: string; clientSecret: string } | null; google: { clientId: string; clientSecret: string } | null; newAccountDays: number;
     /** OpenAI app-review login (one account, openai-reviewer). Off unless REVIEWER_LOGIN_ENABLED=1 and REVIEWER_PASSWORD_HASH are set. */
@@ -73,6 +75,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       globalDailyCostBudgetUsd: num(env.AGENT_GLOBAL_DAILY_COST_BUDGET_USD, 20), reconnectGraceMs: num(env.AGENT_RECONNECT_GRACE_MS, 30_000), maxToolResultChars: num(env.AGENT_MAX_TOOL_RESULT_CHARS, 12_000) },
     security: { sessionSecret: secret || "dev-only-insecure-secret-change-me-please!!", accessCodes: list(env.COMPOSER_ACCESS_CODES), cookieSecure: publicOrigin.startsWith("https://"),
       loginPerMinute: num(env.RATE_LOGIN_PER_MINUTE, 10), messagesPerMinute: num(env.RATE_MESSAGES_PER_MINUTE, 6), ipRequestsPerMinute: num(env.RATE_IP_PER_MINUTE, 120) },
+    signin2: {
+      appleServicesId: (env.APPLE_SERVICES_ID ?? "").trim(),
+      twilio: env.TWILIO_ACCOUNT_SID && env.TWILIO_VERIFY_SID && (env.TWILIO_AUTH_TOKEN || (env.TWILIO_API_KEY && env.TWILIO_API_SECRET))
+        ? { accountSid: env.TWILIO_ACCOUNT_SID, verifySid: env.TWILIO_VERIFY_SID, user: env.TWILIO_API_KEY || env.TWILIO_ACCOUNT_SID, secret: env.TWILIO_API_SECRET || env.TWILIO_AUTH_TOKEN || "" } : null,
+      turnstileSecret: (env.TURNSTILE_SECRET ?? "").trim(), turnstileSiteKey: (env.TURNSTILE_SITE_KEY ?? "").trim(),
+      smsPrefixes: env.SMS_COUNTRY_PREFIXES ? list(env.SMS_COUNTRY_PREFIXES) : ["+1"],
+    },
     native: {
       appleBundleId: (env.APPLE_BUNDLE_ID ?? "").trim(),
       googleClientIds: list(env.GOOGLE_IOS_CLIENT_IDS),
