@@ -17,6 +17,10 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Native auth (Apple/Google exchange, refresh, logout), web-code handoff, `DELETE /api/me`, push register | behind `AuthServicing`: `LiveAuthService` calls the specced routes; `MockAuthService` for tests. Routes 404 on prod today |
 | sf2player-swift `SF2Engine` dependency | added (pinned 6ce4941), not used yet |
 | Inbox/DMs | placeholder (P4) |
+| Signing | `DEVELOPMENT_TEAM` 83D36RPMUM in project.yml; CI builds with `CODE_SIGNING_ALLOWED=NO` |
+| App icon | placeholder 1024px generated (awaiting approval) |
+| Release | `.github/workflows/ios-release.yml` (manual TestFlight, mirrors finalcut; secrets not set yet, never run) |
+| CI | `ios.yml` green on 4742342 (run 40222202858) |
 
 ### Doc vs prod (checked 2026-10-25 against prod 44b3be2)
 
