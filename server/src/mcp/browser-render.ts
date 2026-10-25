@@ -8,6 +8,7 @@
 //   tab    -> GET snapshotUrl, renders offline, PUTs the WAV in chunks to uploadUrl (capability token), replies with metadata
 //   server -> verifies SHA-256 + WAV header + `validated`, writes artifacts (WAV + server-serialized SMF), completes the job.
 // A tab that disconnects, times out or reports an error fails the job explicitly; no partial artifact is ever published.
+import { execSync } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, writeFileSync, renameSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -49,6 +50,15 @@ export function resolveWidgetAsset(file: string): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [join(here, "widget", file), join(process.cwd(), "server", "dist", "widget", file), join(here, "..", "..", "dist", "widget", file)];
   for (const c of candidates) if (existsSync(c)) return c;
+
+  try {
+    const root = join(here, "..", "..", "..");
+    execSync("node scripts/build-widget.mjs", { cwd: root, stdio: "ignore" });
+    for (const c of candidates) if (existsSync(c)) return c;
+  } catch {
+    // fall through to the typed not-found below so the route reports a clean 404 instead of a server crash.
+  }
+
   throw new McpError("NOT_FOUND", `widget asset ${file} not built (run node scripts/build-widget.mjs)`);
 }
 
