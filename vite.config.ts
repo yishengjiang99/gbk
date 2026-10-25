@@ -1,8 +1,8 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync, existsSync, mkdirSync, copyFileSync, writeFileSync, utimesSync, createReadStream, statSync } from "node:fs";
-import { join } from "node:path";
-import { gzipSync, constants as zc } from "node:zlib";
+import { dirname, join } from "node:path";
+import { gzipSync, brotliCompressSync, constants as zc } from "node:zlib";
 import { execSync } from "node:child_process";
 
 /** Release id baked into the bundle for error reports: GBK_RELEASE_ID (deploy.sh) or the git short sha. */
@@ -60,8 +60,17 @@ function hashedSoundFonts(): Plugin {
       for (const f of fonts) {
         const src = join(outDir, "static", f.file); if (!existsSync(src)) continue;
         const dest = join(dir, hashed(f)); copyFileSync(src, dest);
-        writeFileSync(`${dest}.gz`, gzipSync(readFileSync(dest), { level: zc.Z_BEST_COMPRESSION }));
-        for (const p of [dest, `${dest}.gz`]) utimesSync(p, FIXED, FIXED);
+        const buf = readFileSync(dest);
+        writeFileSync(`${dest}.gz`, gzipSync(buf, { level: zc.Z_BEST_COMPRESSION }));
+        // Brotli (nginx brotli_static, deploy/install-brotli.sh): max quality + 16 MB window; ~19% smaller than gzip.
+        // q11 takes ~90s for GeneralUser-GS, so cache by content-hashed name across builds.
+        const cache = join("node_modules", ".cache", "sf-br", `${hashed(f)}.br`);
+        if (!existsSync(cache)) {
+          mkdirSync(dirname(cache), { recursive: true });
+          writeFileSync(cache, brotliCompressSync(buf, { params: { [zc.BROTLI_PARAM_QUALITY]: 11, [zc.BROTLI_PARAM_LGWIN]: 24, [zc.BROTLI_PARAM_SIZE_HINT]: buf.length } }));
+        }
+        copyFileSync(cache, `${dest}.br`);
+        for (const p of [dest, `${dest}.gz`, `${dest}.br`]) utimesSync(p, FIXED, FIXED);
       }
     },
   };

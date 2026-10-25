@@ -8,8 +8,8 @@ export GBK_RELEASE_ID=$ID
 npm run build:compose
 npm run build:server
 tar czf /tmp/gbk-composer-$ID.tgz dist server/dist/index.mjs server/dist/render-worker.mjs server/dist/widget deploy package.json
-scp /tmp/gbk-composer-$ID.tgz deploy/remote-install.sh "$HOST:/tmp/"
-ssh "$HOST" "bash /tmp/remote-install.sh /tmp/gbk-composer-$ID.tgz $ID && bash /var/www/gbk-composer/current/deploy/install-nginx.sh /var/www/gbk-composer/current/deploy/nginx.conf"
+scp /tmp/gbk-composer-$ID.tgz deploy/remote-install.sh "$HOST:/tmp/" && rm -f /tmp/gbk-composer-$ID.tgz
+ssh "$HOST" "bash /tmp/remote-install.sh /tmp/gbk-composer-$ID.tgz $ID && bash /var/www/gbk-composer/current/deploy/install-brotli.sh && bash /var/www/gbk-composer/current/deploy/install-nginx.sh /var/www/gbk-composer/current/deploy/nginx.conf"
 # SoundFonts: the small fonts ship inside dist/static; the large server-delivery
 # fonts (soundfonts/catalog.json, delivery=server — FluidR3 GM) live outside the
 # releases in /var/www/gbk-composer/soundfonts/ (nginx serves them at

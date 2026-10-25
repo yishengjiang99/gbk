@@ -27,7 +27,7 @@ fi
 systemctl restart gbk-composer
 if healthy 8792; then
   sleep 2; systemctl stop gbk-composer-standby
-  echo "healthy: $ID"; ls -1dt $ROOT/releases/* | tail -n +6 | xargs -r rm -rf; exit 0
+  rm -f "$TGZ"; echo "healthy: $ID"; ls -1dt $ROOT/releases/* | tail -n +6 | xargs -r rm -rf; exit 0
 fi
 echo "primary health check failed; rolling back to $PREV (standby keeps serving meanwhile)" >&2
 journalctl -u gbk-composer -n 40 --no-pager >&2
