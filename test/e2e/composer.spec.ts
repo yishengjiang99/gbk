@@ -136,6 +136,44 @@ test("smoke: page + composer connect in other engines", async ({ page }) => {
   await signIn(page, "e2e-code-2");
 });
 
+// Regression (client_errors, iPhone Safari): tapping the piano roll on a read-only share threw an uncaught
+// READ_ONLY error from assertWritable. Edits must be no-ops with a gentle hint; Play must still work.
+test("read-only share: piano-roll tap does not throw or report an error; Play works", async ({ browser }) => {
+  test.skip(test.info().project.name !== "chrome-no-webmcp", "desktop Chrome only");
+  const { readFileSync } = await import("node:fs");
+  const proj = JSON.parse(readFileSync("songs/2026-10-23-midnight-invention/project.json", "utf8"));
+  const owner = await browser.newContext(); const op = await owner.newPage();
+  await op.goto("/studio");
+  const slug = await op.evaluate(async ({ proj }) => {
+    const j = async (r: Response) => { if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.json(); };
+    const s = await j(await fetch("/api/session", { credentials: "same-origin" }));
+    const l = await j(await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": s.csrf }, body: JSON.stringify({ code: "e2e-code-2" }) }));
+    const r = await j(await fetch("/api/shares", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": l.csrf }, body: JSON.stringify({ title: "Read-only tap", project: proj, public: true }) }));
+    return r.slug as string;
+  }, { proj });
+  await owner.close();
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }); const p = await ctx.newPage();
+  const errors: string[] = []; p.on("pageerror", (e) => errors.push(e.message));
+  const reports: string[] = []; p.on("request", (r) => { if (/client-?errors?/i.test(r.url())) reports.push(r.url()); });
+  await p.goto(`/s/${slug}`);
+  await expect.poll(async () => (await ws(p)).readOnly, { timeout: 20_000 }).toBeTruthy();
+  const before = await ws(p);
+  const roll = p.getByTestId("piano-roll"); await expect(roll).toBeVisible();
+  const b = (await roll.boundingBox())!;
+  await roll.tap({ position: { x: b.width / 2, y: b.height / 2 } });
+  await roll.click({ position: { x: b.width / 3, y: b.height / 3 } });
+  await roll.dblclick({ position: { x: b.width / 4, y: b.height / 2 } });
+  await roll.focus(); await p.keyboard.press("Delete");
+  await expect(p.getByTestId("readonly-hint")).toBeVisible();
+  const after = await ws(p);
+  expect(after.notes).toBe(before.notes); expect(after.revision).toBe(before.revision);
+  await p.getByTestId("ws-play").first().click();
+  await expect.poll(() => p.evaluate(() => (globalThis as any).__gbkWorkstation.state.transport.playing), { timeout: 10_000 }).toBe(true);
+  await p.waitForTimeout(500);
+  expect(errors).toEqual([]); expect(reports).toEqual([]);
+  await ctx.close();
+});
+
 // Regression: a /s/<slug> link must show exactly that song, even though the player's startup default song
 // (Beethoven) and the autosave restore race it. Previously the startup song replaced the share in fresh profiles.
 test("share link always opens the shared song (startup default/restore must not win)", async ({ browser, baseURL }) => {

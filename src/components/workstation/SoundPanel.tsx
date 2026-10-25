@@ -65,12 +65,12 @@ export function SoundPanel({ project, trackId, proposal }: { project: Project; t
   const g = rep.zones[0]?.generators, gB = repB?.zones[0]?.generators;
   const fx = rep.effects, fxB = repB?.effects;
   const commitVoice = (param: string, value: number) => {
-    try { workstation.edit([{ op: "setVoicePatch", trackId, overrides: [humanEditToOverride({ param, mode: "set", value })], mode: "merge" }], { label: `sound: ${param}` }); }
+    try { workstation.userEdit([{ op: "setVoicePatch", trackId, overrides: [humanEditToOverride({ param, mode: "set", value })], mode: "merge" }], { label: `sound: ${param}` }); }
     catch (e) { alert((e as Error).message); }
     setDrag((d) => { const n = { ...d }; delete n[param]; return n; });
   };
   const commitFx = (k: keyof EffectsParams, value: number | boolean) => {
-    try { workstation.edit([{ op: "setEffects", params: { [k]: value } }], { label: `effects: ${k}` }); } catch (e) { alert((e as Error).message); }
+    try { workstation.userEdit([{ op: "setEffects", params: { [k]: value } }], { label: `effects: ${k}` }); } catch (e) { alert((e as Error).message); }
     setDrag((d) => { const n = { ...d }; delete n[`fx.${k}`]; return n; });
   };
   const diffs = g && gB ? Object.entries(gB).filter(([k, v]) => v.native !== g[k as keyof Gens].native).map(([k, v]) => `${k}: ${fmt(g[k as keyof Gens].value)} → ${fmt(v.value)} ${v.unit}`) : [];
@@ -101,7 +101,7 @@ export function SoundPanel({ project, trackId, proposal }: { project: Project; t
         );
       })}
       {rep.zones[0] && <div className="ws-dim" data-testid="effective-sends">send: reverb {rep.zones[0].effectiveSends.reverb.effectivePercent}% · chorus {rep.zones[0].effectiveSends.chorus.effectivePercent}% (zone + CC91/93 + override)</div>}
-      {rep.overrides.length > 0 && <button onClick={() => workstation.edit([{ op: "setVoicePatch", trackId, overrides: [], mode: "replace" }], { label: "sound: reset track" })}>Reset to SoundFont</button>}
+      {rep.overrides.length > 0 && <button onClick={() => workstation.userEdit([{ op: "setVoicePatch", trackId, overrides: [], mode: "replace" }], { label: "sound: reset track" })}>Reset to SoundFont</button>}
       <h4>Effects <label className="ws-dim"><input type="checkbox" checked={fx.enabled} data-testid="fx-enabled" onChange={(e) => commitFx("enabled", e.target.checked)} /> on</label></h4>
       {FX.map(({ k, label }) => {
         const [lo, hi] = EFFECTS_RANGES[k]; const cur = drag[`fx.${k}`] ?? (fx[k] as number);

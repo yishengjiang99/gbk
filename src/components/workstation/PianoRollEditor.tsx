@@ -157,24 +157,24 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     const updates = d.noteIds.map((id) => { const n = byId.get(id)!; return d.kind === "move"
       ? { id, tick: Math.max(0, n.tick + d.dTick), pitch: Math.max(0, Math.min(127, n.pitch + d.dPitch)) }
       : { id, duration: Math.max(project.ppq / 16, n.duration + d.dTick) }; });
-    try { workstation.edit([{ op: "updateNotes", updates }], { label: d.kind === "move" ? "move notes" : "resize notes" }); } catch (err) { console.warn(err); }
+    try { workstation.userEdit([{ op: "updateNotes", updates }], { label: d.kind === "move" ? "move notes" : "resize notes" }); } catch (err) { console.warn(err); }
   };
   const onDoubleClick = (e: React.MouseEvent) => {
     const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
     const n = noteAt(px, py);
-    if (n) { workstation.edit([{ op: "removeNotes", ids: [n.id] }], { label: "delete note" }); return; }
+    if (n) { workstation.userEdit([{ op: "removeNotes", ids: [n.id] }], { label: "delete note" }); return; }
     const track = project.tracks.find((t) => t.id === sel.trackIds[0]) ?? project.tracks.find((t) => t.visible && project.notes.some((x) => x.trackId === t.id)) ?? project.tracks[0];
     if (!track) return;
-    workstation.edit([{ op: "addNotes", notes: [{ trackId: track.id, channel: track.channel, tick: snap(tickAt(px)), duration: project.ppq, pitch: pitchAt(py), velocity: 90 }] }], { label: "add note" });
+    workstation.userEdit([{ op: "addNotes", notes: [{ trackId: track.id, channel: track.channel, tick: snap(tickAt(px)), duration: project.ppq, pitch: pitchAt(py), velocity: 90 }] }], { label: "add note" });
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
     const ids = sel.noteIds;
-    if ((e.key === "Delete" || e.key === "Backspace") && ids.length) { workstation.edit([{ op: "removeNotes", ids }], { label: "delete notes" }); e.preventDefault(); }
+    if ((e.key === "Delete" || e.key === "Backspace") && ids.length) { workstation.userEdit([{ op: "removeNotes", ids }], { label: "delete notes" }); e.preventDefault(); }
     else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && ids.length) {
       const dp = (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 12 : 1); const byId = new Map(project.notes.map((n) => [n.id, n]));
-      workstation.edit([{ op: "updateNotes", updates: ids.map((id) => ({ id, pitch: Math.max(0, Math.min(127, byId.get(id)!.pitch + dp)) })) }], { label: "transpose" }); e.preventDefault();
+      workstation.userEdit([{ op: "updateNotes", updates: ids.map((id) => ({ id, pitch: Math.max(0, Math.min(127, byId.get(id)!.pitch + dp)) })) }], { label: "transpose" }); e.preventDefault();
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      if (ids.length && e.altKey) { const dt = (e.key === "ArrowRight" ? 1 : -1) * project.ppq / 4; const byId = new Map(project.notes.map((n) => [n.id, n])); workstation.edit([{ op: "updateNotes", updates: ids.map((id) => ({ id, tick: Math.max(0, byId.get(id)!.tick + dt) })) }], { label: "nudge" }); }
+      if (ids.length && e.altKey) { const dt = (e.key === "ArrowRight" ? 1 : -1) * project.ppq / 4; const byId = new Map(project.notes.map((n) => [n.id, n])); workstation.userEdit([{ op: "updateNotes", updates: ids.map((id) => ({ id, tick: Math.max(0, byId.get(id)!.tick + dt) })) }], { label: "nudge" }); }
       else { onManualScroll?.(); setView({ ...view, scrollTick: Math.max(0, view.scrollTick + (e.key === "ArrowRight" ? 1 : -1) * project.ppq * 4) }); }
       e.preventDefault();
     } else if (e.key === "+" || e.key === "=") setView({ ...view, pxPerTick: Math.min(2, view.pxPerTick * 1.25) });

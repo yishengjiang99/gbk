@@ -202,6 +202,14 @@ export class WorkstationController {
     return { revision: this.project.revision, warnings };
   }
 
+  /** UI-boundary edit: on a read-only share this is a no-op that pings readOnlyHint listeners instead of throwing. */
+  readOnlyHintListeners = new Set<(reason: string) => void>();
+  userEdit(ops: Op[], opts: { baseRevision?: number; label?: string } = {}): { revision: number; warnings: string[] } | null {
+    if (this.readOnlyReason) { for (const f of this.readOnlyHintListeners) f(this.readOnlyReason); return null; }
+    try { return this.edit(ops, opts); }
+    catch (e) { if (e instanceof WorkstationError && e.code === "READ_ONLY") { for (const f of this.readOnlyHintListeners) f(e.message); return null; } throw e; }
+  }
+
   undo(): boolean {
     const e = this.undoStack.pop(); if (!e) return false;
     const restored = { ...e.before, revision: this.project.revision + 1 };
