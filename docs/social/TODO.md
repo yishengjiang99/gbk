@@ -9,6 +9,11 @@
 - Inbox/DMs and blocks list (P4), notifications (P5).
 - Align `docs/social-api.md` with prod for `preview`, `/api/session`, and 404 error bodies.
 
+- iOS reviewer path: the app has only Apple/Google sign-in; add a reviewer username/password sign-in (webview to /signin/reviewer or native POST /api/auth/reviewer) before App Review, or review can't reach signed-in features.
+- iOS: `/api/auth/apple` and `DELETE /api/me` 404 on prod; both required for review (4.8 sign-in, 5.1.1(v) account deletion).
+- iOS screenshots: replace mockups with simulator captures (UI-test snapshot step in ios.yml) once auth routes ship.
+- App Store playbook `make_screenshots.py` uses `Image.Lanczos` (breaks on current Pillow); use `Image.LANCZOS`.
+
 ### Needs Yisheng
 
 - Register App ID `com.grepawk.gbk` under team 83D36RPMUM (set in project.yml) with Push, Sign in with Apple and Associated Domains, and create the App Store Connect app record.
@@ -17,6 +22,9 @@
 - Approve the final app icon (current one is a generated placeholder: light-blue gradient with a #2d6a93 note).
 - Approve TestFlight submission (`.github/workflows/ios-release.yml` is workflow_dispatch only and has never been run).
 - AASA at `/.well-known/apple-app-site-association` (server, iOS-1): app id `83D36RPMUM.com.grepawk.gbk`.
+- Switch the ASC record's bundle ID (app 6826906431, 'GBK Music Composer') from com.grepawk.moviefone to com.grepawk.gbk; the API cannot change an existing record's bundle ID. If ASC won't allow it (a build was uploaded under moviefone), create a new app record for com.grepawk.gbk.
+- Enter the review password for `openai-reviewer` in ASC App Review Information, and fill App Privacy / age rating from `docs/asc/app-review.md`.
+- Approve the listing copy and screenshots in `docs/asc/` (screenshots are mockups, not simulator captures).
 - Server push (P5) reuses the existing team-wide APNs key; configure it on the server only, never copy key material.
 
 ## Commercialization
