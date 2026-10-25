@@ -19,13 +19,15 @@ export const badText = (t: string) => BAD.test(t);
 export const encCursor = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
 export const decCursor = <T>(c: unknown): T | null => { if (typeof c !== "string" || !c || c.length > 300) return null; try { return JSON.parse(Buffer.from(c, "base64url").toString()) as T; } catch { return null; } };
 
-export interface Profile { user_id: string; handle: string; display_name: string; dm_policy: string; handle_changed: number; created_at: number }
+export interface Profile { user_id: string; handle: string; display_name: string; bio: string | null; badge: string | null; dm_policy: string; handle_changed: number; created_at: number }
 export interface CommentRow { id: number; share_id: string; user_id: string; body: string; created_at: number; deleted_at: number | null; hidden: number }
 
 export class SocialStore {
   constructor(private db: DatabaseSync, private now: () => number = Date.now) {
     const cols = (this.db.prepare("PRAGMA table_info(shares)").all() as { name: string }[]).map((c) => c.name);
     const add = (c: string, d: string) => { if (!cols.includes(c)) this.db.exec(`ALTER TABLE shares ADD COLUMN ${c} ${d}`); };
+    const pcols = (this.db.prepare("PRAGMA table_info(profiles)").all() as { name: string }[]).map((c) => c.name);
+    if (pcols.length && !pcols.includes("badge")) this.db.exec("ALTER TABLE profiles ADD COLUMN badge TEXT");
     add("labels", "TEXT NOT NULL DEFAULT '[]'"); add("prompt_shared", "INTEGER NOT NULL DEFAULT 0"); add("prompt_text", "TEXT");
     add("rating_sum", "INTEGER NOT NULL DEFAULT 0"); add("rating_count", "INTEGER NOT NULL DEFAULT 0"); add("comment_count", "INTEGER NOT NULL DEFAULT 0");
     add("play_count", "INTEGER NOT NULL DEFAULT 0"); add("score", "REAL NOT NULL DEFAULT 0"); add("published_at", "INTEGER");
@@ -37,7 +39,7 @@ export class SocialStore {
       CREATE INDEX IF NOT EXISTS comments_share ON comments(share_id, created_at);
       CREATE TABLE IF NOT EXISTS share_tags (share_id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (share_id, tag));
       CREATE INDEX IF NOT EXISTS share_tags_tag ON share_tags(tag, share_id);
-      CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, bio TEXT, dm_policy TEXT NOT NULL DEFAULT 'all', handle_changed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, bio TEXT, dm_policy TEXT NOT NULL DEFAULT 'all', handle_changed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, badge TEXT);
       CREATE TABLE IF NOT EXISTS blocks (blocker TEXT NOT NULL, blocked TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (blocker, blocked));
       CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter TEXT NOT NULL, kind TEXT NOT NULL, target_id TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', created_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS reports_status ON reports(status, created_at);
@@ -68,6 +70,13 @@ export class SocialStore {
     if (o.display_name !== undefined) this.db.prepare("UPDATE profiles SET display_name = ? WHERE user_id = ?").run(o.display_name, userId);
     if (o.dm_policy !== undefined) this.db.prepare("UPDATE profiles SET dm_policy = ? WHERE user_id = ?").run(o.dm_policy, userId);
     return "ok";
+  }
+  /** AI artist provisioning (admin CLI): fixed handle, display name, bio, "AI artist" badge. */
+  upsertArtist(userId: string, o: { handle: string; display_name: string; bio: string }) {
+    const taken = this.byHandle(o.handle); if (taken && taken.user_id !== userId) throw new Error(`handle ${o.handle} is taken`);
+    if (!this.profile(userId)) this.db.prepare("INSERT INTO profiles (user_id, handle, display_name, created_at) VALUES (?,?,?,?)").run(userId, o.handle, o.display_name, this.now());
+    this.db.prepare("UPDATE profiles SET handle = ?, display_name = ?, bio = ?, badge = 'AI artist', handle_changed = 1 WHERE user_id = ?").run(o.handle, o.display_name, o.bio, userId);
+    return this.profile(userId)!;
   }
   userStats(userId: string) {
     const r = this.db.prepare("SELECT COUNT(*) AS n, SUM(rating_sum) AS rs, SUM(rating_count) AS rc FROM shares WHERE owner = ? AND public = 1").get(userId) as { n: number; rs: number | null; rc: number | null };

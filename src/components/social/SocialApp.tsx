@@ -42,7 +42,7 @@ function Card({ idx, song, me, playing, onPlay, onUpdate, onSheet, onFilter, onO
       </div>
       <div className="so-meta">
         <h2 data-testid="card-title">{song.title}</h2>
-        <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a> · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""}</div>
+        <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a>{song.author.badge && <span className="so-badge">{song.author.badge}</span>} · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""}</div>
         <Stars song={song} me={me} onNeedSignIn={() => onSheet({ kind: "signin", why: "Sign in to rate songs." })} onChange={onUpdate} />
         <Chips song={song} onFilter={onFilter} />
         {!song.media.mp3 && !song.media.wav && <div className="so-dim">No audio preview yet. Open in Studio to play.</div>}
@@ -199,7 +199,7 @@ function ProfileView({ handle, me, onSheet, setMe }: { handle: string | null; me
   const mine = me?.handle === d.user.handle;
   return (
     <div className="so-pad" data-testid="profile-view">
-      <div className="so-row"><div className="so-av">{d.user.display_name.slice(0, 1).toUpperCase()}</div><div className="so-grow"><h2 data-testid="profile-name">{d.user.display_name}</h2><div className="so-dim">@{d.user.handle} · {d.user.song_count} songs{d.user.rating_avg !== null ? ` · ★${d.user.rating_avg.toFixed(1)}` : ""}</div></div></div>
+      <div className="so-row"><div className="so-av">{d.user.display_name.slice(0, 1).toUpperCase()}</div><div className="so-grow"><h2 data-testid="profile-name">{d.user.display_name}{d.user.badge && <span className="so-badge" data-testid="profile-badge">{d.user.badge}</span>}</h2><div className="so-dim">@{d.user.handle} · {d.user.song_count} songs{d.user.rating_avg !== null ? ` · ★${d.user.rating_avg.toFixed(1)}` : ""}</div>{d.user.bio && <div className="so-bio" data-testid="profile-bio">{d.user.bio}</div>}</div></div>
       {!mine && <p className="so-row"><button className="so-btn" disabled title="Messages arrive in the next update">✉ Message</button><button className="so-btn" data-testid="profile-report" onClick={() => (me ? onSheet({ kind: "report", what: "user", target: d.user.handle, label: `@${d.user.handle}` }) : onSheet({ kind: "signin", why: "Sign in to report." }))}>Report</button></p>}
       {mine && me && (
         <form className="so-settings" data-testid="profile-settings" onSubmit={async (e) => { e.preventDefault(); setMsg(""); try { const m = await social.settings({ display_name: name, ...(hd !== me.handle ? { handle: hd } : {}) }); setMe(m); setMsg("Saved"); if (m.handle !== h) navigate(`u/${m.handle}`); } catch (x) { setMsg((x as Error).message); } }}>

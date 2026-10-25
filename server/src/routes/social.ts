@@ -19,7 +19,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
   const nameOf = (u: string) => accounts.get(u)?.name || u;
   const prof = (u: string) => social.ensureProfile(u, nameOf(u));
-  const user = (u: string) => { const p = prof(u); return { handle: p.handle, display_name: p.display_name, avatar_url: null, ...social.userStats(u), created_at: p.created_at }; };
+  const user = (u: string) => { const p = prof(u); return { handle: p.handle, display_name: p.display_name, bio: p.bio ?? null, badge: p.badge ?? null, avatar_url: null, ...social.userStats(u), created_at: p.created_at }; };
   const me = (u: string) => { const p = prof(u); return { ...user(u), id: u, dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u) }; };
   /** Signed-in, non-guest account required for social writes. */
   const auth = (req: FastifyRequest, reply: FastifyReply, write = true) => {

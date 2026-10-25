@@ -62,3 +62,5 @@
 .pub-tags{display:flex;flex-wrap:wrap;gap:4px}
 .so-feed{position:relative}
 .so-unlock{position:sticky;top:10px;left:0;margin:0 auto -44px;display:block;z-index:5;border:0;border-radius:20px;padding:10px 16px;background:#16324a;color:#fff;font:inherit;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.so-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;background:#eefbf8;border:1px solid #9fd3c9;color:#1f6f60;font-size:11px;font-weight:600;vertical-align:middle}
+.so-bio{margin-top:4px;font-size:13px;overflow-wrap:anywhere;white-space:pre-wrap}
