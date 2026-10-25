@@ -26,3 +26,26 @@ Constants also live in `docs/social-api.md` → "Client behavior".
   - iOS keeps the pending action in memory and replays it when the sheet's sign-in completes.
 - **Sign out** is in Profile (own profile, below the settings) on web, and in Settings on iOS.
 - Code: `src/components/auth/gate.ts` (`needSignIn`, `takePending`), `src/components/auth/SignInSheet.tsx`. Tests: e2e `sign-in only on demand` (WebKit iPhone, Pixel, desktop Chrome).
+
+## Palette (light default, dark via prefers-color-scheme)
+- All social colours are `--so-*` custom properties on `:root`, in `src/components/social/social.css`. Light is the default; the dark set applies under `@media (prefers-color-scheme: dark)`. The sign-in sheet uses the same variables.
+- Key values (light → dark):
+  - accent `#2d6a93 → #61a6d1`
+  - surface `#fff → #16283a`
+  - text `#16324a → #e6f0f8`
+  - roll bg `#f8fcff → #0f1d2a`
+  - playhead `#e5396b-ish → #ff5c93`
+- The viz canvases (`LiveRoll.tsx`) read the `--viz-*` variables, which are derived from the palette. Theming the piano roll and waveform therefore means editing `--so-*` only.
+
+  | Viz variable | Palette source |
+  |---|---|
+  | `--viz-bg` | `--so-roll-bg` |
+  | `--viz-grid` | `--so-roll-grid` |
+  | `--viz-row` | `--so-roll-row` |
+  | `--viz-head` | `--so-playhead` |
+  | `--viz-bar` | `--so-roll-bar` |
+  | `--viz-wave` | `--so-wave` |
+  | `--viz-dim` | `--so-muted-border` |
+
+- `color-scheme: dark` is scoped to `.so-app` and `.si-sheet`, so the studio keeps its bright theme.
+- iOS has matching asset colour sets.

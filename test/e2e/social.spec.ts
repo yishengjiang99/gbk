@@ -270,3 +270,16 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
     await expect(page.getByTestId("composer-input")).toHaveValue("");
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
+
+test("dark mode: palette follows prefers-color-scheme, --viz-* derive from it, no overflow; light stays bright", async ({ page }) => {
+  const P = test.info().project.name; const shots = process.env.GBK_SHOTS ?? "/workspace/shots";
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme }); await page.goto("/feed?sort=new"); await expect(page.getByTestId("social-app")).toBeVisible();
+    const v = await page.evaluate(() => { const app = document.querySelector(".so-app")!; const cs = getComputedStyle(app); const lum = (c: string) => { const m = c.match(/\d+/g)!.map(Number); return (m[0] * 299 + m[1] * 587 + m[2] * 114) / 1000; };
+      return { bg: lum(cs.backgroundColor), fg: lum(cs.color), vizBg: cs.getPropertyValue("--viz-bg").trim(), vizHead: cs.getPropertyValue("--viz-head").trim(), overflow: document.documentElement.scrollWidth > innerWidth }; });
+    if (scheme === "dark") { expect(v.bg).toBeLessThan(80); expect(v.fg).toBeGreaterThan(180); expect(v.vizBg).toBe("#0f1d2a"); expect(v.vizHead).toBe("#ff5c93"); }
+    else { expect(v.bg).toBeGreaterThan(200); expect(v.fg).toBeLessThan(90); expect(v.vizBg).toBe("#f8fcff"); }
+    expect(v.overflow).toBeFalsy();
+    await page.screenshot({ path: `${shots}/feed-${scheme}-${P}.png` });
+  }
+});

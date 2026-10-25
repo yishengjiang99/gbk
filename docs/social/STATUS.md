@@ -16,6 +16,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Feed ranking: impressions `POST /api/events` (beacon, model_version), personalized For you (candidates + LR nightly + 12% explore + diversity + session steer), admin metrics, privacy line, 60-day retention (docs/social/ranking.md); iOS should send impressions with `x-gbk-install` + `session` | done (web, server) |
 | Guest accounts `POST /api/auth/anonymous` (two-word username, idempotent per device via HMAC, 409 HANDLE_TAKEN, 422s, 5 new/20 calls per IP/h), `me.provider`/`is_guest`, guest limits (no publish → 403 GUEST_LIMITED, 20 comments/day, two-word settings), Apple/Google upgrade with guest bearer (`upgraded: linked|merged`) | done (server, prod) |
 | Web sign-in only on demand: no standalone Sign in button; gated actions open the sign-in sheet (configured methods) and resume the action after sign-in; Sign out in Profile (feed-design.md) | done (web) |
+| Web dark mode: `--so-*` palette on :root with prefers-color-scheme dark set; `--viz-*` derived (LiveRoll); sign-in sheet themed; e2e light/dark | done (web) |
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |

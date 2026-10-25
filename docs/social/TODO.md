@@ -6,7 +6,6 @@
 
 - Sign in with Apple: server answers 503 until `APPLE_BUNDLE_ID` is set; the app shows "not available yet".
 - SF2 playback on `SF2Engine`: copy the sequencer and MIDI parsing from earsheet's `Packages/SF2Player`.
-- Web: add a dark palette (prefers-color-scheme) to social.css; iOS dark variants live in Assets.xcassets and can be copied.
 - Web: decide whether finished notes should vanish at the playhead (iOS does) and whether to add the oscilloscope.
 - Ranking: admin metrics UI view and offline eval script (API `GET /api/admin/metrics` exists); iOS impressions client.
 - Guest DMs restrictions (no send/receive) land with P4 DMs; guest push for DMs off.
