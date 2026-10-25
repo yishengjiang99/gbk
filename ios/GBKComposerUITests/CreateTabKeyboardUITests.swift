@@ -12,6 +12,9 @@ final class CreateTabKeyboardUITests: XCTestCase {
 
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30), "studio web view")
+        // The studio's composer input lives under the bottom dock's "Composer" tab (Tracks is the default).
+        let composerTab = web.buttons["Composer"]
+        if composerTab.waitForExistence(timeout: 60) { composerTab.tap() }
         let input = web.textViews.firstMatch
         guard input.waitForExistence(timeout: 60) else {
             attach(app, "create-tab-no-input")

@@ -7,6 +7,9 @@ struct GBKComposerApp: App {
     @StateObject private var router = DeepLinkRouter()
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Unit tests run inside this app; launch side effects (guest registration writes Keychain) would race them.
+    static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     var body: some Scene {
         WindowGroup {
             RootTabView()
@@ -14,7 +17,7 @@ struct GBKComposerApp: App {
                 .environmentObject(auth)
                 .environmentObject(router)
                 .tint(Theme.accent)
-                .task { await auth.ensureAnonymousSession() }
+                .task { if !Self.isUnitTestHost { await auth.ensureAnonymousSession() } }
                 .onOpenURL { router.handle($0) }
                 .task { PurchaseStore.shared.start() }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
