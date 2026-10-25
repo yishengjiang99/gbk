@@ -22,7 +22,7 @@ final class MIDIBridge: NSObject, WKScriptMessageHandler {
     static func install(in config: WKWebViewConfiguration, hub: MIDIInputHub = .shared) -> MIDIBridge {
         let bridge = MIDIBridge(hub: hub)
         config.userContentController.addUserScript(WKUserScript(source: MIDIBridgeScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        config.userContentController.add(WeakScriptHandler(bridge), name: handlerName)
+        config.userContentController.add(MIDIWeakScriptHandler(bridge), name: handlerName)
         return bridge
     }
 
@@ -86,7 +86,7 @@ final class MIDIBridge: NSObject, WKScriptMessageHandler {
 }
 
 /// WKUserContentController retains its handlers; break the cycle.
-private final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
+private final class MIDIWeakScriptHandler: NSObject, WKScriptMessageHandler {
     weak var target: (any WKScriptMessageHandler)?
     init(_ t: any WKScriptMessageHandler) { target = t }
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
