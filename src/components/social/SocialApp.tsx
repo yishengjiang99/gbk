@@ -1,5 +1,6 @@
 // gbk Social web UI: one Feed tab (Explore merged: chips + Browse sheet), Create, Inbox, Profile; song ratings,
 // flat comments, reports, profiles and the admin report queue. All user text renders as React text nodes.
+import { Crossfader, type FadeState } from "./crossfade.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { social, LABELS, type Me, type Song, type SComment, type SUser } from "../../agent/social-client.ts";
 import { PianoRoll } from "../explore/ExplorePage.tsx";
@@ -57,24 +58,26 @@ function Card({ idx, song, me, playing, onPlay, onUpdate, onSheet, onFilter, onO
 const srcOf = (s: Song) => s.media.mp3 ?? s.media.wav;
 /** One shared <audio> (iOS only lets a gesture-unlocked element autoplay) + a warm-up element that preloads the next song. */
 function useAudio() {
-  const ref = useRef<HTMLAudioElement | null>(null); const warm = useRef<HTMLAudioElement | null>(null);
-  const [cur, setCur] = useState<string | null>(null); const [unlocked, setUnlocked] = useState(false); const counted = useRef(new Set<string>());
+  const host = useRef<HTMLDivElement | null>(null); const xf = useRef<Crossfader | null>(null);
+  const [st, setSt] = useState<FadeState>({ current: null, fading: null }); const [unlocked, setUnlocked] = useState(false); const counted = useRef(new Set<string>());
+  const slugBySrc = useRef(new Map<string, string>());
   useEffect(() => {
-    const a = new Audio(); a.preload = "auto"; a.setAttribute("playsinline", ""); a.loop = true; ref.current = a;
-    const w = new Audio(); w.preload = "auto"; w.muted = true; warm.current = w;
-    const vis = () => { if (document.hidden) { a.pause(); setCur(null); } };
+    const x = new Crossfader(host.current!, setSt); xf.current = x;
+    const vis = () => { if (document.hidden) x.stop(); };
     document.addEventListener("visibilitychange", vis);
-    return () => { a.pause(); a.removeAttribute("src"); w.removeAttribute("src"); document.removeEventListener("visibilitychange", vis); };
+    return () => { document.removeEventListener("visibilitychange", vis); x.dispose(); };
   }, []);
-  const start = useCallback((s: Song) => {
-    const a = ref.current!; const src = srcOf(s); if (!src) { a.pause(); setCur(null); return; }
-    if (a.src !== src) a.src = src;
-    void a.play().then(() => { setCur(s.slug); setUnlocked(true); if (!counted.current.has(s.slug)) { counted.current.add(s.slug); void social.play(s.slug); } }).catch(() => setCur(null));
+  const start = useCallback((s: Song, gesture = false) => {
+    const x = xf.current!; const src = srcOf(s); if (gesture) x.unlock(); if (!src) { void x.play(null); return; }
+    slugBySrc.current.set(src, s.slug);
+    void x.play(src).then((ok) => { if (!ok) return; setUnlocked(true); if (!counted.current.has(s.slug)) { counted.current.add(s.slug); void social.play(s.slug); } });
   }, []);
-  const toggle = useCallback((s: Song) => { const a = ref.current!; if (cur === s.slug && !a.paused) { a.pause(); setCur(null); } else start(s); }, [cur, start]);
-  const stop = useCallback(() => { ref.current?.pause(); setCur(null); }, []);
-  const preload = useCallback((s: Song | undefined) => { const src = s && srcOf(s); const w = warm.current; if (w && src && w.src !== src) { w.src = src; w.load(); } }, []);
-  return { cur, unlocked, start, toggle, stop, preload };
+  const cur = st.current ? slugBySrc.current.get(st.current) ?? null : null;
+  const toggle = useCallback((s: Song) => { if (cur === s.slug) void xf.current!.play(null); else start(s, true); }, [cur, start]);
+  const stop = useCallback(() => xf.current?.stop(), []);
+  const preload = useCallback((ss: (Song | undefined)[]) => xf.current?.preload(ss.map((s) => s && srcOf(s))), []);
+  const fading = st.fading ? slugBySrc.current.get(st.fading) ?? null : null;
+  return { cur, fading, unlocked, start, toggle, stop, preload, host };
 }
 
 function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; filter: { sort: string; label?: string; tag?: string }; setFilter: (f: { sort: string; label?: string; tag?: string }) => void; onSheet: (s: Sheet) => void; onOpen: (slug: string, fork: boolean) => void }) {
@@ -88,14 +91,23 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
     catch (e) { setErr((e as Error).message); } finally { setLoading(false); }
   }, [filter.sort, filter.label, filter.tag, cursor, key]);
   useEffect(() => { live.current = key; setItems([]); setCursor(null); setDone(false); audio.stop(); void load(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
-  const feedEl = useRef<HTMLDivElement | null>(null); const [active, setActive] = useState(0);
+  const feedEl = useRef<HTMLDivElement | null>(null); const [active, setActive] = useState(0); const [candidate, setCandidate] = useState(0);
   // Autoplay: the card that is >= 60% in view is active; it plays once audio is unlocked (first tap), and the next card preloads.
   useEffect(() => {
     const root = feedEl.current; if (!root) return;
-    const io = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting && e.intersectionRatio >= 0.6) setActive(Number((e.target as HTMLElement).dataset.idx)); }, { root, threshold: [0.6] });
+    const io = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting && e.intersectionRatio >= 0.6) setCandidate(Number((e.target as HTMLElement).dataset.idx)); }, { root, threshold: [0.6] });
     root.querySelectorAll("[data-idx]").forEach((el) => io.observe(el)); return () => io.disconnect();
   }, [items.length]);
-  useEffect(() => { const s = items[active]; if (!s) return; if (audio.unlocked) audio.start(s); audio.preload(items[active + 1]); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [active, items.length > 0, audio.unlocked]);
+  // Snap settle: the crossfade starts only once scrolling stops (scrollend, or 120 ms without scroll events).
+  const [settled, setSettled] = useState(0);
+  useEffect(() => {
+    const root = feedEl.current; if (!root) return; let t: ReturnType<typeof setTimeout> | undefined;
+    const done = () => { clearTimeout(t); const cards = [...root.querySelectorAll<HTMLElement>("[data-idx]")]; const mid = root.scrollTop + root.clientHeight / 2; const near = cards.reduce((b, el) => Math.abs(el.offsetTop + el.offsetHeight / 2 - mid) < Math.abs(b.offsetTop + b.offsetHeight / 2 - mid) ? el : b, cards[0]); if (near) setActive(Number(near.dataset.idx)); setSettled((n) => n + 1); };
+    const on = () => { clearTimeout(t); t = setTimeout(done, 120); };
+    root.addEventListener("scroll", on, { passive: true }); root.addEventListener("scrollend", done);
+    return () => { clearTimeout(t); root.removeEventListener("scroll", on); root.removeEventListener("scrollend", done); };
+  }, []);
+  useEffect(() => { const s = items[active]; if (!s) return; audio.preload([items[active], items[active + 1], items[active - 1]]); if (audio.unlocked) audio.start(s); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [active, settled, items.length > 0, audio.unlocked]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return; if (document.querySelector(".so-sheet")) return;
@@ -121,8 +133,9 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
         {filter.label && !labels.includes(filter.label) && chip(`${filter.label} ✕`, { sort: "for_you" }, true, "chip-label")}
         <button className="so-chip" data-testid="browse" onClick={() => onSheet({ kind: "browse" })}>Browse ▾</button>
       </div>
-      <div className="so-feed" data-testid="feed" ref={feedEl} data-active={active} data-unlocked={audio.unlocked ? "1" : "0"}>
-        {!audio.unlocked && items.some(srcOf) && <button className="so-unlock" data-testid="tap-to-play" onClick={() => { const s = items[active]; if (s) audio.start(s); }}>🔊 Tap to play</button>}
+      <div className="so-feed" data-testid="feed" ref={feedEl} data-active={active} data-unlocked={audio.unlocked ? "1" : "0"} data-fading={audio.fading ?? ""} data-candidate={candidate}>
+        <div ref={audio.host} hidden data-testid="feed-audio" />
+        {!audio.unlocked && items.some(srcOf) && <button className="so-unlock" data-testid="tap-to-play" onClick={() => { const s = items[active]; if (s) audio.start(s, true); }}>🔊 Tap to play</button>}
         {items.map((s, i) => <Card key={s.slug} idx={i} song={s} me={me} playing={audio.cur === s.slug} onPlay={audio.toggle} onUpdate={(n) => setItems((p) => p.map((x) => x.slug === n.slug ? n : x))} onSheet={onSheet} onFilter={(f) => setFilter({ sort: "new", ...f })} onOpen={onOpen} />)}
         {!loading && !items.length && !err && <div className="so-empty" data-testid="feed-empty">Nothing here yet. <button className="so-btn pri" onClick={() => navigate("studio")}>Compose the first one</button></div>}
         {err && <div className="so-empty so-err">{err} <button className="so-btn" onClick={() => void load(true)}>Retry</button></div>}

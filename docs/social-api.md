@@ -142,6 +142,15 @@ Server env (all optional; never commit values): `APPLE_SERVICES_ID`, `TWILIO_ACC
 `IOS_APP_IDS` (e.g. `TEAMID.com.grepawk.gbk`, enables AASA), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8` or `APNS_P8_PATH`, `APNS_TOPIC` (defaults to bundle id).
 APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.com/inbox/<handle>" }`. No email notifications.
 
+## Client behavior (web + iOS)
+
+- **Feed audio crossfade:** `CROSSFADE_MS = 400`. Equal-power curves: outgoing gain `cos(t·π/2)`, incoming `sin(t·π/2)`, `t` from 0 to 1 over 400 ms.
+- The fade starts when the scroll settles on a snapped card (web: `scrollend`, or 120 ms without scroll events). It does not start while the user is still scrolling.
+- At most one voice fades out at a time. A new switch during a fade stops the stale fading voice at once, so audio never piles up.
+- Preload the active card's audio plus the next and previous cards.
+- The first tap unlocks audio (iOS). After that, settling on a card autoplays it. Pause everything when the tab or app is hidden.
+- Web applies gain through Web Audio GainNodes, because iOS Safari ignores `HTMLMediaElement.volume`.
+
 ## Rate limits
 
 Per user + IP, in-memory: comments 10/min, ratings 60/min, DMs 20/min, reports 10/hour, plays 120/min.

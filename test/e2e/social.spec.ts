@@ -114,3 +114,44 @@ test("social prompt sharing: off by default, owner opts in, feed shows prompt, R
     await expect(page.getByTestId("composer-input")).toHaveValue("a stormy sea shanty in A minor");
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
+
+test("social feed crossfade: 400ms equal-power fade on settle, one fading voice max, preload neighbours, pause when hidden", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const slugs: string[] = [];
+  for (const t of ["XF Four", "XF Three", "XF Two", "XF One"]) {
+    const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json();
+    expect((await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: silentWav() })).ok()).toBeTruthy();
+    slugs.unshift(sh.slug);
+  }
+  const feed = page.getByTestId("feed"); const cards = page.getByTestId("feed-card");
+  const playing = () => page.getByTestId("feed-audio").evaluate((h) => [...h.querySelectorAll("audio")].filter((a) => !a.paused).length);
+  try {
+    await page.goto("/feed?sort=new");
+    await expect(cards.first()).toHaveAttribute("data-slug", slugs[0]);
+    await page.getByTestId("tap-to-play").click();
+    await expect(cards.first()).toHaveAttribute("data-playing", "1");
+    // neighbours preloaded (current + next)
+    await expect.poll(() => page.getByTestId("feed-audio").evaluate((h) => h.querySelectorAll("audio").length)).toBeGreaterThanOrEqual(2);
+    // settle on card 2: card 1 fades out while card 2 fades in, then only one voice plays
+    await feed.evaluate((f) => f.scrollBy({ top: f.clientHeight }));
+    await expect(feed).toHaveAttribute("data-fading", slugs[0]);
+    expect(await playing()).toBe(2);
+    await expect(cards.nth(1)).toHaveAttribute("data-playing", "1");
+    await expect(feed).toHaveAttribute("data-fading", "", { timeout: 2000 });
+    expect(await playing()).toBe(1);
+    // fast scrolls: never more than 2 voices, the stale fade is cancelled
+    const samples = page.evaluate(() => new Promise<number>((res) => { let max = 0; const h = document.querySelector("[data-testid=feed-audio]")!; const t0 = performance.now();
+      const tick = () => { max = Math.max(max, [...h.querySelectorAll("audio")].filter((a) => !a.paused).length); if (performance.now() - t0 < 1500) requestAnimationFrame(tick); else res(max); }; tick(); }));
+    for (let i = 0; i < 2; i++) { await feed.evaluate((f) => f.scrollBy({ top: f.clientHeight })); await expect(feed).toHaveAttribute("data-active", String(2 + i)); }
+    expect(await samples).toBeLessThanOrEqual(2);
+    await expect(cards.nth(3)).toHaveAttribute("data-playing", "1");
+    await expect.poll(playing).toBe(1);
+    // tab hidden pauses everything
+    await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+    await expect.poll(playing).toBe(0);
+    await expect(cards.nth(3)).toHaveAttribute("data-playing", "0");
+  } finally {
+    for (const s of slugs) await owner.request.delete(`/api/shares/${s}`, { headers: oh }); await owner.close();
+  }
+});
