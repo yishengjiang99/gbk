@@ -22,7 +22,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | App icon | placeholder 1024px generated (awaiting approval) |
 | Release | `.github/workflows/ios-release.yml` (manual TestFlight, mirrors finalcut; secrets not set yet, never run) |
 | App Store listing | `docs/asc/`: metadata (name, subtitle, description, keywords, URLs), privacy label, content rights, age rating, review notes (reviewer login), 2 x 6.9" screenshots from mockups. compose.grepawk.com /privacy, /support, /terms all 200. Bundle ID com.grepawk.gbk not registered (no ASC key usable from the box; gbk repo has no ASC secrets) |
-| CI | `ios.yml` (simulator build + tests) |
+| CI | `ios.yml` (simulator build + tests) green on 43da5e5: https://github.com/yishengjiang99/gbk/actions/runs/40223123005 |
 
 ### Doc vs prod (checked 2026-10-25 against prod 44b3be2)
 
