@@ -34,8 +34,8 @@ export function pricingConfig(env: Record<string, string | undefined> = process.
 }
 
 export const PLANS = [
-  { id: "pro_monthly", name: "Pro monthly", price: 6, period: "month", note: "7-day free trial, cancel anytime" },
-  { id: "pro_yearly", name: "Pro yearly", price: 48, period: "year", note: "7-day free trial, 2 months free vs monthly" },
+  { id: "pro_monthly", name: "Pro monthly", price: 5.99, period: "month", note: "7-day free trial, cancel anytime" },
+  { id: "pro_yearly", name: "Pro yearly", price: 47.99, period: "year", note: "7-day free trial, save 33% vs monthly" },
   { id: "lifetime", name: "Pro lifetime", price: 99, period: "", note: "one payment, no subscription" },
 ] as const;
 
@@ -179,8 +179,8 @@ export function pricingRoutes(app: FastifyInstance, cfg: Config, sessions: Sessi
     const q = req.query as Record<string, string>;
     const notice = NOTICES[q.checkout === "cancel" ? "cancel" : q.waitlist ?? ""] ?? "";
     const email = p.checkoutEnabled ? accountEmail(req) : null;
-    return send(reply, shell(cfg, "/pricing", "GBK Composer pricing: free AI MIDI composer, Pro from $6/month",
-      "GBK Composer is free: describe music in ChatGPT or GBK Studio and get editable MIDI and WAV. Pro raises render and AI limits from $6/month or $99 once.",
+    return send(reply, shell(cfg, "/pricing", "GBK Composer pricing: free AI MIDI composer, Pro from $5.99/month",
+      "GBK Composer is free: describe music in ChatGPT or GBK Studio and get editable MIDI and WAV. Pro raises render and AI limits from $5.99/month or $99 once.",
       pricingBody(cfg, p, email, notice), { jsonLd: jsonLd(cfg), head: pixelHead(p) }), email || notice ? "private, no-store" : undefined);
   });
   app.get("/pricing/thanks", async (_req, reply) => send(reply, shell(cfg, "/pricing/thanks", "Thanks for going Pro · GBK Composer", "Your GBK Composer Pro purchase.", thanksBody(p), { noindex: true, head: pixelHead(p) }), "no-store"));

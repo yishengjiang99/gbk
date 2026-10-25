@@ -24,7 +24,7 @@ test("pricing page: SEO tags, valid JSON-LD with offers + FAQ, waitlist by defau
     for (const t of ["og:title", "og:description", "og:image", "og:url"]) assert.match(h, new RegExp(`property="${t}" content="[^"]+"`));
     for (const t of ["twitter:card", "twitter:title", "twitter:image"]) assert.match(h, new RegExp(`name="${t}" content="[^"]+"`));
     const [app, faq] = jsonLds(h);
-    assert.equal(app["@type"], "SoftwareApplication"); assert.deepEqual(app.offers.map((o: { price: string }) => o.price), ["0", "6.00", "48.00", "99.00"]);
+    assert.equal(app["@type"], "SoftwareApplication"); assert.deepEqual(app.offers.map((o: { price: string }) => o.price), ["0", "5.99", "47.99", "99.00"]);
     assert.equal(faq["@type"], "FAQPage"); assert.equal(faq.mainEntity.length, FAQ.length);
     assert.match(h, /id="waitlist"/); assert.doesNotMatch(h, /api\/compose\/checkout/);
     assert.doesNotMatch(h, /uwt\.js|redditstatic/);
