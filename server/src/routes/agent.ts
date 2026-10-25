@@ -11,9 +11,13 @@ import { COOKIE, CSRF_COOKIE, cookie, parseCookies, type Session, type SessionSt
 import { csrfOk, originAllowed } from "../security/authorization.ts";
 import type { RateLimiter } from "../security/rate-limit.ts";
 
-export function currentSession(req: FastifyRequest, sessions: SessionStore): Session | null { return sessions.fromCookie(parseCookies(req.headers.cookie)[COOKIE]); }
+/** Bearer token (native clients; value = the session token) or the web session cookie. */
+const bearerOf = (req: FastifyRequest) => { const h = req.headers.authorization; return typeof h === "string" && /^Bearer\s+\S+$/i.test(h) ? h.replace(/^Bearer\s+/i, "").trim() : null; };
+export function currentSession(req: FastifyRequest, sessions: SessionStore): Session | null { const b = bearerOf(req); return b ? sessions.fromCookie(b) : sessions.fromCookie(parseCookies(req.headers.cookie)[COOKIE]); }
 /** For state-changing requests: same-origin Origin header + double-submit CSRF token. */
 export function guardWrite(cfg: Config, req: FastifyRequest, reply: FastifyReply, s?: Session | null): boolean {
+  // Bearer auth carries no ambient credential, so Origin/CSRF checks do not apply (cookie must be absent).
+  if (s && bearerOf(req) && !parseCookies(req.headers.cookie)[COOKIE]) return true;
   if (!originAllowed(cfg, req.headers.origin)) { void reply.code(403).send({ code: "BAD_ORIGIN", message: "cross-origin request rejected" }); return false; }
   if (!csrfOk(req.headers["x-gbk-csrf"], parseCookies(req.headers.cookie)[CSRF_COOKIE], s?.csrf)) { void reply.code(403).send({ code: "CSRF", message: "missing or invalid CSRF token; reload the page" }); return false; }
   return true;

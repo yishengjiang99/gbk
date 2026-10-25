@@ -29,7 +29,7 @@ export function ComposerPanel({ project, readOnly }: { project: Project; readOnl
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; }); const [code, setCode] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { const f = () => input.current?.focus(); window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
+  useEffect(() => { const f = () => { const d = sessionStorage.getItem("gbk.composerDraft"); if (d) { sessionStorage.removeItem("gbk.composerDraft"); setText(d); } input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   const submit = (t = text) => { if (s.send(t)) setText(""); };
   const busy = !!s.run;

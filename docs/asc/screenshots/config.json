@@ -1,0 +1,64 @@
+{
+ "app_name": "GBK Music Composer",
+ "brand": {
+  "bg": [
+   22,
+   30,
+   48
+  ],
+  "accent": [
+   46,
+   196,
+   182
+  ],
+  "ink": [
+   245,
+   245,
+   247
+  ],
+  "muted": [
+   170,
+   178,
+   196
+  ],
+  "card": [
+   30,
+   40,
+   62
+  ]
+ },
+ "output_dir": "docs/asc/screenshots/en-US",
+ "source_dir": "docs/asc/screenshots/en-US/source",
+ "shots": [
+  {
+   "slug": "01-feed",
+   "hero": "Hear new music\\nin one swipe",
+   "sub": "A feed of short pieces to play and rate",
+   "source": "ios-feed.png"
+  },
+  {
+   "slug": "02-detail",
+   "hero": "See the notes\\nand the prompt",
+   "sub": "Piano roll, ratings and comments",
+   "source": "detail-crop.png"
+  },
+  {
+   "slug": "03-remix",
+   "hero": "Remix any\\npiece you like",
+   "sub": "Forks credit the original composer",
+   "source": "feed-mobile.png"
+  },
+  {
+   "slug": "04-publish",
+   "hero": "Share your\\npieces",
+   "sub": "Add labels and tags, then publish",
+   "source": "publish-crop.png"
+  },
+  {
+   "slug": "05-explore",
+   "hero": "Explore by\\ntag and style",
+   "sub": "Classical, lofi, jazz and more",
+   "source": "explore-crop.png"
+  }
+ ]
+}

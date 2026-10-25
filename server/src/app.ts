@@ -32,12 +32,20 @@ import { CompositionService } from "./mcp/service.ts";
 import { RenderService, resolveSoundFontPath } from "./mcp/browser-render.ts";
 import { ServerRenderPool } from "./mcp/server-render.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
+import { SocialStore } from "./persistence/social.ts";
+import { NativeStore } from "./persistence/native.ts";
+import { createNotifier } from "./push/notifier.ts";
+import type { ApnsSender } from "./push/apns.ts";
+import { nativeRoutes } from "./routes/native.ts";
+import { currentSession } from "./routes/agent.ts";
+import { authExtraRoutes } from "./routes/auth-extra.ts";
+import { socialRoutes } from "./routes/social.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
 
 export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
 
-export interface AppDeps { model?: ModelClient; persist?: boolean; logger?: boolean | object; fetch?: typeof fetch; now?: () => number }
+export interface AppDeps { model?: ModelClient; persist?: boolean; logger?: boolean | object; fetch?: typeof fetch; now?: () => number; apns?: ApnsSender }
 export interface McpHandle { store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; close: () => Promise<void> }
 export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; shares: ShareStore; mcp: McpHandle; accounts: AccountStore; clientErrors: ClientErrorStore }> {
   const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers[\"x-gbk-project-token\"]", "req.headers[\"x-gbk-csrf\"]"] }, bodyLimit: 64 * 1024, trustProxy: "127.0.0.1", disableRequestLogging: false });
@@ -81,7 +89,28 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   // Private Studio links for account-free MCP projects carry the read capability (sent as x-gbk-project-token).
   shareRoutes(app, cfg, sessions, shares, new RateLimiter(10), model, (token, projectId, owner) => {
     try { const g = resolveGuestCapability(cfg, mcpStore, token); return g.compositionId === projectId && g.user === owner; } catch { return false; }
+  }, (id) => {
+    social.markPublished(id);
+    const r = shares.byId(id); const parent = r?.parent_id ? shares.byId(r.parent_id) : null;
+    if (r && parent && parent.owner !== r.owner && !isGuest(r.owner)) notify(parent.owner, { kind: "fork", title: `${social.ensureProfile(r.owner, accounts.get(r.owner)?.name ?? r.owner).display_name} remixed ${parent.title}`, body: r.title, link: `${cfg.publicOrigin}/s/${r.slug}` });
   });
+  const social = new SocialStore(shares.database, deps.now);
+  const native = new NativeStore(persist ? join(cfg.dataDir, "native.sqlite") : ":memory:", deps.now);
+  const notify = createNotifier(cfg, native, (o) => app.log.info(o), deps.apns);
+  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify);
+  // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
+  app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
+    const s = currentSession(req, sessions); const row = shares.bySlug((req.params as { slug: string }).slug);
+    if (!s || !row || row.owner !== s.user) return reply.code(404).send({ code: "NOT_FOUND", message: "no such song of yours" });
+    const c = convs.get(s.user); const first = c.messages.find((m) => m.role === "user");
+    const text = typeof first?.content === "string" ? first.content : Array.isArray(first?.content) ? (first!.content as { text?: string }[]).map((x) => x.text ?? "").join(" ") : "";
+    return { prompt: text.trim().slice(0, 4000) || null, sameProject: !!row.project_id && c.projectId === row.project_id };
+  });
+  // Unknown /api routes: Fastify's {message,error,statusCode} plus our `code` so clients can rely on one shape.
+  app.all("/api/*", async (req, reply) => reply.code(404).send({ code: "NOT_FOUND", message: `Route ${req.method}:${req.url.split("?")[0]} not found`, error: "Not Found", statusCode: 404 }));
+  const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, me: socialApi.me, fetch: deps.fetch });
+  authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
+  const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless
   // clients) they run on the server in worker threads (SERVER_RENDER=0 turns that off).
@@ -100,7 +129,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
   const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
+    close: async () => { clearInterval(pruneTimer); clearInterval(rescoreTimer); native.close(); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);

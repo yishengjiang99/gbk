@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // Environment configuration. Secrets stay server-side; toPublic() is the only view that leaves the process.
 export interface Config {
   publicOrigin: string; allowedOrigins: string[];
@@ -11,6 +12,10 @@ export interface Config {
   agent: { maxToolSteps: number; maxConcurrentRunsPerUser: number; toolTimeoutMs: number; renderTimeoutMs: number; maxInputChars: number; maxContextTokens: number; maxOutputTokens: number; dailyTokenBudget: number; newAccountDailyTokenBudget: number; dailyCostBudgetUsd: number; globalDailyCostBudgetUsd: number; reconnectGraceMs: number; maxToolResultChars: number };
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number };
   /** Sign-in. A provider is offered only when both its client id and secret are set. */
+  /** Native iOS client: Sign in with Apple, Google ID tokens, APNs, universal links. All optional; unset = feature answers 503/404. */
+  /** Web Sign in with Apple (Services ID) and SMS sign-in (Twilio Verify + Turnstile). Unset = 503. */
+  signin2: { appleServicesId: string; twilio: { accountSid: string; user: string; secret: string; verifySid: string } | null; turnstileSecret: string; turnstileSiteKey: string; smsPrefixes: string[] };
+  native: { appleBundleId: string; googleClientIds: string[]; iosAppIds: string[]; apns: { keyId: string; teamId: string; privateKey: string; topic: string } };
   auth: { github: { clientId: string; clientSecret: string } | null; google: { clientId: string; clientSecret: string } | null; newAccountDays: number;
     /** OpenAI app-review login (one account, openai-reviewer). Off unless REVIEWER_LOGIN_ENABLED=1 and REVIEWER_PASSWORD_HASH are set. */
     reviewer: { enabled: boolean; passwordHash: string } };
@@ -70,6 +75,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       globalDailyCostBudgetUsd: num(env.AGENT_GLOBAL_DAILY_COST_BUDGET_USD, 20), reconnectGraceMs: num(env.AGENT_RECONNECT_GRACE_MS, 30_000), maxToolResultChars: num(env.AGENT_MAX_TOOL_RESULT_CHARS, 12_000) },
     security: { sessionSecret: secret || "dev-only-insecure-secret-change-me-please!!", accessCodes: list(env.COMPOSER_ACCESS_CODES), cookieSecure: publicOrigin.startsWith("https://"),
       loginPerMinute: num(env.RATE_LOGIN_PER_MINUTE, 10), messagesPerMinute: num(env.RATE_MESSAGES_PER_MINUTE, 6), ipRequestsPerMinute: num(env.RATE_IP_PER_MINUTE, 120) },
+    signin2: {
+      appleServicesId: (env.APPLE_SERVICES_ID ?? "").trim(),
+      twilio: env.TWILIO_ACCOUNT_SID && env.TWILIO_VERIFY_SID && (env.TWILIO_AUTH_TOKEN || (env.TWILIO_API_KEY && env.TWILIO_API_SECRET))
+        ? { accountSid: env.TWILIO_ACCOUNT_SID, verifySid: env.TWILIO_VERIFY_SID, user: env.TWILIO_API_KEY || env.TWILIO_ACCOUNT_SID, secret: env.TWILIO_API_SECRET || env.TWILIO_AUTH_TOKEN || "" } : null,
+      turnstileSecret: (env.TURNSTILE_SECRET ?? "").trim(), turnstileSiteKey: (env.TURNSTILE_SITE_KEY ?? "").trim(),
+      smsPrefixes: env.SMS_COUNTRY_PREFIXES ? list(env.SMS_COUNTRY_PREFIXES) : ["+1"],
+    },
+    native: {
+      // iOS bundle id: Sign in with Apple client id (id_token aud) and APNs topic. Set APPLE_BUNDLE_ID="" to disable.
+      appleBundleId: (env.APPLE_BUNDLE_ID ?? "com.grepawk.moviefone").trim(),
+      googleClientIds: list(env.GOOGLE_IOS_CLIENT_IDS),
+      iosAppIds: env.IOS_APP_IDS === undefined ? ["83D36RPMUM.com.grepawk.moviefone"] : list(env.IOS_APP_IDS),
+      apns: { keyId: (env.APNS_KEY_ID ?? "").trim(), teamId: (env.APNS_TEAM_ID ?? "").trim(), privateKey: apnsKey(env), topic: (env.APNS_TOPIC ?? env.APPLE_BUNDLE_ID ?? "com.grepawk.moviefone").trim() },
+    },
     auth: {
       github: env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } : null,
       google: env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } : null,
@@ -127,3 +146,10 @@ export function toPublic(c: Config) {
     limits: { maxToolSteps: c.agent.maxToolSteps, maxInputChars: c.agent.maxInputChars, maxOutputTokens: c.agent.maxOutputTokens, dailyTokenBudget: c.agent.dailyTokenBudget, dailyCostBudgetUsd: c.agent.dailyCostBudgetUsd, toolTimeoutMs: c.agent.toolTimeoutMs } };
 }
 export const authProviders = (c: Config) => [...(c.auth.github ? ["github" as const] : []), ...(c.auth.google ? ["google" as const] : [])];
+
+/** APNs .p8 from APNS_P8 (PEM text, \n escapes allowed) or APNS_P8_PATH. Never logged. */
+function apnsKey(env: Record<string, string | undefined>): string {
+  if (env.APNS_P8) return env.APNS_P8.replace(/\\n/g, "\n");
+  if (env.APNS_P8_PATH) { try { return readFileSync(env.APNS_P8_PATH, "utf8"); } catch { return ""; } }
+  return "";
+}

@@ -1,0 +1,5 @@
+*.xcodeproj
+xcuserdata/
+DerivedData/
+snapshots/
+TestResults.xcresult
