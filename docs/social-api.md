@@ -181,6 +181,69 @@ APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.co
 - The first tap unlocks audio (iOS). After that, settling on a card autoplays it. Pause everything when the tab or app is hidden.
 - Web applies gain through Web Audio GainNodes, because iOS Safari ignores `HTMLMediaElement.volume`.
 
+## In-app purchases — Apple (spec; implementation follows)
+
+Products (bundle `com.grepawk.moviefone`, see `docs/asc/iap.md`) all grant the same `pro` entitlement as Stripe Pro.
+
+| productId | type | Stripe equivalent |
+|---|---|---|
+| `com.grepawk.moviefone.pro_monthly` | auto-renewable, group "GBK Pro" | `pro_monthly` |
+| `com.grepawk.moviefone.pro_yearly` | auto-renewable, group "GBK Pro" | `pro_yearly` |
+| `com.grepawk.moviefone.lifetime` | non-consumable | `lifetime` |
+
+`pro` means 10× the Studio composer-agent daily token budget (2M vs 200k) and 120 server renders per hour of up to 600 s (vs 30/h, 300 s).
+
+### `POST /api/iap/apple`
+
+Auth: optional Bearer. A guest or signed-in session is fine; with no auth the purchase is linked only by `app_account_token`.
+
+Body: `{ "signed_transaction": "<StoreKit 2 JWSTransaction>", "app_account_token": "<uuid>" }`.
+
+Verification:
+- The JWS header `x5c` chain must verify up to **Apple Root CA - G3**. The root certificate is pinned in the repo at `server/certs/AppleRootCA-G3.cer`. Each certificate must be within its validity window, and the leaf must carry the Apple Mac App Store receipt-signing OID `1.2.840.113635.100.6.11.1`.
+- `alg` is `ES256`. The signature is checked with the leaf key.
+- Payload: `bundleId == "com.grepawk.moviefone"`, `productId` must be one of the three above, and `appAccountToken` (when present in the payload) must equal `app_account_token`.
+- **Environment:** `Production` is always accepted. `Sandbox` / `Xcode` is accepted only when the server runs with `IAP_ALLOW_SANDBOX=1`. That is the default off production, and on production it allows App Review / TestFlight sandbox purchases.
+  - Sandbox entitlements are stored with `environment: "Sandbox"` and shown in `/api/me` as `pro_environment`.
+- **Ownership:**
+  - With a bearer, the purchase attaches to the caller's account (guests too).
+  - Without one, it attaches to the account already linked to that `app_account_token`, or stays pending: stored and claimed by the first account that later posts the same token.
+  - A transaction (`originalTransactionId`) or `app_account_token` already owned by a **different** account → `409 { code: "IAP_OWNED_BY_OTHER", message, error: "Conflict", statusCode: 409 }`.
+- **Idempotent** on `transactionId`: reposting returns the same answer.
+
+Responses:
+- `200 { "entitlements": ["pro"] | [], "expires_at": <unix ms> | null, "product_id", "environment" }`. `expires_at` is null for lifetime. A revoked/refunded or expired transaction → `entitlements: []`.
+- `400 { code: "INVALID_JWS" | "WRONG_BUNDLE" | "UNKNOWN_PRODUCT" | "SANDBOX_NOT_ALLOWED" | "TOKEN_MISMATCH", message, error, statusCode }`.
+- Rate limit: 30/min per IP and 10/min per account → `429`.
+
+### `POST /api/iap/apple/notifications`
+
+App Store Server Notifications **v2**. The same URL is used for production and sandbox in App Store Connect.
+
+Body: `{ "signedPayload": "<JWS>" }`. Verified as above; the nested `signedTransactionInfo` and `signedRenewalInfo` are verified too.
+
+Idempotent on `notificationUUID`: repeats → `200` with no change. Handling:
+- `SUBSCRIBED`, `DID_RENEW`, `OFFER_REDEEMED`: update `expires_at` and set active.
+- `DID_FAIL_TO_RENEW`: with subtype `GRACE_PERIOD`, active until `gracePeriodExpiresDate`; otherwise no change until expiry.
+- `GRACE_PERIOD_EXPIRED`, `EXPIRED`: inactive.
+- `REFUND`, `REVOKE`: set `revoked_at`, inactive.
+- `DID_CHANGE_RENEWAL_STATUS`, `DID_CHANGE_RENEWAL_PREF`: store `auto_renew` (informational).
+- Others: logged, `200`.
+
+Mapping to an account uses `originalTransactionId`, then `appAccountToken`. Invalid JWS → `400`, so Apple retries only on non-2xx.
+
+### Entitlements in `GET /api/me`
+
+`Me` gains `pro: boolean`, `pro_source: "stripe" | "apple" | null`, `pro_expires_at: <unix ms> | null` and `pro_environment: "Production" | "Sandbox" | null`. This applies to guests too.
+
+Pro from either source lifts the agent token budget and render limits.
+
+Guest → Apple/Google upgrade or merge carries Apple entitlements over: purchases move to the surviving account.
+
+`DELETE /api/me` detaches purchases from the account. They stay re-claimable by `app_account_token` / Restore.
+
+No App Store Server API key is needed for JWS verification. An In-App Purchase key would only be needed later for lookups or refund history.
+
 ## Rate limits
 
 Per user + IP, in-memory: comments 10/min, ratings 60/min, DMs 20/min, reports 10/hour, plays 120/min.
