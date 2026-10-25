@@ -10,8 +10,19 @@ import XCTest
 final class SnapshotTests: XCTestCase {
     private func render<V: View>(_ view: V, name: String, style: UIUserInterfaceStyle,
                                  size: CGSize = CGSize(width: 393, height: 760)) throws -> UIImage {
-        let host = UIHostingController(rootView: view.environmentObject(AuthStore.shared))
-        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        let scheme: ColorScheme = style == .dark ? .dark : .light
+        let host = UIHostingController(rootView: view
+            .environmentObject(AuthStore.shared)
+            .environment(\.colorScheme, scheme)
+            .preferredColorScheme(scheme))
+        host.overrideUserInterfaceStyle = style
+        let window: UIWindow
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: size)
+        } else {
+            window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        }
         window.overrideUserInterfaceStyle = style
         window.rootViewController = host
         window.makeKeyAndVisible()
