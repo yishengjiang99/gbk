@@ -1,0 +1,102 @@
+AI Music Radar (formerly EarSheet: Music to Sheet)
+Copyright (C) 2026 Yisheng Jiang
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your option)
+any later version (SPDX-License-Identifier: AGPL-3.0-or-later). See LICENSE
+for the full text.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for details.
+
+Corresponding source code: https://github.com/yishengjiang99/earsheet
+
+The app links the AGPL-3.0 Swift package SF2Player (Packages/SF2Player,
+vendored from https://github.com/yishengjiang99/omr-sheet-cam at commit
+d22a82d1ef38c5fde902a51f88e9d56d444406d9; see Packages/SF2Player/VENDOR.md),
+so the app as a whole is distributed under AGPL-3.0-or-later.
+
+
+===============================================================================
+Third-party components
+===============================================================================
+
+1. Basic Pitch (note transcription model and decoder)
+   https://github.com/spotify/basic-pitch
+   Copyright Spotify AB — Apache License 2.0 (repository LICENSE)
+
+   The onset / frame / minimum-length / contour note decoder in
+   Packages/HearSheet (BasicPitchDecoder.swift) is a Swift port of Spotify's
+   `basic_pitch/note_creation.py:model_output_to_notes`, keeping Spotify's
+   default thresholds. The model graph is unchanged: waveform input
+   [1, 43844, 1], note [1, 172, 88], onset [1, 172, 88],
+   contour [1, 172, 264] heads.
+
+   The Core ML weights shipped with the app are the published ICASSP 2022
+   release checkpoint, used unmodified (pinned by SHA-256 in models.lock,
+   fetched by scripts/fetch-models, never committed to git). The app loads
+   whichever checkpoint models.lock pins; no app code depends on which
+   checkpoint that is.
+
+   Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
+
+2. LAME MP3 encoder 3.100 (Packages/LAME, vendored libmp3lame sources)
+   https://lame.sourceforge.io
+   Copyright 1999-2017 The LAME Project — GNU Library General Public
+   License 2.0 (LGPL-2.0-or-later; see the upstream COPYING). Used only for
+   the "Download MP3" export (Swift wrapper: Sources/App/MP3Encoder.swift).
+   Only the encoder library sources are vendored; the decoder (mpglib),
+   CLI frontend and x86 SIMD paths are excluded. Build notes and the file
+   list are in Packages/LAME/VENDOR.md.
+
+3. GeneralUser GS SoundFont 2.0.2 (GeneralUser-GS.sf2)
+   Copyright 1997-2025 by S. Christian Collins
+   https://www.schristiancollins.com
+   https://github.com/mrbumpy409/GeneralUser-GS
+   License: GeneralUser GS License v2.0 (pinned in models.lock, fetched by
+   scripts/fetch-models, not committed to git, bundled for playback). The text
+   below is the bank's own INFO/ICMT license text (line-wrapped here):
+
+   ***     License v2.0    ***
+
+   ** License of the complete work **
+   You may use GeneralUser GS without restriction for your own music creation,
+   private or commercial. This SoundFont bank is provided to the community
+   free of charge. Please feel free to use it in your software projects, and
+   to modify the SoundFont bank or its packaging to suit your needs.
+
+   ** License of contained samples **
+   GeneralUser GS inherits the usage rights of the samples contained within,
+   all of which allow full use in music production, including the ability to
+   make profit from musical recordings created with GeneralUser GS.
+
+   Many of the samples are original, but some were taken from other banks
+   freely (and legally) available on the Internet from various SoundFont
+   websites. Because GeneralUser GS originated as a personal project with no
+   intention for publication, I cannot be 100% sure where all of the samples
+   originated, although I do know that none of them came from commercially
+   published SoundFont packages or sample CDs. Regardless, many "free"
+   SoundFonts available on the web may indeed contain samples of questionable
+   origin. My understanding of the copyrights of all samples is only as good
+   as the information provided by the original sources. If you become aware
+   of any restricted samples being used in GeneralUser GS, please let me know
+   so I can replace them.
+
+   This uncertainty may concern you if you intend to use GeneralUser GS in a
+   commercial software product. That being said, I have never received any
+   complaint regarding sample ownership since I published the original
+   GeneralUser GS back in 2000, and as far as I am aware, neither have any of
+   the companies creating commercial software products using GeneralUser GS.
+
+   ** More info **
+   If you plan to feature GeneralUser GS on your own website, please do not
+   link directly to my download files. Either link to my website, or provide
+   your own local copy instead.
+
+   I hope you enjoy GeneralUser GS! This SoundFont bank is the product of
+   many years of hard work.
+
+   You can find updates to GeneralUser GS and more of my virtual instruments
+   at: http://www.schristiancollins.com

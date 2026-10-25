@@ -19,6 +19,8 @@ packages:
   SF2Player:
     url: https://github.com/yishengjiang99/sf2player-swift.git
     revision: 6ce4941247d1dcd178da5c71b9279a9cf91fc007
+  HearSheetCore:
+    path: Packages/HearSheetCore
 # TODO: playback is not built on SF2Engine yet. Copy the sequencer and MIDI parsing from
 #       earsheet's Packages/SF2Player when wiring SF2 playback.
 targets:
@@ -27,9 +29,14 @@ targets:
     platform: iOS
     sources:
       - path: GBKComposer
+      # Basic Pitch Core ML model for native Hum (committed, 288 KB; refresh with scripts/fetch-hum-model.sh).
+      - path: HumModel
+        type: folder
+        optional: true
     dependencies:
       - package: SF2Player
         product: SF2Engine
+      - package: HearSheetCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.grepawk.moviefone

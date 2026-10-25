@@ -24,6 +24,8 @@
 	<key>LSRequiresIPhoneOS</key><true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hum a tune in the studio and GBK turns it into notes. Audio is transcribed on your device and isn't uploaded.</string>
 	<key>UIBackgroundModes</key><array><string>remote-notification</string></array>
 	<key>UILaunchScreen</key><dict/>
 	<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
