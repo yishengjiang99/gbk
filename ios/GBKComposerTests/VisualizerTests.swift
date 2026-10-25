@@ -7,10 +7,20 @@ final class PianoRollMathTests: XCTestCase {
                               notes: [[0, 0, 100, 60], [1, 500, 10, 72], [0, 990, 10, 61]])
 
     func testConstantsMatchWeb() {
+        // web VIZ, gbk #108 / db68404
         XCTAssertEqual(FeedVisuals.playheadFraction, 0.25)
         XCTAssertEqual(FeedVisuals.windowSeconds, 4)
+        XCTAssertEqual(FeedVisuals.rollFraction, 0.62)
+        XCTAssertEqual(FeedVisuals.fftSize, 2048)
         XCTAssertEqual(FeedVisuals.barCount, 48)
+        XCTAssertEqual(FeedVisuals.minHz, 40)
+        XCTAssertEqual(FeedVisuals.maxHz, 16_000)
         XCTAssertEqual(FeedVisuals.decaySeconds, 0.15)
+        XCTAssertEqual(FeedVisuals.maxFrameDt, 0.1)
+        XCTAssertEqual(FeedVisuals.waveformPoints, 256)
+        XCTAssertEqual(FeedVisuals.pastAlpha, 0.35)
+        XCTAssertEqual(FeedVisuals.upcomingAlpha, 0.8)
+        XCTAssertEqual(FeedVisuals.activeBrighten, 0.45)
     }
 
     func testUnitsConvertToSeconds() {
@@ -23,54 +33,49 @@ final class PianoRollMathTests: XCTestCase {
 
     func testActiveNoteSitsOnPlayhead() {
         let notes = PianoRollMath.notes(from: preview, durationSeconds: 40)
-        let w = PianoRollMath.window(notes: notes, time: 2, lo: 60, hi: 72, durationSeconds: 40)
+        let w = PianoRollMath.window(notes: notes, time: 2, lo: 60, hi: 72)
         XCTAssertEqual(w.count, 1)
-        XCTAssertTrue(w[0].isActive)
-        XCTAssertEqual(w[0].x0, -0.25, accuracy: 1e-9)  // started 2 s ago = half the 1 s left margin past the edge
-        XCTAssertEqual(w[0].x1, 0.75, accuracy: 1e-9)   // ends 2 s after the playhead
-        XCTAssertLessThan(w[0].x0, FeedVisuals.playheadFraction)
-        XCTAssertGreaterThan(w[0].x1, FeedVisuals.playheadFraction)
+        XCTAssertEqual(w[0].state, .active)
+        XCTAssertEqual(w[0].x0, -0.25, accuracy: 1e-9)
+        XCTAssertEqual(w[0].x1, 0.75, accuracy: 1e-9)
     }
 
-    func testPastNotesDisappearAndUpcomingAreInactive() {
+    func testPastNotesStayOneSecondThenLeave() {
         let notes = PianoRollMath.notes(from: preview, durationSeconds: 40)
-        XCTAssertTrue(PianoRollMath.window(notes: notes, time: 4.5, lo: 60, hi: 72, durationSeconds: 40).isEmpty)
-        let up = PianoRollMath.window(notes: notes, time: 18, lo: 60, hi: 72, durationSeconds: 40)
+        let past = PianoRollMath.window(notes: notes, time: 4.5, lo: 60, hi: 72)
+        XCTAssertEqual(past.map(\.state), [.past], "ended 0.5 s ago: still in the 1 s past margin, dimmed")
+        XCTAssertTrue(PianoRollMath.window(notes: notes, time: 5.5, lo: 60, hi: 72).isEmpty)
+        let up = PianoRollMath.window(notes: notes, time: 18, lo: 60, hi: 72)
         XCTAssertEqual(up.map(\.note.pitch), [72])
-        XCTAssertFalse(up[0].isActive)
-        XCTAssertEqual(up[0].x0, 0.75, accuracy: 1e-9) // 2 s ahead → 0.25 + 2/4
+        XCTAssertEqual(up[0].state, .upcoming)
+        XCTAssertEqual(up[0].x0, 0.75, accuracy: 1e-9)
     }
 
-    func testLoopWrapShowsStartOfSongAhead() {
+    func testNoLoopWrap() {
         let notes = PianoRollMath.notes(from: preview, durationSeconds: 40)
-        let w = PianoRollMath.window(notes: notes, time: 38, lo: 60, hi: 72, durationSeconds: 40)
-        XCTAssertEqual(Set(w.map(\.note.pitch)), [60, 61])
-        XCTAssertEqual(w.first { $0.note.pitch == 60 }!.x0, 0.75, accuracy: 1e-9)
+        XCTAssertEqual(PianoRollMath.window(notes: notes, time: 38, lo: 60, hi: 72).map(\.note.pitch), [61])
     }
 
-    func testPitchRowsCentredWithMinimumSpan() {
-        let notes = [RollNote(track: 0, start: 0, length: 1, pitch: 64)]
-        let w = PianoRollMath.window(notes: notes, time: 0.5, lo: 64, hi: 64)
-        // span = max(12, 1) → row height 1/12, centred: offset 11/24
-        XCTAssertEqual(w[0].yTop, 11.0 / 24.0, accuracy: 1e-9)
-        XCTAssertEqual(w[0].height, 0.85 / 12, accuracy: 1e-9)
+    func testPitchRowsPaddedWithMinimumSpan() {
+        XCTAssertEqual(PianoRollMath.pitchRange(lo: 64, hi: 64).lo, 62)
+        XCTAssertEqual(PianoRollMath.pitchRange(lo: 64, hi: 64).hi, 73)   // lo-2 + 11
+        XCTAssertEqual(PianoRollMath.pitchRange(lo: 60, hi: 84).hi, 86)   // hi + 2
+        let w = PianoRollMath.window(notes: [RollNote(track: 0, start: 0, length: 1, pitch: 64)], time: 0.5, lo: 64, hi: 64)
+        XCTAssertEqual(w[0].rows, 12)
+        XCTAssertEqual(w[0].row, 9) // 73 − 64, from the top
     }
 }
 
 final class SpectrumTests: XCTestCase {
-    func testLogBandsCoverRangeContiguously() {
-        for rate in [44_100.0, 48_000.0] {
-            let bands = SpectrumMath.logBands(fftSize: 2048, sampleRate: rate)
-            XCTAssertEqual(bands.count, 48)
-            XCTAssertEqual(bands.first?.lowerBound, 1, "DC bin is skipped")
-            XCTAssertTrue(bands.allSatisfy { !$0.isEmpty })
-            XCTAssertTrue(zip(bands, bands.dropFirst()).allSatisfy { $0.upperBound == $1.lowerBound })
-            let hzPerBin = rate / 2048
-            XCTAssertEqual(Double(bands.last!.upperBound) * hzPerBin, 16_000, accuracy: hzPerBin)
-            // log spacing: upper bands are wider than lower ones
-            XCTAssertGreaterThan(bands.last!.count, bands[24].count)
-            XCTAssertGreaterThanOrEqual(bands[24].count, bands[0].count)
-        }
+    func testLogBandsMatchWebBinning() {
+        let bands = SpectrumMath.logBands(fftSize: 2048, sampleRate: 48_000)
+        XCTAssertEqual(bands.count, 48)
+        XCTAssertTrue(bands.allSatisfy { !$0.isEmpty })
+        // 40 Hz / 24 kHz · 1024 = 1.7 → bin 1; last band ends at ceil(16k/24k · 1024) = 683
+        XCTAssertEqual(bands.first?.lowerBound, 1)
+        XCTAssertEqual(bands.last?.upperBound, 683)
+        XCTAssertTrue(zip(bands, bands.dropFirst()).allSatisfy { $0.lowerBound <= $1.lowerBound })
+        XCTAssertGreaterThan(bands.last!.count, bands[0].count)
     }
 
     func testLevelsPickBandWithEnergy() {
@@ -87,8 +92,10 @@ final class SpectrumTests: XCTestCase {
     func testAttackInstantDecay150ms() {
         let up = SpectrumMath.smooth(previous: [0], target: [1], dt: 1 / 60)
         XCTAssertEqual(up[0], 1)
-        let down = SpectrumMath.smooth(previous: [1], target: [0], dt: 0.15)
-        XCTAssertEqual(down[0], Float(exp(-1.0)), accuracy: 1e-6)
+        let down = SpectrumMath.smooth(previous: [1], target: [0.2], dt: 0.05)
+        XCTAssertEqual(down[0], Float(exp(-1.0 / 3)), accuracy: 1e-6, "web: level *= exp(-dt/150ms)")
+        let capped = SpectrumMath.smooth(previous: [1], target: [0], dt: 2)
+        XCTAssertEqual(capped[0], Float(exp(-0.1 / 0.15)), accuracy: 1e-6, "dt capped at 100 ms")
     }
 
     func testFFTPeakLandsInExpectedBar() {
@@ -103,8 +110,9 @@ final class SpectrumTests: XCTestCase {
         XCTAssertEqual(lv.firstIndex(of: lv.max()!), bands.firstIndex { $0.contains(peakBin) })
     }
 
-    func testWaveformDownsampleKeepsPeaks() {
-        XCTAssertEqual(WaveformMath.points([0, 0.5, -0.9, 0.1], count: 2), [0.5, -0.9])
+    func testWaveformSamplesEvenlyLikeWeb() {
+        XCTAssertEqual(WaveformMath.points([0, 0.5, -0.9, 0.1], count: 2), [0, -0.9])
+        XCTAssertEqual(WaveformMath.points([Float](repeating: 0.1, count: 2048)).count, 256)
         XCTAssertEqual(WaveformMath.points([], count: 3), [0, 0, 0])
     }
 }

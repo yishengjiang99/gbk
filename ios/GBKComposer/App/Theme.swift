@@ -3,7 +3,7 @@ import UIKit
 
 /// All colours come from asset-catalog colour sets with light and dark variants
 /// (Resources/Assets.xcassets). Light values follow GBK Social web (src/components/social/social.css);
-/// web has no dark palette yet, so the dark variants are defined here (see docs/social/STATUS.md).
+/// feed viz colours are web LiveRoll's light/dark palette.
 enum Theme {
     static let accent = Color("AccentColor")
     static let onAccent = Color("OnAccent")
@@ -17,11 +17,14 @@ enum Theme {
     static let textSecondary = Color("TextSecondary")
     static let border = Color("Border")
     static let chip = Color("Chip")
-    static let rollRow = Color("RollRow")
-    static let playhead = Color("Playhead")
-    static let waveform = Color("Waveform")
-    static let barStart = Color("BarStart")
-    static let barEnd = Color("BarEnd")
+    /// Feed viz palette: web LiveRoll `DEF.light` / `DEF.dark` (gbk #108).
+    static let vizBg = Color("VizBg")
+    static let vizGrid = Color("VizGrid")
+    static let vizRow = Color("VizRow")
+    static let vizHead = Color("VizHead")
+    static let vizBar = Color("VizBar")
+    static let vizWave = Color("VizWave")
+    static let vizDim = Color("VizDim")
     static let trackFallback = Color("TrackFallback")
     static let destructive = Color("Destructive")
 
@@ -30,20 +33,6 @@ enum Theme {
     }
     static var cardGradient: LinearGradient {
         LinearGradient(colors: [cardTop, cardBottom], startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    /// Colour for bar `i` of `count`: interpolated between BarStart and BarEnd for the current appearance.
-    static func barColor(_ i: Int, of count: Int, scheme: ColorScheme) -> Color {
-        let t = count > 1 ? CGFloat(i) / CGFloat(count - 1) : 0
-        let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
-        let a = UIColor(named: "BarStart")?.resolvedColor(with: traits) ?? .systemBlue
-        let b = UIColor(named: "BarEnd")?.resolvedColor(with: traits) ?? .systemPink
-        var (h1, s1, v1, a1, h2, s2, v2, a2): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0, 0, 0, 0, 0)
-        a.getHue(&h1, saturation: &s1, brightness: &v1, alpha: &a1)
-        b.getHue(&h2, saturation: &s2, brightness: &v2, alpha: &a2)
-        if h2 < h1 { h2 += 1 } // sweep 200° → 340° through violet, like web hsl()
-        let h = (h1 + (h2 - h1) * t).truncatingRemainder(dividingBy: 1)
-        return Color(hue: Double(h), saturation: Double(s1 + (s2 - s1) * t), brightness: Double(v1 + (v2 - v1) * t))
     }
 
     /// Server track colour (`#rrggbb`), falling back to TrackFallback.

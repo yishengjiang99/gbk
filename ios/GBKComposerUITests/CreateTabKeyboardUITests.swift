@@ -12,9 +12,7 @@ final class CreateTabKeyboardUITests: XCTestCase {
 
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30), "studio web view")
-        // The studio's composer input lives under the bottom dock's "Composer" tab (Tracks is the default).
-        let composerTab = web.buttons["Composer"]
-        if composerTab.waitForExistence(timeout: 60) { composerTab.tap() }
+        // Web 54e9d10 pins the composer input under every dock tab (guests included), so no tab switch needed.
         let input = web.textViews.firstMatch
         guard input.waitForExistence(timeout: 60) else {
             attach(app, "create-tab-no-input")
@@ -29,6 +27,11 @@ final class CreateTabKeyboardUITests: XCTestCase {
         XCTAssertTrue(window.contains(input.frame), "input \(input.frame) inside window \(window)")
         XCTAssertLessThanOrEqual(input.frame.maxY, tabBar.minY + 1, "input above the tab bar")
 
+        // Start playback (web ws-play, aria-label "Play") so the rest runs while playing.
+        let play = web.buttons["Play"]
+        if play.waitForExistence(timeout: 30) { play.tap(); sleep(1); attach(app, "create-tab-playing") }
+        XCTAssertTrue(input.isHittable, "composer input visible during playback")
+
         // Keyboard up.
         input.tap()
         let keyboard = app.keyboards.firstMatch
@@ -41,6 +44,13 @@ final class CreateTabKeyboardUITests: XCTestCase {
 
         input.typeText("calm piano in D minor")
         XCTAssertLessThanOrEqual(input.frame.maxY, keyboard.frame.minY + 1, "still visible while typing")
+        attach(app, "create-tab-typing")
+
+        // Keyboard down again.
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+        _ = keyboard.waitForNonExistence(timeout: 5)
+        attach(app, "create-tab-keyboard-dismissed")
+        XCTAssertTrue(input.isHittable, "composer input visible after the keyboard closes")
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {

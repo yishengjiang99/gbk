@@ -1,28 +1,34 @@
 import Foundation
 
-/// Shared feed-card visual constants, mirrored from web src/components/social/LiveRoll.tsx
-/// (PLAYHEAD_X = 0.25, WINDOW_SEC = 4, BARS = 48, BAR_DECAY_MS = 150, F_LO = 40, F_HI = 16000).
+/// Feed now-playing viz constants, mirrored 1:1 from web `VIZ` in src/components/social/LiveRoll.tsx
+/// (gbk #108, db68404; spec https://github.com/yishengjiang99/gbk/issues/108#issuecomment-6402713315).
 enum FeedVisuals {
-    /// Playhead x as a fraction of card width.
-    static let playheadFraction: Double = 0.25
-    /// Seconds visible across the full card width (web WINDOW_SEC): 1 s behind the playhead, 3 s ahead.
     static let windowSeconds: Double = 4
+    static let playheadFraction: Double = 0.25
+    /// Row 1 (roll) height share; row 2 (bars + waveform overlaid) is the rest.
+    static let rollFraction: Double = 0.62
+    static let pitchPad: Double = 2
+    static let minPitchSpan: Double = 12
+    static let noteGap: Double = 1
+    static let minNoteSize: Double = 2
+    static let fftSize = 2048
     static let barCount = 48
-    /// Attack is instant; levels fall with this time constant.
-    static let decaySeconds: Double = 0.15
     static let minHz: Double = 40
     static let maxHz: Double = 16_000
-    static let fftSize = 2048
-    /// Web LiveRoll: bar i colour = hsl(200 + i/48·140, 85%, 58%); active notes brightened 45% toward white with a glow.
-    static let barHueStart: Double = 200
-    static let barHueSpan: Double = 140
-    static let activeBrighten: Double = 0.45
-    /// Waveform (oscilloscope) points drawn per frame.
+    /// Bars: instant attack, `level *= exp(-dt / 150 ms)`, dt capped at 100 ms.
+    static let decaySeconds: Double = 0.15
+    static let maxFrameDt: Double = 0.1
+    static let barAlpha: Double = 0.85
     static let waveformPoints = 256
+    /// Active note = track colour mixed 45% toward white, 1 px outline in the playhead colour.
+    static let activeBrighten: Double = 0.45
+    static let pastAlpha: Double = 0.35
+    static let upcomingAlpha: Double = 0.8
+    /// Web falls back to 30 s when the audio duration is unknown (static frame).
+    static let fallbackDuration: Double = 30
 }
 
-/// Piano-roll note windowing. Preview notes are `[track, start, len, pitch]` with `start`/`len`
-/// in 0...1000 (fractions of the whole song, see src/agent/piano-roll-preview.ts), so seconds = value / 1000 · duration.
+/// Preview notes are `[track, start, len, pitch]` with start/len on 0...1000, so seconds = value / 1000 · duration.
 struct RollNote: Equatable {
     let track: Int
     let start: Double   // seconds
@@ -30,77 +36,65 @@ struct RollNote: Equatable {
     let pitch: Int
 }
 
+enum NoteState: Equatable { case past, active, upcoming }
+
 struct PlacedNote: Equatable {
     let note: RollNote
-    /// Left and right edges as fractions of width (may extend past 0...1 when partially visible).
+    /// Left/right edges as fractions of width (may extend past 0...1).
     let x0: Double
     let x1: Double
-    /// Top edge and height as fractions of the roll height.
-    let yTop: Double
-    let height: Double
-    let isActive: Bool
+    /// Pitch row index from the top, and the total row count.
+    let row: Int
+    let rows: Int
+    let state: NoteState
+    var isActive: Bool { state == .active }
 }
 
 enum PianoRollMath {
-    /// Web LiveRoll: notes shorter than this are drawn at this length.
-    static let minNoteSeconds = 0.03
-
     static func notes(from preview: SongPreview?, durationSeconds: Double) -> [RollNote] {
         guard let raw = preview?.notes, durationSeconds > 0 else { return [] }
         return raw.compactMap { n in
             guard n.count >= 4 else { return nil }
             return RollNote(track: Int(n[0]), start: n[1] / 1000 * durationSeconds,
-                            length: max(minNoteSeconds, n[2] / 1000 * durationSeconds), pitch: Int(n[3]))
+                            length: n[2] / 1000 * durationSeconds, pitch: Int(n[3]))
         }
     }
 
-    /// Notes visible at `time`: current and upcoming notes moving right-to-left toward the playhead.
-    /// Notes that have finished (end <= time) disappear. The song loops, so copies one duration later are included.
-    /// Pitch rows: span = max(12, hi - lo + 1), centred, highest pitch at the top (web LiveRoll).
-    static func window(notes: [RollNote], time: Double, lo: Double, hi: Double, durationSeconds: Double? = nil,
+    /// Pitch range drawn: lo − 2 … max(hi + 2, lo − 2 + 11).
+    static func pitchRange(lo: Double, hi: Double) -> (lo: Double, hi: Double) {
+        let l = lo - FeedVisuals.pitchPad
+        return (l, max(hi + FeedVisuals.pitchPad, l + FeedVisuals.minPitchSpan - 1))
+    }
+
+    /// Web drawRoll: notes intersecting the 4 s window (1 s past, 3 s ahead). No loop wrap.
+    static func window(notes: [RollNote], time t: Double, lo: Double, hi: Double,
                        windowSeconds: Double = FeedVisuals.windowSeconds,
                        playhead: Double = FeedVisuals.playheadFraction) -> [PlacedNote] {
-        let viewStart = time - windowSeconds * playhead
-        let viewEnd = viewStart + windowSeconds
-        let rows = hi - lo + 1
-        let span = max(12, rows)
-        let nh = 1 / span
-        let off = (span - rows) * nh / 2
-        let offsets = (durationSeconds ?? 0) > 0 ? [0, durationSeconds!] : [0]
-        var out: [PlacedNote] = []
-        for n in notes {
-            for shift in offsets {
-                let s0 = n.start + shift, end = s0 + n.length
-                guard end > time, s0 < viewEnd else { continue }
-                out.append(PlacedNote(note: n, x0: (s0 - viewStart) / windowSeconds, x1: (end - viewStart) / windowSeconds,
-                                      yTop: (hi - Double(n.pitch)) * nh + off, height: nh * 0.85,
-                                      isActive: s0 <= time && time < end))
-            }
+        let (l, h) = pitchRange(lo: lo, hi: hi)
+        let rows = Int(h - l + 1)
+        return notes.compactMap { n in
+            let t0 = n.start, t1 = n.start + n.length
+            let x0 = playhead + (t0 - t) / windowSeconds, x1 = playhead + (t1 - t) / windowSeconds
+            guard x1 >= 0, x0 <= 1 else { return nil }
+            let state: NoteState = (t0 <= t && t1 > t) ? .active : (t1 <= t ? .past : .upcoming)
+            return PlacedNote(note: n, x0: x0, x1: x1, row: Int(h) - n.pitch, rows: rows, state: state)
         }
-        return out
     }
 }
 
 enum SpectrumMath {
-    /// FFT bin ranges for `bars` log-spaced bands between minHz and maxHz. Every band has at least one bin,
-    /// bands are contiguous and increasing, and bin 0 (DC) is never used.
+    /// Web LiveRoll binning: band b spans f0 = fMin·(fMax/fMin)^(b/48) … f1 = …^((b+1)/48);
+    /// i0 = floor(f0/nyquist·n), i1 = max(i0+1, ceil(f1/nyquist·n)), both clamped to n bins.
     static func logBands(bars: Int = FeedVisuals.barCount, fftSize: Int = FeedVisuals.fftSize, sampleRate: Double,
                          minHz: Double = FeedVisuals.minHz, maxHz: Double = FeedVisuals.maxHz) -> [Range<Int>] {
-        let binCount = fftSize / 2
-        let hzPerBin = sampleRate / Double(fftSize)
-        let top = min(maxHz, sampleRate / 2)
-        let ratio = top / minHz
-        var bands: [Range<Int>] = []
-        var lower = max(1, Int((minHz / hzPerBin).rounded(.down)))
-        for i in 0..<bars {
-            let fHi = minHz * pow(ratio, Double(i + 1) / Double(bars))
-            var upper = Int((fHi / hzPerBin).rounded(.up))
-            upper = min(max(upper, lower + 1), binCount)
-            if lower >= binCount { lower = binCount - 1; upper = binCount }
-            bands.append(lower..<upper)
-            lower = upper
+        let n = fftSize / 2, ny = sampleRate / 2
+        return (0..<bars).map { b in
+            let f0 = minHz * pow(maxHz / minHz, Double(b) / Double(bars))
+            let f1 = minHz * pow(maxHz / minHz, Double(b + 1) / Double(bars))
+            let i0 = min(n - 1, Int((f0 / ny * Double(n)).rounded(.down)))
+            let i1 = min(n, max(i0 + 1, Int((f1 / ny * Double(n)).rounded(.up))))
+            return i0..<i1
         }
-        return bands
     }
 
     /// Per band: max power over its bins → 0...1 by mapping dB from `minDB`...`maxDB`
@@ -116,23 +110,17 @@ enum SpectrumMath {
         }
     }
 
-    /// Instant attack, exponential decay with time constant `decay`.
+    /// Web: `levels[b] = v >= levels[b] ? v : levels[b] * exp(-dt/150ms)`, dt capped at 100 ms.
     static func smooth(previous: [Float], target: [Float], dt: Double, decay: Double = FeedVisuals.decaySeconds) -> [Float] {
-        let k = Float(exp(-max(dt, 0) / decay))
-        return zip(previous, target).map { old, new in new >= old ? new : new + (old - new) * k }
+        let k = Float(exp(-min(max(dt, 0), FeedVisuals.maxFrameDt) / decay))
+        return zip(previous, target).map { old, new in new >= old ? new : old * k }
     }
 }
 
 enum WaveformMath {
-    /// Downsample a time-domain buffer to `points` values in -1...1 (peak-preserving: the larger-magnitude sample per bucket).
+    /// Web: 256 points, sample k = buffer[floor(k/256 · count)].
     static func points(_ samples: [Float], count points: Int = FeedVisuals.waveformPoints) -> [Float] {
         guard !samples.isEmpty, points > 0 else { return [Float](repeating: 0, count: max(points, 0)) }
-        let bucket = max(1, samples.count / points)
-        return (0..<points).map { i in
-            let a = min(i * bucket, samples.count - 1), b = min(a + bucket, samples.count)
-            var v: Float = 0
-            for j in a..<b where abs(samples[j]) > abs(v) { v = samples[j] }
-            return min(max(v, -1), 1)
-        }
+        return (0..<points).map { k in min(max(samples[k * samples.count / points], -1), 1) }
     }
 }

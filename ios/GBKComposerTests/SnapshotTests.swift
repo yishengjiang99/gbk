@@ -92,7 +92,7 @@ final class SnapshotTests: XCTestCase {
 
     func testAllThemeColorsResolveInBothAppearances() {
         let names = ["AccentColor", "OnAccent", "BackgroundTop", "BackgroundBottom", "Surface", "SurfaceRaised", "CardTop", "CardBottom",
-                     "TextPrimary", "TextSecondary", "Border", "Chip", "RollRow", "Playhead", "Waveform", "BarStart", "BarEnd",
+                     "TextPrimary", "TextSecondary", "Border", "Chip", "VizBg", "VizGrid", "VizRow", "VizHead", "VizBar", "VizWave", "VizDim",
                      "TrackFallback", "Destructive"]
         for name in names {
             let c = UIColor(named: name, in: Bundle(for: AppDelegate.self), compatibleWith: nil)

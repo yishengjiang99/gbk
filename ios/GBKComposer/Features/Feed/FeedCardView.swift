@@ -24,9 +24,9 @@ struct FeedCardView: View {
                 .foregroundStyle(Theme.textSecondary)
             }
 
-            LiveRollView(preview: song.preview, tracks: song.preview?.tracks ?? [], playback: playback)
+            NowPlayingVizView(preview: song.preview, playback: playback)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surfaceRaised))
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.vizBg))
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     if !isPlaying {
@@ -41,14 +41,6 @@ struct FeedCardView: View {
                     Task { await quickLove() }
                 }
                 .onTapGesture(perform: onTap)
-
-            HStack(spacing: 10) {
-                SpectrumBarsView(playback: playback)
-                WaveformView(playback: playback)
-            }
-            .frame(height: 56)
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surfaceRaised))
 
             if !(song.labels.isEmpty && song.tags.isEmpty) {
                 HStack(spacing: 6) {

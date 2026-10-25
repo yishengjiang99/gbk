@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// What the active card needs to animate. Cards without one draw statically.
+/// What the active card needs to animate. Cards without one draw a static frame.
 /// Time and duration are read from AVPlayer by closure every frame (CMTime → seconds), never via published state.
 struct CardPlayback {
     let time: @MainActor () -> Double?
@@ -11,112 +11,84 @@ struct CardPlayback {
 
 private let blackKeys: Set<Int> = [1, 3, 6, 8, 10]
 
-/// Row 1: windowed piano roll. Current and upcoming notes move right-to-left toward a fixed playhead at 25%;
-/// finished notes disappear. Look follows the web Export video / LiveRoll: black-key row stripes, track colours,
-/// active notes brightened with a glow, a 2 pt playhead line.
-struct LiveRollView: View {
+/// Feed now-playing viz, a port of web `LiveRoll` (src/components/social/LiveRoll.tsx, gbk #108, db68404).
+/// One canvas: row 1 (top 62%) windowed piano roll, row 2 (bottom 38%) 48 spectrum bars with the 256-point waveform
+/// drawn over them, 1 px grid line between. Only the playing card animates; others draw the roll at t = 0 with
+/// flat dimmed bars and waveform.
+struct NowPlayingVizView: View {
     let preview: SongPreview?
-    let tracks: [String]
     let playback: CardPlayback?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: !(playback?.isPlaying ?? false))) { timeline in
+        let live = playback?.isPlaying ?? false
+        TimelineView(.animation(minimumInterval: nil, paused: !live)) { timeline in
             Canvas { ctx, size in
-                _ = timeline.date // redraw every animation frame while unpaused
-                draw(&ctx, size: size)
+                draw(&ctx, size: size, now: timeline.date.timeIntervalSinceReferenceDate, live: live)
             }
         }
-        .accessibilityLabel("Piano roll")
+        .accessibilityElement()
+        .accessibilityLabel("piano-roll and spectrum")
+        .accessibilityIdentifier("card-pianoroll")
     }
 
-    private func draw(_ ctx: inout GraphicsContext, size: CGSize) {
-        let lo = preview?.lo ?? 60, hi = preview?.hi ?? 72
-        let rows = hi - lo + 1, span = max(12, rows), nh = size.height / span, off = (span - rows) * nh / 2
-        for p in Int(lo)...Int(max(lo, hi)) where blackKeys.contains(p % 12) {
-            ctx.fill(Path(CGRect(x: 0, y: (hi - Double(p)) * nh + off, width: size.width, height: nh)), with: .color(Theme.rollRow))
+    private func draw(_ ctx: inout GraphicsContext, size: CGSize, now: Double, live: Bool) {
+        let W = size.width, H = size.height
+        let rH = (H * FeedVisuals.rollFraction).rounded(), sH = H - rH
+        let dur = (live ? playback?.duration() : nil).flatMap { $0 > 0 && $0.isFinite ? $0 : nil } ?? FeedVisuals.fallbackDuration
+        let t = live ? (playback?.time() ?? 0) : 0
+        drawRoll(&ctx, W: W, H: rH, t: t, dur: dur)
+
+        ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: sH)), with: .color(Theme.vizBg))
+        ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: 1)), with: .color(Theme.vizGrid))
+
+        let analyzer = live ? playback?.analyzer : nil
+        let levels = analyzer?.bars(now: now) ?? []
+        let bw = W / CGFloat(FeedVisuals.barCount)
+        var bars = Path()
+        for b in 0..<FeedVisuals.barCount {
+            let v = b < levels.count ? CGFloat(levels[b]) : 0
+            let h = max(1, v * (sH - 4))
+            bars.addRect(CGRect(x: CGFloat(b) * bw + 1, y: H - h, width: max(1, bw - 2), height: h))
         }
-        let duration = playback?.duration()
-        if let playback, let duration, let time = playback.time() {
-            let t = time.truncatingRemainder(dividingBy: duration)
-            let notes = PianoRollMath.notes(from: preview, durationSeconds: duration)
-            for n in PianoRollMath.window(notes: notes, time: t, lo: lo, hi: hi, durationSeconds: duration) {
-                let rect = CGRect(x: n.x0 * size.width, y: n.yTop * size.height,
-                                  width: max(2, (n.x1 - n.x0) * size.width), height: max(2, n.height * size.height))
-                drawNote(&ctx, rect: rect, track: n.note.track, active: n.isActive)
-            }
-        } else {
-            // Static (inactive / not loaded): whole-song overview.
-            for raw in preview?.notes ?? [] where raw.count >= 4 {
-                let rect = CGRect(x: raw[1] / 1000 * size.width, y: (hi - raw[3]) * nh + off,
-                                  width: max(2, raw[2] / 1000 * size.width), height: max(2, nh * 0.85))
-                drawNote(&ctx, rect: rect, track: Int(raw[0]), active: false)
-            }
+        ctx.fill(bars, with: .color((analyzer != nil ? Theme.vizBar : Theme.vizDim).opacity(FeedVisuals.barAlpha)))
+
+        let samples = analyzer?.sink.map { WaveformMath.points($0.latest(FeedVisuals.fftSize)) }
+            ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
+        let mid = rH + sH / 2, amp = sH / 2 - 2
+        var wave = Path()
+        for (k, s) in samples.enumerated() {
+            let p = CGPoint(x: CGFloat(k) / CGFloat(samples.count - 1) * W, y: mid - CGFloat(s) * amp)
+            if k == 0 { wave.move(to: p) } else { wave.addLine(to: p) }
         }
-        let x = size.width * FeedVisuals.playheadFraction
-        ctx.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(Theme.playhead))
+        ctx.stroke(wave, with: .color(analyzer != nil ? Theme.vizWave : Theme.vizDim), lineWidth: max(1, H / 200))
     }
 
-    private func drawNote(_ ctx: inout GraphicsContext, rect: CGRect, track: Int, active: Bool) {
-        let hex = track >= 0 && track < tracks.count ? tracks[track] : nil
-        let path = Path(roundedRect: rect, cornerRadius: min(2, rect.height / 2))
-        if active {
-            ctx.drawLayer { layer in
-                layer.addFilter(.shadow(color: Theme.track(hex), radius: 4))
-                layer.fill(path, with: .color(Theme.trackLit(hex)))
-            }
-        } else {
-            ctx.fill(path, with: .color(Theme.track(hex).opacity(0.85)))
+    private func drawRoll(_ ctx: inout GraphicsContext, W: CGFloat, H: CGFloat, t: Double, dur: Double) {
+        ctx.fill(Path(CGRect(x: 0, y: 0, width: W, height: H)), with: .color(Theme.vizBg))
+        let (lo, hi) = PianoRollMath.pitchRange(lo: preview?.lo ?? 60, hi: preview?.hi ?? 72)
+        let rows = hi - lo + 1, rh = H / rows
+        for q in Int(lo)...Int(hi) where blackKeys.contains(((q % 12) + 12) % 12) {
+            ctx.fill(Path(CGRect(x: 0, y: H - (Double(q) - lo + 1) * rh, width: W, height: rh)), with: .color(Theme.vizRow))
         }
+        let tracks = preview?.tracks ?? []
+        let notes = PianoRollMath.notes(from: preview, durationSeconds: dur)
+        let gap = FeedVisuals.noteGap, minS = FeedVisuals.minNoteSize
+        for n in PianoRollMath.window(notes: notes, time: t, lo: preview?.lo ?? 60, hi: preview?.hi ?? 72) {
+            let hex = n.note.track >= 0 && n.note.track < tracks.count ? tracks[n.note.track] : nil
+            let x0 = n.x0 * W, x1 = n.x1 * W
+            let rect = CGRect(x: x0, y: CGFloat(n.row) * rh + gap / 2, width: max(minS, x1 - x0 - gap), height: max(minS, rh - gap))
+            switch n.state {
+            case .active:
+                ctx.fill(Path(rect), with: .color(Theme.trackLit(hex)))
+                ctx.stroke(Path(rect.insetBy(dx: 0.5, dy: 0.5)), with: .color(Theme.vizHead), lineWidth: 1)
+            case .past: ctx.fill(Path(rect), with: .color(Theme.track(hex).opacity(FeedVisuals.pastAlpha)))
+            case .upcoming: ctx.fill(Path(rect), with: .color(Theme.track(hex).opacity(FeedVisuals.upcomingAlpha)))
+            }
+        }
+        let hx = (W * FeedVisuals.playheadFraction).rounded()
+        ctx.fill(Path(CGRect(x: hx - 1, y: 0, width: 2, height: H)), with: .color(Theme.vizHead))
     }
 }
 
-/// Row 2 left: 48 log-spaced spectrum bars from the audio tap. Instant attack, 150 ms decay.
-struct SpectrumBarsView: View {
-    let playback: CardPlayback?
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        let colors = (0..<FeedVisuals.barCount).map { Theme.barColor($0, of: FeedVisuals.barCount, scheme: scheme) }
-        TimelineView(.animation(minimumInterval: nil, paused: !(playback?.isPlaying ?? false))) { timeline in
-            Canvas { ctx, size in
-                let now = timeline.date.timeIntervalSinceReferenceDate
-                let levels: [Float] = (playback?.isPlaying ?? false)
-                    ? (playback?.analyzer?.bars(now: now) ?? [])
-                    : []
-                let bw = size.width / CGFloat(FeedVisuals.barCount)
-                for i in 0..<FeedVisuals.barCount {
-                    let v = i < levels.count ? CGFloat(levels[i]) : 0
-                    let h = max(1, v * size.height)
-                    ctx.fill(Path(CGRect(x: CGFloat(i) * bw + bw * 0.15, y: size.height - h, width: bw * 0.7, height: h)),
-                             with: .color(colors[i]))
-                }
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-/// Row 2 right: oscilloscope of the latest time-domain buffer from the same tap.
-struct WaveformView: View {
-    let playback: CardPlayback?
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: !(playback?.isPlaying ?? false))) { timeline in
-            Canvas { ctx, size in
-                _ = timeline.date
-                let mid = size.height / 2
-                ctx.fill(Path(CGRect(x: 0, y: mid - 0.5, width: size.width, height: 1)), with: .color(Theme.border))
-                guard playback?.isPlaying == true, let sink = playback?.analyzer?.sink else { return }
-                let pts = WaveformMath.points(sink.latest(1024))
-                guard pts.count > 1 else { return }
-                var path = Path()
-                for (i, v) in pts.enumerated() {
-                    let p = CGPoint(x: CGFloat(i) / CGFloat(pts.count - 1) * size.width, y: mid - CGFloat(v) * mid * 0.95)
-                    if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
-                }
-                ctx.stroke(path, with: .color(Theme.waveform), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
+#Preview("Viz light") { NowPlayingVizView(preview: nil, playback: nil).frame(height: 300).preferredColorScheme(.light) }
+#Preview("Viz dark") { NowPlayingVizView(preview: nil, playback: nil).frame(height: 300).preferredColorScheme(.dark) }
