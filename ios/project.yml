@@ -21,6 +21,10 @@ packages:
     revision: 6ce4941247d1dcd178da5c71b9279a9cf91fc007
   HearSheetCore:
     path: Packages/HearSheetCore
+  # Sheet-music recognition (AGPL-3.0, port of liebharc/homr). Vendored copy of omr-sheet-cam's
+  # Packages/omr-homr-ios (see Packages/omr-homr-ios/VENDORED.md for the pinned SHA and update steps).
+  OMRHomrIOS:
+    path: Packages/omr-homr-ios
 # TODO: playback is not built on SF2Engine yet. Copy the sequencer and MIDI parsing from
 #       earsheet's Packages/SF2Player when wiring SF2 playback.
 targets:
@@ -37,6 +41,25 @@ targets:
       - package: SF2Player
         product: SF2Engine
       - package: HearSheetCore
+      - package: OMRHomrIOS
+        product: OMRHomrIOS
+    postCompileScripts:
+      - name: Bundle OMR models
+        basedOnDependencyAnalysis: false
+        script: |
+          # homr ONNX models (models.lock; fetched by scripts/fetch-models into gitignored ios/models/) -> <App>.app/models/.
+          # Missing models: warning, nothing bundled; the app then reports "recognition models are not installed".
+          # OMR_REQUIRE_MODELS=1 (release archive) fails instead.
+          set -eu
+          SRC="${SRCROOT}/models"; DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/models"
+          names=$(grep -Ev '^[[:space:]]*(#|$)' "${SRCROOT}/models.lock" | awk '{print $2}')
+          missing=""; for n in $names; do [ -f "$SRC/$n" ] || missing="$missing $n"; done
+          if [ -n "$missing" ]; then
+            if [ "${OMR_REQUIRE_MODELS:-0}" = "1" ]; then echo "error: OMR models missing:$missing (run ios/scripts/fetch-models)" >&2; exit 1; fi
+            echo "warning: OMR models not bundled (missing:$missing); run ios/scripts/fetch-models"; exit 0
+          fi
+          mkdir -p "$DST"; for n in $names; do cmp -s "$SRC/$n" "$DST/$n" || cp -p "$SRC/$n" "$DST/$n"; done
+          echo "Bundled OMR models: $(du -sh "$DST" | cut -f1)"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.grepawk.moviefone
@@ -50,6 +73,10 @@ targets:
     platform: iOS
     sources:
       - path: GBKComposerTests
+        excludes: ["Fixtures/**"]
+      - path: GBKComposerTests/Fixtures
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: GBKComposer
     settings:

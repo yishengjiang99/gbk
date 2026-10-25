@@ -102,4 +102,18 @@ final class SnapshotTests: XCTestCase {
         let dark = UIColor(named: "TextPrimary")!.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
         XCTAssertNotEqual(light, dark)
     }
+
+    func testScanEntryAndErrorLightAndDark() throws {
+        let fixture = FixtureSheetRecognizer(result: .failure(.nothingRecognized))
+        let entry = ScanController(recognizer: fixture)
+        let failed = ScanController(recognizer: fixture)
+        failed.phase = .error(.nothingRecognized)
+        let readOnly = ScanController(recognizer: fixture)
+        readOnly.phase = .error(.readOnlyProject)
+        for (name, c) in [("scan-entry", entry), ("scan-error", failed), ("scan-read-only", readOnly)] {
+            let light = try render(ScanSheetView(controller: c), name: "\(name)-light", style: .light)
+            let dark = try render(ScanSheetView(controller: c), name: "\(name)-dark", style: .dark)
+            XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, name)
+        }
+    }
 }

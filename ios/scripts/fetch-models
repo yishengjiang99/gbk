@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Fetch the pinned homr ONNX checkpoints (and the GeneralUser GS SoundFont used
+# by the SF2 player) into <repo>/models/.
+#
+#   scripts/fetch-models            # download / verify everything in models.lock
+#   MODELS_DIR=/tmp/m scripts/fetch-models
+#
+# models.lock (repo root) has one entry per line:
+#   <sha256>  <filename>  <url>
+# <sha256> is the SHA-256 of <filename> as written to models/ (the .onnx / .sf2 file).
+# <url> is the upstream release asset from
+#   https://github.com/liebharc/homr/releases/tag/onnx_checkpoints
+# or, for GeneralUser-GS.sf2, the commit-pinned raw file in yishengjiang99/gbk.
+# If the asset is a .zip, <filename> is extracted from it; otherwise the
+# download itself is <filename>. Blank lines and lines starting with # are skipped.
+#
+# Idempotent: a file whose hash already matches is skipped. Exits non-zero on
+# any download, extraction or hash failure; a mismatching file is never left in
+# models/. Needs bash, curl, unzip, and sha256sum or shasum. No Python.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCK="${MODELS_LOCK:-$ROOT/models.lock}"
+DEST="${MODELS_DIR:-$ROOT/models}"
+
+die() { echo "fetch-models: error: $*" >&2; exit 1; }
+log() { echo "fetch-models: $*" >&2; }
+
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum >/dev/null 2>&1; then
+  sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+  die "need sha256sum or shasum"
+fi
+command -v curl >/dev/null 2>&1 || die "need curl"
+[ -f "$LOCK" ] || die "lock file not found: $LOCK"
+
+mkdir -p "$DEST"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/fetch-models.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+fetched=0 skipped=0 failed=0
+while read -r want name url extra || [ -n "${want:-}" ]; do
+  case "${want:-}" in ''|'#'*) continue ;; esac
+  if [ -z "${name:-}" ] || [ -z "${url:-}" ] || [ -n "${extra:-}" ] \
+     || ! printf '%s' "$want" | grep -Eq '^[0-9a-f]{64}$'; then
+    die "malformed line in $LOCK: $want $name $url $extra"
+  fi
+  case "$name" in */*|.*) die "refusing unsafe filename: $name" ;; esac
+  target="$DEST/$name"
+
+  if [ -f "$target" ]; then
+    have="$(sha256 "$target")"
+    if [ "$have" = "$want" ]; then
+      log "skip   $name (sha256 ok)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    log "stale  $name (have $have, want $want) - removing and re-downloading"
+    rm -f "$target"
+  fi
+
+  asset="$TMP/$(basename "$url")"
+  log "fetch  $url"
+  if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 -sS -o "$asset" "$url"; then
+    log "FAIL   download failed: $url"
+    failed=$((failed + 1))
+    continue
+  fi
+
+  case "$asset" in
+    *.zip)
+      command -v unzip >/dev/null 2>&1 || die "need unzip for $url"
+      if ! unzip -tq "$asset" >/dev/null || ! unzip -oq "$asset" "$name" -d "$TMP/x"; then
+        log "FAIL   could not extract $name from $(basename "$url")"
+        failed=$((failed + 1))
+        continue
+      fi
+      got="$TMP/x/$name"
+      ;;
+    *) got="$asset" ;;
+  esac
+
+  have="$(sha256 "$got")"
+  if [ "$have" != "$want" ]; then
+    log "FAIL   sha256 mismatch for $name: got $have, want $want"
+    rm -f "$got"
+    failed=$((failed + 1))
+    continue
+  fi
+  mv -f "$got" "$target.part" && mv -f "$target.part" "$target"
+  log "ok     $name"
+  fetched=$((fetched + 1))
+  rm -f "$asset"
+done < "$LOCK"
+
+log "done: $fetched fetched, $skipped skipped, $failed failed -> $DEST"
+[ "$failed" -eq 0 ] || exit 1

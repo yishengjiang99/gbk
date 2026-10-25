@@ -1,0 +1,36 @@
+{
+  "generator": "tools/oracle/export_preprocess_refs.py",
+  "opencv": "5.0.0",
+  "numpy": "2.5.3",
+  "homr_commit": "7d97c3cee4ad772b50266fdf9dc78bbf9064701e",
+  "crop_real_shape": [
+    181,
+    509
+  ],
+  "resizes": {
+    "src_37x131": [
+      [
+        300,
+        90
+      ],
+      [
+        61,
+        17
+      ],
+      [
+        131,
+        80
+      ],
+      [
+        213,
+        64
+      ]
+    ],
+    "src_40x130": [
+      [
+        65,
+        20
+      ]
+    ]
+  }
+}

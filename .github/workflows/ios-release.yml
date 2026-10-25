@@ -83,10 +83,15 @@ jobs:
           sed -i '' 's/^          //' "$GITHUB_WORKSPACE/ExportOptions.plist"
           plutil -lint "$GITHUB_WORKSPACE/ExportOptions.plist"
 
+      - name: Fetch OMR models (homr ONNX, SHA-pinned in ios/models.lock)
+        working-directory: ios
+        run: scripts/fetch-models
+
       - name: Archive
         working-directory: ios
         env:
           MV: ${{ github.event.inputs.marketing_version }}
+          OMR_REQUIRE_MODELS: "1"
         run: |
           set -euo pipefail
           [[ "$MV" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::invalid marketing_version '$MV'"; exit 1; }

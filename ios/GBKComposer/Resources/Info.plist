@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>GBK uses the camera to scan printed sheet music into new tracks in your song.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>GBK reads the photos you pick of sheet music to turn them into new tracks.</string>
 	<key>ITSAppUsesNonExemptEncryption</key><false/>
 	<key>CFBundleDevelopmentRegion</key><string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key><string>GBK Composer</string>

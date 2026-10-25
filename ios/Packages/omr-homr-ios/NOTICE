@@ -1,0 +1,15 @@
+omr-homr-ios
+============
+
+This package ports Optical Music Recognition algorithms and tokenizers
+compatible with liebharc/homr.
+
+Credits (required):
+- liebharc/homr — https://github.com/liebharc/homr (AGPL-3.0)
+- BreezeWhite/oemer
+- NetEase/Polyphonic-TrOMR
+
+ONNX checkpoints: https://github.com/liebharc/homr/releases/tag/onnx_checkpoints
+
+Do not ship this package inside a proprietary App Store binary without a
+valid AGPL-compliant distribution plan (or a dual-license you control).

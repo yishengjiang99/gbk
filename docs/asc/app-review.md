@@ -16,11 +16,12 @@ Tracking: **No**. No data is used for tracking or shared with data brokers. No t
 | User Content › Other User Content (comments, ratings, direct messages) | Yes | Yes | App Functionality |
 | Identifiers › User ID (account id) | Yes | Yes | App Functionality |
 | Identifiers › Device ID (APNs push token) | Yes | Yes | App Functionality (push notifications) |
+| Camera / Photos (Scan sheet music) | No: images are recognized on-device and never uploaded; only the resulting notes are saved in the song | — | — |
 | Diagnostics, Location, Contacts, Health, Financial, Browsing, Purchases | No | — | — |
 
 ## Content rights
 
-"Does your app contain, show, or access third-party content?" **Yes** — user-posted compositions. Users must own or have rights to what they post (see /terms). SoundFont samples are bundled under their licenses.
+"Does your app contain, show, or access third-party content?" **Yes** — user-posted compositions. Users must own or have rights to what they post (see /terms). SoundFont samples are bundled under their licenses. The iOS app is open source (AGPL-3.0-or-later, `ios/LICENSE`); third-party components and licenses (homr models, omr-homr-ios, sf2player-swift, ONNX Runtime, GeneralUser GS) are listed in `ios/THIRD_PARTY_NOTICES.md` and linked in Profile › About.
 
 ## Age rating (questionnaire)
 

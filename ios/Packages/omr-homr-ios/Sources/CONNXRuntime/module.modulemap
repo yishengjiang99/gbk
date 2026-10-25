@@ -1,0 +1,8 @@
+// Linux-only system library for the ONNX Runtime C API (fetched by scripts/fetch-ort).
+// Header search path + link flags come from Package.swift (auto-detected third_party/onnxruntime)
+// or manually: -Xcc -I<ort>/include -Xlinker -L<ort>/lib -Xlinker -rpath -Xlinker <ort>/lib
+module CONNXRuntime [system] {
+    header "shim.h"
+    link "onnxruntime"
+    export *
+}

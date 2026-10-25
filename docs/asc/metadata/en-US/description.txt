@@ -25,3 +25,6 @@ GOOD TO KNOW
 
 PRIVACY
 We collect only what is needed to run your account and deliver notifications. See https://compose.grepawk.com/privacy. You can delete your account in the app (Profile) or via the support page.
+
+OPEN SOURCE
+The iOS app is free software under the GNU AGPL v3 (or later). Source code: https://github.com/yishengjiang99/gbk/tree/main/ios (also linked in Profile › About). Sheet-music scanning uses homr (AGPL-3.0) and runs on your device.

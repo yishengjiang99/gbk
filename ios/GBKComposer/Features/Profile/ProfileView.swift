@@ -81,6 +81,7 @@ struct ProfileView: View {
                             Menu {
                                 if auth.isLinkedAccount { Button("Sign out") { Task { await auth.signOut() } } }
                                 Button("Delete account", role: .destructive) { confirmDelete = true }
+                                AboutMenuItems()
                             } label: { Image(systemName: "gearshape") }
                         }
                 } else if auth.isSignedIn {
@@ -92,6 +93,7 @@ struct ProfileView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.background.ignoresSafeArea())
                     .navigationTitle("Profile")
+                    .toolbar { Menu { AboutMenuItems() } label: { Image(systemName: "info.circle") }.accessibilityLabel("About") }
                 }
             }
             .toolbar { ToolbarItem(placement: .topBarLeading) { ProButton() } }
@@ -125,5 +127,17 @@ struct AnonymousProfileView: View {
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(Theme.textSecondary)
         }
         .padding(32)
+    }
+}
+
+/// About: the iOS app is AGPL-3.0-or-later open source (ios/LICENSE); link to its corresponding source.
+struct AboutMenuItems: View {
+    static let sourceURL = URL(string: "https://github.com/yishengjiang99/gbk/tree/main/ios")!
+    static let noticesURL = URL(string: "https://github.com/yishengjiang99/gbk/blob/main/ios/THIRD_PARTY_NOTICES.md")!
+    var body: some View {
+        Section("About") {
+            Link(destination: Self.sourceURL) { Label("Source code (AGPL-3.0)", systemImage: "chevron.left.forwardslash.chevron.right") }
+            Link(destination: Self.noticesURL) { Label("Third-party notices", systemImage: "doc.text") }
+        }
     }
 }

@@ -12,6 +12,7 @@
 - iOS: follow the sign-in-only-on-demand rule (feed-design.md): remove standalone Sign in, keep pending action in memory and replay.
 - IAP pro render limits (120 renders/hour up to 600 s vs 30/h, 300 s) not enforced yet: there is no per-hour render limiter to hook into (daily only).
 - Inbox/DMs and blocks list (P4), notifications (P5).
+- Scan sheet music (docs/ios/scan.md): consider on-demand model download (~102 MB bundled today); multi-voice/chord accuracy is whatever omr-homr-ios gives; web Scan button only appears inside the app.
 - Align `docs/social-api.md` with prod for `preview`, `/api/session`, and 404 error bodies.
 
 - iOS reviewer path: the app has only Apple/Google sign-in; add a reviewer username/password sign-in (webview to /signin/reviewer or native POST /api/auth/reviewer) before App Review, or review can't reach signed-in features.
@@ -20,6 +21,7 @@
 - App Store playbook `make_screenshots.py` uses `Image.Lanczos` (breaks on current Pillow); use `Image.LANCZOS`.
 
 ### Needs Yisheng
+- AGPL decision for omr-homr-ios: **decided 2026-10-25**, `ios/` is AGPL-3.0-or-later and links omr-homr-ios. Remaining: confirm the App Store listing's open-source paragraph (docs/asc/metadata/en-US/description.txt) and that distributing an AGPL binary via the App Store is acceptable to you (the App Store's usage rules are the known GPL-family friction; we own the gbk iOS copyright, homr upstream is liebharc's).
 - App Store Connect → App Information → App Store Server Notifications v2: set Production and Sandbox URL to `https://compose.grepawk.com/api/iap/apple/notifications` (endpoint is live).
 - Decide whether prod accepts sandbox IAP receipts (App Review/TestFlight need it): `IAP_ALLOW_SANDBOX=1` in the prod env.
 

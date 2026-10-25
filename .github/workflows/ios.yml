@@ -23,6 +23,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Cache OMR models
+        uses: actions/cache@v4
+        with:
+          path: ios/models
+          key: omr-models-${{ hashFiles('ios/models.lock') }}
+      - name: Fetch OMR models (homr ONNX, SHA-pinned in ios/models.lock)
+        run: scripts/fetch-models
       - name: Generate project
         run: xcodegen generate
       - name: Pick simulator
@@ -54,6 +61,7 @@ jobs:
       - name: Test
         env:
           TEST_RUNNER_SNAPSHOT_DIR: ${{ github.workspace }}/ios/snapshots
+          TEST_RUNNER_OMR_REQUIRE_MODELS: "1"
         run: |
           xcodebuild test -project GBKComposer.xcodeproj -scheme GBKComposer \
             -destination "id=${{ steps.sim.outputs.udid }}" \

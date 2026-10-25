@@ -12,6 +12,7 @@ struct StudioWebView: View {
     }
     @EnvironmentObject private var auth: AuthStore
     @State private var url: URL?
+    @StateObject private var scan = ScanController()
 
     var body: some View {
         // Composer input must always be visible (keyboard up or down, during playback). Keyboard handling:
@@ -19,10 +20,12 @@ struct StudioWebView: View {
         // (and above the tab bar when the keyboard is down). The page then sees a smaller viewport and pins its
         // shell to visualViewport (`--app-h`, src/midireader.tsx), keeping the bottom composer on screen.
         Group {
-            if let url { WebView(url: url).accessibilityIdentifier("studio-webview") } else { ProgressView().tint(Theme.accent) }
+            if let url { WebView(url: url, scan: scan).accessibilityIdentifier("studio-webview") } else { ProgressView().tint(Theme.accent) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background.ignoresSafeArea())
+        // Scan is started by the web (its Scan item, shown when window.gbkNative.scan) and runs in a sheet.
+        .sheet(isPresented: $scan.isPresented) { ScanSheetView(controller: scan) }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
             let handoff = try? await AuthServices.current.webSessionURL(returnPath: "/studio")
@@ -33,6 +36,7 @@ struct StudioWebView: View {
 
 struct WebView: UIViewRepresentable {
     let url: URL
+    var scan: ScanController? = nil
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -41,6 +45,8 @@ struct WebView: UIViewRepresentable {
         HumBridge.install(on: config, bridge: context.coordinator.hum)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
+        scan?.install(on: config)
+        scan?.webView = view
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         context.coordinator.observeMicrophone(view)
