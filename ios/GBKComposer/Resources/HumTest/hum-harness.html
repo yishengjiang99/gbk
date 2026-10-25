@@ -5,7 +5,7 @@
 <style>body{font:16px -apple-system;margin:0;padding:16px}#bar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:8px;padding:12px;border-top:1px solid #ccc;background:#fff}
 #bar input{flex:1;font-size:16px}#out div{margin:4px 0}</style></head>
 <body><h3>Hum harness</h3><div id="caps"></div><div id="state">phase: idle</div><div id="out"></div>
-<div id="bar"><input placeholder="Describe the music to compose…" aria-label="composer input"><button id="hum" data-testid="hum-btn">🎤 Hum</button><button>Send</button></div>
+<div id="bar"><input placeholder="Describe the music to compose…" aria-label="composer input"><button id="hum" data-testid="hum-btn" aria-label="Hum">🎤 Hum</button><button>Send</button></div>
 <script>
 const project = { ppq: 480, tempos: [{ tick: 0, microPerQuarter: 500000 }], tracks: [{ id: "t0", channel: 0 }], readOnlyReason: null };
 const caps = window.gbkNative && window.gbkNative.capabilities || [];
@@ -27,6 +27,7 @@ window.gbkHum = {
   showReadOnlyHint: (r) => { document.getElementById('out').textContent = 'read-only: ' + r; },
   onState: (s) => {
     document.getElementById('state').textContent = 'phase: ' + s.phase;
+    document.getElementById('hum').setAttribute('aria-label', s.phase === 'recording' ? 'Stop' : s.phase === 'transcribing' ? 'Transcribing' : 'Hum');
     document.getElementById('hum').textContent = s.phase === 'recording' ? '⏺ Stop' : s.phase === 'transcribing' ? '🎤 ' + Math.round(s.progress * 100) + '%' : '🎤 Hum';
   },
 };

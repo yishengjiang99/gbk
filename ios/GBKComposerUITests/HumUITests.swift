@@ -13,13 +13,15 @@ final class HumUITests: XCTestCase {
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 20))
         XCTAssertTrue(web.staticTexts["native: hum"].waitForExistence(timeout: 20), "gbkNative capability injected")
-        let hum = web.buttons["🎤 Hum"]
+        let hum = web.buttons["Hum"]
         XCTAssertTrue(hum.waitForExistence(timeout: 10))
         attach(app, "hum-idle")
         hum.tap()
         XCTAssertTrue(web.staticTexts["phase: recording"].waitForExistence(timeout: 10))
         attach(app, "hum-recording")
-        web.buttons["⏺ Stop"].tap()
+        let stop = web.buttons["Stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
         let result = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Hummed melody:'")).firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 90), "track added via gbkHum.apply")
         attach(app, "hum-result")

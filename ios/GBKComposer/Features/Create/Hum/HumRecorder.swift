@@ -78,7 +78,7 @@ final class HumRecorder {
             var acc: Float = 0; src = [Float](repeating: 0, count: x.count)
             for i in x.indices { acc += x[i]; if i >= k { acc -= x[i - k] }; src[i] = acc / Float(min(i + 1, k)) }
         }
-        let n = Int(Double(x.count) / ratio)
+        let n = Int((Double(x.count) / ratio).rounded())
         return (0..<n).map { i in
             let p = Double(i) * ratio, j = Int(p), f = Float(p - Double(j))
             let a = src[min(j, src.count - 1)], b = src[min(j + 1, src.count - 1)]
