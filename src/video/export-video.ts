@@ -9,6 +9,7 @@ import { Output, MovOutputFormat, BufferTarget, EncodedVideoPacketSource, Encode
 import type { Project } from "../workstation/model.ts";
 import { renderJobs, safeFilename } from "../audio/render-job.ts";
 import { buildVideoModel, drawFrame, type VideoModel, type VideoOptions } from "./piano-roll-video.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 import { audioChunks, evenSize, exportFrameCount, exportProgress, frameDurationUs, frameTimestampUs, parseWav } from "./export-timing.ts";
 
 export interface VideoExportState { running: boolean; progress: number; stage: string; error?: string; method?: string }
@@ -49,14 +50,16 @@ export async function exportVideo(project: Project, opts: { height?: number; dow
     const size = evenSize(opts.height ?? 720);
     const vo: VideoOptions = { ...LOGICAL, fps: FPS, windowSeconds: 8, playheadFrac: 0.3, theme: "light" };
     set({ stage: "Encoding video", progress: exportProgress("audio", 1) });
-    let out: { blob: Blob; ext: string; method: string };
+    let out: { blob: Blob; ext: string; method: string; note?: string };
     const wc = await pickWebCodecs(size, audio.sampleRate, audio.channels.length);
     if (wc?.audio) out = await encodeWebCodecs(model, vo, size, audio, { video: wc.video, audio: wc.audio, audioCodec: wc.audioCodec! }, signal);
     else if (wc) out = await encodeVideoPcmMov(model, vo, size, audio, wc.video, signal);
     else if (typeof MediaRecorder !== "undefined") out = await encodeMediaRecorder(model, vo, size, audio, signal, primed);
     else throw new Error("This browser cannot encode video (no WebCodecs or MediaRecorder)");
     const filename = safeFilename(project.name, out.ext);
-    console.info(`[export-video] ${JSON.stringify({ method: out.method, songSeconds: +duration.toFixed(2), audioMs: Math.round(tAudio), encodeMs: Math.round(performance.now() - t0 - tAudio), totalMs: Math.round(performance.now() - t0) })}`);
+    const info = { method: out.method, songSeconds: +duration.toFixed(2), audioMs: Math.round(tAudio), encodeMs: Math.round(performance.now() - t0 - tAudio), totalMs: Math.round(performance.now() - t0), peakDb: peakDb(audio.channels), bytes: out.blob.size, ...(out.note ? { note: out.note } : {}) };
+    console.info(`[export-video] ${JSON.stringify(info)}`);
+    reportError(new Error(`export-video ok: ${out.method}`), { where: "export-video", ...info }); // telemetry: which path iPhones take
     set({ running: false, progress: 1, stage: `Done (${out.method})`, method: out.method });
     opts.download?.(out.blob, filename);
     return { blob: out.blob, filename };
@@ -74,6 +77,25 @@ function assertAudible(project: Project, channels: Float32Array[]) {
   if (!project.notes.length) return;
   let peak = 0; for (const ch of channels) for (let i = 0; i < ch.length; i += 7) { const a = Math.abs(ch[i]); if (a > peak) peak = a; }
   if (!(peak > 1e-4)) throw new Error("the rendered audio is silent (SoundFont not loaded or all tracks muted); not exporting a silent video");
+}
+
+const peakDb = (chs: Float32Array[]) => { let p = 0; for (const ch of chs) for (let i = 0; i < ch.length; i += 7) { const a = Math.abs(ch[i]); if (a > p) p = a; } return p > 0 ? +(20 * Math.log10(p)).toFixed(1) : -Infinity; };
+
+const AAC_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+/** AAC-LC AudioSpecificConfig (ISO 14496-3 1.6.2.1) for our own stream parameters. */
+export function aacLcAsc(sampleRate: number, channels: number): Uint8Array {
+  const fi = AAC_RATES.indexOf(sampleRate); if (fi < 0) throw new Error(`no AAC sample-rate index for ${sampleRate}`);
+  const v = (2 << 11) | (fi << 7) | (channels << 3); return new Uint8Array([v >> 8, v & 0xff]);
+}
+/** WebKit (Safari/iOS 26, bug 302253) hands back an esds box body as the AAC "description" instead of an
+ *  AudioSpecificConfig; muxed as-is the track reads as 22.05 kHz / 0 channels and plays SILENT on iPhone.
+ *  We only ever encode AAC-LC at a known rate/channel count, so always write the correct ASC ourselves. */
+export function fixAacMeta(meta: EncodedAudioChunkMetadata | undefined, sampleRate: number, channels: number): { meta: EncodedAudioChunkMetadata | undefined; replaced: boolean } {
+  const dc = meta?.decoderConfig; if (!dc) return { meta, replaced: false };
+  const want = aacLcAsc(sampleRate, channels);
+  const d = dc.description ? new Uint8Array(dc.description instanceof ArrayBuffer ? dc.description : (dc.description as ArrayBufferView).buffer.slice((dc.description as ArrayBufferView).byteOffset, (dc.description as ArrayBufferView).byteOffset + (dc.description as ArrayBufferView).byteLength)) : null;
+  const same = !!d && d.length >= 2 && d[0] === want[0] && (d[1] & 0xf8) === (want[1] & 0xf8);
+  return { meta: { ...meta, decoderConfig: { ...dc, description: same ? dc.description : want } }, replaced: !same };
 }
 
 type Size = { width: number; height: number };
@@ -152,8 +174,12 @@ async function encodeWebCodecs(m: VideoModel, vo: VideoOptions, size: Size, audi
     audio: { codec: plan.audioCodec, sampleRate: audio.sampleRate, numberOfChannels: audio.channels.length } });
   let failure: Error | null = null;
   const venc = new VideoEncoder({ output: (c, meta) => muxer.addVideoChunk(c, meta), error: (e) => { failure = e as Error; } });
-  let audioBytes = 0;
-  const aenc = new AudioEncoder({ output: (c, meta) => { audioBytes += c.byteLength; muxer.addAudioChunk(c, meta); }, error: (e) => { failure = e as Error; } });
+  let audioBytes = 0; let ascReplaced = false;
+  const aenc = new AudioEncoder({ output: (c, meta) => {
+    audioBytes += c.byteLength;
+    if (plan.audioCodec === "aac") { const f = fixAacMeta(meta, audio.sampleRate, audio.channels.length); meta = f.meta; ascReplaced ||= f.replaced; }
+    muxer.addAudioChunk(c, meta);
+  }, error: (e) => { failure = e as Error; } });
   venc.configure(plan.video); aenc.configure(plan.audio);
   try {
     // Audio first (fast), then frames; the muxer interleaves by timestamp.
@@ -169,7 +195,7 @@ async function encodeWebCodecs(m: VideoModel, vo: VideoOptions, size: Size, audi
     await aenc.flush(); if (failure) throw failure;
     if (audioBytes === 0) throw new Error(`the ${plan.audioCodec.toUpperCase()} audio encoder produced no output; not exporting a silent video`);
     muxer.finalize();
-    return { blob: new Blob([muxer.target.buffer], { type: "video/mp4" }), ext: "mp4", method: `WebCodecs H.264 + ${plan.audioCodec.toUpperCase()}` };
+    return { blob: new Blob([muxer.target.buffer], { type: "video/mp4" }), ext: "mp4", method: `WebCodecs H.264 + ${plan.audioCodec.toUpperCase()}`, note: ascReplaced ? "aac-description-replaced" : undefined };
   } finally { try { venc.close(); } catch { /* closed */ } try { aenc.close(); } catch { /* closed */ } }
 }
 
