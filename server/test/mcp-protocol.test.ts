@@ -88,3 +88,23 @@ test("test-auth header is ignored unless MCP_TEST_AUTH=1 (fail closed)", async (
     assert.deepEqual((r.rpc?.result as { structuredContent: { items: unknown[] } }).structuredContent.items, [], "test header must not establish an account");
   } finally { await s.app.close(); }
 });
+
+test("Codex-style probes: GET/DELETE before initialize -> 405, stale session id -> 404 then clean re-init", async () => {
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
+  try {
+    const hdr = { accept: "application/json, text/event-stream", "content-type": "application/json" };
+    const get = await fetch(`${s.base}/mcp`, { method: "GET", headers: { accept: "text/event-stream" } });
+    assert.equal(get.status, 405);
+    assert.equal(get.headers.get("allow"), "POST");
+    const del = await fetch(`${s.base}/mcp`, { method: "DELETE" });
+    assert.equal(del.status, 405);
+    const stale = "00000000-0000-4000-8000-000000000000";
+    const post = await fetch(`${s.base}/mcp`, { method: "POST", headers: { ...hdr, "mcp-session-id": stale }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) });
+    assert.equal(post.status, 404, "unknown session must be 404 so clients re-initialize");
+    const staleGet = await fetch(`${s.base}/mcp`, { method: "GET", headers: { accept: "text/event-stream", "mcp-session-id": stale } });
+    assert.equal(staleGet.status, 404);
+    const c = new McpClient(s.base);
+    assert.equal((await c.initialize()).status, 200);
+    assert.ok((await c.send("tools/list", {})).rpc?.result);
+  } finally { await s.app.close(); }
+});

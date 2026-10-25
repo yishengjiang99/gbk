@@ -139,6 +139,20 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
       await transport.handleRequest(req.raw, raw, body);
       return;
     }
+    if (sessionId) {
+      // Unknown/expired session (evicted, or lost on a restart/deploy): 404 per the MCP spec so the
+      // client starts a fresh session with initialize instead of failing hard on a 400.
+      raw.statusCode = 404; raw.setHeader("content-type", "application/json");
+      raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "MCP session not found or expired; send a new initialize request" }, id: null }));
+      return;
+    }
+    if (req.method === "GET" || req.method === "DELETE") {
+      // No session yet: there is no standalone SSE stream to open (or session to end). Clients such as
+      // Codex probe GET /mcp before initialize; 405 tells them to proceed POST-only.
+      raw.statusCode = 405; raw.setHeader("allow", "POST"); raw.setHeader("content-type", "application/json");
+      raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "method not allowed without an MCP session; POST initialize first" }, id: null }));
+      return;
+    }
     raw.statusCode = 400; raw.setHeader("content-type", "application/json");
     raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "no MCP session: send an initialize request first (stateless requests are not accepted)" }, id: null }));
   };
