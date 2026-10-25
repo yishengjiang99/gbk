@@ -189,13 +189,13 @@ test("share link always opens the shared song (startup default/restore must not 
     const j = async (r: Response) => { if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.json(); };
     const s = await j(await fetch("/api/session", { credentials: "same-origin" }));
     const l = await j(await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": s.csrf }, body: JSON.stringify({ code: "e2e-code-2" }) }));
-    const r = await j(await fetch("/api/shares", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": l.csrf }, body: JSON.stringify({ title: "Midnight Invention", project: proj }) }));
+    const r = await j(await fetch("/api/shares", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": l.csrf }, body: JSON.stringify({ title: "Midnight Invention", project: proj, public: true }) })); // shares are private unless public
     return r.slug as string;
   }, { proj });
   await owner.close();
   for (const warm of [false, true]) {
     const ctx = await browser.newContext(); const p = await ctx.newPage();
-    if (warm) { await p.goto("/studio"); await expect.poll(async () => (await ws(p)).notes, { timeout: 30_000 }).toBeGreaterThan(1000); } // player default loaded + autosaved
+    if (warm) { await p.goto("/studio"); await expect(p.getByTestId("workstation")).toBeVisible(); await p.waitForTimeout(3_000); } // whatever the studio starts with (empty or a default song) is loaded + autosaved first
     await p.goto(`/s/${slug}`);
     await expect.poll(async () => (await ws(p)).name, { timeout: 20_000 }).toBe("Midnight Invention");
     await p.waitForTimeout(10_000); // give the player's startup song load every chance to clobber it
@@ -224,6 +224,7 @@ test("studio fits the viewport: no vertical scrolling of the page or any panel",
     await page.getByTestId("keys-toggle").click(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
     for (const t of ["tracks", "composer", "agent", "sound", "files"]) {
       const tab = page.getByTestId(`tab-${t}`); if (await tab.count()) await tab.dispatchEvent("click"); // the floating Keys window may sit over the tabs
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))); // roll re-measures after the full-height Composer view hid it
       const r = await page.evaluate(() => {
         const bad: string[] = [];
         for (const e of document.querySelectorAll(".ws, .ws *")) {
