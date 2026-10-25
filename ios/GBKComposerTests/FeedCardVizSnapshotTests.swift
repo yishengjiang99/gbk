@@ -115,6 +115,10 @@ final class FeedCardVizSnapshotTests: XCTestCase {
                 XCTAssertEqual(h, h1, accuracy: 0.5, "#\(t) must stay on one line at \(type)")
             }
         }
+        // The card never grows past the 320 pt screen, even with a tag wider than the card at AX3.
+        let card320 = UIHostingController(rootView: FeedCardView(song: Self.song(), playback: nil)
+            .environmentObject(AuthStore.shared).dynamicTypeSize(.accessibility3))
+        XCTAssertLessThanOrEqual(card320.sizeThatFits(in: CGSize(width: 320, height: 2000)).width, 320.5)
         let flow = UIHostingController(rootView: TagChips(labels: ["classical"], tags: Self.longTags).frame(width: 280))
         XCTAssertGreaterThan(flow.sizeThatFits(in: CGSize(width: 280, height: 2000)).height,
                              UIHostingController(rootView: TagChip(text: "#x", isLabel: false)).sizeThatFits(in: CGSize(width: 280, height: 100)).height * 2,

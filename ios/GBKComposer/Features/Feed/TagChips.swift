@@ -30,7 +30,8 @@ struct TagChip: View {
         Text(text)
             .font(.system(.caption, design: .monospaced))
             .lineLimit(1)
-            .fixedSize()
+            .truncationMode(.middle)
+            .fixedSize(horizontal: false, vertical: true)
             .foregroundStyle(isLabel ? Theme.tagLabelText : Theme.tagChipText)
             .padding(.horizontal, hPad).padding(.vertical, vPad)
             .background(Capsule().fill(isLabel ? Theme.accent : Theme.vizBg))
@@ -38,7 +39,7 @@ struct TagChip: View {
     }
 }
 
-/// Wraps whole subviews onto new rows (never splits one). A chip wider than the row overflows on its own row rather than breaking.
+/// Wraps whole subviews onto new rows (never splits one). Never breaks a chip's text; a single chip wider than the whole row gets its own row, middle-truncated.
 struct ChipFlowLayout: Layout {
     var spacing: CGFloat = 4
 
@@ -54,7 +55,7 @@ struct ChipFlowLayout: Layout {
         for row in arrange(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
             for (i, size) in zip(row.indices, row.sizes) {
-                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: size.width, height: nil))
                 x += size.width + spacing
             }
             y += row.height + spacing
@@ -67,6 +68,7 @@ struct ChipFlowLayout: Layout {
         var rows: [Row] = [], row = Row()
         for i in subviews.indices {
             var s = subviews[i].sizeThatFits(.unspecified)
+            s.width = min(s.width, maxW)
             if !row.indices.isEmpty && row.width + spacing + s.width > maxW { rows.append(row); row = Row() }
             row.width += (row.indices.isEmpty ? 0 : spacing) + s.width
             row.height = max(row.height, s.height)
