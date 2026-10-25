@@ -78,7 +78,14 @@ export class Ranker {
     const res: Song[] = []; const left = out.map((x) => x.s);
     const ok = (s: Song) => { const n = res.length; const a = res.slice(Math.max(0, n - MAX_AUTHOR_RUN)); const l = res.slice(Math.max(0, n - MAX_LABEL_RUN));
       return !(a.length === MAX_AUTHOR_RUN && a.every((x) => x.owner === s.owner)) && !(s.labels[0] && l.length === MAX_LABEL_RUN && l.every((x) => x.labels[0] === s.labels[0])); };
-    while (left.length) { const i = left.findIndex(ok); res.push(left.splice(i === -1 ? 0 : i, 1)[0]); }
+    while (left.length) {
+      // Feasibility: if one artist dominates what is left, place them now (when allowed) so the tail is not forced into a run > MAX_AUTHOR_RUN.
+      const cnt = new Map<string, number>(); for (const x of left) cnt.set(x.owner, (cnt.get(x.owner) ?? 0) + 1);
+      const [top, c] = [...cnt.entries()].sort((x, y) => y[1] - x[1])[0]; const others = left.length - c;
+      let i = c > MAX_AUTHOR_RUN * others ? left.findIndex((x) => x.owner === top && ok(x)) : -1;
+      if (i === -1) i = left.findIndex(ok);
+      res.push(left.splice(i === -1 ? 0 : i, 1)[0]);
+    }
     return { ids: res.map((s) => s.id), owners: new Map(res.map((s) => [s.id, s.owner])), version: this.version, cold };
   }
 

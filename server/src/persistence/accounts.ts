@@ -38,7 +38,6 @@ export class AccountStore {
   byProvider(provider: string, providerId: string): Account | null { return (this.db.prepare("SELECT * FROM accounts WHERE provider = ? AND provider_id = ?").get(provider, providerId) as unknown as Account) ?? null; }
   /** Guest upgrade in place: attach an external identity to the guest's account (same id). */
   link(id: string, provider: Exclude<Provider, "legacy" | "guest">, providerId: string, name: string, email: string | null) { this.db.prepare("UPDATE accounts SET provider = ?, provider_id = ?, name = ?, email = ?, last_login = ? WHERE id = ?").run(provider, providerId, name.slice(0, 80), email, this.now(), id); }
-  delete(id: string) { this.db.prepare("DELETE FROM accounts WHERE id = ?").run(id); this.db.prepare("DELETE FROM usage WHERE user = ?").run(id); }
   /** Migration of pre-sign-in users (access-code names and existing song owners). They count as established accounts. */
   ensureLegacy(user: string, createdAt = 0): boolean {
     if (!user || this.get(user)) return false;

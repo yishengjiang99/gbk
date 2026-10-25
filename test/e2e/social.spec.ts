@@ -216,7 +216,7 @@ test("feed impressions: settling on cards logs dwell/skip events with model_vers
     await expect(page.getByTestId("feed")).toHaveAttribute("data-active", "1");
     await page.evaluate(() => { const g = (window as unknown as { __gbkImpressions: { end: () => void; flush: () => void } }).__gbkImpressions; g.end(); g.flush(); });
     await req; // the beacon reached POST /api/events (beacon bodies are not exposed to Playwright, so read the sent log)
-    const body = { events: await page.evaluate(() => (window as unknown as { __gbkImpressions: { sentLog: unknown[] } }).__gbkImpressions.sentLog) };
+    const body = { events: await page.evaluate(() => (window as unknown as { __gbkImpressions: { sentLog: { song: string; position: number; feed: string; model_version: string; fast_skip: boolean }[] } }).__gbkImpressions.sentLog) };
     const first = body.events.find((e: { song: string }) => e.song === slugs[0]);
     expect(first).toMatchObject({ position: 0, feed: "new", model_version: "new-1", fast_skip: true });
     expect(body.events.some((e: { song: string; position: number }) => e.song === slugs[1] && e.position === 1)).toBeTruthy();
