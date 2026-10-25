@@ -16,6 +16,7 @@ import type { Config } from "../config.ts";
 import type { McpStore, ArtifactRow } from "./store.ts";
 import type { CompositionService, EditOperation } from "./service.ts";
 import { RenderService, DEFAULT_RENDER_CONFIG, type RenderConfig } from "./browser-render.ts";
+import { resolveRenderFont } from "./soundfonts.ts";
 import { requireScope, type Principal, type Scope } from "./auth.ts";
 import { McpError, toMcpError } from "./errors.ts";
 import { signArtifactUrl } from "./urls.ts";
@@ -155,6 +156,11 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     inputSchema: {}, annotations: annotations(true, true),
   }, async () => run("gbk_get_capabilities", null, {}, async () => ({ capabilities: service.capabilities() })));
 
+  server.registerTool("gbk_list_soundfonts", {
+    title: "List SoundFonts", description: "Use this when the user wants a different SoundFont / instrument bank / tone quality for rendering. Lists the pinned SoundFont catalog this deployment renders with: id, label, size, license, delivery (bundled in the app build vs server-only), which font is the default, and whether each font is actually installed here. Pass an available font's id as soundFont to gbk_render_composition to render with it. Read-only; no sign-in required.",
+    inputSchema: {}, annotations: annotations(true, true),
+  }, async () => run("gbk_list_soundfonts", null, {}, async () => service.listSoundfonts()));
+
   // ---- compositions ----------------------------------------------------------------------------------
   server.registerTool("gbk_create_composition", {
     title: "Create a composition", description: "Use this when the user asks for a new piece of music. Creates a private, durable GBK composition with the deterministic, seeded arrangement engine (style, key, tempo, meter, bars or duration, instrumentation, voices, sections). Returns the composition id, revision, structure summary and Studio URL. Works without sign-in: then it also returns a private accessToken (edit) and readAccessToken that every follow-up call for this project must pass. No browser tab is required to compose. Rendering is a separate step: the in-chat player (gbk_show_composition_ui, Render button) renders audio in the user's browser with no Studio tab or sign-in, or gbk_render_composition uses a connected Studio tab.",
@@ -209,8 +215,9 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- rendering --------------------------------------------------------------------------------------
   server.registerTool("gbk_render_composition", {
-    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV (44.1 kHz stereo PCM16, loudness-normalized by default) plus a Standard MIDI File, returned as signed download URLs with metadata (never audio bytes). Works without a browser: when no GBK Studio tab is connected (Codex, guests with an accessToken, any headless client) or headless is true, GBK renders it on the GBK server with the same SF2 engine and waits up to waitSeconds (default 50) for the result; if it is still running, poll gbk_get_render_status. Signed-in users with a connected Studio tab render there. Server renders are limited in length (guests 180 s, accounts 300 s), rate and concurrency; QUOTA_EXCEEDED explains which. In ChatGPT the in-chat player (gbk_show_composition_ui, Render button) is an alternative that renders in the user's browser.",
+    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV (44.1 kHz stereo PCM16, loudness-normalized by default) plus a Standard MIDI File, returned as signed download URLs with metadata (never audio bytes). Works without a browser: when no GBK Studio tab is connected (Codex, guests with an accessToken, any headless client) or headless is true, GBK renders it on the GBK server with the same SF2 engine and waits up to waitSeconds (default 50) for the result; if it is still running, poll gbk_get_render_status. Signed-in users with a connected Studio tab render there. Server renders are limited in length (guests 180 s, accounts 300 s), rate and concurrency; QUOTA_EXCEEDED explains which. In ChatGPT the in-chat player (gbk_show_composition_ui, Render button) is an alternative that renders in the user's browser. soundFont optionally selects a SoundFont catalog id from gbk_list_soundfonts (default: GeneralUser GS) and every render path — server or Studio tab — uses that font; an unknown id fails with INVALID_ARGUMENT and a catalog font that is not installed on this server fails with NOT_FOUND.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
+      soundFont: z.string().min(1).max(64).optional().describe("SoundFont catalog id from gbk_list_soundfonts, e.g. \"timgm6mb\" or \"fluidr3-gm\" (omit for the default, GeneralUser GS)"),
       sampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(), channels: z.union([z.literal(1), z.literal(2)]).optional(),
       format: z.enum(["pcm16", "float32"]).optional(), normalize: z.enum(["loudness", "peak", "off"]).optional(),
       targetLufs: z.number().min(-40).max(-5).optional().describe("Loudness target (default -16 LUFS, peak ceiling -1 dBTP)"),
@@ -230,7 +237,11 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     } else { const got = service.getProject(user, a.compositionId); snapshot = got.project; rowRev = got.row.revision; }
     const row = service.getRow(user, a.compositionId);
     const config: RenderConfig = { ...DEFAULT_RENDER_CONFIG, sampleRate: a.sampleRate ?? 44100, channels: a.channels ?? 2, format: a.format ?? "pcm16",
-      normalize: a.normalize ?? "loudness", targetLufs: a.targetLufs, tailSeconds: a.tailSeconds ?? 3, includeMidi: a.includeMidi ?? true };
+      normalize: a.normalize ?? "loudness", targetLufs: a.targetLufs, tailSeconds: a.tailSeconds ?? 3, includeMidi: a.includeMidi ?? true,
+      ...(a.soundFont ? { soundFont: a.soundFont } : {}) };
+    // Validate the SoundFont selection once, before any branch creates a job: unknown id ->
+    // INVALID_ARGUMENT, catalog font not installed in this deployment -> NOT_FOUND.
+    if (a.soundFont) resolveRenderFont(cfg, a.soundFont);
     const serverJob = async (guest: boolean) => {
       const job = renders.submitServer(user, { ...row, revision: rowRev }, snapshot, config, { guest, client: ctx.auth.client, ...(guest ? { perDay: cfg.mcp.guestRendersPerDay } : {}) });
       const final = await renders.waitFor(user, job.id, (a.waitSeconds ?? SERVER_RENDER_DEFAULT_WAIT_S) * 1000);

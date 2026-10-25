@@ -19,6 +19,7 @@ import type { ShareStore } from "../persistence/shares.ts";
 import { McpStore, type CompositionRow } from "./store.ts";
 import { McpError, toMcpError } from "./errors.ts";
 import { resolveSoundFontPath } from "./browser-render.ts";
+import { listSoundFonts, type SoundFontView } from "./soundfonts.ts";
 import { guestCapability, isGuest } from "./guest.ts";
 import { serializeSmf } from "../../../src/workstation/smf.ts";
 
@@ -113,13 +114,26 @@ export class CompositionService {
     return { row, project: JSON.parse(row.project_json) as Project };
   }
 
+  /** The pinned SoundFont catalog with per-font availability in this deployment (gbk_list_soundfonts). */
+  listSoundfonts(): { fonts: SoundFontView[]; defaultFontId: string } {
+    const fonts = listSoundFonts(this.cfg);
+    return { fonts, defaultFontId: fonts.find((f) => f.default)?.id ?? fonts[0]?.id ?? "" };
+  }
+
+  /** Capabilities embedding must never fail because the catalog is broken; the dedicated
+   *  gbk_list_soundfonts tool surfaces that error properly instead. */
+  private soundFontViews(): SoundFontView[] {
+    try { return listSoundFonts(this.cfg); } catch { return []; }
+  }
+
   capabilities() {
     return {
       server: "GBK Composer MCP", rendererVersion: RENDERER_VERSION,
       styles: Object.keys(STRATEGIES),
       compositionModes: ["generate_arrangement (seeded, deterministic)", "generate_part", "transform_notes", "orchestrate", "cc_curve", "note_patch", "fugue_section (baroque, Bach generator)"],
       instruments: Object.entries(INSTRUMENTS).map(([name, s]) => ({ name, preset: s.name, program: s.program, role: s.role, family: s.family })),
-      soundFont: "GeneralUser GS (bundled); pipe organ = GM program 19 (instrument name 'organ')",
+      soundFont: "Default is GeneralUser GS (bundled); call gbk_list_soundfonts for every SoundFont this deployment can render with and pass its id as soundFont to gbk_render_composition. Pipe organ = GM program 19 (instrument name 'organ')",
+      soundFonts: this.soundFontViews(),
       renderFormats: { sampleRates: [44100, 48000], channels: [1, 2], formats: ["pcm16", "float32"], normalize: ["loudness", "peak", "off"], targetLufsRange: [-40, -5], peakCeilingDbTp: -1, maxRenderSeconds: this.cfg.mcp.maxRenderSeconds },
       controllers: { audible: [1, 7, 10, 11, 64, 66, 67, 91, 93], storedOnly: [71, 74], note: "all CC 0-127 are preserved and exported to MIDI" },
       authentication: this.cfg.mcp.guestEnabled ? "optional: without sign-in, gbk_create_composition returns a private per-project accessToken (edit) and readAccessToken; pass accessToken on every follow-up call" : "required (OAuth)",

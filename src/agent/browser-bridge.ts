@@ -8,6 +8,7 @@ import { policyFor } from "./tool-policy.ts";
 import { composerManifest } from "./tool-manifest.ts";
 import { MAX_FRAME_BYTES, type ServerMessage, type ToolResultEnvelope } from "./protocol.ts";
 import { renderProjectOffline, type OfflineRenderOptions } from "../audio/offline-renderer.ts";
+import { loadSoundFont, deploymentBase, type LoadedSoundFont } from "../audio/soundfont-loader.ts";
 import type { Project } from "../workstation/model.ts";
 import { reportError } from "../telemetry/error-reporter.ts";
 import { renderJobs } from "../audio/render-job.ts";
@@ -19,6 +20,29 @@ export interface McpRenderDeps {
   http?: (url: string, init?: RequestInit) => Promise<Response>;
   /** Pre-loaded SoundFont (tests); the Studio loads GeneralUser GS itself. */
   soundFont?: Parameters<typeof renderProjectOffline>[4] extends infer D ? D extends { soundFont?: infer S } ? S : never : never;
+  /** Load the SoundFont a render job selected (gbk_render_composition's soundFont id).
+   *  Tests inject this; the default resolves the id against this deployment's generated
+   *  soundfont-manifest.json and loads the font with the shared loader (URL-cached). */
+  loadSoundFont?: (soundFontId: string, signal: AbortSignal) => Promise<LoadedSoundFont>;
+}
+
+function codedError(code: string, message: string): Error & { code: string } {
+  return Object.assign(new Error(message), { code });
+}
+
+interface ManifestEntryLite { id: string; path: string }
+
+/** Default per-job SoundFont loading: the deployment's generated manifest maps catalog ids to
+ *  fetchable paths (bundled: static/<file>; server-only: its /soundfonts/ path). */
+async function loadCatalogSoundFont(soundFontId: string, http: NonNullable<McpRenderDeps["http"]>, signal: AbortSignal): Promise<LoadedSoundFont> {
+  const manifestUrl = `${deploymentBase()}static/soundfont-manifest.json`;
+  const res = await http(manifestUrl, { signal });
+  if (!res.ok) throw codedError("SOUNDFONT_FETCH_FAILED", `SoundFont manifest ${manifestUrl}: HTTP ${res.status}`);
+  const entries = (await res.json()) as ManifestEntryLite[];
+  const entry = Array.isArray(entries) ? entries.find((e) => e.id === soundFontId) : undefined;
+  if (!entry) throw codedError("NOT_FOUND", `SoundFont ${JSON.stringify(soundFontId)} is not available in this deployment`);
+  const url = entry.path.startsWith("/") ? entry.path : `${deploymentBase()}${entry.path}`;
+  return loadSoundFont({ url, signal, fetchImpl: (u, i) => http(u instanceof URL ? u.href : String(u), i) });
 }
 
 type ToolCall = Extract<ServerMessage, { type: "tool_call" }>;
@@ -93,7 +117,7 @@ export class BrowserToolBridge {
 
   /** Render a server-pinned composition snapshot in this tab and upload the WAV. Never touches the open project. */
   private async mcpRender(msg: ToolCall): Promise<ToolResultEnvelope> {
-    const a = (msg.arguments ?? {}) as { jobId?: string; token?: string; snapshotUrl?: string; uploadUrl?: string; chunkBytes?: number; options?: OfflineRenderOptions };
+    const a = (msg.arguments ?? {}) as { jobId?: string; token?: string; snapshotUrl?: string; uploadUrl?: string; chunkBytes?: number; options?: OfflineRenderOptions; soundFontId?: string };
     const http = this.renderDeps.http ?? ((u: string, i?: RequestInit) => fetch(u, { credentials: "same-origin", ...i }));
     const sameOrigin = (u?: string) => { try { return typeof location === "undefined" || new URL(u!, location.href).origin === location.origin; } catch { return false; } };
     if (!a.jobId || !a.token || !a.snapshotUrl || !a.uploadUrl || !a.options || !sameOrigin(a.snapshotUrl) || !sameOrigin(a.uploadUrl)) return this.fail("INVALID_ARGUMENT", "malformed render job");
@@ -104,7 +128,16 @@ export class BrowserToolBridge {
       const snap = await http(a.snapshotUrl, { headers: hdr, signal: ac.signal });
       if (!snap.ok) return this.fail("NOT_FOUND", `render snapshot unavailable (HTTP ${snap.status})`);
       const { project } = (await snap.json()) as { project: Project };
-      const r = await renderProjectOffline(project, a.options, ac.signal, undefined, this.renderDeps.soundFont ? { soundFont: this.renderDeps.soundFont } : {});
+      // A per-job SoundFont selection (gbk_render_composition's soundFont) wins over the tab's
+      // pre-loaded default: load that font (manifest + shared loader) and render with it.
+      let deps: { soundFont?: LoadedSoundFont } = this.renderDeps.soundFont ? { soundFont: this.renderDeps.soundFont } : {};
+      if (a.soundFontId) {
+        const sf = await (this.renderDeps.loadSoundFont
+          ? this.renderDeps.loadSoundFont(a.soundFontId, ac.signal)
+          : loadCatalogSoundFont(a.soundFontId, http, ac.signal));
+        deps = { soundFont: sf };
+      }
+      const r = await renderProjectOffline(project, a.options, ac.signal, undefined, deps);
       const step = Math.max(64 * 1024, Math.min(a.chunkBytes ?? 8 << 20, 8 << 20));
       for (let off = 0; off < r.bytes.length; off += step) {
         const part = r.bytes.subarray(off, Math.min(off + step, r.bytes.length));

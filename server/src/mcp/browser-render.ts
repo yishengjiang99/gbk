@@ -21,11 +21,15 @@ import { McpError } from "./errors.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
 import { signArtifactUrl } from "./urls.ts";
 import type { ServerRenderPool } from "./server-render.ts";
+import { resolveRenderFont, resolveFontFile, defaultFontId } from "./soundfonts.ts";
 import { tickToSec } from "../../../src/workstation/timing.ts";
 
 export interface RenderConfig {
   sampleRate: 44100 | 48000; channels: 1 | 2; format: "pcm16" | "float32";
   normalize: "loudness" | "peak" | "off"; targetLufs?: number; tailSeconds?: number; includeMidi: boolean;
+  /** Optional SoundFont catalog id (see gbk_list_soundfonts). Absent = the catalog default font.
+   *  Validated at submit; every executor (server pool, Studio tab) renders with this font. */
+  soundFont?: string;
 }
 export const DEFAULT_RENDER_CONFIG: RenderConfig = { sampleRate: 44100, channels: 2, format: "pcm16", normalize: "loudness", tailSeconds: 3, includeMidi: true };
 export const BROWSER_RENDER_TOOL = "gbk_mcp_render_job";
@@ -70,6 +74,18 @@ export class RenderService {
   /** True when headless server rendering is available (SERVER_RENDER is not 0 and the pool exists). */
   get serverRenderEnabled() { return !!this.serverPool?.enabled; }
 
+  /** Resolve a job's SoundFont selection to the file the server pool should read, or null when the
+   *  job uses the default (pool workers keep their startup font; tabs keep theirs). Throws the typed
+   *  catalog errors — validation is synchronous so a bad selection fails before any job exists. An
+   *  explicit selection of the catalog default resolves through resolveSoundFontPath, so the
+   *  GBK_SOUNDFONT_PATH operator override still wins. */
+  private resolveJobFont(config: RenderConfig): { sfPath: string; sfLabel: string } | null {
+    if (!config.soundFont) return null;
+    const font = resolveRenderFont(this.cfg, config.soundFont);
+    if (font.id === defaultFontId()) return { sfPath: resolveSoundFontPath(this.cfg), sfLabel: font.file };
+    return { sfPath: resolveFontFile(this.cfg, font)!, sfLabel: font.file };
+  }
+
   /**
    * Render on the server (headless worker thread, app's own SF2 engine) for clients with no Studio tab: Codex, guests,
    * any browserless MCP client. Same job row, verification and atomic WAV + MIDI publication as the browser paths;
@@ -79,6 +95,7 @@ export class RenderService {
   submitServer(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, o: { guest: boolean; client?: string; perDay?: number }): RenderJobRow {
     const pool = this.serverPool;
     if (!pool?.enabled) throw new McpError("WORKER_UNAVAILABLE", "server rendering is turned off on this deployment");
+    const jobFont = this.resolveJobFont(config);
     const sr = this.cfg.serverRender;
     const maxSeconds = o.guest ? sr.guestMaxSeconds : sr.accountMaxSeconds;
     const seconds = tickToSec(snapshot, snapshot.endTick) + (config.tailSeconds ?? 3);
@@ -101,7 +118,7 @@ export class RenderService {
     const options = { sampleRate: cfgFull.sampleRate, channels: cfgFull.channels, format: cfgFull.format, normalize: cfgFull.normalize, targetLufs: cfgFull.targetLufs, tailSeconds: cfgFull.tailSeconds ?? 3, maxSeconds,
       timeoutMs: sr.timeoutMs, stallMs: sr.timeoutMs };
     this.log({ evt: "mcp_server_render_started", user: owner, jobId: job.id, compositionId: row.id, revision: row.revision, seconds: Math.round(seconds) });
-    pool.run(job.id, owner, a.snapshot, options, (x) => { if (this.active.has(job.id)) this.store.patchJob(job.id, { progress: Math.max(0, Math.min(0.99, x)) }); })
+    pool.run(job.id, owner, a.snapshot, options, (x) => { if (this.active.has(job.id)) this.store.patchJob(job.id, { progress: Math.max(0, Math.min(0.99, x)) }); }, jobFont ?? undefined)
       .then((r) => {
         if (!this.active.has(job.id)) return;
         writeFileSync(a.partPath, r.bytes); a.received = r.bytes.length;
@@ -137,7 +154,8 @@ export class RenderService {
     const base = `${this.cfg.publicOrigin}/api/mcp/render-jobs/${job.id}`;
     const options = { sampleRate: config.sampleRate, channels: config.channels, format: config.format, normalize: config.normalize, targetLufs: config.targetLufs, tailSeconds: config.tailSeconds ?? 3, maxSeconds: this.cfg.mcp.maxRenderSeconds };
     link.callTool(`mcp_${job.id}`, `call_${randomBytes(6).toString("hex")}`, BROWSER_RENDER_TOOL,
-      { jobId: job.id, token, snapshotUrl: `${base}/snapshot`, uploadUrl: `${base}/wav`, chunkBytes: UPLOAD_CHUNK_BYTES, options },
+      { jobId: job.id, token, snapshotUrl: `${base}/snapshot`, uploadUrl: `${base}/wav`, chunkBytes: UPLOAD_CHUNK_BYTES, options,
+        ...(config.soundFont ? { soundFontId: config.soundFont } : {}) },
       { expectProjectId: null, consent: { newProject: false }, timeoutMs: this.cfg.mcp.renderTimeoutMs })
       .then((r) => {
         if (!this.active.has(job.id)) return; // cancelled / timed out meanwhile

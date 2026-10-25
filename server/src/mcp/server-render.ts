@@ -17,7 +17,9 @@ export type RenderFailure = Error & { code: string };
 const fail = (code: string, message: string): RenderFailure => Object.assign(new Error(message), { code });
 
 export interface ServerRenderResult { bytes: Uint8Array; meta: Record<string, unknown> }
-interface Task { jobId: string; owner: string; project: Project; options: OfflineRenderOptions; resolve: (r: ServerRenderResult) => void; reject: (e: RenderFailure) => void; onProgress: (x: number) => void }
+/** A per-job SoundFont selection resolved by the caller (RenderService): file + provenance label. */
+export interface JobFont { sfPath: string; sfLabel: string }
+interface Task { jobId: string; owner: string; project: Project; options: OfflineRenderOptions; font?: JobFont; resolve: (r: ServerRenderResult) => void; reject: (e: RenderFailure) => void; onProgress: (x: number) => void }
 interface Slot { w: Worker; task?: Task; timer?: NodeJS.Timeout }
 
 function workerEntry(): { url: URL | string; eval?: boolean } {
@@ -91,11 +93,11 @@ export class ServerRenderPool {
   }
 
   /** Admission checks happen in the caller (RenderService); this enforces the queue bound and runs the job. */
-  run(jobId: string, owner: string, project: Project, options: OfflineRenderOptions, onProgress: (x: number) => void): Promise<ServerRenderResult> {
+  run(jobId: string, owner: string, project: Project, options: OfflineRenderOptions, onProgress: (x: number) => void, font?: JobFont): Promise<ServerRenderResult> {
     if (!this.enabled) return Promise.reject(fail("WORKER_UNAVAILABLE", "server rendering is turned off (SERVER_RENDER=0)"));
     if (this.depth() >= this.cfg.serverRender.concurrency + this.cfg.serverRender.maxQueue) return Promise.reject(fail("QUOTA_EXCEEDED", "the server render queue is full; retry in a minute"));
     return new Promise((resolve, reject) => {
-      this.queue.push({ jobId, owner, project, options, resolve, reject, onProgress });
+      this.queue.push({ jobId, owner, project, options, font, resolve, reject, onProgress });
       if (this.slots.length < this.cfg.serverRender.concurrency) void this.start(); // lazy: workers spawn on first use
       this.pump();
     });
@@ -118,7 +120,8 @@ export class ServerRenderPool {
         void slot.w.terminate();
       }, this.cfg.serverRender.timeoutMs);
       slot.timer.unref?.();
-      slot.w.postMessage({ type: "render", jobId: t.jobId, project: t.project, options: t.options });
+      slot.w.postMessage({ type: "render", jobId: t.jobId, project: t.project, options: t.options,
+        ...(t.font ? { soundFontPath: t.font.sfPath, soundFontLabel: t.font.sfLabel } : {}) });
     }
   }
 }

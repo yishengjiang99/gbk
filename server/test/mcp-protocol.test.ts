@@ -40,7 +40,7 @@ test("MCP initialize, tools/list with annotations, anonymous capabilities, auth 
     const tools = (list.rpc?.result as { tools: { name: string; annotations?: Record<string, boolean>; inputSchema: unknown }[] }).tools;
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, ["gbk_cancel_render", "gbk_claim_composition", "gbk_create_composition", "gbk_delete_composition", "gbk_edit_composition", "gbk_get_artifacts", "gbk_get_capabilities",
-      "gbk_get_composition", "gbk_get_render_status", "gbk_list_compositions", "gbk_open_workstation", "gbk_publish_composition",
+      "gbk_get_composition", "gbk_get_render_status", "gbk_list_compositions", "gbk_list_soundfonts", "gbk_open_workstation", "gbk_publish_composition",
       "gbk_render_composition", "gbk_show_composition_ui", "gbk_widget_render_finish", "gbk_widget_render_start"].sort());
     const caps = tools.find((t) => t.name === "gbk_get_capabilities")!;
     assert.equal(caps.annotations?.readOnlyHint, true);
