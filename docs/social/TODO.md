@@ -18,3 +18,25 @@
 - App icon (1024×1024) for `ios/GBKComposer/Resources/Assets.xcassets/AppIcon.appiconset`.
 - TestFlight / App Store Connect app record and approval.
 - APNs .p8 key for the server sender (P5).
+
+## Commercialization
+
+Open items (owner in brackets):
+
+- [ ] Pro limits enforcement in the MCP server (~60 lines) [GBK Launch]
+- [ ] Paid-plan terms + refund policy [Music Biz]
+- [ ] Private support channel for paying customers [Music Biz]
+- [ ] ChatGPT listing (pending review) [GBK Launch]
+- [ ] Stripe customer portal (manage/cancel subscription) [Music Biz]
+- [ ] Apple guideline 3.1.3 check for the music app (web checkout vs IAP) [Music Biz]
+- [ ] X Ads API application [Yisheng]
+- [ ] Waitlist launch email [Music Biz, needs approval]
+- [ ] Rename to EarSheet in the demo + fix dead Page tab [EarSheet]
+
+### Needs Yisheng
+
+- [ ] Set Stripe price env vars (MUSIC_* / COMPOSE_*) and restart the server after finalcut#118/#120
+- [ ] Approve earsheet#95 (publishes public landing site)
+- [ ] Confirm price: $6/mo or $48/yr (lifetime $99 flagged risky)
+- [ ] Submit X Ads API application
+- [ ] Approve the launch email
