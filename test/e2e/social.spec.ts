@@ -172,3 +172,33 @@ test("first paint on / is the Feed shell, never the studio; /studio still loads 
   await expect(page.getByTestId("social-app")).toHaveCount(0);
   await expect(page.getByTestId("composer-input").or(page.getByTestId("tab-composer")).first()).toBeVisible();
 });
+
+test("social studio: composer input always visible + in viewport on every tab, keyboard open/close, during playback (mobile + desktop)", async ({ page, baseURL }, info) => {
+  test.setTimeout(150_000);
+  const input = page.getByTestId("composer-input");
+  // signed out: the input renders (send is gated behind sign-in) on the default tab
+  await page.goto("/studio"); await expect(input).toBeVisible(); await input.fill("draft before sign-in");
+  await apiLogin(page.request, new URL(baseURL!).origin, "e2e-code");
+  await page.goto("/studio");
+  const check = async (label: string) => {
+    await expect(input, label).toBeVisible();
+    const r = await input.evaluate((e) => { const b = e.getBoundingClientRect(); const vv = window.visualViewport; return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, h: vv ? vv.height + vv.offsetTop : innerHeight, w: innerWidth, fs: getComputedStyle(e).fontSize, ox: document.documentElement.scrollWidth - innerWidth }; });
+    if (r.bottom > r.h + 1) { await expect.poll(() => input.evaluate((e) => { const vv = window.visualViewport; return e.getBoundingClientRect().bottom - (vv ? vv.height + vv.offsetTop : innerHeight); }), { message: label, timeout: 3000 }).toBeLessThanOrEqual(1); return; }
+    expect(r.top, label).toBeGreaterThanOrEqual(0); expect(r.bottom, label).toBeLessThanOrEqual(r.h + 1);
+    expect(r.left, label).toBeGreaterThanOrEqual(0); expect(r.right, label).toBeLessThanOrEqual(r.w + 1); expect(r.ox, label).toBeLessThanOrEqual(0);
+    if (info.project.name.startsWith("mobile")) expect(r.fs, label).toBe("16px");
+  };
+  const tabs = ["tracks", "composer", "agent", "sound", "files"];
+  for (const t of tabs) {
+    const tab = page.getByTestId(`tab-${t}`); if (!(await tab.count())) continue;
+    await tab.click(); await check(`tab ${t}`);
+    await input.focus(); await check(`tab ${t} focused`);
+    const vp = page.viewportSize()!; await page.setViewportSize({ width: vp.width, height: Math.round(vp.height * 0.55) }); await check(`tab ${t} keyboard open (short viewport)`);
+    await page.setViewportSize(vp); await input.blur(); await check(`tab ${t} keyboard closed`);
+    if (t === "tracks") await page.screenshot({ path: info.outputPath("studio-tracks.png") });
+  }
+  if (!info.project.name.startsWith("mobile")) expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(0);
+  if (await page.getByTestId("tab-tracks").count()) await page.getByTestId("tab-tracks").click(); else await page.getByTestId("tab-agent").click();
+  const play = page.getByTestId("ws-play");
+  if (await play.isVisible()) { await play.click(); await page.waitForTimeout(800); await check("during playback"); await play.click().catch(() => undefined); }
+});

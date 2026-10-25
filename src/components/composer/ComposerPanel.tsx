@@ -15,7 +15,7 @@ export const STARTER_PROMPTS: { label: string; text: string }[] = [
 ];
 const STATUS: Record<string, string> = { idle: "Offline", connecting: "Connecting…", connected: "Connected", reconnecting: "Reconnecting…", offline: "Disconnected", unauthorized: "Signed out" };
 
-export function ComposerPanel({ project, readOnly }: { project: Project; readOnly: string | null }) {
+export function ComposerPanel({ project, readOnly, dock = false }: { project: Project; readOnly: string | null; dock?: boolean }) {
   const s = useAgentSession();
   // Private auto-save while logged in; when a run that produced a saved song finishes, offer Publish (never automatic).
   useEffect(() => { if (s.auth.authenticated) songAutosaver.start(); else songAutosaver.stop(); }, [s.auth.authenticated]);
@@ -34,12 +34,19 @@ export function ComposerPanel({ project, readOnly }: { project: Project; readOnl
   const submit = (t = text) => { if (s.send(t)) setText(""); };
   const busy = !!s.run;
   return (
-    <aside className="cmp" aria-label="AI Composer" data-testid="composer-panel">
+    <aside className={`cmp${dock ? " cmp-dock" : ""}`} aria-label="AI Composer" data-testid="composer-panel">
       <div className="cmp-head">
         <h3>AI Composer</h3>
         <span className={`cmp-conn ${s.conn.state}`} data-testid="composer-conn" data-state={s.conn.state}>{STATUS[s.conn.state]} ●</span>
       </div>
       {!s.auth.checked ? <div className="ws-dim">…</div> : !s.auth.authenticated ? (
+        <>
+        {/* Signed out / guest: the input is always there; only sending needs an account. The draft survives sign-in. */}
+        <form className="cmp-input" onSubmit={(e) => { e.preventDefault(); if (text.trim()) sessionStorage.setItem("gbk.composerDraft", text); location.href = `/api/auth/${s.auth.providers?.[0] ?? "google"}?return=${encodeURIComponent(location.pathname + location.search)}`; }}>
+          <textarea ref={input} data-testid="composer-input" value={text} rows={3} maxLength={12000} placeholder="Describe a song… (sign in to send)" aria-label="Describe a song"
+            onChange={(e) => { setText(e.target.value); sessionStorage.setItem("gbk.composerDraft", e.target.value); }} />
+          <button type="submit" data-testid="composer-send" disabled={!s.auth.providers?.length} title="Sign in to send">Send</button>
+        </form>
         <div className="cmp-login" data-testid="composer-login">
           <div className="ws-dim">Sign in to compose with the AI. It's free, with a daily limit. (Shared songs play without signing in.)</div>
           {(s.auth.providers ?? []).map((p) => (
@@ -58,6 +65,7 @@ export function ComposerPanel({ project, readOnly }: { project: Project; readOnl
           {s.auth.reviewerLogin && <a className="ws-dim" data-testid="reviewer-signin" href={`/signin/reviewer?return=${encodeURIComponent(location.pathname + location.search)}`}>Reviewer sign-in</a>}
           {s.auth.error && <div className="cmp-error">{s.auth.error}</div>}
         </div>
+        </>
       ) : (<>
         {s.conn.state !== "connected" && s.conn.state !== "connecting" && <div className="cmp-error">{STATUS[s.conn.state]} {s.conn.detail ?? ""} <button onClick={s.reconnect}>Reconnect</button></div>}
         {s.info?.rejectedTools.length ? <div className="cmp-error">Server refused {s.info.rejectedTools.length} tool definitions from this page (version mismatch? reload).</div> : null}

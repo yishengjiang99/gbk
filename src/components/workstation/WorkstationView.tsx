@@ -69,6 +69,14 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [keysOn, setKeysOn] = useState(false);
   const narrow = useMedia("(max-width: 900px)");
   const phone = useMedia("(max-width: 600px)");
+  // iOS keyboard: size the studio to the visual viewport and undo Safari's pan, so the docked composer input sits
+  // right above the keyboard instead of the page shifting up.
+  useEffect(() => {
+    const vv = window.visualViewport; if (!vv) return;
+    const f = () => { const ws = document.querySelector<HTMLElement>("[data-testid=workstation]"); if (ws) ws.style.setProperty("--ws-vh", `${Math.round(vv.height)}px`); if (vv.offsetTop > 0 && document.documentElement.classList.contains("studio-fit")) window.scrollTo(0, 0); };
+    f(); vv.addEventListener("resize", f); vv.addEventListener("scroll", f); window.addEventListener("resize", f);
+    return () => { vv.removeEventListener("resize", f); vv.removeEventListener("scroll", f); window.removeEventListener("resize", f); };
+  }, []);
   const [mainRef, mainBox] = useBox<HTMLElement>();
   const [rollRef, rollBox] = useBox<HTMLDivElement>();
   const tabs = useMemo(() => [...(narrow ? ["Tracks"] : []), ...(composer ? ["Composer"] : []), "Agent", "Sound", "Files"], [narrow, composer]);
@@ -248,7 +256,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           <div className="ws-tabs" role="tablist" aria-label="Panels">
             {tabs.map((t) => <button key={t} role="tab" aria-selected={t === activeTab} className={t === activeTab ? "on" : ""} data-testid={`tab-${t.toLowerCase()}`} onClick={() => setTab(t)}>{t}{t === "Agent" && pendingCount ? ` (${pendingCount})` : ""}</button>)}
           </div>
-          <div className={`ws-tabbody ${activeTab === "Composer" ? "ws-tab-composer" : "ws-flow"}`} role="tabpanel" aria-label={activeTab}>
+          <div className="ws-tabbody ws-flow" role="tabpanel" aria-label={activeTab} hidden={(composer && activeTab === "Composer") || undefined}>
             {activeTab === "Tracks" && <nav className="ws-tracks" aria-label="Tracks">
           <div className="ws-row ws-tracks-head"><AddTrackButton testId={TRACK_BTN} /></div>
           {p.tracks.length === 0 && <p className="ws-dim">Add a track to write notes, or open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
@@ -275,12 +283,14 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
             );
           })}
             </nav>}
-            {composer && <div hidden={activeTab !== "Composer"} className="ws-tabfill"><ComposerPanel project={p} readOnly={workstation.readOnlyReason} /></div>}
             {/* Always mounted (hidden off-tab) so agent commits can always ask for approval; a request brings the tab up. */}
             <div hidden={activeTab !== "Agent"}><AgentPanel state={state} focusProposal={focus} setFocus={setFocus} /></div>
             {activeTab === "Sound" && <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />}
             {activeTab === "Files" && <><div className="ws-row"><VideoExportButton /></div><ArtifactPanel /></>}
           </div>
+          {/* One Composer instance (keeps draft + connection): full panel on the Composer tab, otherwise its input stays docked
+              under the other tabs so the text box is always visible (standing rule, docs/social/feed-design.md). */}
+          {composer && <div className={activeTab === "Composer" ? "ws-tabbody ws-tab-composer" : "ws-cmp-dock"} data-testid="composer-dock" data-docked={activeTab === "Composer" ? "0" : "1"}><div className="ws-tabfill"><ComposerPanel project={p} readOnly={workstation.readOnlyReason} dock={activeTab !== "Composer"} /></div></div>}
         </div>
       </div>
     </div>
