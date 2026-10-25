@@ -11,6 +11,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Feed crossfade: 400 ms equal-power (cos/sin) on scroll settle, two AVPlayers (matches web) | done |
 | Feed card visuals: row 1 windowed piano roll (playhead 25%, 4 s window = 1 s behind / 3 s ahead, finished notes vanish, active notes brightened 45% + glow, black-key row stripes, loops); row 2 48 log-spaced spectrum bars (40 Hz–16 kHz, instant attack, 150 ms decay) + oscilloscope, both from one MTAudioProcessingTap; TimelineView(.animation)+Canvas, active card only, paused with audio | done (constants from web LiveRoll.tsx; device run unverified) |
 | Dark Mode: all colours in asset colour sets with light/dark variants, no hard-coded white/black; previews + light/dark snapshot tests uploaded as the `ios-snapshots` CI artifact | done (dark palette defined on iOS; web has no dark palette yet) |
+| Background audio policy: the feed pauses when the app goes to the background (decided) | done |
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |
@@ -22,7 +23,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Reviewer sign-in (App Review): native form → `/signin/reviewer` CSRF + `POST /api/auth/reviewer`, `gbk_cs` stored as Bearer | done (live route; verified to reach the password check from Linux) |
 | Inbox/DMs | placeholder (P4) |
 | Signing | `DEVELOPMENT_TEAM` 83D36RPMUM in project.yml; CI builds with `CODE_SIGNING_ALLOWED=NO` |
-| App icon | placeholder 1024px generated (awaiting approval) |
+| App icon | approved by Yisheng (light-blue gradient, #2d6a93 note); keep as is |
 | Release | `.github/workflows/ios-release.yml` (manual TestFlight, mirrors finalcut; secrets not set yet, never run) |
 | App Store listing | `docs/asc/`: metadata (name, subtitle, description, keywords, URLs), privacy label, content rights, age rating, review notes (reviewer login), 2 x 6.9" screenshots from mockups. compose.grepawk.com /privacy, /support, /terms all 200. Bundle ID com.grepawk.gbk not registered (no ASC key usable from the box; gbk repo has no ASC secrets) |
 | CI | `ios.yml` (simulator build + tests, light/dark snapshots as `ios-snapshots` artifact) green on b752fff: https://github.com/yishengjiang99/gbk/actions/runs/40225529455 |

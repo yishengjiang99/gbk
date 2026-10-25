@@ -45,6 +45,7 @@ final class FeedViewModel: ObservableObject {
 
 struct FeedView: View {
     @EnvironmentObject private var router: DeepLinkRouter
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = FeedViewModel()
     @StateObject private var player = FeedPlayer()
     @State private var visibleSlug: String?
@@ -105,6 +106,10 @@ struct FeedView: View {
         }
         .onChange(of: router.pending) { _, link in
             if case .tag(let name)? = link { tagText = name; model.query.tag = name; router.pending = nil }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Decided: the feed pauses when the app leaves the foreground (matches web pausing when the tab is hidden).
+            if phase != .active { player.pause() }
         }
         .onDisappear { player.pause() }
     }
