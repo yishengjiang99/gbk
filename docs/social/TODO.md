@@ -11,7 +11,8 @@
 
 ### Needs Yisheng
 
-- Apple Developer team ID and App ID `com.grepawk.gbkcomposer` with Push, Sign in with Apple and Associated Domains enabled.
+- Team ID is almost certainly `83D36RPMUM` (the team every other iOS app here uses); confirm reusing it, plus the existing team-wide APNs .p8 key and the App Store Connect API key from finalcut (gbk repo has no ASC secrets yet).
+- Apple Developer App ID `com.grepawk.gbkcomposer` with Push, Sign in with Apple and Associated Domains enabled.
 - Signing (development team in Xcode / CI signing secrets for archive builds).
 - AASA file at `https://compose.grepawk.com/.well-known/apple-app-site-association` needs the team ID (`<TEAMID>.com.grepawk.gbkcomposer`).
 - App icon (1024×1024) for `ios/GBKComposer/Resources/Assets.xcassets/AppIcon.appiconset`.
