@@ -70,6 +70,36 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 | `DELETE /api/me` | live | deletes account, songs, comments, ratings, messages, devices; → `{ ok: true }` (App Store 5.1.1(v)) |
 
 `TokenPair` = `{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, me: Me }`.
+
+### Guest accounts (iOS, spec; implementation follows)
+
+Reads need no auth: `GET /api/feed`, `/api/tags/top`, `/api/tags/:tag`, `/api/songs/:slug`, `/api/users/:handle`, `/api/shares/:slug/comments`, plus the `/s/<slug>`, `/u/<handle>` and `/t/<tag>` pages.
+Reads with a guest or full bearer add viewer fields (`my_rating`, `is_mine`, `can_delete`).
+
+`POST /api/auth/anonymous` (no auth): `{ deviceId, username }` → `{ token, refreshToken, user, ...TokenPair }`.
+- `token` = `access_token`, `refreshToken` = `refresh_token`, `user` = `me`. Both naming styles are present. Refresh and logout work as for other tokens.
+- `deviceId`: 16–128 chars of `[A-Za-z0-9-_]`, e.g. `identifierForVendor` or a Keychain UUID. The server stores only an HMAC of it.
+- `username`: exactly two capitalized English words, letters only, no digits or spaces, 4–20 chars. Regex `^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$`, e.g. `MellowFox`. Blocklisted words → `422`.
+  - `display_name` = `MellowFox`, `handle` = `mellowfox` (lowercase). `me.provider` = `"guest"`, `me.is_guest` = `true`.
+- **Idempotent per device:** a known `deviceId` returns its existing guest with fresh tokens. The `username` is then ignored, never 409.
+- **Collision:** a new device whose handle is taken (by anyone) → `409 { code: "HANDLE_TAKEN", message, error: "Conflict", statusCode: 409 }`. The server never appends digits; the client generates a new two-word combo and retries.
+- **Errors:** invalid input → `422 { code: "INVALID_USERNAME" | "INVALID_DEVICE", message, error, statusCode }`.
+- **Rate limit:** 5 new guests per IP per hour and 20 calls per IP per hour; idempotent repeats count toward the 20. Over the limit → `429` with `retry-after`.
+- **Guest permissions:**
+  - Allowed: play, rate, comment (comments 20/day), report, block.
+  - Allowed: edit display name or handle via `PATCH /api/me/settings`, under the same two-word rule while still a guest. Set `dm_policy`. `DELETE /api/me`.
+  - Not allowed: publishing public songs (`POST /api/shares` with `public: true` → `403 GUEST_LIMITED`), sending DMs (`403 GUEST_LIMITED`), receiving DMs from others (guests behave as `dm_policy: "off"`), and push for DMs. Comment and rating push works after `POST /api/push/register`.
+  - Sign in with Apple or Google to lift the limits.
+
+**Upgrade on sign-in.** `POST /api/auth/apple` and `POST /api/auth/google/native` accept an optional `Authorization: Bearer <guest access token>`.
+- If the bearer is a valid guest and the Apple/Google identity has **no** account yet, the guest account is upgraded in place. Same user id, handle, display name, ratings, comments, blocks and devices; the Apple/Google identity is attached and `is_guest` becomes `false`. All the guest's refresh tokens are revoked and a new `TokenPair` is returned with `upgraded: "linked"`.
+- If the identity **already** has an account, that account wins and is returned (`upgraded: "merged"`).
+  - The guest's ratings move over unless that account already rated the same song.
+  - The guest's comments, reports, blocks and push devices are re-owned by that account.
+  - The guest account and its handle are then deleted.
+- If the bearer is missing, invalid or not a guest, sign-in behaves as before (`upgraded` absent). An invalid bearer is ignored, never an error.
+
+`Me` gains `provider` (`"google"|"apple"|"phone"|"github"|"guest"`) and `is_guest`.
 `Me` = `User` + `{ "id": "...", "dm_policy": "all|off", "handle_changed": false, "is_admin": false }`.
 
 ## Me / profiles (P1)
