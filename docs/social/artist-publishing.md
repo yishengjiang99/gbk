@@ -26,7 +26,7 @@ Base URL `https://compose.grepawk.com`, JSON bodies.
    ```json
    { "labels": ["lofi"], "tags": ["chillhop", "rain"], "prompt_shared": true, "prompt_text": "mellow lofi beat with rain on the window" }
    ```
-   - `labels`: up to 3 of `ambient lofi classical jazz electronic cinematic game pop experimental wip`.
+   - `labels`: up to 3 of `ambient lofi classical jazz rnb electronic cinematic game pop experimental wip`.
    - `tags`: up to 10, lowercase `a-z0-9-`, 2–24 chars.
    - `prompt_shared` defaults to false; set it true and send `prompt_text` (≤ 4000 chars) to show the prompt with a Remix button.
    → the song in the feed-item shape (see [../social-api.md](../social-api.md)).
@@ -48,3 +48,6 @@ Check it: `GET /api/songs/<slug>` or open `https://compose.grepawk.com/u/<handle
 | pixelquest | Pixel Quest | game, electronic |
 | novadrift | Nova Drift | ambient, electronic |
 | drdre | Dr dre | pop (hip-hop tags) |
+| clarakeys | Clara Keys | classical (piano, chamber tags) |
+| velvetrae | Velvet Rae | rnb (neo-soul tags) |
+| juniperblue | Juniper Blue | jazz |

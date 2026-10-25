@@ -2,7 +2,7 @@
 // Tables live in shares.sqlite beside `shares`, created idempotently at startup. Contract: docs/social-api.md.
 import type { DatabaseSync } from "node:sqlite";
 
-export const LABELS = ["ambient", "lofi", "classical", "jazz", "electronic", "cinematic", "game", "pop", "experimental", "wip"] as const;
+export const LABELS = ["ambient", "lofi", "classical", "jazz", "rnb", "electronic", "cinematic", "game", "pop", "experimental", "wip"] as const;
 export const TAG_RE = /^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])$/;
 export const normTags = (v: unknown): string[] | null => {
   if (!Array.isArray(v)) return null;

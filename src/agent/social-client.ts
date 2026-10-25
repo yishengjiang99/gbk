@@ -2,7 +2,7 @@
 import { apiBase } from "./bridge-client.ts";
 import type { PianoRollPreview } from "./piano-roll-preview.ts";
 
-export const LABELS = ["ambient", "lofi", "classical", "jazz", "electronic", "cinematic", "game", "pop", "experimental", "wip"] as const;
+export const LABELS = ["ambient", "lofi", "classical", "jazz", "rnb", "electronic", "cinematic", "game", "pop", "experimental", "wip"] as const;
 export interface SUser { handle: string; display_name: string; bio?: string | null; badge?: string | null; avatar_url: string | null; song_count: number; rating_avg: number | null; created_at: number }
 export interface Me extends SUser { id: string; dm_policy: "all" | "off"; handle_changed: boolean; is_admin: boolean }
 export interface Song { slug: string; title: string; url: string; author: SUser; created_at: number; published_at: number | null; labels: string[]; tags: string[]; rating_avg: number | null; rating_count: number; comment_count: number; play_count: number; fork_count: number; my_rating: number | null; media: { mp3: string | null; wav: string | null; midi: string | null }; preview: PianoRollPreview | null; prompt_shared: boolean; prompt_text: string | null; parent_slug: string | null; is_mine: boolean }

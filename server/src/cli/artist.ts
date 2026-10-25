@@ -12,7 +12,7 @@ import { ShareStore } from "../persistence/shares.ts";
 import { SocialStore } from "../persistence/social.ts";
 import { NativeStore } from "../persistence/native.ts";
 
-export const ARTIST_HANDLES = ["lofiluna", "maestroaria", "pixelquest", "novadrift", "drdre"] as const;
+export const ARTIST_HANDLES = ["lofiluna", "maestroaria", "pixelquest", "novadrift", "drdre", "clarakeys", "velvetrae", "juniperblue"] as const;
 export const ARTIST_TOKEN_TTL_MS = 365 * 86400_000;
 export interface ArtistStores { sessions: SessionStore; accounts: AccountStore; social: SocialStore; native: NativeStore }
 export const artistId = (handle: string) => `ai-${handle}`;

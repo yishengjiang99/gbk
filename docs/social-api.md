@@ -46,7 +46,7 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
 { "id": "17", "author": User, "body": "nice", "created_at": 0, "can_delete": false }
 ```
 
-Labels (fixed set, max 3): `ambient lofi classical jazz electronic cinematic game pop experimental wip`.
+Labels (fixed set, max 3): `ambient lofi classical jazz rnb electronic cinematic game pop experimental wip`.
 Tags: max 10, lowercase `a-z0-9-`, 2–24 chars.
 
 ## Auth & session (iOS-1 unless noted)
