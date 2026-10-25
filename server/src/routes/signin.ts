@@ -59,7 +59,7 @@ export function signinRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     catch (e) { req.log.warn({ evt: "signin_failed", provider: p, err: (e as Error).message }); return page(reply, 502, "Sign-in failed", "<p>We could not verify your account with the provider.</p>" + retry); }
     const { account, created } = accounts.upsertOAuth(p as ProviderName, who.id, who.name, who.email);
     const s = sessions.create(account.id);
-    reply.header("set-cookie", [stateCookie("", 0), cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: 30 * 86400 }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
+    reply.header("set-cookie", [stateCookie("", 0), cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: sessions.maxAgeSec(s) }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
     req.log.info({ evt: "login", via: p, user: account.id, created });
     return page(reply, 200, "Signed in", `<p>Signed in as ${esc(account.name)}. <a href="${esc(saved.ret)}">Continue</a></p>`, saved.ret);
   });

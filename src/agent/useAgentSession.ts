@@ -27,8 +27,9 @@ export function useAgentSession() {
   const client = useRef<BridgeClient | null>(null);
 
   const refreshAuth = useCallback(async () => {
-    try { const { status, body } = await api("/session"); setAuth({ checked: true, authenticated: !!body.authenticated, user: body.user, name: body.name ?? body.user, csrf: body.csrf, enabled: body.enabled !== false, providers: Array.isArray(body.providers) ? body.providers : [], codeLogin: !!body.loginAvailable, reviewerLogin: !!body.reviewerLogin, limits: body.limits ?? null, error: status >= 500 ? "server error" : undefined }); }
-    catch { setAuth({ checked: true, authenticated: false, error: "Composer server unreachable" }); }
+    // A 5xx / unreachable server (e.g. mid-deploy) is not a logout: keep the last known sign-in state.
+    try { const { status, body } = await api("/session"); if (status >= 500) { setAuth((a) => ({ ...a, checked: true, error: "server error" })); return; } setAuth({ checked: true, authenticated: !!body.authenticated, user: body.user, name: body.name ?? body.user, csrf: body.csrf, enabled: body.enabled !== false, providers: Array.isArray(body.providers) ? body.providers : [], codeLogin: !!body.loginAvailable, reviewerLogin: !!body.reviewerLogin, limits: body.limits ?? null, error: status >= 500 ? "server error" : undefined }); }
+    catch { setAuth((a) => ({ ...a, checked: true, error: "Composer server unreachable" })); }
   }, []);
   useEffect(() => { void refreshAuth(); }, [refreshAuth]);
 

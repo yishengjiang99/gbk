@@ -7,7 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config.ts";
 import type { AccountStore } from "../persistence/accounts.ts";
-import { COOKIE, CSRF_COOKIE, cookie, parseCookies, type SessionStore } from "../security/authentication.ts";
+import { COOKIE, CSRF_COOKIE, cookie, parseCookies, type SessionStore, REVIEWER_SESSION_TTL_MS } from "../security/authentication.ts";
 import { originAllowed } from "../security/authorization.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import { safeReturn } from "./signin.ts";
@@ -64,8 +64,8 @@ ${error ? `<p role="alert" data-testid="reviewer-error" style="color:#b00020">${
     const okPw = verifyReviewerPassword(cfg.auth.reviewer.passwordHash, str(b.password));
     if (!okUser || !okPw) { req.log.warn({ evt: "reviewer_login_failed", ip: req.ip }); return reply.code(401).type("text/html; charset=utf-8").send(form(ret, csrf, "Wrong username or password.")); }
     accounts.ensureLegacy(REVIEWER_USER, Date.now()); accounts.touchLogin(REVIEWER_USER);
-    const s = sessions.create(REVIEWER_USER);
-    reply.header("set-cookie", [cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: 7 * 86400 }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
+    const s = sessions.create(REVIEWER_USER, REVIEWER_SESSION_TTL_MS);
+    reply.header("set-cookie", [cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: sessions.maxAgeSec(s) }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
     req.log.info({ evt: "login", via: "reviewer", user: REVIEWER_USER });
     return reply.code(303).header("location", ret).send();
   });
