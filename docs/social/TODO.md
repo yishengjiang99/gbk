@@ -37,9 +37,9 @@
 - Create an iOS OAuth client in Google Cloud Console (same project as the web `GOOGLE_CLIENT_ID`, bundle ID com.grepawk.moviefone). Put its ID in `ios/project.yml` `GOOGLE_IOS_CLIENT_ID` (and the reversed form in `GOOGLE_REVERSED_CLIENT_ID`), and add it to the server env `GOOGLE_IOS_CLIENT_IDS`. None exists in the repo or server config today.
 - Set `APPLE_BUNDLE_ID` on the server to enable Sign in with Apple (`/api/auth/apple` returns 503 until then), and `IOS_APP_IDS` for the AASA file (404 today).
 
-- Give the App Store Connect issuer ID (ASC > Users and Access > Integrations > App Store Connect API, shown above the keys list) so it can be set as `APP_STORE_CONNECT_ISSUER_ID`; key 95M27GJTV7 returned 401 with every issuer UUID found on the box. Then confirm Push, Sign in with Apple and Associated Domains on `com.grepawk.moviefone` and run ios-release.yml.
+- Confirm Push, Sign in with Apple and Associated Domains capabilities on `com.grepawk.moviefone` (CI build 4 signed fine with automatic signing).
 - App Review notes: reviewer account `openai-reviewer` (password in server config; enter it in App Store Connect review notes) — confirm REVIEWER_LOGIN_ENABLED stays on during review.
-- Approve TestFlight submission (`.github/workflows/ios-release.yml` is workflow_dispatch only and has never been run).
+- TestFlight 0.1.0 (4) is live for internal testers (group "Internal", you are invited at yisheng.jiang@gmail.com; add other ASC users there). Approve before any external TestFlight (Beta App Review) or App Store submission.
 - AASA at `/.well-known/apple-app-site-association` (server, iOS-1): app id `83D36RPMUM.com.grepawk.moviefone` (iOS bundle is now com.grepawk.moviefone).
 - Enter the review password for `openai-reviewer` in ASC App Review Information, and fill App Privacy / age rating from `docs/asc/app-review.md`.
 - Approve the listing copy and screenshots in `docs/asc/` (screenshots are mockups, not simulator captures).
@@ -68,4 +68,4 @@ Open items (owner in brackets):
 - [ ] Approve the launch email
 
 - [ ] GBK Launch: wire Pro limits. `/etc/gbk-composer.env` now has `COMPOSE_ENTITLEMENT_TOKEN` (same value as grepawk.com's); gbk has no consumer yet. Call `GET https://grepawk.com/api/compose/entitlement?email=…` with `Authorization: Bearer $COMPOSE_ENTITLEMENT_TOKEN` and raise limits when `pro: true`. See docs/stripe.md.
-- ASC listing: run `ASC_ISSUER_ID=... python3 docs/asc/scripts/push_listing.py` then `--verify`; enter App Privacy answers (docs/asc/app-review.md) and the `openai-reviewer` password and review contact by hand; check the icon once the TestFlight build processes.
+- ASC listing pushed 2026-10-25 (metadata + 10 screenshots); IAPs created (3, READY_TO_SUBMIT). Still by hand: enter App Privacy answers (docs/asc/app-review.md) and the `openai-reviewer` password and review contact by hand; check the icon once the TestFlight build processes.
