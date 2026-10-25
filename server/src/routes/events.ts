@@ -16,7 +16,8 @@ export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: Session
   const lim = new RateLimiter(30); const ipLim = new RateLimiter(120);
   app.post("/api/events", { bodyLimit: 65536 }, async (req, reply) => {
     const s = currentSession(req, sessions); const bearer = /^Bearer /i.test(String(req.headers.authorization ?? ""));
-    if (!bearer && !originAllowed(cfg, req.headers.origin)) return reply.code(403).send({ code: "BAD_ORIGIN", message: "cross-origin request rejected" });
+    // Browsers always send Origin on POST; native apps (no Origin) are allowed and identify with x-gbk-install.
+    if (!bearer && req.headers.origin !== undefined && !originAllowed(cfg, req.headers.origin)) return reply.code(403).send({ code: "BAD_ORIGIN", message: "cross-origin request rejected" });
     let actor = s?.user ?? null;
     if (!actor) {
       const c = parseCookies(req.headers.cookie)[GID]; const h = String(req.headers["x-gbk-install"] ?? "");

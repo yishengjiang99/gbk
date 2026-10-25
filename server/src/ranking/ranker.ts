@@ -20,20 +20,23 @@ interface Song { id: string; owner: string; score: number; published_at: number;
 const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
 export class Ranker {
-  weights: Weights = { ...HEURISTIC }; version = "heur-2"; private cache: { at: number; songs: Song[] } | null = null;
+  weights: Weights = { ...HEURISTIC }; version = "heur-2"; private cache: { at: number; key: string; songs: Song[] } | null = null;
   constructor(private db: DatabaseSync, private now: () => number = Date.now) {
     this.db.exec("CREATE TABLE IF NOT EXISTS rank_models (version TEXT PRIMARY KEY, weights TEXT NOT NULL, n INTEGER NOT NULL, auc REAL, created_at INTEGER NOT NULL)");
     const m = this.db.prepare("SELECT version, weights FROM rank_models ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined;
     if (m) { this.weights = JSON.parse(m.weights); this.version = m.version; }
   }
   private songs(): Song[] {
-    if (this.cache && this.now() - this.cache.at < 30_000) return this.cache.songs;
+    // Cheap freshness key so a just-published / unpublished song shows up (or disappears) immediately.
+    const k = this.db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(published_at, created_at)), 0) AS m, COALESCE(SUM(score), 0) AS sc FROM shares WHERE public = 1").get() as { n: number; m: number; sc: number };
+    const key = `${k.n}:${k.m}:${Math.round(Number(k.sc))}`;
+    if (this.cache && this.cache.key === key && this.now() - this.cache.at < 30_000) return this.cache.songs;
     const rows = this.db.prepare(`SELECT s.id, s.owner, s.score, COALESCE(s.published_at, s.created_at) AS pub, s.labels, s.project_json AS project FROM shares s
       WHERE s.public = 1 AND NOT EXISTS (SELECT 1 FROM json_each(s.labels) WHERE value = 'wip') ORDER BY s.score DESC LIMIT 1000`).all() as { id: string; owner: string; score: number; pub: number; labels: string; project: string | null }[];
     const tags = new Map<string, string[]>(); for (const t of this.db.prepare("SELECT share_id, tag FROM share_tags").all() as { share_id: string; tag: string }[]) (tags.get(t.share_id) ?? tags.set(t.share_id, []).get(t.share_id)!).push(t.tag);
     const fam = (p: string | null) => { try { const j = JSON.parse(p ?? "{}") as { tracks?: { program?: number; channel?: number }[] }; return [...new Set((j.tracks ?? []).map((t) => t.channel === 9 ? "drums" : `gm${Math.floor((t.program ?? 0) / 8)}`))]; } catch { return []; } };
     const songs = rows.map((r) => ({ id: r.id, owner: r.owner, score: Number(r.score), published_at: Number(r.pub), tags: tags.get(r.id) ?? [], labels: JSON.parse(r.labels || "[]") as string[], fam: fam(r.project) }));
-    this.cache = { at: this.now(), songs }; return songs;
+    this.cache = { at: this.now(), key, songs }; return songs;
   }
   invalidate() { this.cache = null; }
 

@@ -183,6 +183,25 @@ export class SocialStore {
     const more = rows.length > o.limit; const page = rows.slice(0, o.limit);
     return { rows: page, next: more ? encCursor({ id: Number(page[page.length - 1].id) }) : null };
   }
+  /** Guest sign-up: create a profile with exactly this handle; false when taken. */
+  createProfileExact(userId: string, handle: string, displayName: string): boolean {
+    if (this.byHandle(handle)) return false;
+    try { this.db.prepare("INSERT INTO profiles (user_id, handle, display_name, created_at) VALUES (?,?,?,?)").run(userId, handle, displayName, this.now()); return true; } catch { return false; }
+  }
+  /** Guest -> existing account merge: ratings move unless already rated; comments, reports, blocks re-owned; guest profile dropped. */
+  mergeUser(from: string, to: string) {
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("UPDATE OR IGNORE ratings SET user_id = ? WHERE user_id = ?").run(to, from);
+      for (const r of this.db.prepare("SELECT share_id FROM ratings WHERE user_id = ?").all(from) as { share_id: string }[]) this.rate(r.share_id, from, null);
+      this.db.prepare("UPDATE comments SET user_id = ? WHERE user_id = ?").run(to, from);
+      this.db.prepare("UPDATE reports SET reporter = ? WHERE reporter = ?").run(to, from);
+      this.db.prepare("UPDATE OR IGNORE blocks SET blocker = ? WHERE blocker = ?").run(to, from); this.db.prepare("DELETE FROM blocks WHERE blocker = ? OR blocker = blocked").run(from);
+      try { this.db.prepare("UPDATE impressions SET actor = ? WHERE actor = ?").run(to, from); } catch { /* no table yet */ }
+      this.db.prepare("DELETE FROM profiles WHERE user_id = ?").run(from);
+      this.db.exec("COMMIT");
+    } catch (e) { this.db.exec("ROLLBACK"); throw e; }
+  }
   reportById(id: number) { return this.db.prepare("SELECT * FROM reports WHERE id = ?").get(id) as { id: number; kind: string; target_id: string; status: string } | undefined; }
   resolveReport(id: number, status: "hidden" | "dismissed") { const r = this.reportById(id); if (r) this.db.prepare("UPDATE reports SET status = ? WHERE kind = ? AND target_id = ? AND status = 'open'").run(status, r.kind, r.target_id); }
   /** Test cleanup / account deletion: drop a user's social rows. */

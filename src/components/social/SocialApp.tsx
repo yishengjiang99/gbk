@@ -9,17 +9,17 @@ import { LiveRoll, type VizSource } from "./LiveRoll.tsx";
 import { MySongs } from "../songs/MySongs.tsx";
 import { navigate } from "../../agent/routes.ts";
 import type { SocialRoute } from "../../agent/routes.ts";
+import { needSignIn, takePending } from "../auth/gate.ts";
 
-type Sheet = null | { kind: "comments"; song: Song } | { kind: "browse" } | { kind: "signin"; why: string } | { kind: "report"; what: "song" | "comment" | "user"; target: string; label: string };
-const signInUrl = () => `/api/auth/google?return=${encodeURIComponent(location.pathname + location.search)}`;
+type Sheet = null | { kind: "comments"; song: Song; draft?: string } | { kind: "browse" } | { kind: "report"; what: "song" | "comment" | "user"; target: string; label: string };
 /** Opens the Studio with the Composer prefilled (never auto-run). */
 export const remix = (prompt: string) => { sessionStorage.setItem("gbk.focusComposer", "1"); sessionStorage.setItem("gbk.composerDraft", prompt.slice(0, 4000)); navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50); };
 const ago = (t: number) => { const s = (Date.now() - t) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
 
-function Stars({ song, me, onNeedSignIn, onChange }: { song: Song; me: Me | null; onNeedSignIn: () => void; onChange: (s: Song) => void }) {
+function Stars({ song, me, onChange }: { song: Song; me: Me | null; onChange: (s: Song) => void }) {
   const [err, setErr] = useState("");
   const set = async (n: number) => {
-    if (!me) return onNeedSignIn(); if (song.is_mine) { setErr("You can't rate your own song"); return; }
+    if (!me) return needSignIn("Sign in to rate songs.", { kind: "rate", slug: song.slug, stars: n }); if (song.is_mine) { setErr("You can't rate your own song"); return; }
     try { const r = await social.rate(song.slug, song.my_rating === n ? null : n); markAction(song.slug, "rate"); onChange({ ...song, ...r }); setErr(""); } catch (e) { setErr((e as Error).message); }
   };
   return (
@@ -43,12 +43,12 @@ function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
         <button aria-label="Open in Studio" data-testid="card-open" onClick={() => { markAction(song.slug, "open_studio"); onOpen(song.slug, false); }}>✎<small>open</small></button>
         <button aria-label="Remix (fork)" data-testid="card-fork" onClick={() => { markAction(song.slug, "remix"); onOpen(song.slug, true); }}>⑂<small>{song.fork_count}</small></button>
-        <button aria-label="Report song" data-testid="card-report" onClick={() => (me ? onSheet({ kind: "report", what: "song", target: song.slug, label: song.title }) : onSheet({ kind: "signin", why: "Sign in to report." }))}>⚑</button>
+        <button aria-label="Report song" data-testid="card-report" onClick={() => (me ? onSheet({ kind: "report", what: "song", target: song.slug, label: song.title }) : needSignIn("Sign in to report.", { kind: "report", what: "song", target: song.slug, label: song.title }))}>⚑</button>
       </div>
       <div className="so-meta">
         <h2 data-testid="card-title">{song.title}</h2>
         <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a>{song.author.badge && <span className="so-badge">{song.author.badge}</span>} · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""}</div>
-        <Stars song={song} me={me} onNeedSignIn={() => onSheet({ kind: "signin", why: "Sign in to rate songs." })} onChange={onUpdate} />
+        <Stars song={song} me={me} onChange={onUpdate} />
         <Chips song={song} onFilter={onFilter} />
         {song.prompt_shared && song.prompt_text && <div className="so-prompt" data-testid="card-prompt"><span className="so-clamp">“{song.prompt_text}”</span><button className="so-btn" data-testid="card-remix" onClick={() => remix(song.prompt_text!)}>Remix this prompt</button></div>}
         {!song.media.mp3 && !song.media.wav && <div className="so-dim">No audio preview yet. Open in Studio to play.</div>}
@@ -164,10 +164,10 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
   );
 }
 
-function CommentsSheet({ song, me, onSheet, onCount }: { song: Song; me: Me | null; onSheet: (s: Sheet) => void; onCount: () => void }) {
-  const [items, setItems] = useState<SComment[] | null>(null); const [next, setNext] = useState<string | null>(null); const [text, setText] = useState(""); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
+function CommentsSheet({ song, me, draft, onSheet, onCount }: { song: Song; me: Me | null; draft?: string; onSheet: (s: Sheet) => void; onCount: () => void }) {
+  const [items, setItems] = useState<SComment[] | null>(null); const [next, setNext] = useState<string | null>(null); const [text, setText] = useState(draft ?? ""); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   useEffect(() => { void social.comments(song.slug).then((r) => { setItems(r.items); setNext(r.next_cursor); }).catch((e) => setErr((e as Error).message)); }, [song.slug]);
-  const post = async () => { const b = text.trim(); if (!b) return; setBusy(true); setErr(""); try { const c = await social.comment(song.slug, b); markAction(song.slug, "comment"); setItems((p) => [c, ...(p ?? [])]); setText(""); onCount(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
+  const post = async () => { const b = text.trim(); if (!b) return; if (!me) return needSignIn("Sign in to comment.", { kind: "comment", slug: song.slug, text: b }); setBusy(true); setErr(""); try { const c = await social.comment(song.slug, b); markAction(song.slug, "comment"); setItems((p) => [c, ...(p ?? [])]); setText(""); onCount(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
   return (
     <div data-testid="comments-sheet">
       {song.prompt_shared && song.prompt_text && <div className="so-prompt">Prompt: {song.prompt_text} <button className="so-link" data-testid="sheet-remix" onClick={() => remix(song.prompt_text!)}>Remix</button></div>}
@@ -184,12 +184,12 @@ function CommentsSheet({ song, me, onSheet, onCount }: { song: Song; me: Me | nu
       ))}
       {next && <button className="so-btn" onClick={async () => { const r = await social.comments(song.slug, next); setItems((p) => [...(p ?? []), ...r.items]); setNext(r.next_cursor); }}>More</button>}
       {err && <div className="so-err">{err}</div>}
-      {me ? (
+      {(
         <form className="so-row so-compose" onSubmit={(e) => { e.preventDefault(); void post(); }}>
           <input data-testid="comment-input" value={text} maxLength={500} placeholder="Add a comment" onChange={(e) => setText(e.target.value)} />
           <button className="so-btn pri" data-testid="comment-send" disabled={busy || !text.trim()}>Post</button>
         </form>
-      ) : <a className="so-btn pri" href={signInUrl()} data-testid="comment-signin">Sign in with Google to comment</a>}
+      )}
     </div>
   );
 }
@@ -228,19 +228,20 @@ function ProfileView({ handle, me, onSheet, setMe }: { handle: string | null; me
   const [name, setName] = useState(""); const [hd, setHd] = useState(""); const [msg, setMsg] = useState("");
   useEffect(() => { setD(null); setErr(""); if (h) void social.user(h).then(setD).catch((e) => setErr((e as Error).message)); }, [h]);
   useEffect(() => { if (me) { setName(me.display_name); setHd(me.handle); } }, [me]);
-  if (!h) return <div className="so-pad"><p>Sign in to see your profile and songs.</p><a className="so-btn pri" href={signInUrl()} data-testid="profile-signin">Sign in with Google</a></div>;
+  if (!h) return <div className="so-pad so-dim" data-testid="profile-guest">Your profile and songs appear here after you sign in. Tap Profile to sign in.</div>;
   if (err) return <div className="so-pad so-err">{err}</div>;
   if (!d) return <div className="so-pad so-dim">Loading…</div>;
   const mine = me?.handle === d.user.handle;
   return (
     <div className="so-pad" data-testid="profile-view">
       <div className="so-row"><div className="so-av">{d.user.display_name.slice(0, 1).toUpperCase()}</div><div className="so-grow"><h2 data-testid="profile-name">{d.user.display_name}{d.user.badge && <span className="so-badge" data-testid="profile-badge">{d.user.badge}</span>}</h2><div className="so-dim">@{d.user.handle} · {d.user.song_count} songs{d.user.rating_avg !== null ? ` · ★${d.user.rating_avg.toFixed(1)}` : ""}</div>{d.user.bio && <div className="so-bio" data-testid="profile-bio">{d.user.bio}</div>}</div></div>
-      {!mine && <p className="so-row"><button className="so-btn" disabled title="Messages arrive in the next update">✉ Message</button><button className="so-btn" data-testid="profile-report" onClick={() => (me ? onSheet({ kind: "report", what: "user", target: d.user.handle, label: `@${d.user.handle}` }) : onSheet({ kind: "signin", why: "Sign in to report." }))}>Report</button></p>}
+      {!mine && <p className="so-row"><button className="so-btn" disabled title="Messages arrive in the next update">✉ Message</button><button className="so-btn" data-testid="profile-report" onClick={() => (me ? onSheet({ kind: "report", what: "user", target: d.user.handle, label: `@${d.user.handle}` }) : needSignIn("Sign in to report.", { kind: "report", what: "user", target: d.user.handle, label: `@${d.user.handle}` }))}>Report</button></p>}
       {mine && me && (
         <form className="so-settings" data-testid="profile-settings" onSubmit={async (e) => { e.preventDefault(); setMsg(""); try { const m = await social.settings({ display_name: name, ...(hd !== me.handle ? { handle: hd } : {}) }); setMe(m); setMsg("Saved"); if (m.handle !== h) navigate(`u/${m.handle}`); } catch (x) { setMsg((x as Error).message); } }}>
           <label>Display name <input data-testid="settings-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} /></label>
           <label>Handle {me.handle_changed ? <span className="so-dim">(already changed once)</span> : <span className="so-dim">(can be changed once)</span>}<input data-testid="settings-handle" value={hd} maxLength={20} disabled={me.handle_changed} onChange={(e) => setHd(e.target.value.toLowerCase())} /></label>
           <div className="so-row"><button className="so-btn pri" data-testid="settings-save">Save</button><span className="so-dim" data-testid="settings-msg">{msg}</span>{me.is_admin && <a href="/admin/reports" onClick={(e) => { e.preventDefault(); navigate("admin/reports"); }} data-testid="admin-link">Report queue</a>}</div>
+          <div className="so-row"><button type="button" className="so-btn" data-testid="signout" onClick={async () => { const c = document.cookie.match(/(?:^|; )gbk_csrf=([^;]+)/)?.[1]; await fetch("/api/logout", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...(c ? { "x-gbk-csrf": decodeURIComponent(c) } : {}) }, body: "{}" }); location.href = "/"; }}>Sign out</button></div>
         </form>
       )}
       <h3>Published</h3>
@@ -273,7 +274,18 @@ function AdminView() {
 
 export function SocialApp({ route, onOpen }: { route: SocialRoute; onOpen: (slug: string, fork: boolean) => void }) {
   const [me, setMe] = useState<Me | null>(null); const [sheet, setSheet] = useState<Sheet>(null); const [toast, setToast] = useState("");
-  useEffect(() => { void social.me().then(setMe).catch(() => setMe(null)); }, []);
+  const [meChecked, setMeChecked] = useState(false);
+  useEffect(() => { void social.me().then(setMe).catch(() => setMe(null)).finally(() => setMeChecked(true)); }, []);
+  // Resume the action that asked for sign-in (rating, comment text, report, profile/inbox tab) once we know who we are.
+  useEffect(() => {
+    if (!meChecked || !me) return;
+    const p = takePending("rate", "comment", "report", "profile", "inbox"); if (!p) return;
+    if (p.kind === "rate") void social.rate(p.slug, p.stars).then(() => { markAction(p.slug, "rate"); say(`Rated ${p.stars}★`); setBump((b) => b + 1); }).catch((e) => say((e as Error).message));
+    else if (p.kind === "comment") void social.song(p.slug).then(async (song) => { try { await social.comment(p.slug, p.text); markAction(p.slug, "comment"); setSheet({ kind: "comments", song: { ...song, comment_count: song.comment_count + 1 } }); } catch (e) { say((e as Error).message); setSheet({ kind: "comments", song, draft: p.text }); } }).catch((e) => say((e as Error).message));
+    else if (p.kind === "report") setSheet({ kind: "report", what: p.what, target: p.target, label: p.label });
+    else if (p.kind === "profile") navigate(`u/${me.handle}`);
+    else navigate("inbox");
+  }, [meChecked, me]);
   const filter = route.view === "feed" ? { sort: route.tag || route.label ? "new" : (route.sort ?? "for_you"), label: route.label, tag: route.tag } : { sort: "for_you" };
   const setFilter = (f: { sort: string; label?: string; tag?: string }) => navigate(f.tag ? `t/${f.tag}` : f.label ? `feed?label=${f.label}` : f.sort === "for_you" ? "" : `feed?sort=${f.sort}`);
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2000); };
@@ -281,28 +293,27 @@ export function SocialApp({ route, onOpen }: { route: SocialRoute; onOpen: (slug
   const [bump, setBump] = useState(0);
   return (
     <div className="so-app" data-testid="social-app">
-      <header className="so-top"><a href="/" onClick={(e) => { e.preventDefault(); navigate(""); }}><b>gbk</b></a><span className="so-grow" />{me ? <span className="so-dim" data-testid="me-handle">@{me.handle}</span> : <a className="so-btn" href={signInUrl()} data-testid="signin">Sign in</a>}</header>
+      <header className="so-top"><a href="/" onClick={(e) => { e.preventDefault(); navigate(""); }}><b>gbk</b></a><span className="so-grow" />{me && <span className="so-dim" data-testid="me-handle">@{me.handle}</span>}</header>
       <main className="so-main" key={bump}>
         {route.view === "feed" && <FeedView me={me} filter={filter} setFilter={setFilter} onSheet={setSheet} onOpen={onOpen} />}
         {route.view === "profile" && <ProfileView handle={route.handle} me={me} onSheet={setSheet} setMe={setMe} />}
-        {route.view === "inbox" && <div className="so-pad" data-testid="inbox-view"><h2>Inbox</h2>{me ? <p className="so-dim">Direct messages are coming in the next update. You'll be able to message any signed-in musician, and block, report or turn DMs off.</p> : <><p>Sign in to use messages.</p><a className="so-btn pri" href={signInUrl()}>Sign in with Google</a></>}</div>}
+        {route.view === "inbox" && <div className="so-pad" data-testid="inbox-view"><h2>Inbox</h2>{me ? <p className="so-dim">Direct messages are coming in the next update. You'll be able to message any signed-in musician, and block, report or turn DMs off.</p> : <p className="so-dim">Messages appear here after you sign in. Tap Inbox to sign in.</p>}</div>}
         {route.view === "admin" && (me?.is_admin ? <AdminView /> : <div className="so-pad so-dim">Admins only.</div>)}
       </main>
       <nav className="so-tabs" data-testid="tabs">
         <button className={tab === "feed" ? "on" : ""} data-testid="tab-feed" onClick={() => navigate("")}>▶<br />Feed</button>
         <button data-testid="tab-create" onClick={() => navigate("studio")}>＋<br />Create</button>
-        <button className={tab === "inbox" ? "on" : ""} data-testid="tab-inbox" onClick={() => navigate("inbox")}>✉<br />Inbox</button>
-        <button className={tab === "me" ? "on" : ""} data-testid="tab-profile" onClick={() => navigate(me ? `u/${me.handle}` : "me")}>◉<br />Profile</button>
+        <button className={tab === "inbox" ? "on" : ""} data-testid="tab-inbox" onClick={() => (me || !meChecked ? navigate("inbox") : needSignIn("Sign in to see your messages.", { kind: "inbox" }))}>✉<br />Inbox</button>
+        <button className={tab === "me" ? "on" : ""} data-testid="tab-profile" onClick={() => (me ? navigate(`u/${me.handle}`) : meChecked ? needSignIn("Sign in to see your profile.", { kind: "profile" }) : navigate("me"))}>◉<br />Profile</button>
       </nav>
       {sheet && <div className="so-scrim" onClick={() => setSheet(null)} />}
       {sheet && (
         <div className="so-sheet" role="dialog" aria-modal="true" data-testid="sheet">
-          <header><b>{sheet.kind === "comments" ? `Comments · ${sheet.song.title}` : sheet.kind === "browse" ? "Browse" : sheet.kind === "report" ? "Report" : "Sign in"}</b><button className="so-btn" data-testid="sheet-close" aria-label="Close" onClick={() => setSheet(null)}>✕</button></header>
+          <header><b>{sheet.kind === "comments" ? `Comments · ${sheet.song.title}` : sheet.kind === "browse" ? "Browse" : "Report"}</b><button className="so-btn" data-testid="sheet-close" aria-label="Close" onClick={() => setSheet(null)}>✕</button></header>
           <div className="so-sheetbody">
-            {sheet.kind === "comments" && <CommentsSheet song={sheet.song} me={me} onSheet={setSheet} onCount={() => setBump((x) => x)} />}
+            {sheet.kind === "comments" && <CommentsSheet song={sheet.song} me={me} draft={sheet.draft} onSheet={setSheet} onCount={() => setBump((x) => x)} />}
             {sheet.kind === "browse" && <BrowseSheet onPick={(f) => { setSheet(null); setFilter({ sort: "new", ...f }); }} />}
             {sheet.kind === "report" && <ReportSheet what={sheet.what} target={sheet.target} label={sheet.label} done={(m) => { setSheet(null); say(m); }} />}
-            {sheet.kind === "signin" && <div><p>{sheet.why} Guests can browse, play and read.</p><a className="so-btn pri" href={signInUrl()} data-testid="sheet-signin">Sign in with Google</a></div>}
           </div>
         </div>
       )}
