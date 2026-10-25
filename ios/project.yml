@@ -33,6 +33,14 @@ targets:
     platform: iOS
     sources:
       - path: GBKComposer
+      # UI-test Hum harness + fixture. Loose files under the GBKComposer path are NOT auto-bundled
+      # (same reason HumModel needs its own entry below): without this, hum-harness.html and
+      # hum-fixture.wav never reach the app bundle, Bundle.main.url(forResource:) returns nil, the
+      # -uiTestHum launch falls back to the live studio page and HumUITests times out waiting for the
+      # harness. buildPhase: resources (no folder type) lands both files flat at the bundle root,
+      # matching the flat lookups in StudioWebView/HumBridge.
+      - path: GBKComposer/Resources/HumTest
+        buildPhase: resources
       # Basic Pitch Core ML model for native Hum (committed, 288 KB; refresh with scripts/fetch-hum-model.sh).
       - path: HumModel
         type: folder

@@ -43,9 +43,12 @@ struct WebView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         HumBridge.install(on: config, bridge: context.coordinator.hum)
+        // Must install on the configuration BEFORE the web view is created from it: WKWebView
+        // snapshots the configuration at init, so the old post-creation call never registered
+        // the gbkScan handler on the live web view.
+        scan?.install(on: config)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
-        scan?.install(on: config)
         scan?.webView = view
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
