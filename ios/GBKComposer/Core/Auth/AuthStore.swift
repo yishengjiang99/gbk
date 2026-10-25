@@ -62,6 +62,9 @@ final class AuthStore: ObservableObject {
     /// Launch: make sure the install has an anonymous identity, and (when the server supports it) an anonymous
     /// session so rate/comment work without Apple/Google. On 409 HANDLE_TAKEN pick a different two-word name.
     /// Until GBK Social ships `POST /api/auth/anonymous` this ends at notAvailable and gated actions prompt sign-in.
+    /// Seconds the server asked us to wait (429 retry-after) before registering the guest again.
+    private(set) var anonymousRetryAfter: TimeInterval?
+
     func ensureAnonymousSession(service: AuthServicing = AuthServices.current) async {
         var name = AnonymousIdentity.username
         guard !isSignedIn else { return }
@@ -71,10 +74,21 @@ final class AuthStore: ObservableObject {
             do {
                 let pair = try await service.registerAnonymous(deviceID: AnonymousIdentity.deviceID, username: name)
                 store(pair, anonymous: true)
+                AnonymousIdentity.adopt(pair.me?.displayName)
+                anonymousRetryAfter = nil
                 return
             } catch APIError.badStatus(let code, _) where code == 409 || code == 422 {
                 // 409 HANDLE_TAKEN / 422 INVALID_USERNAME (blocklisted word): new two-word combo, never digits.
                 name = AnonymousIdentity.replaceUsername(excluding: tried)
+            } catch APIError.rateLimited(let after, _) {
+                // 429: keep the local name, try again after retry-after (default 10 min, at most 1 h).
+                anonymousRetryAfter = min(max(after ?? 600, 1), 3600)
+                let wait = anonymousRetryAfter!
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
+                    await self?.ensureAnonymousSession(service: service)
+                }
+                return
             } catch {
                 return // not available yet / offline: stay signed out
             }
@@ -93,6 +107,9 @@ final class AuthStore: ObservableObject {
         if let r = pair.refreshToken { Keychain.set(r, for: Self.refreshKey) }
         accessToken = pair.accessToken
         if let m = pair.me { me = m }
+        // Guest bearer sent with Apple/Google: "linked" keeps the guest's handle/name; "merged" means the existing
+        // account won and the guest was deleted. Either way the returned `me` is now the identity; refresh it.
+        if pair.upgraded != nil || pair.me == nil { Task { await loadMe() } }
         // Push registration only after a real (Apple/Google/reviewer) sign-in.
         if !anonymous && !wasLinked { Task { await PushManager.shared.signedIn() } }
     }

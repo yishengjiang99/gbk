@@ -85,10 +85,9 @@ struct ProfileView: View {
                 } else if auth.isLinkedAccount {
                     ProgressView().task { await auth.loadMe() }
                 } else {
+                    // Normally unreachable: the tab is gated (RootTabView); the sheet shows the guest name.
                     AnonymousProfileView(username: auth.me?.displayName ?? auth.anonymousUsername,
-                                         hasAnonymousSession: auth.isSignedIn) {
-                        requestSignIn("Sign in with Apple or Google to keep your name and songs on every device.")
-                    }
+                                         hasAnonymousSession: auth.isSignedIn)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.background.ignoresSafeArea())
                     .navigationTitle("Profile")
@@ -114,20 +113,15 @@ struct ProfileView: View {
 struct AnonymousProfileView: View {
     let username: String
     let hasAnonymousSession: Bool
-    let onSignIn: () -> Void
 
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: "person.crop.circle.fill").font(.system(size: 72)).foregroundStyle(Theme.accent)
             Text(username).font(.title.bold()).foregroundStyle(Theme.text)
                 .accessibilityIdentifier("anonymous-username")
-            Text(hasAnonymousSession ? "This is your name on GBK. Sign in to keep it across devices."
+            Text(hasAnonymousSession ? "This is your name on GBK."
                                      : "Your name on GBK. Listen, explore and create without an account.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(Theme.textSecondary)
-            Button(action: onSignIn) { Text("Sign in").frame(maxWidth: 260, minHeight: 44) }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .foregroundStyle(Theme.onAccent)
         }
         .padding(32)
     }

@@ -51,15 +51,11 @@ struct CommentsSheet: View {
     @ViewBuilder private var composer: some View {
         VStack(spacing: 4) {
             if let error { Text(error).font(.footnote).foregroundStyle(Theme.destructive) }
-            if auth.isSignedIn {
-                HStack {
-                    TextField("Add a comment", text: $draft, axis: .vertical).lineLimit(1...4)
-                    Button("Post") { Task { await post() } }
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 500)
-                }
-            } else {
-                Button("Sign in to comment") { requestSignIn("Sign in to join the conversation.") }
-                    .font(.footnote.weight(.semibold)).foregroundStyle(Theme.accent)
+            // Anyone can type; Post is the gated action (guest session suffices), replayed after sign-in.
+            HStack {
+                TextField("Add a comment", text: $draft, axis: .vertical).lineLimit(1...4)
+                Button("Post") { auth.gate("Sign in to comment.", prompt: requestSignIn) { Task { await post() } } }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 500)
             }
         }
         .padding().background(.ultraThinMaterial)
@@ -76,7 +72,12 @@ struct CommentsSheet: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let c = try await APIClient.shared.send(Endpoints.postComment(song.slug, body: text), as: Comment.self)
+            ImpressionLogger.shared.mark(.comment, song: song.slug)
             items.insert(c, at: 0); draft = ""; error = nil; onCountChange(1)
+        } catch APIError.rateLimited(_, let body) where auth.isSignedIn && !auth.isLinkedAccount {
+            // Guests: 20 comments/day. Offer sign-in to lift it, then post the kept draft.
+            error = body?.message ?? "Guests can post 20 comments a day; sign in to lift the limit."
+            requestSignIn("Guests can post 20 comments a day. Sign in to keep commenting.") { Task { await post() } }
         } catch let e as APIError { error = e.userMessage } catch { self.error = "Couldn't post." }
     }
 

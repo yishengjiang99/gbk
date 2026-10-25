@@ -7,7 +7,7 @@
 - Sign in with Apple: server answers 503 until `APPLE_BUNDLE_ID` is set; the app shows "not available yet".
 - SF2 playback on `SF2Engine`: copy the sequencer and MIDI parsing from earsheet's `Packages/SF2Player`.
 - Web: decide whether finished notes should vanish at the playhead (iOS does) and whether to add the oscilloscope.
-- Ranking: admin metrics UI view and offline eval script (API `GET /api/admin/metrics` exists); iOS impressions client.
+- Ranking: admin metrics UI view and offline eval script (API `GET /api/admin/metrics` exists) (iOS impressions client done).
 - Guest DMs restrictions (no send/receive) land with P4 DMs; guest push for DMs off.
 - iOS: follow the sign-in-only-on-demand rule (feed-design.md): remove standalone Sign in, keep pending action in memory and replay.
 - Inbox/DMs and blocks list (P4), notifications (P5).

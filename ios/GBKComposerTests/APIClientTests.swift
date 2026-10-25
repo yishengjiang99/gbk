@@ -147,12 +147,13 @@ final class CrossfadeTests: XCTestCase {
 final class StubProtocol: URLProtocol {
     static var handler: ((URLRequest) -> (Int, String))?
     static var requests: [URLRequest] = []
+    static var extraHeaders: [String: String] = [:]
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.requests.append(request)
         let (status, body) = Self.handler?(request) ?? (500, "{}")
-        let resp = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": "application/json"])!
+        let resp = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": "application/json"].merging(Self.extraHeaders) { $1 })!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)

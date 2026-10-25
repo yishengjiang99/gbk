@@ -37,8 +37,8 @@ struct FeedCardView: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) {
-                    guard !song.isMine, auth.requireSession("Sign in to rate songs.", prompt: requestSignIn) else { return }
-                    Task { await quickLove() }
+                    guard !song.isMine else { return }
+                    auth.gate("Sign in to rate songs.", prompt: requestSignIn) { Task { await quickLove() } }
                 }
                 .onTapGesture(perform: onTap)
 
@@ -80,6 +80,7 @@ struct FeedCardView: View {
     /// Double-tap = 5 stars (doc: "like" maps to rating).
     private func quickLove() async {
         guard let r = try? await APIClient.shared.send(Endpoints.rate(song.slug, stars: 5), as: RatingSummary.self) else { return }
+        ImpressionLogger.shared.mark(.rate, song: song.slug)
         var s = song; s.ratingAvg = r.ratingAvg; s.ratingCount = r.ratingCount; s.myRating = r.myRating
         onRated(s)
     }

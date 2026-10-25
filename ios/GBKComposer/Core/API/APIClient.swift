@@ -6,6 +6,8 @@ enum APIError: Error, Equatable {
     case notAvailable
     case unauthenticated
     case invalidURL
+    /// 429 with the server's `retry-after` seconds (when sent) and body (e.g. guests' 20 comments/day).
+    case rateLimited(retryAfter: TimeInterval?, APIErrorBody?)
 
     var userMessage: String {
         switch self {
@@ -13,6 +15,7 @@ enum APIError: Error, Equatable {
         case .unauthenticated: return "Please sign in first."
         case .badStatus(_, let body): return body?.message ?? "Something went wrong."
         case .invalidURL: return "Something went wrong."
+        case .rateLimited(_, let body): return body?.message ?? "Slow down a little and try again."
         }
     }
 }
@@ -68,6 +71,7 @@ final class APIClient: APIClientProtocol {
         }
         // Bearer only; never cookies (doc: never send both).
         req.httpShouldHandleCookies = false
+        for (k, v) in endpoint.headers { req.setValue(v, forHTTPHeaderField: k) }
         if let token = tokenProvider() { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return req
     }
@@ -93,6 +97,7 @@ final class APIClient: APIClientProtocol {
             switch http.statusCode {
             case 401: throw APIError.unauthenticated
             case 404, 503: throw APIError.notAvailable
+            case 429: throw APIError.rateLimited(retryAfter: (http.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init), body)
             default: throw APIError.badStatus(http.statusCode, body)
             }
         }

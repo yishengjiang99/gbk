@@ -83,6 +83,8 @@ struct Song: Codable, Hashable, Identifiable {
 struct Page<Item: Codable>: Codable {
     let items: [Item]
     let nextCursor: String?
+    /// Feed only: ranker version that produced this page (logged with each impression).
+    var modelVersion: String? = nil
 }
 typealias FeedPage = Page<Song>
 

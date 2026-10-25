@@ -9,6 +9,7 @@ struct Endpoint {
     var body: [String: Any]? = nil
     /// Skip the automatic refresh-and-retry on 401 (used by the auth endpoints themselves).
     var isAuthCall = false
+    var headers: [String: String] = [:]
 }
 
 enum FeedSort: String, CaseIterable, Identifiable {
@@ -34,7 +35,7 @@ enum Endpoints {
     // MARK: Feed & songs (P1, live)
     static func feed(_ query: FeedQuery, cursor: String?, limit: Int = 20) -> Endpoint {
         Endpoint(path: "/api/feed", query: q("sort", query.sort.rawValue) + q("label", query.label) + q("tag", query.tag)
-                 + q("cursor", cursor) + q("limit", String(limit)))
+                 + q("cursor", cursor) + q("limit", String(limit)) + q("session", ImpressionLogger.session))
     }
     static func tag(_ tag: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/tags/\(tag)", query: q("cursor", cursor)) }
     static func topTags(limit: Int = 20) -> Endpoint { Endpoint(path: "/api/tags/top", query: q("limit", String(limit))) }

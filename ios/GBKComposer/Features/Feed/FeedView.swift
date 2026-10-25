@@ -8,6 +8,8 @@ final class FeedViewModel: ObservableObject {
         didSet { if query != oldValue { Task { await reload() } } }
     }
     private var cursor: String?
+    /// slug → model_version of the feed page that delivered it.
+    private(set) var modelVersions: [String: String] = [:]
     private var exhausted = false
     private var loading = false
     let provider: FeedProviding
@@ -30,6 +32,7 @@ final class FeedViewModel: ObservableObject {
             guard requested == query else { return }
             let known = Set(items.map(\.slug))
             items.append(contentsOf: page.items.filter { $0.mp3URL != nil && !known.contains($0.slug) })
+            for s in page.items { modelVersions[s.slug] = page.modelVersion ?? "unknown" }
             cursor = page.nextCursor
             exhausted = page.nextCursor == nil
             error = nil
@@ -45,6 +48,8 @@ final class FeedViewModel: ObservableObject {
 
 struct FeedView: View {
     @EnvironmentObject private var router: DeepLinkRouter
+    @EnvironmentObject private var auth: AuthStore
+    @Environment(\.requestSignIn) private var requestSignIn
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = FeedViewModel()
     @StateObject private var player = FeedPlayer()
@@ -65,7 +70,7 @@ struct FeedView: View {
                                          onTap: { player.toggle() },
                                          onRated: { model.update($0) },
                                          onComments: { commentsFor = song },
-                                         onReport: { reportFor = song },
+                                         onReport: { auth.gate("Sign in to report.", prompt: requestSignIn) { reportFor = song } },
                                          onTag: { model.query.tag = $0; tagText = $0 })
                             .frame(width: geo.size.width, height: geo.size.height)
                             .id(song.slug)
@@ -109,9 +114,9 @@ struct FeedView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             // Decided: the feed pauses when the app leaves the foreground (matches web pausing when the tab is hidden).
-            if phase != .active { player.pause() }
+            if phase != .active { player.pause(); ImpressionLogger.shared.suspend() }
         }
-        .onDisappear { player.pause() }
+        .onDisappear { player.pause(); ImpressionLogger.shared.end() }
     }
 
     private var filterBar: some View {
@@ -161,6 +166,10 @@ struct FeedView: View {
     private func playVisible(_ slug: String?) {
         guard let slug, let idx = model.items.firstIndex(where: { $0.slug == slug }),
               let url = model.items[idx].mp3URL else { return }
+        let p = player
+        ImpressionLogger.shared.start(song: slug, position: idx, feed: model.query.sort.rawValue,
+                                      modelVersion: model.modelVersions[slug] ?? "unknown",
+                                      time: { p.currentSeconds(for: slug) }, duration: { p.durationSeconds(for: slug) })
         let next = idx + 1 < model.items.count ? model.items[idx + 1] : nil
         player.play(slug: slug, url: url, next: next.flatMap { n in n.mp3URL.map { (slug: n.slug, url: $0) } })
     }

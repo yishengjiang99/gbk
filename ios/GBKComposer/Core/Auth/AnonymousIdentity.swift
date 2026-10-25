@@ -46,6 +46,18 @@ enum AnonymousIdentity {
         return name
     }
 
+    /// Server guest-name rule (docs/social-api.md): two capitalized words, letters only, 4–20 chars.
+    static let pattern = "^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$"
+    static func isValid(_ name: String) -> Bool {
+        (4...20).contains(name.count) && name.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// The same device gets its existing guest back (username ignored server-side): keep the server's name locally.
+    static func adopt(_ serverName: String?) {
+        guard let n = serverName, isValid(n), n != Keychain.get(usernameKey) else { return }
+        Keychain.set(n, for: usernameKey)
+    }
+
     static func replaceUsername(excluding: Set<String>) -> String {
         let name = generate(excluding: excluding)
         Keychain.set(name, for: usernameKey)

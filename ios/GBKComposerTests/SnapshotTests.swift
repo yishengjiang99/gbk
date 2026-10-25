@@ -66,7 +66,7 @@ final class SnapshotTests: XCTestCase {
     }
 
     func testSignInLightAndDark() throws {
-        let view = ZStack { Theme.background.ignoresSafeArea(); SignInView(reason: "Sign in to see your profile and songs.") }
+        let view = ZStack { Theme.background.ignoresSafeArea(); SignInView(reason: "Sign in to rate songs.") }
         let light = try render(view, name: "sign-in-light", style: .light)
         let dark = try render(view, name: "sign-in-dark", style: .dark)
         XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2)
