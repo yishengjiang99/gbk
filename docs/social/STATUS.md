@@ -25,7 +25,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Signing | `DEVELOPMENT_TEAM` 83D36RPMUM in project.yml; CI builds with `CODE_SIGNING_ALLOWED=NO` |
 | App icon | approved by Yisheng (light-blue gradient, #2d6a93 note); keep as is |
 | Release | `.github/workflows/ios-release.yml`: manual TestFlight, automatic signing via ASC API key (`-allowProvisioningUpdates`), no p12/profile; build number = run_number; `ITSAppUsesNonExemptEncryption=NO`. Bundle switched to `com.grepawk.moviefone` (2026-10-25, Yisheng's call) to match ASC app 6826906431. Blocked: ASC issuer ID not found on the box, so the key can't authenticate and `APP_STORE_CONNECT_ISSUER_ID` isn't set |
-| App Store listing | `docs/asc/`: metadata (name, subtitle, description, keywords, URLs), privacy label, content rights, age rating, review notes (reviewer login), 2 x 6.9" screenshots from mockups. compose.grepawk.com /privacy, /support, /terms all 200. Bundle ID is com.grepawk.moviefone (matches the ASC record); com.grepawk.gbk no longer used |
+| App Store listing | `docs/asc/`: metadata, privacy label, content rights, age rating, review notes; 5 x 6.9" + 5 x 6.5" screenshots from mockups (2026-10-25); upload script `docs/asc/scripts/push_listing.py` (sets everything except App Privacy and the reviewer password, never submits). Not yet pushed to ASC app 6826906431: waiting for the ASC issuer ID. /privacy, /support, /terms all 200. Bundle com.grepawk.moviefone |
 | CI | `ios.yml` (simulator build + tests, light/dark snapshots as `ios-snapshots` artifact) green on b752fff: https://github.com/yishengjiang99/gbk/actions/runs/40225529455 |
 
 ### Doc vs prod (checked 2026-10-25 against prod 44b3be2)

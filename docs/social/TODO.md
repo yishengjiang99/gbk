@@ -48,3 +48,4 @@ Open items (owner in brackets):
 - [ ] Approve the launch email
 
 - [ ] GBK Launch: wire Pro limits. `/etc/gbk-composer.env` now has `COMPOSE_ENTITLEMENT_TOKEN` (same value as grepawk.com's); gbk has no consumer yet. Call `GET https://grepawk.com/api/compose/entitlement?email=…` with `Authorization: Bearer $COMPOSE_ENTITLEMENT_TOKEN` and raise limits when `pro: true`. See docs/stripe.md.
+- ASC listing: run `ASC_ISSUER_ID=... python3 docs/asc/scripts/push_listing.py` then `--verify`; enter App Privacy answers (docs/asc/app-review.md) and the `openai-reviewer` password and review contact by hand; check the icon once the TestFlight build processes.

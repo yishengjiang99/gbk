@@ -1,8 +1,8 @@
 # GBK Music Composer — App Store Connect answers
 
 App: GBK Music Composer · Apple ID 6826906431 · SKU Music-composer-gbk · bundle ID com.grepawk.moviefone (team 83D36RPMUM).
-Listing text: `metadata/en-US/`. Screenshots (6.9", 1320x2868, 2 frames from design mockups; DM/Inbox frames dropped until P4 ships): `screenshots/en-US/`, regenerate with
-`python3 app-store-playbook/make_screenshots.py --config docs/asc/screenshots/config.json` (fix `Image.Lanczos` → `Image.LANCZOS` in the script first).
+Listing text: `metadata/en-US/`. Screenshots: 5 frames each for iPhone 6.9" (1320x2868, `iphone-69-*`) and 6.5" (1284x2778, `iphone-65-*`) in `screenshots/en-US/`, built from design mockups (feed, piece detail, remix, publish, explore; DM/Inbox left out until P4 ships). Regenerate with `python3 docs/asc/scripts/make_screenshots.py --config docs/asc/screenshots/config.json` (local copy of the playbook script with the LANCZOS fix, 6.5" size and upscaling).
+Upload: `ASC_ISSUER_ID=... python3 docs/asc/scripts/push_listing.py` (`--dry-run`, `--verify`, `--no-screenshots`). It sets app info, category, content rights, age rating, version 1.0 text, review details and screenshots. It never submits for review. App Privacy answers must be entered by hand (no public API).
 
 ## App Privacy (nutrition label)
 

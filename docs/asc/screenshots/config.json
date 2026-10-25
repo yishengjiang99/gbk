@@ -33,14 +33,32 @@
   {
    "slug": "01-feed",
    "hero": "Hear new music\\nin one swipe",
-   "sub": "A feed of pieces made with GBK",
+   "sub": "A feed of short pieces to play and rate",
    "source": "ios-feed.png"
   },
   {
-   "slug": "02-remix",
-   "hero": "Remix any\\nprompt you like",
-   "sub": "Every piece shows the prompt behind it",
+   "slug": "02-detail",
+   "hero": "See the notes\\nand the prompt",
+   "sub": "Piano roll, ratings and comments",
+   "source": "detail-crop.png"
+  },
+  {
+   "slug": "03-remix",
+   "hero": "Remix any\\npiece you like",
+   "sub": "Forks credit the original composer",
    "source": "feed-mobile.png"
+  },
+  {
+   "slug": "04-publish",
+   "hero": "Share your\\npieces",
+   "sub": "Add labels and tags, then publish",
+   "source": "publish-crop.png"
+  },
+  {
+   "slug": "05-explore",
+   "hero": "Explore by\\ntag and style",
+   "sub": "Classical, lofi, jazz and more",
+   "source": "explore-crop.png"
   }
  ]
 }
