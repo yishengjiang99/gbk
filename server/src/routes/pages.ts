@@ -154,7 +154,7 @@ export function pageRoutes(app: FastifyInstance, cfg: Config, funnel?: FunnelSto
   app.get("/robots.txt", async (_r, reply) => reply.type("text/plain; charset=utf-8").send(
     `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /oauth/\nDisallow: /mcp\nSitemap: ${cfg.publicOrigin}/sitemap.xml\n`));
   app.get("/sitemap.xml", async (_r, reply) => reply.type("application/xml; charset=utf-8").send(
-    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${["/", "/explore", ...PAGE_PATHS, "/chatgpt/gallery"].map((p) => `  <url><loc>${cfg.publicOrigin}${p}</loc></url>`).join("\n")}\n</urlset>\n`));
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${["/", "/explore", ...PAGE_PATHS, "/chatgpt/gallery", "/pricing", "/plans"].map((p) => `  <url><loc>${cfg.publicOrigin}${p}</loc></url>`).join("\n")}\n</urlset>\n`));
 }
 
 /** OpenAI plugin domain verification: serve the exact portal token as plain text (OPENAI_APPS_CHALLENGE). 404 until set. */
