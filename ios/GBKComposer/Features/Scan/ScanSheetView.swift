@@ -7,6 +7,7 @@ import VisionKit
 
 /// Presented as a sheet over the studio (never overlays the web toolbar/composer in place).
 struct ScanSheetView: View {
+    static var fixtureEnabled: Bool { ProcessInfo.processInfo.arguments.contains("-uiTestScanFixture") }
     @ObservedObject var controller: ScanController
     @State private var showCamera = false
     @State private var showPDF = false
@@ -67,7 +68,7 @@ struct ScanSheetView: View {
     private var choose: some View {
         VStack(spacing: 14) {
             Image(systemName: "music.note.list").font(.system(size: 44)).foregroundStyle(Theme.accent).padding(.top, 12)
-            Text("Turn printed sheet music into new tracks in this song.")
+            Text("Turn printed sheet music into a MIDI file and open it in the studio as a new song or new tracks.")
                 .multilineTextAlignment(.center).foregroundStyle(Theme.textSecondary)
             Spacer().frame(height: 8)
             ScanOptionButton(title: "Scan with camera", icon: "doc.viewfinder", id: "scan-camera") { startCamera() }
@@ -75,6 +76,12 @@ struct ScanSheetView: View {
                 ScanOptionLabel(title: "Choose photos", icon: "photo.on.rectangle")
             }.accessibilityIdentifier("scan-photos")
             ScanOptionButton(title: "Import PDF or image", icon: "doc.richtext", id: "scan-pdf") { showPDF = true }
+            if ScanSheetView.fixtureEnabled, let url = Bundle.main.url(forResource: "scan-fixture", withExtension: "png") {
+                // UI tests only (-uiTestScanFixture): the simulator has no document camera.
+                ScanOptionButton(title: "Use test sheet", icon: "testtube.2", id: "scan-fixture") {
+                    if let img = UIImage(contentsOfFile: url.path), let p = SheetPage(uiImage: img) { controller.recognize([p]) }
+                }
+            }
             Spacer()
         }
     }
@@ -82,16 +89,14 @@ struct ScanSheetView: View {
     private func errorView(_ e: ScanError) -> some View {
         VStack(spacing: 14) {
             Spacer()
-            Image(systemName: e == .readOnlyProject ? "lock.fill" : "exclamationmark.triangle.fill")
+            Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 44)).foregroundStyle(Theme.destructive)
             Text(e.localizedDescription).multilineTextAlignment(.center).foregroundStyle(Theme.text)
                 .accessibilityIdentifier("scan-error")
             if e == .cameraDenied, let url = URL(string: UIApplication.openSettingsURLString) {
                 Link("Open Settings", destination: url).foregroundStyle(Theme.accent)
             }
-            if e != .readOnlyProject {
-                Button("Try again") { controller.phase = .choose }.buttonStyle(.borderedProminent).tint(Theme.accent)
-            }
+            Button("Try again") { controller.phase = .choose }.buttonStyle(.borderedProminent).tint(Theme.accent)
             Spacer()
         }
     }

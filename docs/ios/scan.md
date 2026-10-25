@@ -2,33 +2,19 @@
 
 Scan printed sheet music (camera, photos or PDF) into new tracks of the open studio project.
 
-## Flow
+## Flow (iOS-only; no web changes)
 
-1. The app injects the shared, frozen `window.gbkNative = {platform: "ios", version: 1, capabilities: ["hum", "scan"], scan: true}` at document start (`HumBridge.capabilityScript`).
-2. The studio renders a **📷 Scan** button next to Hum (`src/components/workstation/ScanButton.tsx`) only when the scan capability and `webkit.messageHandlers.gbkScan` exist. Native draws nothing over the web toolbar or composer.
-3. Tap → web posts `{type: "scan.start", project: {ppq, channels, noteCount, readOnly, readOnlyReason?}}` to `webkit.messageHandlers.gbkScan`.
-4. Native shows a sheet (`ScanSheetView`): **Scan with camera** (VNDocumentCameraViewController), **Choose photos** (PhotosPicker, up to 10), **Import PDF or image** (fileImporter; PDFKit rasterizes up to 10 pages at 200 dpi).
-5. `SheetRecognizer.recognize(pages:)` → `Score` → `ScoreOps.ops` → `window.gbkStudio.applyNativeOps(ops, {label: "scan sheet music", source: "scan"})`, one undo step through `workstation.userEdit`. Native then fires `gbknative:scan` (`{status: "added", tracks, notes}` or `{status: "cancelled"}`).
+1. Create tab: a slim native bar **above** the studio WKWebView (stacked in a VStack, not overlaid) has a **Scan sheet music** button (`StudioNativeBar`, accent capsule; light and dark). The web view keeps its whole frame below the bar, so the web toolbar and the bottom composer input stay visible.
+2. Tap → native sheet (`ScanSheetView`): **Scan with camera** (VNDocumentCameraViewController), **Choose photos** (PhotosPicker, up to 10), **Import PDF or image** (fileImporter; PDFKit rasterizes up to 10 pages at 200 dpi). `-uiTestScanFixture` adds **Use test sheet** (bundled `scan-fixture.png`) for UI tests.
+3. `SheetRecognizer.recognize(pages:)` → `Score` → `SMFWriter` (type 1, 480 TPQ: conductor with tempo / time signature / key, then one track per part with name and program; channels skip 9).
+4. Hand-off through the studio's existing MIDI import (prod since befdd00, checked in the live bundle on 2026-10-25): native runs
+   `window.dispatchEvent(new CustomEvent("gbk:midi-file", {detail: {file: new File([bytes], "Scanned sheet music.mid", {type: "audio/midi"})}}))`.
+   The page's `MidiImportChooser` asks **Open as new project** / **Add to current project** (read-only projects only offer "new"), parses the SMF with `workstation/smf.ts`, and drops the conductor track. Native waits for `[data-testid="midi-import"]` to appear, then closes its sheet.
+5. Errors in the sheet: camera denied (with Open Settings), nothing recognized, models missing, unreadable file, studio not ready (the page has not loaded / the chooser did not appear).
 
-Errors shown in the sheet: camera denied (with Open Settings), nothing recognized, read-only project (checked from `scan.start` and again from the `applyNativeOps` result), models missing, unreadable file.
+There is no `scan` capability in `window.gbkNative` and no `gbkScan` message handler; Scan depends on no native-specific web API.
 
-## Web contract (owned by GBK Social; proposed implementation handed off as a patch, not on main)
-
-Without it the app still works: no Scan button appears (nothing starts a scan), and if `window.gbkStudio.applyNativeOps` is missing when ops are applied the sheet shows "The studio page doesn't support Scan yet" (`ScanError.studioNotReady`).
-
-- `window.gbkNative.capabilities` includes `"scan"` (also `window.gbkNative.scan === true`); one shared object with Hum.
-- `webkit.messageHandlers.gbkScan.postMessage({type: "scan.start", project})`.
-- `window.gbkStudio.applyNativeOps(ops: Op[], opts?) -> {ok: boolean, revision?: number, error?: string}`; accepts only `addTrack`, `addNotes`, `setTempoMap`, `setTimeSigMap`, `setMeta`; error `READ_ONLY: <reason>` on read-only projects.
-- Event `gbknative:scan` on `window` (optional to listen to).
-
-## Score and ops
-
-```swift
-protocol SheetRecognizer { func recognize(pages: [SheetPage]) async throws -> Score }
-Score { parts: [{name, program?, notes: [{pitch, onset, duration, velocity}]}], tempo (BPM)?, key?, timeSig? }  // onset/duration in quarter notes
-```
-
-Ops match `humToOps` (`src/hum/notes-to-ops.ts`): per part `addTrack {id, name, channel, program, bankMsb: 0, bankLsb: 0, role: "melody"}` + `addNotes {trackId, channel, tick, duration, pitch, velocity}` with `tick = beats * project.ppq`; channels are the next free melodic ones (skip 9). Tempo/time signature/key ops are emitted only when the project has no notes.
+If the studio ever drops the `gbk:midi-file` event, the smallest web hook that keeps this working is: keep `MidiImportChooser` mounted on /studio and listening for `window` `gbk:midi-file` with `{detail: {file: File}}` (a test in the web suite should pin it).
 
 ## Recognizer: omr-homr-ios (AGPL-3.0)
 
@@ -43,9 +29,9 @@ Yisheng chose to license `ios/` AGPL-3.0-or-later (2026-10-25), so the real reco
 
 ## Tests
 
-- `ScanTests.swift`: Score → ops (empty and existing project, channels, read-only, nothing recognized, exact op JSON), SMF reader, bridge message decode / scripts, controller errors, and the real pipeline on `GBKComposerTests/Fixtures/c_major_scale.png` (omr-sheet-cam `fixtures/mono.c_major_scale`) asserting pitches 60 62 64 65 67 69 71 72. CI sets `OMR_REQUIRE_MODELS=1` so that test can't silently skip.
-- `SnapshotTests.testScanEntryAndErrorLightAndDark`: `scan-entry`, `scan-error`, `scan-read-only` light/dark in the `ios-snapshots` artifact.
-- Web (in the GBK Social patch): `test/native-scan-bridge.test.ts`.
+- `ScanTests.swift`: Score → SMF → Score round trip (tempo, time sig, key, names, programs, retriggered pitches, channels), SMF reader, the `gbk:midi-file` hand-off against a stand-in chooser page (file name, type, bytes), "studio not ready" on a page without the import, nothing recognized, no `scan` capability flag, and the real pipeline on `GBKComposerTests/Fixtures/c_major_scale.png` (pitches 60 62 64 65 67 69 71 72; CI sets `OMR_REQUIRE_MODELS=1`).
+- `ScanUITests.swift` (live compose.grepawk.com/studio): bar button → sheet → **Use test sheet** → real recognition (~3 min on the simulator) → studio chooser → **Open as new project** → "Imported 1 track, 8 notes"; composer input hittable throughout. Dark run checks the bar + sheet.
+- Snapshots: `scan-entry`, `scan-error`, `studio-scan-bar` (light/dark) + UI screenshots `scan-ui-*` in the `ios-snapshots` artifact.
 
 ## AGPL §13 note
 

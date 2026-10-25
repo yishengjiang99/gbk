@@ -19,18 +19,43 @@ struct StudioWebView: View {
         // the web view is NOT `.ignoresSafeArea(.keyboard)`, so SwiftUI shrinks it to the area above the keyboard
         // (and above the tab bar when the keyboard is down). The page then sees a smaller viewport and pins its
         // shell to visualViewport (`--app-h`, src/midireader.tsx), keeping the bottom composer on screen.
-        Group {
-            if let url { WebView(url: url, scan: scan).accessibilityIdentifier("studio-webview") } else { ProgressView().tint(Theme.accent) }
+        // Native Scan entry: a slim bar ABOVE the web view (stacked, not overlaid), so it can never cover the
+        // web toolbar or the bottom composer input.
+        VStack(spacing: 0) {
+            StudioNativeBar(onScan: { scan.start() })
+            Group {
+                if let url { WebView(url: url, scan: scan).accessibilityIdentifier("studio-webview") } else { ProgressView().tint(Theme.accent) }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background.ignoresSafeArea())
-        // Scan is started by the web (its Scan item, shown when window.gbkNative.scan) and runs in a sheet.
         .sheet(isPresented: $scan.isPresented) { ScanSheetView(controller: scan) }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
             let handoff = try? await AuthServices.current.webSessionURL(returnPath: "/studio")
             url = (handoff ?? nil) ?? Self.studioURL
         }
+    }
+}
+
+/// Native controls for the studio, stacked above the web view.
+struct StudioNativeBar: View {
+    var onScan: () -> Void
+    var body: some View {
+        HStack {
+            Spacer()
+            Button(action: onScan) {
+                Label("Scan sheet music", systemImage: "doc.viewfinder")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .foregroundStyle(Theme.onAccent)
+                    .background(Theme.accent, in: Capsule())
+            }
+            .accessibilityIdentifier("scan-open")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Theme.surface)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 0.5) }
     }
 }
 
@@ -43,10 +68,6 @@ struct WebView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         HumBridge.install(on: config, bridge: context.coordinator.hum)
-        // Must install on the configuration BEFORE the web view is created from it: WKWebView
-        // snapshots the configuration at init, so the old post-creation call never registered
-        // the gbkScan handler on the live web view.
-        scan?.install(on: config)
         let midi = MIDIBridge.install(in: config) // Web MIDI polyfill backed by CoreMIDI (Core/MIDI, docs/ios/midi.md)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view

@@ -41,6 +41,9 @@ targets:
       # matching the flat lookups in StudioWebView/HumBridge.
       - path: GBKComposer/Resources/HumTest
         buildPhase: resources
+      # Scan UI-test fixture (12 KB one-staff C major scale; used only with -uiTestScanFixture).
+      - path: GBKComposer/Resources/ScanTest
+        buildPhase: resources
       # Basic Pitch Core ML model for native Hum (committed, 288 KB; refresh with scripts/fetch-hum-model.sh).
       - path: HumModel
         type: folder

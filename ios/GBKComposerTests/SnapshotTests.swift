@@ -108,12 +108,15 @@ final class SnapshotTests: XCTestCase {
         let entry = ScanController(recognizer: fixture)
         let failed = ScanController(recognizer: fixture)
         failed.phase = .error(.nothingRecognized)
-        let readOnly = ScanController(recognizer: fixture)
-        readOnly.phase = .error(.readOnlyProject)
-        for (name, c) in [("scan-entry", entry), ("scan-error", failed), ("scan-read-only", readOnly)] {
+        for (name, c) in [("scan-entry", entry), ("scan-error", failed)] {
             let light = try render(ScanSheetView(controller: c), name: "\(name)-light", style: .light)
             let dark = try render(ScanSheetView(controller: c), name: "\(name)-dark", style: .dark)
             XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, name)
         }
+        let bar = VStack(spacing: 0) { StudioNativeBar(onScan: {}); Theme.background }
+        let size = CGSize(width: 393, height: 120)
+        let light = try render(bar, name: "studio-scan-bar-light", style: .light, size: size)
+        let dark = try render(bar, name: "studio-scan-bar-dark", style: .dark, size: size)
+        XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, "studio bar")
     }
 }

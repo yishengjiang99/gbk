@@ -1,83 +1,49 @@
 import Foundation
 import WebKit
 
-/// Studio <-> native contract for Scan (see docs/ios/scan.md "Web contract").
-///   native -> web at document start (HumBridge.capabilityScript, shared): window.gbkNative.capabilities includes "scan" (and .scan === true)
-///   web -> native: webkit.messageHandlers.gbkScan.postMessage({type: "scan.start", project: {ppq, channels, noteCount, readOnly, readOnlyReason?}})
-///   native -> web: window.gbkStudio.applyNativeOps(ops, {label: "scan sheet music", source: "scan"}) -> {ok, revision?, error?}
-///                  window.dispatchEvent(new CustomEvent("gbknative:scan", {detail: {status, tracks?, notes?, error?}}))
-enum ScanBridge {
-    static let handlerName = "gbkScan"
-    static let label = "scan sheet music"
+/// Hands a recognized Score to the studio through its existing MIDI import (live since befdd00):
+/// the page's MidiImportChooser listens for `window` event `gbk:midi-file` with `{detail: {file}}` and asks the
+/// user "Open as new project" / "Add to current project" (read-only projects open as a new project).
+/// No web change is needed; nothing here depends on a native-specific web API.
+enum StudioMIDIImport {
+    static let fileName = "Scanned sheet music.mid"
 
-    /// The capability flag lives in the shared `window.gbkNative` object HumBridge injects (it is frozen).
-    static var userScript: String { HumBridge.capabilityScript }
-
-    struct Message: Decodable, Equatable {
-        var type: String
-        var project: StudioProjectInfo?
-    }
-
-    static func decode(_ body: Any) -> Message? {
-        guard JSONSerialization.isValidJSONObject(body), let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
-        return try? JSONDecoder().decode(Message.self, from: data)
-    }
-
-    static func applyScript(ops: [StudioOp]) throws -> String {
-        let opsJSON = try ScoreOps.json(ops)
-        return """
-        (function(){ var s = window.gbkStudio; if (!s || typeof s.applyNativeOps !== 'function') return JSON.stringify({ok:false,error:'studio bridge missing'});
-        try { var r = s.applyNativeOps(\(opsJSON), {label: \(jsString(label)), source: 'scan'}); return JSON.stringify(r || {ok:true}); }
-        catch (e) { return JSON.stringify({ok:false,error:String(e && e.message || e)}); } })()
+    static func script(midi: Data, fileName: String = fileName) -> String {
+        """
+        (function(){ try {
+          var b = atob("\(midi.base64EncodedString())"), u = new Uint8Array(b.length);
+          for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+          var f = new File([u], \(jsString(fileName)), {type: "audio/midi"});
+          window.dispatchEvent(new CustomEvent("gbk:midi-file", {detail: {file: f}}));
+          return "dispatched";
+        } catch (e) { return "error:" + (e && e.message || e); } })()
         """
     }
 
-    static func eventScript(status: String, tracks: Int? = nil, notes: Int? = nil, error: String? = nil) -> String {
-        var d: [String: Any] = ["status": status]
-        if let tracks { d["tracks"] = tracks }
-        if let notes { d["notes"] = notes }
-        if let error { d["error"] = error }
-        let json = (try? JSONSerialization.data(withJSONObject: d, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-        return "window.dispatchEvent(new CustomEvent('gbknative:scan', {detail: \(json)}));"
-    }
+    /// True once the page shows its import chooser (data-testid="midi-import").
+    static let chooserVisibleScript = "!!document.querySelector('[data-testid=\"midi-import\"]')"
 
     static func jsString(_ s: String) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: [s])) ?? Data("[\"\"]".utf8)
         return String(String(decoding: data, as: UTF8.self).dropFirst().dropLast())
     }
-
-    struct ApplyResult: Decodable { var ok: Bool; var error: String? }
 }
 
-/// Owns the scan sheet state and talks to the web view.
+/// Owns the native Scan sheet and the hand-off to the studio web view.
 @MainActor
-final class ScanController: NSObject, ObservableObject, WKScriptMessageHandler {
+final class ScanController: ObservableObject {
     enum Phase: Equatable { case choose, working, error(ScanError), done(tracks: Int, notes: Int) }
 
     @Published var isPresented = false
     @Published var phase: Phase = .choose
-    private(set) var project: StudioProjectInfo?
     weak var webView: WKWebView?
     let recognizer: SheetRecognizer
+    /// Last SMF handed to the studio (tests).
+    private(set) var lastMIDI: Data?
 
     init(recognizer: SheetRecognizer = HomrSheetRecognizer()) { self.recognizer = recognizer }
 
-    func install(on config: WKWebViewConfiguration) {
-        config.userContentController.add(WeakScriptHandler(self), name: ScanBridge.handlerName)
-    }
-
-    nonisolated func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
-        let msg = ScanBridge.decode(message.body)
-        Task { @MainActor in self.handle(msg) }
-    }
-
-    func handle(_ msg: ScanBridge.Message?) {
-        guard let msg, msg.type == "scan.start" else { return }
-        project = msg.project
-        phase = (msg.project?.readOnly ?? false) ? .error(.readOnlyProject) : .choose
-        isPresented = true
-    }
-
+    func start() { phase = .choose; isPresented = true }
     func fail(_ e: ScanError) { phase = .error(e) }
 
     func recognize(_ pages: [SheetPage]) {
@@ -86,13 +52,14 @@ final class ScanController: NSObject, ObservableObject, WKScriptMessageHandler {
         Task {
             do {
                 let score = try await recognizer.recognize(pages: pages)
-                let ops = try ScoreOps.ops(for: score, project: project ?? StudioProjectInfo(ppq: 480, channels: [], noteCount: 0, readOnly: false))
-                try await apply(ops)
-                let tracks = ops.filter { if case .addTrack = $0 { return true }; return false }.count
+                guard score.noteCount > 0 else { throw ScanError.nothingRecognized }
+                let midi = SMFWriter.data(for: score)
+                lastMIDI = midi
+                try await handOff(midi)
+                let tracks = score.parts.filter { !$0.notes.isEmpty }.count
                 phase = .done(tracks: tracks, notes: score.noteCount)
-                webView?.evaluateJavaScript(ScanBridge.eventScript(status: "added", tracks: tracks, notes: score.noteCount), completionHandler: nil)
-                try? await Task.sleep(nanoseconds: 900_000_000)
-                if case .done = phase { isPresented = false }
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                if case .done = phase { isPresented = false } // the studio's import chooser is now on screen
             } catch let e as ScanError {
                 phase = .error(e)
             } catch {
@@ -101,28 +68,16 @@ final class ScanController: NSObject, ObservableObject, WKScriptMessageHandler {
         }
     }
 
-    private func apply(_ ops: [StudioOp]) async throws {
-        guard let webView else { throw ScanError.failed("the studio isn't loaded") }
-        let raw = try await webView.evaluateJavaScript(try ScanBridge.applyScript(ops: ops))
-        guard let s = raw as? String, let r = try? JSONDecoder().decode(ScanBridge.ApplyResult.self, from: Data(s.utf8)) else { return }
-        if !r.ok {
-            if r.error == "studio bridge missing" { throw ScanError.studioNotReady }
-            if (r.error ?? "").uppercased().contains("READ_ONLY") || (r.error ?? "").lowercased().contains("read-only") { throw ScanError.readOnlyProject }
-            throw ScanError.failed(r.error ?? "the studio rejected the new tracks")
+    private func handOff(_ midi: Data) async throws {
+        guard let webView else { throw ScanError.studioNotReady }
+        let r = try? await webView.evaluateJavaScript(StudioMIDIImport.script(midi: midi)) as? String
+        guard r == "dispatched" else { throw ScanError.studioNotReady }
+        for _ in 0..<20 { // the chooser renders on the next React commit
+            if (try? await webView.evaluateJavaScript(StudioMIDIImport.chooserVisibleScript)) as? Bool == true { return }
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
+        throw ScanError.studioNotReady
     }
 
-    func cancel() {
-        isPresented = false
-        webView?.evaluateJavaScript(ScanBridge.eventScript(status: "cancelled"), completionHandler: nil)
-    }
-}
-
-/// WKUserContentController retains its handlers; break the cycle.
-final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
-    weak var target: WKScriptMessageHandler?
-    init(_ t: WKScriptMessageHandler) { target = t }
-    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
-        target?.userContentController(ucc, didReceive: message)
-    }
+    func cancel() { isPresented = false }
 }

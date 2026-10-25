@@ -38,7 +38,6 @@ struct SheetPage: @unchecked Sendable {
 enum ScanError: Error, Equatable, LocalizedError {
     case cameraDenied
     case nothingRecognized
-    case readOnlyProject
     case recognizerUnavailable(String)
     case unreadableInput(String)
     case studioNotReady
@@ -48,10 +47,9 @@ enum ScanError: Error, Equatable, LocalizedError {
         switch self {
         case .cameraDenied: return "Camera access is off. Allow it in Settings › GBK › Camera, or import a photo or PDF instead."
         case .nothingRecognized: return "No notes were recognized. Try a sharper, well-lit photo of printed sheet music."
-        case .readOnlyProject: return "This project is read-only. Remix or open your own project, then scan again."
         case .recognizerUnavailable(let m): return "Sheet recognition isn't available: \(m)"
         case .unreadableInput(let m): return "Couldn't read that file: \(m)"
-        case .studioNotReady: return "The studio page doesn't support Scan yet. Your sheet was read, but no tracks were added; try again after the studio updates."
+        case .studioNotReady: return "The studio isn't ready to import yet. Wait for it to finish loading, then try again."
         case .failed(let m): return "Recognition failed: \(m)"
         }
     }
