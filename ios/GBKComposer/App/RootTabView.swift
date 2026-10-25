@@ -8,17 +8,16 @@ struct RootTabView: View {
     @Environment(\.requestSignIn) private var requestSignIn
     @ObservedObject private var store = PurchaseStore.shared
 
-    /// Profile and Inbox are gated (feed-design.md): selecting one signed out (or as a guest) opens the sign-in sheet
-    /// and stays on the current tab; after sign-in the tab opens.
+    /// Only Inbox is gated (guests can't DM): selecting it without Apple/Google opens the sign-in sheet and stays on
+    /// the current tab; after sign-in it opens. Profile is open to guests (Yisheng: shows the two-word name).
     private var selection: Binding<AppTab> {
         Binding(get: { router.selectedTab }, set: { tab in
             guard Self.isGated(tab), !auth.isLinkedAccount else { router.selectedTab = tab; return }
-            requestSignIn(tab == .inbox ? "Sign in to send and receive messages." : "Sign in to see your profile and songs.",
-                          need: .linkedAccount) { router.selectedTab = tab }
+            requestSignIn("Sign in to send and receive messages.", need: .linkedAccount) { router.selectedTab = tab }
         })
     }
 
-    static func isGated(_ tab: AppTab) -> Bool { tab == .inbox || tab == .profile }
+    static func isGated(_ tab: AppTab) -> Bool { tab == .inbox }
 
     var body: some View {
         TabView(selection: selection) {

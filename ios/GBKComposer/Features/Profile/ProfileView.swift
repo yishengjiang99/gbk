@@ -74,18 +74,19 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if auth.isLinkedAccount, let me = auth.me {
+                // Linked account or guest: own profile (guest shows its two-word name), with the gear menu.
+                if auth.isSignedIn, let me = auth.me {
                     UserProfileView(handle: me.handle)
                         .toolbar {
                             Menu {
-                                Button("Sign out") { Task { await auth.signOut() } }
+                                if auth.isLinkedAccount { Button("Sign out") { Task { await auth.signOut() } } }
                                 Button("Delete account", role: .destructive) { confirmDelete = true }
                             } label: { Image(systemName: "gearshape") }
                         }
-                } else if auth.isLinkedAccount {
+                } else if auth.isSignedIn {
                     ProgressView().task { await auth.loadMe() }
                 } else {
-                    // Normally unreachable: the tab is gated (RootTabView); the sheet shows the guest name.
+                    // No session yet (guest sign-up pending/offline): the local two-word name. No sign-in button.
                     AnonymousProfileView(username: auth.me?.displayName ?? auth.anonymousUsername,
                                          hasAnonymousSession: auth.isSignedIn)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

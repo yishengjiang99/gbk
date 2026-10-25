@@ -105,7 +105,7 @@ final class GuestAndImpressionTests: XCTestCase {
         store.gate("Sign in to see your profile and songs.", need: .linkedAccount, prompt: req) { ran += 1 }
         XCTAssertEqual(ran, 1)
         XCTAssertEqual(prompted?.1, .linkedAccount)
-        XCTAssertTrue(RootTabView.isGated(.profile) && RootTabView.isGated(.inbox) && !RootTabView.isGated(.feed))
+        XCTAssertTrue(RootTabView.isGated(.inbox) && !RootTabView.isGated(.profile) && !RootTabView.isGated(.feed))
         store.clearLocal()
     }
 }
