@@ -10,7 +10,7 @@
     "fetch:soundfonts": "node scripts/fetch-soundfonts.mjs",
     "prepare:soundfonts": "node scripts/prepare-soundfonts.mjs",
     "dev": "npm run gen:midi-manifest && npm run gen:songs && vite",
-    "build": "npm run gen:midi-manifest && npm run gen:songs && npm run prepare:omr-models && npm run prepare:soundfonts && npm run prepare:ort-runtime && vite build",
+    "build": "npm run gen:midi-manifest && npm run gen:songs && npm run prepare:omr-models && npm run prepare:soundfonts && npm run prepare:ort-runtime && npm run prepare:hum-model && vite build",
     "preview": "vite preview",
     "test": "node --import tsx/esm --import ./test/support/offline-audio-context.ts --test test/*.test.ts",
     "test:e2e": "playwright test",
@@ -33,7 +33,8 @@
     "build:eval": "esbuild scripts/plugin-discovery/run.ts --bundle --platform=node --format=esm --target=node22 --outfile=/tmp/plugin-discovery-eval.mjs",
     "check:launch": "node scripts/launch/check-launch.mjs",
     "smoke:prod": "node --import tsx/esm scripts/acceptance/prod-smoke.ts",
-    "test:mcp": "node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test server/test/mcp-*.test.ts"
+    "test:mcp": "node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test server/test/mcp-*.test.ts",
+    "prepare:hum-model": "node scripts/prepare-hum-model.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

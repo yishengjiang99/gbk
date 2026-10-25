@@ -27,6 +27,7 @@ import { LiveKeyboard } from "./LiveKeyboard.tsx";
 import { FloatingWindow } from "./FloatingWindow.tsx";
 import { selectedTrackId } from "../../workstation/live-input.ts";
 import { AddTrackButton } from "./AddTrack.tsx";
+import { HumButton } from "./HumButton.tsx";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { VideoExportButton } from "./VideoExport.tsx";
@@ -145,6 +146,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   </>);
   const transportExtras = (<>
           <button onClick={() => setKeysOn(!keysOn)} aria-pressed={keysOn} data-testid="keys-toggle" title="Piano keyboard (on-screen, computer keys A-K, Web MIDI)">🎹 Keys</button>
+          <HumButton />
           <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
           <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
   </>);
