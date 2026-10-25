@@ -43,3 +43,5 @@ Compare models by `model_version`.
 
 ## Privacy
 The privacy page (`/privacy`, section "Listening activity and your feed") says that listening activity personalizes the feed. It is not sold or shared with advertisers, it is kept for 60 days, and it is deleted with the account.
+
+> GBDT: not used. Evaluate a GBDT head with `scripts/rank-eval.ts` once there are more than 20k impressions.

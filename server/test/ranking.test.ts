@@ -43,7 +43,7 @@ test("ranking: personalized For you learns from dwell/skips, session-aware, pagi
 });
 
 // ---- v2 unit tests on synthetic fixtures (rank-fixture.ts) ----
-import { Ranker, trainInWorker, FEATURES, HEURISTIC } from "../src/ranking/ranker.ts";
+import { Ranker, trainInWorker, FEATURES, HEURISTIC, SKIP_LAMBDA, labels, projectSeconds } from "../src/ranking/ranker.ts";
 import { fixture, rand, H as HR, D } from "./rank-fixture.ts";
 
 const randomWorld = (fx: ReturnType<typeof fixture>, seed: number, n = 1600) => {
@@ -68,11 +68,29 @@ test("ranking v2 / phase 1: promotion gate keeps a better promoted model and sto
   const songs = Array.from({ length: 40 }, (_, i) => fx.song({ owner: `o${i % 8}`, score: i / 40 }));
   // train window: random labels; holdout (last 3 days): label = popular song
   for (let k = 0; k < 1500; k++) { const s = Math.floor(r() * 40); const at = fx.now() - Math.floor(r() * 20 * D) - HR; const hold = at >= fx.now() - 3 * D; fx.imp({ actor: `a${Math.floor(r() * 50)}`, song: songs[s], at, good: hold ? s >= 20 : r() < 0.5 }); }
-  const good = { ...Object.fromEntries(FEATURES.map((k) => [k, 0])), bias: 0, popularity: 5 };
+  const z = Object.fromEntries(FEATURES.map((k) => [k, 0])); const good = { complete: { ...z, bias: 0, popularity: 5 }, skip: { ...z, bias: 0, popularity: -5 } };
   new Ranker(fx.db, fx.now); fx.db.prepare("INSERT INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES ('lr-good', ?, 1, 0.99, ?, 1)").run(JSON.stringify(good), fx.now() - D);
   const rk = new Ranker(fx.db, fx.now); assert.equal(rk.version, "lr-good");
-  const res = rk.train()!; assert.equal(res.promoted, false); assert.ok(res.previous_auc! > res.auc!);
+  const res = rk.train()!; assert.equal(res.promoted, false); assert.ok(res.previous_auc! > res.auc!); assert.match(res.version, /^lr2-\d{8}/);
   assert.equal(rk.version, "lr-good"); assert.equal(new Ranker(fx.db, fx.now).version, "lr-good", "startup loads the promoted model");
   assert.equal((fx.db.prepare("SELECT promoted FROM rank_models WHERE version = ?").get(res.version) as { promoted: number }).promoted, 0);
   void HEURISTIC;
+});
+
+test("ranking v2 / phase 3: labels (replay / ratio >= 0.9 complete), two-head value orders a likely-complete long song above a likely-skip one", () => {
+  assert.deepEqual(labels({ completed: 0, replay: 1, listen_ratio: 0.2, fast_skip: 0 }), { complete: 1, skip: 0 });
+  assert.deepEqual(labels({ completed: 0, replay: 0, listen_ratio: 0.95, fast_skip: 0 }), { complete: 1, skip: 0 });
+  assert.deepEqual(labels({ completed: 0, replay: 0, listen_ratio: 0.1, fast_skip: 1 }), { complete: 0, skip: 1 });
+  assert.equal(SKIP_LAMBDA, 1.0);
+  const z = Object.fromEntries(FEATURES.map((k) => [k, 0])) as Record<string, number>;
+  const m = { complete: { ...z, bias: -1, affinity: 4 }, skip: { ...z, bias: -1, affinity: -4 } } as never;
+  const fx = fixture(); const rk = new Ranker(fx.db, fx.now);
+  const likely = rk.value({ ...z, affinity: 1 }, 240, m), skippy = rk.value({ ...z, affinity: -1 }, 240, m), short = rk.value({ ...z, affinity: 1 }, 30, m);
+  assert.ok(likely > short && short > skippy, `${likely} > ${short} > ${skippy}`);
+  // duration from project_json through the tempo map: 60 s fixture song
+  assert.ok(Math.abs(projectSeconds({ ppq: 480, tempos: [{ tick: 0, microPerQuarter: 500000 }], notes: [{ tick: 0, duration: 57600 }] })! - 60) < 1e-9);
+  // model served after promotion: version lr2-*, rank uses it
+  const a = fx.song({ owner: "x", seconds: 170 }); fx.song({ owner: "y", seconds: 20 });
+  fx.db.prepare("INSERT INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES ('lr2-20261024', ?, 1, 0.7, ?, 1)").run(JSON.stringify({ complete: { ...z, bias: 2 }, skip: { ...z, bias: -3 } }), fx.now());
+  rk.reload(); assert.equal(rk.version, "lr2-20261024"); const r = rk.rank({ actor: null, session: null, seed: 1 }); assert.equal(r.ids[0], a, "longer likely-complete song first"); assert.equal(r.version, "lr2-20261024");
 });

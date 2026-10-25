@@ -1,8 +1,8 @@
 // Personalized "For you" ranking (docs/social/ranking.md). Small and in-process:
 //   1. candidate generation: item-item co-engagement, content affinity (tags/labels/artist/instrument family),
 //      trending (popularity score), fresh uploads; cold start = popularity + freshness.
-//   2. pointwise value score: w · features. The weights come from a logistic model trained nightly on logged
-//      impressions (trainModel) once there is enough data, otherwise from heuristic defaults.
+//   2. pointwise value: expected listen value from two nightly LR heads (lr2: P(complete), P(fast skip)) once a
+//      model passes the promotion gate, otherwise HEURISTIC weights · features.
 //   3. re-rank: freshness boost, ~12% epsilon exploration, diversity (max 2 in a row per artist, max 3 per label).
 //   4. session-aware: impressions from the current session (fast skips / long dwell) steer tags and artists.
 import type { DatabaseSync } from "node:sqlite";
@@ -10,17 +10,30 @@ import type { DatabaseSync } from "node:sqlite";
 export const FEATURES = ["affinity", "coeng", "popularity", "freshness", "session", "seen"] as const;
 export type Weights = Record<(typeof FEATURES)[number], number> & { bias: number };
 export const HEURISTIC: Weights = { bias: 0, affinity: 1.0, coeng: 0.8, popularity: 0.6, freshness: 0.4, session: 1.2, seen: -0.6 };
+/** Learned model (lr2): two pointwise LR heads on the same features; value = expected listen value. */
+export interface Model { complete: Weights; skip: Weights; auc_skip?: number | null }
+export const SKIP_LAMBDA = 1.0, DUR_CAP_S = 180;
+const sig = (z: number) => 1 / (1 + Math.exp(-z));
+/** Labels: completion = completed, replay, or listen_ratio >= 0.9; fast skip = dwell < 2 s (as logged). */
+export const labels = (i: { completed: number; replay?: number; listen_ratio?: number; fast_skip: number }) => ({ complete: i.completed || i.replay || (i.listen_ratio ?? 0) >= 0.9 ? 1 : 0, skip: i.fast_skip ? 1 : 0 });
 export const EPSILON = 0.12, MAX_AUTHOR_RUN = 2, MAX_LABEL_RUN = 3, MIN_TRAIN = 500, FRESH_HALF_LIFE_H = 48;
 
 /** Signal weight of one impression: completion/dwell/actions positive, fast skip negative. */
 export const signal = (i: { dwell_ms: number; completed: number; fast_skip: number; actions: string }) =>
   (i.fast_skip ? -1 : 0) + (i.completed ? 1 : 0) + (i.dwell_ms >= 10_000 ? 0.5 : 0) + (i.actions !== "[]" ? 1.5 : 0);
 
-interface Song { id: string; owner: string; score: number; published_at: number; tags: string[]; labels: string[]; fam: string[] }
+interface Song { id: string; owner: string; score: number; published_at: number; tags: string[]; labels: string[]; fam: string[]; dur: number }
+/** Song length in seconds from project_json (last note end through the tempo map); null if unknown. */
+export function projectSeconds(p: { ppq?: number; tempos?: { tick: number; microPerQuarter: number }[]; notes?: { tick: number; duration: number }[] }): number | null {
+  const ppq = p.ppq || 480; const end = Math.max(0, ...(p.notes ?? []).map((n) => n.tick + n.duration)); if (!end) return null;
+  const ts = [...(p.tempos?.length ? p.tempos : [{ tick: 0, microPerQuarter: 500000 }])].sort((a, b) => a.tick - b.tick); let sec = 0;
+  for (let i = 0; i < ts.length; i++) { const a = Math.max(ts[i].tick, i ? ts[i].tick : 0), b = Math.min(end, ts[i + 1]?.tick ?? end); if (b > a) sec += ((b - a) / ppq) * (ts[i].microPerQuarter / 1e6); }
+  if (ts[0].tick > 0) sec += (Math.min(end, ts[0].tick) / ppq) * 0.5; return sec;
+}
 const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
 export class Ranker {
-  weights: Weights = { ...HEURISTIC }; version = "heur-2"; private cache: { at: number; key: string; songs: Song[] } | null = null;
+  weights: Weights = { ...HEURISTIC }; model: Model | null = null; version = "heur-2"; private cache: { at: number; key: string; songs: Song[] } | null = null;
   constructor(private db: DatabaseSync, private now: () => number = Date.now) {
     this.db.exec("CREATE TABLE IF NOT EXISTS rank_models (version TEXT PRIMARY KEY, weights TEXT NOT NULL, n INTEGER NOT NULL, auc REAL, created_at INTEGER NOT NULL)");
     // promoted: 1 = served, 0 = candidate that lost the gate. Pre-gate rows (NULL) were served, so they count as promoted.
@@ -30,9 +43,11 @@ export class Ranker {
   /** Load the latest promoted model (or stay on HEURISTIC). */
   reload() {
     const m = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted IS NULL OR promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined;
-    if (m) { this.weights = JSON.parse(m.weights); this.version = m.version; } else { this.weights = { ...HEURISTIC }; this.version = "heur-2"; }
+    this.weights = { ...HEURISTIC }; this.model = null; this.version = "heur-2";
+    if (m) { const w = JSON.parse(m.weights) as Weights | Model; this.version = m.version; if ("complete" in w) this.model = w; else this.weights = w; }
   }
-  private promoted() { const m = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted IS NULL OR promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined; return m ? { version: m.version, weights: JSON.parse(m.weights) as Weights } : null; }
+  /** Latest promoted model (lr2 two-head); a legacy single-head row or none counts as "no model" for the gate. */
+  private promoted() { const m = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted IS NULL OR promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined; const w = m ? JSON.parse(m.weights) as Weights | Model : null; return m && w && "complete" in w ? { version: m.version, model: w } : null; }
   private songs(): Song[] {
     // Cheap freshness key so a just-published / unpublished song shows up (or disappears) immediately.
     const k = this.db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(COALESCE(published_at, created_at)), 0) AS m, COALESCE(SUM(score), 0) AS sc FROM shares WHERE public = 1").get() as { n: number; m: number; sc: number };
@@ -42,7 +57,10 @@ export class Ranker {
       WHERE s.public = 1 AND NOT EXISTS (SELECT 1 FROM json_each(s.labels) WHERE value = 'wip') ORDER BY s.score DESC LIMIT 1000`).all() as { id: string; owner: string; score: number; pub: number; labels: string; project: string | null }[];
     const tags = new Map<string, string[]>(); for (const t of this.db.prepare("SELECT share_id, tag FROM share_tags").all() as { share_id: string; tag: string }[]) (tags.get(t.share_id) ?? tags.set(t.share_id, []).get(t.share_id)!).push(t.tag);
     const fam = (p: string | null) => { try { const j = JSON.parse(p ?? "{}") as { tracks?: { program?: number; channel?: number }[] }; return [...new Set((j.tracks ?? []).map((t) => t.channel === 9 ? "drums" : `gm${Math.floor((t.program ?? 0) / 8)}`))]; } catch { return []; } };
-    const songs = rows.map((r) => ({ id: r.id, owner: r.owner, score: Number(r.score), published_at: Number(r.pub), tags: tags.get(r.id) ?? [], labels: JSON.parse(r.labels || "[]") as string[], fam: fam(r.project) }));
+    const secs = (p: string | null) => { try { return projectSeconds(JSON.parse(p ?? "{}")); } catch { return null; } };
+    const songs = rows.map((r) => ({ id: r.id, owner: r.owner, score: Number(r.score), published_at: Number(r.pub), tags: tags.get(r.id) ?? [], labels: JSON.parse(r.labels || "[]") as string[], fam: fam(r.project), dur: secs(r.project) ?? NaN }));
+    const known = songs.map((x) => x.dur).filter((d) => Number.isFinite(d)).sort((a, b) => a - b); const median = known.length ? known[Math.floor(known.length / 2)] : 60;
+    for (const x of songs) if (!Number.isFinite(x.dur)) x.dur = median;
     this.cache = { at: this.now(), key, songs }; return songs;
   }
   invalidate() { this.cache = null; }
@@ -71,12 +89,17 @@ export class Ranker {
     const sq = (m: Map<string, number>, s: Song) => { const keys = [...s.tags.map((x) => `t:${x}`), ...s.labels.map((x) => `l:${x}`), `a:${s.owner}`, ...s.fam.map((x) => `f:${x}`)]; let v = 0; for (const k of keys) v += m.get(k) ?? 0; return Math.tanh(v / 3); };
     return songs.map((s) => ({ song: s, f: { affinity: sq(pref, s), coeng: (co.get(s.id) ?? 0) / maxCo, popularity: s.score / maxScore, freshness: Math.pow(0.5, Math.max(0, t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000)), session: sq(sess, s), seen: Math.min(1, (seen.get(s.id) ?? 0) / 2) }, history: hist.length }));
   }
-  value(f: Record<string, number>, w = this.weights) { let v = w.bias; for (const k of FEATURES) v += (w[k] ?? 0) * (f[k] ?? 0); return v; }
+  /** Score: with a learned model, expected listen value P(complete)·min(dur,180)/180 − SKIP_LAMBDA·P(fast skip); else HEURISTIC w·f. */
+  value(f: Record<string, number>, durS = 60, m: Model | null = this.model, w = this.weights) {
+    const x = FEATURES.map((k) => f[k] ?? 0);
+    if (m) return sig(lin(x, m.complete)) * (Math.min(durS, DUR_CAP_S) / DUR_CAP_S) - SKIP_LAMBDA * sig(lin(x, m.skip));
+    return lin(x, w);
+  }
 
   /** Full ranked id list for an actor; deterministic for a given seed (pages stay consistent). */
   rank(o: { actor: string | null; session: string | null; seed: number; viewer?: string | null }): { ids: string[]; owners: Map<string, string>; version: string; cold: boolean } {
     const fs = this.features(o.actor, o.session); const r = rng(o.seed); const cold = !fs.length || fs[0].history === 0;
-    const scored = fs.map((x) => ({ s: x.song, v: this.value(x.f) + (x.song.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
+    const scored = fs.map((x) => ({ s: x.song, v: this.value(x.f, x.song.dur) + (x.song.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
     scored.sort((a, b) => b.v - a.v);
     // exploration: ~EPSILON of the slots go to random lower-ranked (often new / untried) songs
     const out: typeof scored = []; const pool = [...scored];
@@ -96,36 +119,42 @@ export class Ranker {
     return { ids: res.map((s) => s.id), owners: new Map(res.map((s) => [s.id, s.owner])), version: this.version, cold };
   }
 
-  /** Nightly: fit a logistic model P(positive | features). Features are point-in-time (as of each impression's hour,
-   *  with its own session); the last HOLDOUT_DAYS are held out. The candidate is always stored, promoted only if it
-   *  beats (>=) the promoted model on the same holdout (HEURISTIC counts as no model). */
+  /** Nightly: fit two LR heads, P(complete) and P(fast skip), on point-in-time features (as of each impression's
+   *  hour, with its own session); the last HOLDOUT_DAYS are held out. The candidate is always stored, and promoted
+   *  only if both heads' holdout AUC are >= the promoted model's on the same holdout (HEURISTIC = no model). */
   train(): TrainResult | null {
     const t0 = Date.now(); const t = this.now();
-    const imps = this.db.prepare("SELECT actor, session, share_id, dwell_ms, completed, fast_skip, actions, created_at FROM impressions WHERE created_at > ? AND position >= 0 ORDER BY id DESC LIMIT 20000").all(t - 30 * 86_400_000) as { actor: string; session: string; share_id: string; dwell_ms: number; completed: number; fast_skip: number; actions: string; created_at: number }[];
+    const imps = this.db.prepare("SELECT actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at FROM impressions WHERE created_at > ? AND position >= 0 ORDER BY id DESC LIMIT 20000").all(t - 30 * 86_400_000) as { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number }[];
     if (imps.length < MIN_TRAIN) return null;
-    const cache = new Map<string, Map<string, Record<string, number>>>();
-    const split = t - HOLDOUT_DAYS * 86_400_000; const tr: Row[] = [], ho: Row[] = [];
+    const { tr, ho } = this.dataset(imps, t - HOLDOUT_DAYS * 86_400_000);
+    if (tr.length < MIN_TRAIN || !ho.length) return null;
+    const model: Model = { complete: fitLR(tr.map((d) => ({ x: d.x, y: d.c }))), skip: fitLR(tr.map((d) => ({ x: d.x, y: d.s }))) };
+    const ev = (m: Model) => ({ c: aucOf(ho.map((d) => lin(d.x, m.complete)), ho.map((d) => d.c)), s: aucOf(ho.map((d) => lin(d.x, m.skip)), ho.map((d) => d.s)) });
+    const a = ev(model); model.auc_skip = a.s; const cur = this.promoted(); const b = cur ? ev(cur.model) : null;
+    const ge = (x: number | null, y: number | null | undefined) => y === null || y === undefined || (x !== null && x >= y);
+    const promote = !cur || (ge(a.c, b!.c) && ge(a.s, b!.s));
+    let version = `lr2-${new Date(t).toISOString().slice(0, 10).replace(/-/g, "")}`; if (cur?.version === version && !promote) version += "-c";
+    this.db.prepare("INSERT OR REPLACE INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES (?,?,?,?,?,?)").run(version, JSON.stringify(model), tr.length, a.c, t, promote ? 1 : 0);
+    if (promote) { this.model = model; this.version = version; }
+    return { version, n: tr.length, holdout: ho.length, auc: a.c, auc_skip: a.s, promoted: promote, previous: cur?.version ?? null, previous_auc: b?.c ?? null, previous_auc_skip: b?.s ?? null, ms: Date.now() - t0, model };
+  }
+  /** Point-in-time training rows (features as of each impression's hour + its session), split at `split`. */
+  dataset(imps: { actor: string; session: string; share_id: string; listen_ratio: number; completed: number; fast_skip: number; replay: number; created_at: number }[], split: number) {
+    const cache = new Map<string, Map<string, Record<string, number>>>(); const tr: Row[] = [], ho: Row[] = [];
     for (const i of imps) {
       const hr = Math.floor(Number(i.created_at) / 3_600_000) * 3_600_000; const key = `${i.actor}\u0001${i.session}\u0001${hr}`;
       let m = cache.get(key); if (!m) { if (cache.size > 2000) cache.clear(); m = new Map(this.features(i.actor, i.session, hr).map((x) => [x.song.id, x.f as Record<string, number>])); cache.set(key, m); }
-      const f = m.get(i.share_id); if (!f) continue; (Number(i.created_at) >= split ? ho : tr).push({ x: FEATURES.map((k) => f[k]), y: signal(i) > 0 ? 1 : 0 });
+      const f = m.get(i.share_id); if (!f) continue; const l = labels(i);
+      (Number(i.created_at) >= split ? ho : tr).push({ x: FEATURES.map((k) => f[k]), c: l.complete, s: l.skip, at: Number(i.created_at), actor: i.actor, session: i.session, share_id: i.share_id });
     }
-    if (tr.length < MIN_TRAIN || !ho.length) return null;
-    const weights = fitLR(tr);
-    const auc = aucOf(ho.map((d) => lin(d.x, weights)), ho.map((d) => d.y));
-    const cur = this.promoted(); const curAuc = cur ? aucOf(ho.map((d) => lin(d.x, cur.weights)), ho.map((d) => d.y)) : null;
-    const promote = !cur || (auc !== null && (curAuc === null || auc >= curAuc));
-    let version = `lr-${new Date(t).toISOString().slice(0, 10).replace(/-/g, "")}`; if (cur?.version === version && !promote) version += "-c";
-    this.db.prepare("INSERT OR REPLACE INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES (?,?,?,?,?,?)").run(version, JSON.stringify(weights), tr.length, auc, t, promote ? 1 : 0);
-    if (promote) { this.weights = weights; this.version = version; }
-    return { version, n: tr.length, holdout: ho.length, auc, promoted: promote, previous: cur?.version ?? null, previous_auc: curAuc, ms: Date.now() - t0, weights };
+    return { tr, ho };
   }
 }
-export interface TrainResult { version: string; n: number; holdout: number; auc: number | null; promoted: boolean; previous: string | null; previous_auc: number | null; ms: number; weights: Weights }
-type Row = { x: number[]; y: number };
+export interface TrainResult { version: string; n: number; holdout: number; auc: number | null; auc_skip: number | null; promoted: boolean; previous: string | null; previous_auc: number | null; previous_auc_skip: number | null; ms: number; model: Model }
+export type Row = { x: number[]; c: number; s: number; at: number; actor: string; session: string; share_id: string };
 export const HOLDOUT_DAYS = 3;
-const lin = (x: number[], w: Weights) => w.bias + x.reduce((a, v, j) => a + v * (w[FEATURES[j]] ?? 0), 0);
-function fitLR(data: Row[]): Weights {
+export function lin(x: number[], w: Weights) { return w.bias + x.reduce((a, v, j) => a + v * (w[FEATURES[j]] ?? 0), 0); }
+function fitLR(data: { x: number[]; y: number }[]): Weights {
   const w = new Array(FEATURES.length + 1).fill(0); const lr = 0.1, l2 = 1e-3;
   for (let ep = 0; ep < 200; ep++) { const g = new Array(w.length).fill(0); for (const d of data) { const z = w[0] + d.x.reduce((a, v, j) => a + v * w[j + 1], 0); const e = 1 / (1 + Math.exp(-z)) - d.y; g[0] += e; d.x.forEach((v, j) => { g[j + 1] += e * v; }); } for (let j = 0; j < w.length; j++) w[j] -= lr * (g[j] / data.length + (j ? l2 * w[j] : 0)); }
   return { bias: w[0], ...Object.fromEntries(FEATURES.map((k, j) => [k, w[j + 1]])) } as Weights;
