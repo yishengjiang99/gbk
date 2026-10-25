@@ -85,7 +85,7 @@ final class APIClientTests: XCTestCase {
     func testBuildsFeedRequestWithBearer() throws {
         let client = APIClient(tokenProvider: { "tok" })
         let req = try client.request(for: Endpoints.feed(FeedQuery(sort: .top, label: "jazz", tag: nil), cursor: "abc", limit: 20))
-        XCTAssertEqual(req.url?.absoluteString, "https://compose.grepawk.com/api/feed?sort=top&label=jazz&cursor=abc&limit=20")
+        XCTAssertEqual(req.url?.absoluteString, "https://compose.grepawk.com/api/feed?sort=top&label=jazz&cursor=abc&limit=20&session=\(ImpressionLogger.session)")
         XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
         XCTAssertFalse(req.httpShouldHandleCookies)
 
