@@ -5,6 +5,7 @@ struct SignInView: View {
     @EnvironmentObject private var auth: AuthStore
     var reason: String
     @State private var message: String?
+    @State private var showReviewer = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -22,8 +23,12 @@ struct SignInView: View {
             }
             .buttonStyle(.borderedProminent)
             if let message { Text(message).font(.footnote).foregroundStyle(.secondary) }
+            Button("Sign in with a review account") { showReviewer = true }
+                .font(.footnote)
+                .foregroundStyle(Theme.accent)
         }
         .padding(32)
+        .sheet(isPresented: $showReviewer) { ReviewerSignInSheet() }
     }
 
     private func run(_ op: () async throws -> Void) async {

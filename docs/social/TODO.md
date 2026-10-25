@@ -20,6 +20,7 @@
 - Create the "GBK Composer App Store" provisioning profile (or pass another name to the ios-release workflow input).
 - Add the App Store Connect API key secrets to the gbk repo (same names as finalcut): `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_P8`, `IOS_DISTRIBUTION_P12_BASE64`, `IOS_DISTRIBUTION_P12_PASSWORD`, `IOS_APPSTORE_PROFILE_BASE64`.
 - Approve the final app icon (current one is a generated placeholder: light-blue gradient with a #2d6a93 note).
+- App Review notes: reviewer account `openai-reviewer` (password in server config; enter it in App Store Connect review notes) — confirm REVIEWER_LOGIN_ENABLED stays on during review.
 - Approve TestFlight submission (`.github/workflows/ios-release.yml` is workflow_dispatch only and has never been run).
 - AASA at `/.well-known/apple-app-site-association` (server, iOS-1): app id `83D36RPMUM.com.grepawk.gbk`.
 - Switch the ASC record's bundle ID (app 6826906431, 'GBK Music Composer') from com.grepawk.moviefone to com.grepawk.gbk; the API cannot change an existing record's bundle ID. If ASC won't allow it (a build was uploaded under moviefone), create a new app record for com.grepawk.gbk.

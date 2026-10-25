@@ -122,3 +122,10 @@ final class MockAuthServiceTests: XCTestCase {
         XCTAssertTrue(mock.deleted)
     }
 }
+
+final class ReviewerSignInTests: XCTestCase {
+    func testFormBodyEncodesReservedCharacters() {
+        let body = String(decoding: ReviewerSignIn.formBody(["password": "a&b=c d+", "username": "openai-reviewer"]), as: UTF8.self)
+        XCTAssertEqual(body, "password=a%26b%3Dc%20d%2B&username=openai-reviewer")
+    }
+}
