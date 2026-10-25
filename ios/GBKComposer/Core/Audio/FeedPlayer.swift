@@ -25,11 +25,8 @@ final class FeedPlayer: ObservableObject {
     let analyzer = SpectrumAnalyzer()
     private var tapTask: Task<Void, Never>?
 
-    nonisolated static func configureAudioSession() {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default)
-        try? session.setActive(true)
-    }
+    /// Session ownership lives in AudioSessionController (single owner; `.playback` unless something records).
+    @MainActor static func configureAudioSession() { AudioSessionController.shared.start() }
 
     /// Outgoing gain for fade progress t in 0...1 (cos curve). The incoming song is always at 1.
     nonisolated static func fadeOutGain(_ t: Double) -> Float {

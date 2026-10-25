@@ -102,24 +102,18 @@ struct WebView: UIViewRepresentable {
             decisionHandler(Self.mediaCaptureDecision(host: origin.host, type: type))
         }
 
-        /// While the page records, the app session is playAndRecord (speaker, Bluetooth, mixes with the SF2 studio
-        /// playback); when capture ends it goes back to the feed's `.playback` session.
+        /// While the page records, the app session is playAndRecord (speaker, Bluetooth; see AudioSessionController);
+        /// when capture ends it goes back to `.playback`.
         func observeMicrophone(_ webView: WKWebView) {
             micObservation = webView.observe(\.microphoneCaptureState, options: [.new]) { wv, _ in
                 let recording = wv.microphoneCaptureState != .none
-                DispatchQueue.main.async { Self.setRecordingSession(recording) }
+                Task { @MainActor in Self.setRecordingSession(recording) }
             }
         }
 
-        static func setRecordingSession(_ recording: Bool) {
-            let session = AVAudioSession.sharedInstance()
-            if recording {
-                try? session.setCategory(.playAndRecord, mode: .default,
-                                         options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
-                try? session.setActive(true)
-            } else {
-                FeedPlayer.configureAudioSession()
-            }
+        @MainActor static func setRecordingSession(_ recording: Bool) {
+            let audio = AudioSessionController.shared
+            if recording { try? audio.beginRecording("web-mic") } else { audio.endRecording("web-mic") }
         }
 
         /// Web alerts (e.g. "Microphone access was denied…", "Transcription failed…") need a native panel in WKWebView.

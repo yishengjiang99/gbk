@@ -1,7 +1,7 @@
 import AVFoundation
 
 /// Mic capture for Hum: AVAudioEngine input tap → mono float → 22,050 Hz (Basic Pitch rate). Auto-stops at 60 s.
-/// The audio session is playAndRecord only while recording, then restored to the feed's `.playback`.
+/// The audio session (AudioSessionController) is playAndRecord/.default only while recording, then `.playback`.
 @MainActor
 final class HumRecorder {
     static let maxSeconds = 60.0
@@ -22,11 +22,11 @@ final class HumRecorder {
 
     func start() throws {
         guard !isRecording else { return }
-        let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
-            try session.setActive(true)
-        } catch { throw RecordError.unavailable(error.localizedDescription) }
+            try AudioSessionController.shared.beginRecording("hum")
+        } catch {
+            AudioSessionController.shared.endRecording("hum")
+            throw RecordError.unavailable(error.localizedDescription) }
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -63,8 +63,7 @@ final class HumRecorder {
     }
 
     static func restoreSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        FeedPlayer.configureAudioSession()
+        AudioSessionController.shared.endRecording("hum")
     }
 
     /// Linear-interpolated resample after a simple box low-pass (enough for monophonic hum pitch detection).
