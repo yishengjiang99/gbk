@@ -8,6 +8,7 @@ import { MySongs } from "../songs/MySongs.tsx";
 import type { Project } from "../../workstation/model.ts";
 import { appUrl } from "../../agent/routes.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
+import { markAction } from "../social/impressions.ts";
 
 /** Share / Fork controls + the owner's shared songs (unshare / delete). */
 /** Share = save privately + the Publish dialog (nothing goes public without its confirm). Also Fork and My songs. */
@@ -44,7 +45,7 @@ export function SharePanel({ project, readOnly, authenticated, publishRequest = 
         </button>
       )}
       {authenticated && !readOnly && <span className="ws-dim"> songs you make with the Composer are saved privately in My songs; Publish puts one on Explore</span>}
-      {last && <div data-testid="share-link">Link: <a href={last.url} target="_blank" rel="noreferrer">{last.url}</a> <button onClick={() => void navigator.clipboard?.writeText(last.url ?? "")}>Copy</button></div>}
+      {last && <div data-testid="share-link">Link: <a href={last.url} target="_blank" rel="noreferrer">{last.url}</a> <button onClick={() => { if (last.slug) markAction(last.slug, "share"); void navigator.clipboard?.writeText(last.url ?? ""); }}>Copy</button></div>}
       {err && <div className="cmp-error">{err}</div>}
       {authenticated && <details data-testid="my-songs-studio"><summary>My songs</summary><MySongs compact refreshKey={rk} /></details>}
       {dialog && <PublishDialog song={dialog} onClose={() => { setDialog(null); setRk((x) => x + 1); }} onPublished={(s) => { setDialog(null); setLast(s); setRk((x) => x + 1); }} />}

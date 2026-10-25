@@ -26,6 +26,12 @@ test("events: impressions batch (guest cookie, user, bearer-less origin check), 
     assert.equal(r.status, 200); assert.equal((await r.json()).accepted, 1); assert.match(r.headers.get("set-cookie") ?? "", /gbk_gid=/);
     r = await fetch(`${s.base}/api/events`, { method: "POST", headers: H(bob), body: JSON.stringify({ session: "sess-bob-1", events: [ev({ actions: ["rate", "bogus"] }), ev({ dwell_ms: 3000, listen_ratio: 0.5, completed: false })] }) });
     assert.equal((await r.json()).accepted, 2);
+    // v2 signals: like/follow/profile_tap accepted (up to 8 actions), unknown dropped; scroll_v clamped 0..20000 and stored
+    r = await fetch(`${s.base}/api/events`, { method: "POST", headers: H(bob), body: JSON.stringify({ session: "sess-bob-2", events: [ev({ actions: ["rate", "like", "follow", "profile_tap", "share", "nope"], scroll_v: 99999 }), ev({ scroll_v: -5 }), ev({ scroll_v: "x" })] }) });
+    assert.equal((await r.json()).accepted, 3);
+    const rows = s.shares.database.prepare("SELECT actions, scroll_v FROM impressions WHERE session = 'sess-bob-2' ORDER BY id").all() as { actions: string; scroll_v: number | null }[];
+    assert.deepEqual(JSON.parse(rows[0].actions), ["rate", "like", "follow", "profile_tap", "share"]); assert.equal(rows[0].scroll_v, 20000); assert.equal(rows[1].scroll_v, 0); assert.equal(rows[2].scroll_v, null);
+    s.shares.database.prepare("DELETE FROM impressions WHERE session = 'sess-bob-2'").run();
     // admin metrics
     assert.equal((await fetch(`${s.base}/api/admin/metrics`, { headers: H(bob) })).status, 403);
     const m = await (await fetch(`${s.base}/api/admin/metrics?days=7`, { headers: H(alice) })).json();

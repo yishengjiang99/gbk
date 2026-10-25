@@ -82,6 +82,7 @@ struct FeedView: View {
                 .scrollTargetBehavior(.paging)
                 .scrollPosition(id: $visibleSlug)
                 .scrollIndicators(.hidden)
+                .modifier(ScrollSpeedLogger())
             }
         }
         .background(Theme.background.ignoresSafeArea())
@@ -193,4 +194,15 @@ struct Chip: View {
 
 extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+/// Feeds the scroll offset to ImpressionLogger.noteScroll for `scroll_v` (iOS 18+; older systems send none).
+private struct ScrollSpeedLogger: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Double.self, of: { Double($0.contentOffset.y) }) { _, y in
+                ImpressionLogger.shared.noteScroll(offset: y)
+            }
+        } else { content }
+    }
 }

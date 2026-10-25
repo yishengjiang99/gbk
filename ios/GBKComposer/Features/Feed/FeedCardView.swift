@@ -21,6 +21,7 @@ struct FeedCardView: View {
                 NavigationLink(value: song.author.handle) {
                     Text("@\(song.author.handle)").font(.subheadline)
                 }
+                .simultaneousGesture(TapGesture().onEnded { ImpressionLogger.shared.mark(.profileTap, song: song.slug) })
                 .foregroundStyle(Theme.textSecondary)
             }
 
@@ -80,7 +81,7 @@ struct FeedCardView: View {
     /// Double-tap = 5 stars (doc: "like" maps to rating).
     private func quickLove() async {
         guard let r = try? await APIClient.shared.send(Endpoints.rate(song.slug, stars: 5), as: RatingSummary.self) else { return }
-        ImpressionLogger.shared.mark(.rate, song: song.slug)
+        ImpressionLogger.shared.markRate(stars: 5, song: song.slug)
         var s = song; s.ratingAvg = r.ratingAvg; s.ratingCount = r.ratingCount; s.myRating = r.myRating
         onRated(s)
     }

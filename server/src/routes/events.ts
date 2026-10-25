@@ -8,7 +8,7 @@ import { parseCookies } from "../security/authentication.ts";
 import { originAllowed } from "../security/authorization.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import type { ShareStore } from "../persistence/shares.ts";
-import { ACTIONS, type EventStore, type Impression } from "../persistence/events.ts";
+import { ACTIONS, MAX_ACTIONS, MAX_SCROLL_V, type EventStore, type Impression } from "../persistence/events.ts";
 import { currentSession } from "./agent.ts";
 
 const GID = "gbk_gid"; const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -36,9 +36,10 @@ export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: Session
       const r = typeof e.song === "string" ? shares.bySlug(e.song) : null; if (!r || !r.public) continue;
       const dwell = Math.round(num(e.dwell_ms, 0, 3_600_000));
       rows.push({ actor, session, share_id: r.id, dwell_ms: dwell, listen_ratio: num(e.listen_ratio, 0, 50), completed: !!e.completed, fast_skip: e.fast_skip === undefined ? dwell < 2000 : !!e.fast_skip,
-        replay: !!e.replay, actions: (Array.isArray(e.actions) ? e.actions : []).map(String).filter((a) => (ACTIONS as readonly string[]).includes(a)).slice(0, 5),
+        replay: !!e.replay, actions: (Array.isArray(e.actions) ? e.actions : []).map(String).filter((a) => (ACTIONS as readonly string[]).includes(a)).slice(0, MAX_ACTIONS),
         position: Math.round(num(e.position, 0, 100000)), feed: typeof e.feed === "string" ? e.feed.slice(0, 32) : "for_you",
-        model_version: typeof e.model_version === "string" ? e.model_version.slice(0, 32) : "unknown", client, ts: Math.round(num(e.ts, 0, 9e15)) });
+        model_version: typeof e.model_version === "string" ? e.model_version.slice(0, 32) : "unknown", client, ts: Math.round(num(e.ts, 0, 9e15)),
+        scroll_v: e.scroll_v === undefined || e.scroll_v === null || !Number.isFinite(Number(e.scroll_v)) ? null : Math.round(num(e.scroll_v, 0, MAX_SCROLL_V)) });
     }
     events.insert(rows);
     return { ok: true, accepted: rows.length };

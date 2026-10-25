@@ -6,6 +6,7 @@ import { renderJobs } from "../../audio/render-job.ts";
 import { STARTER_PROMPTS } from "../composer/ComposerPanel.tsx";
 import { MySongs } from "../songs/MySongs.tsx";
 import { apiBase } from "../../agent/bridge-client.ts";
+import { markAction } from "../social/impressions.ts";
 import type { PianoRollPreview } from "../../agent/piano-roll-preview.ts";
 
 /** Tiny SVG piano roll: one bar per (downsampled) note, colored by track. */
@@ -70,7 +71,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
               <div className="ws-dim">by {s.owner} · {s.forks} fork{s.forks === 1 ? "" : "s"}</div>
               <a className="xp-link" data-testid="top-link" href={link} title={link}>/s/{s.slug}</a>
               <Preview s={s} />
-              <div className="ws-row"><button data-testid="top-open" onClick={() => onOpen(s.slug, false)}>Open</button><button onClick={() => void navigator.clipboard?.writeText(link)}>Copy link</button></div>
+              <div className="ws-row"><button data-testid="top-open" onClick={() => onOpen(s.slug, false)}>Open</button><button onClick={() => { markAction(s.slug, "share"); void navigator.clipboard?.writeText(link); }}>Copy link</button></div>
             </article>
           );
         })}

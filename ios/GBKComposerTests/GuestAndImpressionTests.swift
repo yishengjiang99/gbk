@@ -90,6 +90,31 @@ final class GuestAndImpressionTests: XCTestCase {
         XCTAssertTrue(log.queue.isEmpty)
     }
 
+    func testLikeProfileTapAndScrollSpeed() async {
+        let log = ImpressionLogger()
+        var sent: [[Impression]] = []
+        log.send = { sent.append($0) }
+        var t = Date(timeIntervalSince1970: 1_000)
+        log.now = { t }
+        log.start(song: "a", position: 0, feed: "for_you", modelVersion: "v", time: { nil }, duration: { nil })
+        log.markRate(stars: 5, song: "a"); log.mark(.profileTap, song: "a")
+        log.noteScroll(offset: 0); t = t.addingTimeInterval(0.1); log.noteScroll(offset: 300)   // 3000 pt/s
+        t = t.addingTimeInterval(0.1); log.noteScroll(offset: 100_000)                            // clamped
+        log.start(song: "b", position: 1, feed: "for_you", modelVersion: "v", time: { nil }, duration: { nil })
+        log.markRate(stars: 3, song: "b")
+        log.end(); log.flush()
+        for _ in 0..<5 { await Task.yield() }
+        let evs = sent.flatMap { $0 }
+        XCTAssertEqual(evs[0].actions, [.rate, .like, .profileTap])
+        XCTAssertEqual(evs[0].scrollV, 20000)
+        XCTAssertEqual(evs[1].actions, [.rate])
+        XCTAssertNil(evs[1].scrollV)
+        XCTAssertEqual(ImpressionLogger.json(evs[0])["scroll_v"] as? Double, 20000)
+        XCTAssertNil(ImpressionLogger.json(evs[1])["scroll_v"])
+        XCTAssertEqual((ImpressionLogger.json(evs[0])["actions"] as? [String]), ["rate", "like", "profile_tap"])
+        XCTAssertEqual(FeedAction.follow.rawValue, "follow")
+    }
+
     func testGateRunsNowOrAfterSignIn() {
         let store = AuthStore(); store.clearLocal()
         var prompted: (String, SignInNeed)?

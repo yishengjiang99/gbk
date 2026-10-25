@@ -3,8 +3,8 @@
 // when the page is hidden.
 import { apiBase } from "../../agent/bridge-client.ts";
 
-export type Action = "rate" | "comment" | "remix" | "open_studio" | "share";
-interface Ev { song: string; dwell_ms: number; listen_ratio: number; completed: boolean; fast_skip: boolean; replay: boolean; actions: Action[]; position: number; feed: string; model_version: string; ts: number }
+export type Action = "rate" | "comment" | "remix" | "open_studio" | "share" | "like" | "follow" | "profile_tap";
+interface Ev { song: string; dwell_ms: number; listen_ratio: number; completed: boolean; fast_skip: boolean; replay: boolean; actions: Action[]; position: number; feed: string; model_version: string; ts: number; scroll_v?: number }
 interface Open { song: string; position: number; feed: string; model_version: string; t0: number; actions: Set<Action>; el: HTMLAudioElement | null; listened: number; lastT: number | null; replay: boolean; dur: number }
 
 const session = (() => { try { let s = sessionStorage.getItem("gbk.feedSession"); if (!s) { s = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join(""); sessionStorage.setItem("gbk.feedSession", s); } return s; } catch { return "nosession0"; } })();
@@ -17,20 +17,27 @@ function flush() {
   if (!(navigator.sendBeacon && navigator.sendBeacon(url, blob))) void fetch(url, { method: "POST", body, headers: { "content-type": "application/json" }, credentials: "same-origin", keepalive: true }).catch(() => undefined);
 }
 function sample() { const o = cur; if (!o?.el) return; const t = o.el.currentTime; if (Number.isFinite(o.el.duration) && o.el.duration > 0) o.dur = o.el.duration; if (o.lastT !== null) { const d = t - o.lastT; if (d > 0 && d < 2) o.listened += d; else if (d < -0.5) o.replay = true; } o.lastT = t; }
+// Scroll speed (px/s) of the gesture that leaves the current card: peak since the card started.
+let lastY: number | null = null, lastAt = 0, peakV = 0;
+export function noteScroll(y: number, at = performance.now()) { if (lastY !== null && at > lastAt) peakV = Math.max(peakV, Math.abs(y - lastY) / ((at - lastAt) / 1000)); lastY = y; lastAt = at; }
 /** Close the open impression (if any) and queue it. */
 export function endImpression() {
   const o = cur; if (!o) return; sample(); cur = null;
   const dwell = Math.round(performance.now() - o.t0); const ratio = o.dur ? o.listened / o.dur : 0;
-  queue.push({ song: o.song, dwell_ms: dwell, listen_ratio: Math.round(ratio * 1000) / 1000, completed: ratio >= 0.9 || o.replay, fast_skip: dwell < 2000, replay: o.replay, actions: [...o.actions], position: o.position, feed: o.feed, model_version: o.model_version, ts: Date.now() });
-  if (queue.length >= 10) flush();
+  queue.push({ song: o.song, dwell_ms: dwell, listen_ratio: Math.round(ratio * 1000) / 1000, completed: ratio >= 0.9 || o.replay, fast_skip: dwell < 2000, replay: o.replay, actions: [...o.actions], position: o.position, feed: o.feed, model_version: o.model_version, ts: Date.now(), ...(peakV > 0 ? { scroll_v: Math.round(Math.min(20000, peakV)) } : {}) });
+  peakV = 0; if (queue.length >= 10) flush();
 }
 export function startImpression(song: string, position: number, feed: string, model_version: string) {
-  if (cur?.song === song) return; endImpression();
+  if (cur?.song === song) return; endImpression(); peakV = 0;
   cur = { song, position, feed, model_version, t0: performance.now(), actions: new Set(), el: null, listened: 0, lastT: null, replay: false, dur: 0 };
   if (!timer) { timer = setInterval(() => { sample(); flush(); }, 20_000); setInterval(sample, 250); document.addEventListener("visibilitychange", () => { if (document.hidden) { endImpression(); flush(); } }); addEventListener("pagehide", () => { endImpression(); flush(); }); }
 }
 /** Attach the audio element that plays the open impression's song. */
 export function attachAudio(song: string, el: HTMLAudioElement | null) { if (cur && cur.song === song && cur.el !== el) { sample(); cur.el = el; cur.lastT = el ? el.currentTime : null; } }
 export function markAction(song: string, a: Action) { if (cur?.song === song) cur.actions.add(a); else queue.push({ song, dwell_ms: 0, listen_ratio: 0, completed: false, fast_skip: false, replay: false, actions: [a], position: -1, feed: "detail", model_version: "none", ts: Date.now() }); }
+/** follow: no follow feature yet; call this when it ships (docs/social/TODO.md). */
+export const markFollow = (song: string) => markAction(song, "follow");
+/** like = a rating of 4+ stars (logged in addition to "rate"). */
+export function markRate(song: string, stars: number | null) { markAction(song, "rate"); if (stars !== null && stars >= 4) markAction(song, "like"); }
 export { flush as flushImpressions };
 if (typeof window !== "undefined") (window as unknown as { __gbkImpressions: unknown }).__gbkImpressions = { sentLog, flush, end: endImpression };

@@ -1,7 +1,7 @@
 // gbk Social web UI: one Feed tab (Explore merged: chips + Browse sheet), Create, Inbox, Profile; song ratings,
 // flat comments, reports, profiles and the admin report queue. All user text renders as React text nodes.
 import { Crossfader, type FadeState } from "./crossfade.ts";
-import { startImpression, endImpression, attachAudio, markAction } from "./impressions.ts";
+import { startImpression, endImpression, attachAudio, markAction, markRate, noteScroll } from "./impressions.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { social, LABELS, type Me, type Song, type SComment, type SUser } from "../../agent/social-client.ts";
 import { PianoRoll } from "../explore/ExplorePage.tsx";
@@ -20,7 +20,7 @@ function Stars({ song, me, onChange }: { song: Song; me: Me | null; onChange: (s
   const [err, setErr] = useState("");
   const set = async (n: number) => {
     if (!me) return needSignIn("Sign in to rate songs.", { kind: "rate", slug: song.slug, stars: n }); if (song.is_mine) { setErr("You can't rate your own song"); return; }
-    try { const r = await social.rate(song.slug, song.my_rating === n ? null : n); markAction(song.slug, "rate"); onChange({ ...song, ...r }); setErr(""); } catch (e) { setErr((e as Error).message); }
+    try { const stars = song.my_rating === n ? null : n; const r = await social.rate(song.slug, stars); markRate(song.slug, stars); onChange({ ...song, ...r }); setErr(""); } catch (e) { setErr((e as Error).message); }
   };
   return (
     <div className="so-stars" data-testid="stars">
@@ -42,12 +42,13 @@ function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter
       <div className="so-side">
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
         <button aria-label="Open in Studio" data-testid="card-open" onClick={() => { markAction(song.slug, "open_studio"); onOpen(song.slug, false); }}>✎<small>open</small></button>
+        <button aria-label="Share" data-testid="card-share" onClick={() => { markAction(song.slug, "share"); const url = new URL(`/s/${song.slug}`, location.origin).href; const n = navigator as Navigator & { share?: (d: ShareData) => Promise<void> }; if (n.share) void n.share({ title: song.title, url }).catch(() => undefined); else void navigator.clipboard?.writeText(url); }}>↗<small>share</small></button>
         <button aria-label="Remix (fork)" data-testid="card-fork" onClick={() => { markAction(song.slug, "remix"); onOpen(song.slug, true); }}>⑂<small>{song.fork_count}</small></button>
         <button aria-label="Report song" data-testid="card-report" onClick={() => (me ? onSheet({ kind: "report", what: "song", target: song.slug, label: song.title }) : needSignIn("Sign in to report.", { kind: "report", what: "song", target: song.slug, label: song.title }))}>⚑</button>
       </div>
       <div className="so-meta">
         <h2 data-testid="card-title">{song.title}</h2>
-        <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a>{song.author.badge && <span className="so-badge">{song.author.badge}</span>} · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""}</div>
+        <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); markAction(song.slug, "profile_tap"); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a>{song.author.badge && <span className="so-badge">{song.author.badge}</span>} · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""}</div>
         <Stars song={song} me={me} onChange={onUpdate} />
         <Chips song={song} onFilter={onFilter} />
         {song.prompt_shared && song.prompt_text && <div className="so-prompt" data-testid="card-prompt"><span className="so-clamp">“{song.prompt_text}”</span><button className="so-btn" data-testid="card-remix" onClick={() => remix(song.prompt_text!)}>Remix this prompt</button></div>}
@@ -109,7 +110,7 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
   useEffect(() => {
     const root = feedEl.current; if (!root) return; let t: ReturnType<typeof setTimeout> | undefined;
     const done = () => { clearTimeout(t); const cards = [...root.querySelectorAll<HTMLElement>("[data-idx]")]; const mid = root.scrollTop + root.clientHeight / 2; const near = cards.reduce((b, el) => Math.abs(el.offsetTop + el.offsetHeight / 2 - mid) < Math.abs(b.offsetTop + b.offsetHeight / 2 - mid) ? el : b, cards[0]); if (near) setActive(Number(near.dataset.idx)); setSettled((n) => n + 1); };
-    const on = () => { clearTimeout(t); t = setTimeout(done, 120); };
+    const on = () => { noteScroll(root.scrollTop); clearTimeout(t); t = setTimeout(done, 120); };
     root.addEventListener("scroll", on, { passive: true }); root.addEventListener("scrollend", done);
     return () => { clearTimeout(t); root.removeEventListener("scroll", on); root.removeEventListener("scrollend", done); };
   }, []);
@@ -280,7 +281,7 @@ export function SocialApp({ route, onOpen }: { route: SocialRoute; onOpen: (slug
   useEffect(() => {
     if (!meChecked || !me) return;
     const p = takePending("rate", "comment", "report", "profile", "inbox"); if (!p) return;
-    if (p.kind === "rate") void social.rate(p.slug, p.stars).then(() => { markAction(p.slug, "rate"); say(`Rated ${p.stars}★`); setBump((b) => b + 1); }).catch((e) => say((e as Error).message));
+    if (p.kind === "rate") void social.rate(p.slug, p.stars).then(() => { markRate(p.slug, p.stars); say(`Rated ${p.stars}★`); setBump((b) => b + 1); }).catch((e) => say((e as Error).message));
     else if (p.kind === "comment") void social.song(p.slug).then(async (song) => { try { await social.comment(p.slug, p.text); markAction(p.slug, "comment"); setSheet({ kind: "comments", song: { ...song, comment_count: song.comment_count + 1 } }); } catch (e) { say((e as Error).message); setSheet({ kind: "comments", song, draft: p.text }); } }).catch((e) => say((e as Error).message));
     else if (p.kind === "report") setSheet({ kind: "report", what: p.what, target: p.target, label: p.label });
     else if (p.kind === "profile") navigate(`u/${me.handle}`);

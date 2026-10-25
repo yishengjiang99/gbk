@@ -2,8 +2,9 @@
 // model version that ranked it, so offline eval can compare models. Lives in shares.sqlite.
 import type { DatabaseSync } from "node:sqlite";
 
-export const ACTIONS = ["rate", "comment", "remix", "open_studio", "share"] as const;
-export interface Impression { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: boolean; fast_skip: boolean; replay: boolean; actions: string[]; position: number; feed: string; model_version: string; client: string; ts: number }
+export const ACTIONS = ["rate", "comment", "remix", "open_studio", "share", "like", "follow", "profile_tap"] as const;
+export const MAX_ACTIONS = 8, MAX_SCROLL_V = 20000;
+export interface Impression { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: boolean; fast_skip: boolean; replay: boolean; actions: string[]; position: number; feed: string; model_version: string; client: string; ts: number; scroll_v?: number | null }
 
 export class EventStore {
   constructor(private db: DatabaseSync, private now: () => number = Date.now) {
@@ -13,11 +14,13 @@ export class EventStore {
       CREATE INDEX IF NOT EXISTS impressions_actor ON impressions(actor, created_at);
       CREATE INDEX IF NOT EXISTS impressions_time ON impressions(created_at);
       CREATE INDEX IF NOT EXISTS impressions_share ON impressions(share_id);`);
+    // v2: scroll speed when the user left the card (px/s web, pt/s iOS); stored only, not a model feature yet.
+    if (!(this.db.prepare("PRAGMA table_info(impressions)").all() as { name: string }[]).some((c) => c.name === "scroll_v")) this.db.exec("ALTER TABLE impressions ADD COLUMN scroll_v REAL");
   }
   insert(rows: Impression[]) {
-    const st = this.db.prepare("INSERT INTO impressions (actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, position, feed, model_version, client, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    const st = this.db.prepare("INSERT INTO impressions (actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, position, feed, model_version, client, created_at, scroll_v) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     const t = this.now();
-    for (const r of rows) st.run(r.actor, r.session, r.share_id, r.dwell_ms, r.listen_ratio, r.completed ? 1 : 0, r.fast_skip ? 1 : 0, r.replay ? 1 : 0, JSON.stringify(r.actions), r.position, r.feed, r.model_version, r.client, Math.min(t, r.ts || t));
+    for (const r of rows) st.run(r.actor, r.session, r.share_id, r.dwell_ms, r.listen_ratio, r.completed ? 1 : 0, r.fast_skip ? 1 : 0, r.replay ? 1 : 0, JSON.stringify(r.actions), r.position, r.feed, r.model_version, r.client, Math.min(t, r.ts || t), r.scroll_v ?? null);
   }
   /** Aggregate metrics over [since, now). */
   metrics(since: number) {

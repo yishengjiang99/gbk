@@ -5,7 +5,8 @@ import UIKit
 /// One event per card the user settled on: dwell, listen ratio, completed, fast skip, replay, actions.
 /// Batched to `POST /api/events` with `client: "ios"`: flushes every 10 events, every 20 s, and when the app
 /// leaves the foreground. Native requests carry no Origin; the actor is the bearer or `x-gbk-install`.
-enum FeedAction: String, Codable { case rate, comment, remix, openStudio = "open_studio", share }
+/// `like` = a rating of 4+ stars (sent in addition to `rate`); `follow` is reserved until follow ships.
+enum FeedAction: String, Codable { case rate, comment, remix, openStudio = "open_studio", share, like, follow, profileTap = "profile_tap" }
 
 struct Impression: Codable, Equatable {
     let song: String
@@ -19,6 +20,8 @@ struct Impression: Codable, Equatable {
     let feed: String
     let modelVersion: String
     let ts: Int64
+    /// Scroll speed (pt/s, 0...20000) of the gesture that left the card; nil when unknown.
+    var scrollV: Double? = nil
 }
 
 /// Pure bookkeeping for one open impression, sampled from the player clock.
@@ -42,12 +45,13 @@ struct OpenImpression {
         lastT = t
     }
 
-    func close(at now: Date) -> Impression {
+    func close(at now: Date, scrollV: Double? = nil) -> Impression {
         let dwell = Int((now.timeIntervalSince(t0) * 1000).rounded())
         let ratio = duration > 0 ? listened / duration : 0
         return Impression(song: song, dwellMs: dwell, listenRatio: (ratio * 1000).rounded() / 1000,
                           completed: ratio >= 0.9 || replay, fastSkip: dwell < 2000, replay: replay, actions: actions,
-                          position: position, feed: feed, modelVersion: modelVersion, ts: Int64(now.timeIntervalSince1970 * 1000))
+                          position: position, feed: feed, modelVersion: modelVersion, ts: Int64(now.timeIntervalSince1970 * 1000),
+                          scrollV: scrollV.map { min(20000, max(0, $0.rounded())) })
     }
 }
 
@@ -74,11 +78,23 @@ final class ImpressionLogger {
         _ = try? await APIClient.shared.send(ep, as: OKResult.self)
     }
     var now: () -> Date = Date.init
+    private var lastScroll: (y: Double, at: Date)?
+    private var peakScrollV: Double = 0
+
+    /// Feed scroll offset changed: track the peak speed since the current card started (web `noteScroll`).
+    func noteScroll(offset y: Double) {
+        let t = now()
+        if let l = lastScroll, t > l.at { peakScrollV = max(peakScrollV, abs(y - l.y) / t.timeIntervalSince(l.at)) }
+        lastScroll = (y, t)
+    }
+
+    /// Rating logged as `rate`, plus `like` for 4+ stars (nil = cleared).
+    func markRate(stars: Int?, song: String) { mark(.rate, song: song); if let s = stars, s >= 4 { mark(.like, song: song) } }
 
     func start(song: String, position: Int, feed: String, modelVersion: String,
                time: @escaping @MainActor () -> Double?, duration: @escaping @MainActor () -> Double?) {
         if open?.song == song { return }
-        end()
+        end(); peakScrollV = 0
         open = OpenImpression(song: song, position: position, feed: feed, modelVersion: modelVersion, t0: now())
         clock = (time, duration)
         if sampler == nil {
@@ -96,7 +112,8 @@ final class ImpressionLogger {
     func end() {
         guard open != nil else { return }
         sample()
-        if let o = open { queue.append(o.close(at: now())) }
+        if let o = open { queue.append(o.close(at: now(), scrollV: peakScrollV > 0 ? peakScrollV : nil)) }
+        peakScrollV = 0
         open = nil; clock = nil
         if queue.count >= Self.batchSize { flush() }
     }
@@ -122,8 +139,10 @@ final class ImpressionLogger {
     }
 
     nonisolated static func json(_ e: Impression) -> [String: Any] {
-        ["song": e.song, "dwell_ms": e.dwellMs, "listen_ratio": e.listenRatio, "completed": e.completed,
+        var d: [String: Any] = ["song": e.song, "dwell_ms": e.dwellMs, "listen_ratio": e.listenRatio, "completed": e.completed,
          "fast_skip": e.fastSkip, "replay": e.replay, "actions": e.actions.map(\.rawValue), "position": e.position,
          "feed": e.feed, "model_version": e.modelVersion, "ts": e.ts]
+        if let v = e.scrollV { d["scroll_v"] = v }
+        return d
     }
 }
