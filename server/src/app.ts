@@ -25,6 +25,7 @@ import { clientErrorRoutes } from "./routes/client-errors.ts";
 import { ClientErrorStore } from "./persistence/client-errors.ts";
 import { FunnelStore } from "./persistence/funnel.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
+import { galleryRoutes } from "./routes/gallery.ts";
 import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
 import { RenderService, resolveSoundFontPath } from "./mcp/browser-render.ts";
@@ -65,6 +66,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const funnel = new FunnelStore(persist ? join(cfg.dataDir, "analytics.sqlite") : ":memory:");
   pageRoutes(app, cfg, funnel);
   funnelRoutes(app, cfg, sessions, funnel);
+  galleryRoutes(app, cfg, sessions);
   openaiChallengeRoute(app, cfg.openaiAppsChallenge);
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
   reviewerRoutes(app, cfg, sessions, accounts);
