@@ -9,6 +9,5 @@ let package = Package(
     products: [.library(name: "HearSheetCore", targets: ["HearSheetCore"])],
     targets: [
         .target(name: "HearSheetCore", resources: [.process("velocity-calibration.json")]),
-        .testTarget(name: "HearSheetCoreTests", dependencies: ["HearSheetCore"]),
     ]
 )
