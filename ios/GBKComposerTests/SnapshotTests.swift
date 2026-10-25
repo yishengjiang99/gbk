@@ -70,6 +70,14 @@ final class SnapshotTests: XCTestCase {
         XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2)
     }
 
+    func testPaywallLightAndDark() throws {
+        let view = PaywallView(store: PurchaseStore(verifier: MockIAPVerifier(), accountId: { nil }))
+        let size = CGSize(width: 393, height: 852)
+        let light = try render(view, name: "paywall-light", style: .light, size: size)
+        let dark = try render(view, name: "paywall-dark", style: .dark, size: size)
+        XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, "paywall must follow Dark Mode")
+    }
+
     func testAllThemeColorsResolveInBothAppearances() {
         let names = ["AccentColor", "OnAccent", "BackgroundTop", "BackgroundBottom", "Surface", "SurfaceRaised", "CardTop", "CardBottom",
                      "TextPrimary", "TextSecondary", "Border", "Chip", "RollRow", "Playhead", "Waveform", "BarStart", "BarEnd",

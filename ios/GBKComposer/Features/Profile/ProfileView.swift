@@ -90,6 +90,7 @@ struct ProfileView: View {
                         .navigationTitle("Profile")
                 }
             }
+            .toolbar { ToolbarItem(placement: .topBarLeading) { ProButton() } }
             .alert("Delete your account?", isPresented: $confirmDelete) {
                 Button("Delete", role: .destructive) { Task { await deleteAccount() } }
                 Button("Cancel", role: .cancel) {}

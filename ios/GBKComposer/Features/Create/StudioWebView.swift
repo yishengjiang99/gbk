@@ -29,6 +29,7 @@ struct WebView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         let view = WKWebView(frame: .zero, configuration: config)
+        view.navigationDelegate = context.coordinator
         view.isOpaque = false
         view.backgroundColor = .clear
         view.load(URLRequest(url: url))
@@ -43,5 +44,25 @@ struct WebView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator { var loaded: URL? }
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var loaded: URL?
+
+        /// Web upgrade/buy links (/pricing, Stripe checkout) open the App Store paywall instead (guideline 3.1.1).
+        static func isPurchaseLink(_ url: URL?) -> Bool {
+            guard let url, let host = url.host?.lowercased() else { return false }
+            if host.hasSuffix("stripe.com") { return true }
+            let path = url.path.lowercased()
+            return (host.hasSuffix("grepawk.com") && (path.hasPrefix("/pricing") || path.hasPrefix("/api/compose/checkout")))
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if Self.isPurchaseLink(action.request.url) {
+                decisionHandler(.cancel)
+                Task { @MainActor in PurchaseStore.shared.showPaywall = true }
+            } else {
+                decisionHandler(.allow)
+            }
+        }
+    }
 }

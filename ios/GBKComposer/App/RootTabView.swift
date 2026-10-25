@@ -4,6 +4,7 @@ enum AppTab: Hashable { case feed, create, inbox, profile }
 
 struct RootTabView: View {
     @EnvironmentObject private var router: DeepLinkRouter
+    @ObservedObject private var store = PurchaseStore.shared
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
@@ -15,6 +16,10 @@ struct RootTabView: View {
                 .tabItem { Label("Feed", systemImage: "play.rectangle.on.rectangle") }
                 .tag(AppTab.feed)
             StudioWebView()
+                .overlay(alignment: .topTrailing) {
+                    ProButton().buttonStyle(.borderedProminent).tint(Theme.accent).foregroundStyle(Theme.onAccent)
+                        .controlSize(.small).padding(.trailing, 12).padding(.top, 4)
+                }
                 .tabItem { Label("Create", systemImage: "plus.circle.fill") }
                 .tag(AppTab.create)
             InboxView()
@@ -24,5 +29,6 @@ struct RootTabView: View {
                 .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                 .tag(AppTab.profile)
         }
+        .sheet(isPresented: $store.showPaywall) { PaywallView(store: store) }
     }
 }

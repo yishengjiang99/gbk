@@ -1,0 +1,94 @@
+{
+  "identifier": "GBKCOMPOSER",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "99.99",
+      "familyShareable": false,
+      "internalID": "E3219B6C-19AF-5A29-8B03-0EAD5CF93A69",
+      "localizations": [
+        {
+          "description": "Pro forever: 10x Studio budget, longer renders.",
+          "displayName": "GBK Pro Lifetime",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.grepawk.moviefone.lifetime",
+      "referenceName": "GBK Pro Lifetime",
+      "type": "NonConsumable"
+    }
+  ],
+  "settings": {
+    "_applicationInternalID": "6826906431",
+    "_developerTeamID": "83D36RPMUM",
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
+  },
+  "subscriptionGroups": [
+    {
+      "id": "GBKPRO01",
+      "localizations": [],
+      "name": "GBK Pro",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "47.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "DA68FA0A-4D89-5014-AD47-4F69D748A8C1",
+          "introductoryOffer": {
+            "internalID": "2FCAD189-8541-580E-AE25-1D8C531B2346",
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
+          },
+          "localizations": [
+            {
+              "description": "10x Studio budget and longer renders, billed yearly.",
+              "displayName": "GBK Pro Yearly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.grepawk.moviefone.pro_yearly",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "GBK Pro Yearly",
+          "subscriptionGroupID": "GBKPRO01",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "5.99",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "934371B4-DABD-5026-95B6-FFA9BBBA6560",
+          "introductoryOffer": {
+            "internalID": "4880B1AC-5A9B-5CC7-876C-95F56CA3CF88",
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
+          },
+          "localizations": [
+            {
+              "description": "10x Studio budget and longer renders, billed monthly.",
+              "displayName": "GBK Pro Monthly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.grepawk.moviefone.pro_monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "GBK Pro Monthly",
+          "subscriptionGroupID": "GBKPRO01",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 4,
+    "minor": 0
+  }
+}

@@ -14,6 +14,7 @@ struct GBKComposerApp: App {
                 .environmentObject(router)
                 .tint(Theme.accent)
                 .onOpenURL { router.handle($0) }
+                .task { PurchaseStore.shared.start() }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL { router.handle(url) }
                 }

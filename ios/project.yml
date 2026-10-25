@@ -51,6 +51,8 @@ schemes:
       targets:
         GBKComposer: all
         GBKComposerTests: [test]
+    run:
+      storeKitConfiguration: StoreKit/GBKComposer.storekit
     test:
       targets:
         - GBKComposerTests
