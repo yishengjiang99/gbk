@@ -1039,7 +1039,7 @@ export default function App() {
   }
 
   const ensureAudioInfrastructure = useCallback(
-    async ({ loadWorklet = true }: { loadWorklet?: boolean } = {}): Promise<{
+    async ({ loadWorklet = true, resume = false }: { loadWorklet?: boolean; resume?: boolean } = {}): Promise<{
       ctx: AudioContext;
       input: AudioNode;
     }> => {
@@ -1057,6 +1057,13 @@ export default function App() {
           setAudioCtxState(currentContext.state);
           if (currentContext.state === "closed") setAudioReady(false);
         };
+      }
+      // iOS Safari only unlocks audio when resume() is called synchronously inside the tap, before any await
+      // (this async function runs synchronously up to its first await). Resuming later needed a second tap.
+      if (resume && ctx.state !== "running") {
+        void ctx.resume().catch(() => undefined);
+        // Classic iOS unlock: start a 1-frame silent buffer inside the gesture so WebKit marks the context as allowed.
+        try { const b = ctx.createBufferSource(); b.buffer = ctx.createBuffer(1, 1, ctx.sampleRate); b.connect(ctx.destination); b.start(0); } catch { /* best effort */ }
       }
 
       let analyser = analyserRef.current;

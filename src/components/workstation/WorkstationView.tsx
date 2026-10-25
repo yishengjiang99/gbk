@@ -124,7 +124,8 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
 
   const transportCore = (<>
     <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>
-    {state.transport.playing ? <button className="ws-playbtn" onClick={() => workstation.pause()} aria-label="Pause">⏸</button> : <button className="ws-playbtn" onClick={() => run(() => workstation.play())} aria-label="Play" data-testid="ws-play">▶</button>}
+    {state.transport.starting && !state.transport.playing ? <button className="ws-playbtn" onClick={() => run(() => workstation.play())} aria-label="Loading sound…" aria-busy="true" data-testid="ws-play-loading">⏳</button>
+      : state.transport.playing ? <button className="ws-playbtn" onClick={() => workstation.pause()} aria-label="Pause">⏸</button> : <button className="ws-playbtn" onClick={() => run(() => workstation.play())} aria-label="Play" data-testid="ws-play">▶</button>}
     <button onClick={() => workstation.stop()} aria-label="Stop">⏹</button>
     <span className="ws-pos" data-testid="ws-pos" data-pos-tick={pos}>{bb.bar}.{Math.floor(bb.beat) + 1} · {tickToSec(p, pos).toFixed(2)}s</span>
   </>);

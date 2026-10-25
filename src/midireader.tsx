@@ -402,7 +402,7 @@ interface MidiReaderProps {
   onSelectMidiInput: (id: string) => void;
   midiInputs?: { id: string; name: string }[];
   ensureAudioInfrastructure: (
-    opts?: { loadWorklet?: boolean }
+    opts?: { loadWorklet?: boolean; resume?: boolean }
   ) => Promise<{ ctx: AudioContext; input: AudioNode }>;
   getRegionsForPreset: (presetIndex: number) => SF2Region[];
   resolvePresetIndex: (program: number, bank: number) => number | null;
@@ -1479,8 +1479,8 @@ export default function MidiReader({
     autoplayLoadedSongRef.current = true;
     try {
       // Unlock audio during the click, before waiting for the SoundFont download.
-      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false });
-      await ctx.resume();
+      const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false, resume: true });
+      if (ctx.state !== "running") await ctx.resume();
       setPlayRequested(true);
       if (!sf2Ready && !sf2Loading) onLoadDefaultSf2();
     } catch (err) {
@@ -1629,7 +1629,7 @@ export default function MidiReader({
   const bridgeImplRef = useRef<import("./workstation/player-bridge.ts").PlayerHandle | null>(null);
   bridgeImplRef.current = {
     loadBuffer: (buf, name, o) => loadMidiIntoTracks(buf, name, { autoplay: o.autoplay, restoreSec: o.restoreSec, persist: false }),
-    unlockAudio: async () => { const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false }); await ctx.resume(); },
+    unlockAudio: async () => { const { ctx } = await ensureAudioInfrastructure({ loadWorklet: false, resume: true }); if (ctx.state !== "running") await ctx.resume(); },
     pause: () => workerRef.current?.postMessage({ type: "pause" }),
     seek: (sec) => { seekToSec(sec); },
     isReady: () => sf2Ready,

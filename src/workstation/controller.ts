@@ -14,9 +14,9 @@ export interface Proposal {
   validation: { ok: boolean; warnings: string[] }; status: ProposalStatus;
   original: Project; candidate: Project; // refs: original = snapshot at baseRevision
 }
-export interface TransportState { playing: boolean; positionTick: number; audioReady: boolean }
+export interface TransportState { playing: boolean; positionTick: number; audioReady: boolean; starting?: boolean }
 export interface TransportDriver {
-  play(fromTick: number): Promise<void> | void; pause(): void; stop(): void; seek(tick: number): void;
+  play(fromTick: number): Promise<void> | void; /** Synchronous audio unlock, called inside the user gesture. */ unlock?(): void; pause(): void; stop(): void; seek(tick: number): void;
   isAudioReady(): boolean;
   /** Try to unlock audio + load the default SoundFont. Resolves true when ready. */
   prepare?(): Promise<boolean>;
@@ -308,9 +308,29 @@ export class WorkstationController {
     if (!this.driver || !this.driver.isAudioReady()) throw new WorkstationError("AUDIO_NOT_READY", "Audio engine not ready; the user must click in the page to start audio (autoplay policy) and load a SoundFont.");
     return this.driver;
   }
-  async play() { const d = await this.readyDriver(); await d.play(this.state.transport.positionTick); this.updateTransport({ playing: true }); }
-  pause() { this.driver?.pause(); this.updateTransport({ playing: false }); }
-  stop() { this.driver?.stop(); this.updateTransport({ playing: false, positionTick: 0 }); }
+  private pendingPlay: Promise<void> | null = null;
+  private playCancelled = false;
+  /** One call always ends in playback: unlocks audio synchronously (driver.prepare runs before any await), waits for
+   * the SoundFont if needed, then starts. Idempotent while starting: repeated taps share the pending start. */
+  play(): Promise<void> {
+    if (this.pendingPlay) return this.pendingPlay;
+    if (this.state.transport.playing) return Promise.resolve();
+    this.playCancelled = false;
+    this.driver?.unlock?.(); // must run synchronously in the tap (iOS)
+    this.updateTransport({ starting: true });
+    this.pendingPlay = (async () => {
+      try {
+        const d = await this.readyDriver();
+        if (this.playCancelled) return;
+        await d.play(this.state.transport.positionTick);
+        if (this.playCancelled) { d.pause(); return; }
+        this.updateTransport({ playing: true });
+      } finally { this.pendingPlay = null; this.updateTransport({ starting: false }); }
+    })();
+    return this.pendingPlay;
+  }
+  pause() { if (this.pendingPlay) this.playCancelled = true; this.driver?.pause(); this.updateTransport({ playing: false }); }
+  stop() { if (this.pendingPlay) this.playCancelled = true; this.driver?.stop(); this.updateTransport({ playing: false, positionTick: 0 }); }
   seek(tick: number) { const t = Math.max(0, Math.round(tick)); this.driver?.seek(t); this.updateTransport({ positionTick: t }); }
 
   async previewProposal(id: string, variant: "A" | "B", signal?: AbortSignal) {

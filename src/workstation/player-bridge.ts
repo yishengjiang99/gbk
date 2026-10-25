@@ -65,7 +65,21 @@ class PlayerBridge {
   }
   onSongLoaded() { const w = this.songWaiters; this.songWaiters = []; w.forEach((f) => f()); }
   onTime(sec: number) { const c = this.ctrl; if (!c) return; c.updateTransport({ positionTick: secToTick(c.project, sec) }); }
-  onPlaying(playing: boolean) { this.ctrl?.updateTransport({ playing, audioReady: !!this.handle?.isReady() }); }
+  playerPlaying = false;
+  private playingWaiters: (() => void)[] = [];
+  onPlaying(playing: boolean) {
+    this.playerPlaying = playing;
+    if (playing) { const w = this.playingWaiters; this.playingWaiters = []; w.forEach((f) => f()); }
+    // While a Play tap is still starting (song reload / SoundFont load), the player's transient "not playing" must not
+    // flip the button back to Play; controller.play() settles the state when the start finishes.
+    if (!playing && this.ctrl?.getState().transport.starting) return;
+    this.ctrl?.updateTransport({ playing, audioReady: !!this.handle?.isReady() });
+  }
+  /** Resolves once the player reports it is actually playing; rejects after `ms`. */
+  waitPlaying(ms: number): Promise<void> {
+    if (this.playerPlaying) return Promise.resolve();
+    return new Promise((res, rej) => { const t = setTimeout(() => rej(new Error("Playback did not start; press Play again")), ms); this.playingWaiters.push(() => { clearTimeout(t); res(); }); });
+  }
   onReady() { this.ctrl?.updateTransport({ audioReady: !!this.handle?.isReady() }); }
 
   waitSong(): Promise<void> { return new Promise((r) => this.songWaiters.push(r)); }
@@ -100,6 +114,7 @@ export function driverFor(c: WorkstationController): TransportDriver {
   const b = playerBridge;
   return {
     isAudioReady: () => !!b.handle?.isReady(),
+    unlock: () => { void b.handle?.unlockAudio().catch(() => undefined); },
     async prepare() {
       const h = b.handle; if (!h) return false;
       try { await h.unlockAudio(); } catch { return false; }
@@ -112,6 +127,7 @@ export function driverFor(c: WorkstationController): TransportDriver {
       const sec = tickToSec(c.project, fromTick);
       // Same project+revision already in the worker: just seek+play; otherwise re-sync from the model.
       await b.loadProject(c.project, true, sec);
+      await b.waitPlaying(30_000);
     },
     pause: () => b.handle?.pause(),
     stop: () => { b.handle?.pause(); b.handle?.seek(0); },
