@@ -69,3 +69,11 @@ Differences: iOS hides notes once they finish (per the iOS card spec), while web
   - `showReadOnlyHint(reason)` → `readOnlyHintListeners`.
   - `onState({ phase: "idle" | "recording" | "transcribing", elapsed, progress })` → button label (`⏺ m:ss Stop` / `🎤 NN%` / `🎤 Hum`).
 - Reference implementation of the web side: `ios/GBKComposer/Resources/HumTest/hum-harness.html`.
+
+## Issue triage (2026-10-25)
+| Issue | State | Owner | Next step |
+|---|---|---|---|
+| #72 Plugin follow-up | closed (delivered in #88–#94, 7f4d026, 17edba2; remainder moved to #100) | GBK Launch | none |
+| #100 ChatGPT plugin launch | phases 1–9 done (79d48e7, 1171aeb, 1cd1403) | GBK Launch | **waiting on Yisheng**: upload gbk-composer-d329875.zip to the portal and run the ChatGPT acceptance checks |
+| #108 Now-playing viz | web live (db68404), iOS port (982e3c9) | Web Engineer / GBK iOS | phone light/dark screenshots + 60fps check (web); verify on a real device (iOS) |
+| #110 Feed ranking v2 | v1 live (8cc9daf); v2 implementation prompt posted | GBK Social | **waiting on Yisheng's plan approval** before closing; do the approved phases as separate commits |
