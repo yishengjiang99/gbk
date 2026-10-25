@@ -10,6 +10,9 @@ const PROMPT = "Compose a four-voice Baroque fugue in D minor with expressive st
 const ws = (page: Page) => page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; const p = c.project; return { id: p.id, name: p.name, owner: p.meta?.owner, tracks: p.tracks.map((t: any) => t.name), programs: p.programs.map((g: any) => g.program), notes: p.notes.length, cc11: p.ccs.filter((e: any) => e.controller === 11).length, cc1: p.ccs.filter((e: any) => e.controller === 1).length, effects: p.sound?.effects ?? null, voice: p.sound?.tracks ?? {}, revision: p.revision, readOnly: c.readOnlyReason }; });
 
 async function signIn(page: Page, code = "e2e-code") {
+  // Phones open on the Tracks tab; the composer lives behind its tab there.
+  await expect(page.getByTestId("workstation").or(page.getByTestId("explore-page")).first()).toBeVisible();
+  const tab = page.getByTestId("tab-composer"); if (await tab.isVisible() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
   await expect(page.getByTestId("composer-login")).toBeVisible();
   await page.getByLabel("Access code").fill(code); await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
@@ -206,6 +209,8 @@ test("theme: landing background is uniform full height; Keys track picker is dar
   await page.goto("/"); await expect(page.getByTestId("explore-page")).toBeVisible();
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(22, 27, 36)");
   await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
+  // The track picker only renders when the project has a track (a fresh phone session can start empty).
+  await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_keys", program: 0 }], { label: "seed" }); });
   await page.getByTestId("keys-toggle").click();
   const sel = page.getByTestId("live-track"); await expect(sel).toBeVisible({ timeout: 60_000 });
   expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(26, 32, 41)");
@@ -313,10 +318,12 @@ test("mobile composer view fits the viewport width (no horizontal scroll)", asyn
     await page.goto("/studio");
     await expect(page.getByTestId("workstation")).toBeVisible();
     await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Strings", channel: 0, id: "t_str", program: 48 }], { label: "seed" }); });
-    await page.getByTestId("tab-composer").click();
-    await expect(page.getByTestId("composer-panel")).toBeVisible();
+    // Lanes live on the roll (Tracks tab); the Composer tab then takes the full height (roll hidden).
+    await page.getByTestId("tab-tracks").click();
     for (let i = 0; i < 4; i++) await page.getByRole("button", { name: "+ lane" }).click();
     await expect(page.locator(".ws-lane").first()).toBeVisible();
+    await page.getByTestId("tab-composer").click();
+    await expect(page.getByTestId("composer-panel")).toBeVisible();
     await expect(page.getByTestId("composer-input")).toBeVisible();
     for (const t of ["tracks", "composer", "agent", "sound", "files"]) { const b = (await page.getByTestId(`tab-${t}`).boundingBox())!; expect(b.x).toBeGreaterThanOrEqual(0); expect(b.x + b.width).toBeLessThanOrEqual(w + 0.5); }
     const m = await page.evaluate(() => {
@@ -334,4 +341,29 @@ test("mobile composer view fits the viewport width (no horizontal scroll)", asyn
     expect(m.small, `${w}x${h} controls under 16px`).toEqual([]);
     expect(m.sw).toBeLessThanOrEqual(m.W);
   }
+});
+
+test("mobile composer view fills the screen height; other tabs restore the roll", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
+  await page.goto("/studio"); await signIn(page);
+  await page.goto("/studio");
+  await expect(page.getByTestId("workstation")).toBeVisible();
+  await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Strings", channel: 0, id: "t_str", program: 48 }], { label: "seed" }); });
+  await page.getByTestId("tab-composer").click();
+  const panel = page.getByTestId("composer-panel"); await expect(panel).toBeVisible();
+  await expect(page.locator(".ws-main")).toBeHidden();
+  const H = page.viewportSize()!.height, W = page.viewportSize()!.width;
+  const tr = (await page.getByTestId("transport-row").boundingBox())!;
+  const pb = (await panel.boundingBox())!; const ib = (await page.getByTestId("composer-input").boundingBox())!;
+  expect(pb.y).toBeGreaterThanOrEqual(tr.y + tr.height - 1);
+  expect(pb.y + pb.height).toBeGreaterThan(H - 2);   // panel reaches the bottom of the screen
+  expect(pb.height).toBeGreaterThan(H * 0.55);       // most of the screen, not a 32% strip
+  expect(ib.y + ib.height).toBeGreaterThan(H - 70);  // input pill pinned at the bottom
+  expect(ib.y + ib.height).toBeLessThanOrEqual(H + 0.5);
+  const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, fs: parseFloat(getComputedStyle(document.querySelector("[data-testid=composer-input] textarea, textarea[data-testid=composer-input]") as Element).fontSize), ov: getComputedStyle(document.querySelector(".cmp-messages")!).overflowY }));
+  expect(m.sw).toBeLessThanOrEqual(W); expect(m.sh).toBeLessThanOrEqual(H + 0.5); expect(m.fs).toBeGreaterThanOrEqual(16); expect(m.ov).toBe("auto");
+  if (test.info().project.name === "mobile-webkit") await page.screenshot({ path: "/workspace/shots/composer-fullheight.png" });
+  await page.getByTestId("tab-tracks").click();
+  await expect(page.locator(".ws-main")).toBeVisible();
+  await expect(page.locator(".ws-roll-slot")).toBeVisible();
 });

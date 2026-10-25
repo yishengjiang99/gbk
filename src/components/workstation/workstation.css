@@ -205,3 +205,14 @@ html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-
   .cmp-input button[type=submit] { flex: none; width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 0; background: #2f6fd6; border-color: #6aa6ff; color: #fff; }
   .cmp-input button[type=submit]::before { content: "↑"; font-size: 18px; line-height: 36px; }
 }
+/* Phone + Composer tab: chat takes the full height below header/transport (like FinalCut's mobile chat); the piano
+   roll, lanes and scrubber are hidden until another tab is chosen. Messages scroll inside; pill input pinned at bottom. */
+@media (max-width: 600px) {
+  .ws-composer-full .ws-main, .ws-composer-full .ws-scrub { display: none; }
+  .ws-composer-full .ws-side { flex: 1 1 0; min-height: 0; border-left: 0; }
+  .ws-composer-full .ws-tab-composer .cmp-messages { flex: 1 1 0; min-height: 0; }
+  .ws-composer-full .ws-tab-composer .cmp-input { margin-top: auto; order: 10; }
+  /* settings + share sit above the chat so the input pill is the last thing on screen */
+  .ws-composer-full .ws-tab-composer .cmp-settings, .ws-composer-full .ws-tab-composer .cmp-share { order: -1; max-height: 30%; }
+  .ws-composer-full .ws-tab-composer .cmp-head { order: -2; }
+}

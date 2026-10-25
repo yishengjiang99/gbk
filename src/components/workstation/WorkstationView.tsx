@@ -73,7 +73,8 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [rollRef, rollBox] = useBox<HTMLDivElement>();
   const tabs = useMemo(() => [...(narrow ? ["Tracks"] : []), ...(composer ? ["Composer"] : []), "Agent", "Sound", "Files"], [narrow, composer]);
   const [tab, setTab] = useState<string | null>(null);
-  const want = tab ?? (composer ? "Composer" : "Agent");
+  // Phones open on the roll (Tracks); the Composer tab takes the full screen height when chosen.
+  const want = tab ?? (phone ? "Tracks" : composer ? "Composer" : "Agent");
   const activeTab = tabs.includes(want) ? want : tabs[0];
   const pendingCount = state.proposals.filter((x) => x.status === "pending").length;
   const lastPending = useRef(pendingCount);
@@ -159,7 +160,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [roHint, setRoHint] = useState<string | null>(null);
   useEffect(() => { let t: ReturnType<typeof setTimeout> | undefined; const f = () => { setRoHint("Read-only shared song — press Fork to edit your own copy."); clearTimeout(t); t = setTimeout(() => setRoHint(null), 2500); }; workstation.readOnlyHintListeners.add(f); return () => { workstation.readOnlyHintListeners.delete(f); clearTimeout(t); }; }, []);
   return (
-    <div className="ws" data-testid="workstation">
+    <div className={`ws${phone && composer && activeTab === "Composer" ? " ws-composer-full" : ""}`} data-testid="workstation">
       {roHint && <div role="status" aria-live="polite" data-testid="readonly-hint" style={{ position: "fixed", left: "50%", bottom: 80, transform: "translateX(-50%)", zIndex: 1000, pointerEvents: "none", background: "rgba(20,20,28,.92)", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 14 }}>{roHint}</div>}
       <header className="ws-header">
         <strong className="ws-title">{composer ? "GBK Composer" : "GBK Workstation"}</strong>
