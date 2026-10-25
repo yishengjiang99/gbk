@@ -141,8 +141,12 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
       return fail(me);
     }
   }
-  const annotations = (readOnly: boolean, idempotent = false) => ({
-    readOnlyHint: readOnly, destructiveHint: false, idempotentHint: idempotent, openWorldHint: false,
+  // destructiveHint: true for anything that discards or irreversibly changes the user's data or exposure:
+  // cancel (discards the in-progress render), publish (public, no
+  // unpublish tool), claim (moves the project; the old access keys stop working), delete. Asserted per tool in
+  // server/test/mcp-annotations.test.ts. Edit is not destructive: it writes a new revision and earlier ones are kept.
+  const annotations = (readOnly: boolean, idempotent = false, destructive = false) => ({
+    readOnlyHint: readOnly, destructiveHint: destructive, idempotentHint: idempotent, openWorldHint: false,
   });
 
   /** Everything a browser (in-chat player widget or Studio tab) needs to render audio locally. Read capability only. */
@@ -284,7 +288,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("gbk_cancel_render", {
     title: "Cancel a render", description: "Cancel a queued or running render job. No partial artifact is published for a cancelled job.",
-    inputSchema: { accessToken: ACCESS_TOKEN, jobId: z.string().min(1).max(128) }, annotations: annotations(false, true),
+    inputSchema: { accessToken: ACCESS_TOKEN, jobId: z.string().min(1).max(128) }, annotations: annotations(false, true, true),
   }, async (a) => run("gbk_cancel_render", "gbk:renders.create", a as Record<string, unknown>, async (p) => renders.jobView(p!.user, renders.cancel(p!.user, a.jobId))));
 
   server.registerTool("gbk_get_artifacts", {
@@ -307,7 +311,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("gbk_publish_composition", {
     title: "Publish a composition", description: "Publish a composition as a public GBK share page. This is the ONLY tool that makes a composition public, and it must be called only when the user explicitly asks to publish/share publicly.",
-    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN }, annotations: { ...annotations(false, true), openWorldHint: true },
+    inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN }, annotations: { ...annotations(false, true, true), openWorldHint: true },
   }, async (a) => run("gbk_publish_composition", "gbk:shares.publish", a as Record<string, unknown>, async (p) => service.publish(p!.user, a.compositionId)));
 
   server.registerTool("gbk_delete_composition", {
@@ -319,7 +323,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   server.registerTool("gbk_claim_composition", {
     title: "Claim into your account", description: "Use this when a signed-in user wants to keep an account-free composition in their GBK account (recovery, library). Requires the session to be signed in (OAuth) AND the project's edit accessToken. Moves the project, its revisions and files to the account; the old access keys stop working.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: z.string().min(1).max(256).describe("The project's edit accessToken") },
-    annotations: annotations(false, true),
+    annotations: annotations(false, true, true),
   }, async (a) => run("gbk_claim_composition", "gbk:compositions.write", a as Record<string, unknown>, async (p) => {
     const account = ctx.auth.current;
     if (!account || account.via === "guest") throw new McpError("UNAUTHENTICATED", "sign in to GBK (connect your account) to claim this project");

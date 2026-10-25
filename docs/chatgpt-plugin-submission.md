@@ -127,12 +127,12 @@ Every case works in a **clean conversation** with no sign-in. `gbk_create_compos
 | `gbk_render_composition` | false | false | false | Creates a render job producing a WAV and a MIDI file, rendered on GBK's server when no Studio tab is connected (or in a connected Studio tab), returned as signed download links. It changes no content and publishes nothing. |
 | `gbk_widget_render_start` / `gbk_widget_render_finish` | false | false | false | App-only (`ui.visibility: ["app"]`), called by the in-chat player's Render button: create the user's own render job and publish the WAV their browser rendered (server verifies SHA-256 and the WAV header) plus a server-built MIDI file; nothing is published publicly. |
 | `gbk_get_render_status` | true | false | false | Reads render job status; no changes. |
-| `gbk_cancel_render` | false | false | false | Stops the user's own queued or running render job; no composition data is deleted and nothing is published. |
+| `gbk_cancel_render` | false | false | true | Stops the user's own queued or running render job and discards its in-progress output (no partial artifact is kept; the work can't be resumed, only re-requested). Composition data is not touched. |
 | `gbk_get_artifacts` | true | false | false | Returns signed download links to the user's own files; no changes. |
 | `gbk_open_workstation` | true | false | false | Returns a deep link into GBK Studio; no changes. |
-| `gbk_publish_composition` | false | true | false | Makes the composition publicly viewable on a share page (open world). Called only on explicit user request; not destructive because it deletes nothing. |
+| `gbk_publish_composition` | false | true | true | Makes the composition publicly viewable on a share page (open world). Public exposure is hard to reverse and there is no unpublish tool, so it is marked destructive. Called only on explicit user request. |
 | `gbk_delete_composition` | false | false | true | Permanently deletes the caller's own account-free composition; requires that project's edit key and an explicit user request. |
-| `gbk_claim_composition` | false | false | false | Moves an account-free composition the caller holds the edit key for into their signed-in GBK account; nothing is deleted or published. |
+| `gbk_claim_composition` | false | false | true | Moves an account-free composition the caller holds the edit key for into their signed-in GBK account. Hard to reverse: the old access keys stop working and the project can't be returned to account-free. |
 | `gbk_show_composition_ui` | true | false | false | Renders a read-only player for the user's composition; no changes. |
 
 ### Review details: no sign-in needed

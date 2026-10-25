@@ -19,6 +19,8 @@ metadata is NOT in the uploaded package** (the portal still has category Product
 
 | Demo gallery (public), /chatgpt featured demos, install-click redirect, analytics counters, againstTrack description, nginx deploy safety, CI/smoke, launch docs | #105, da5b20c, 95a3b4e, 1171aeb, Phase 5–8 commits | Server/website/docs-only: no package change after `d329875` |
 
+| Tool annotations after portal validation feedback: `gbk_cancel_render`, `gbk_claim_composition`, and `gbk_publish_composition` now `destructiveHint: true` (all 17 tools audited, asserted in `mcp-annotations.test.ts`) | 2026-10-24 21:4x PT | **Server-only.** Annotations come from the live `tools/list`; no package file mentions them. The replacement ZIP is unchanged (`gbk-composer-d329875.zip`). The portal may need to re-scan the MCP server to pick up the new values |
+
 ## Release recommendation
 
 Build one replacement ZIP from `plugins/gbk-composer/` at the main commit that contains #99. It carries the

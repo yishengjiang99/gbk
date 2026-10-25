@@ -43,7 +43,7 @@ test("tools/list advertises 'Use this' descriptions and publish is the only open
       if (t.name.startsWith("gbk_widget_render_")) continue; // app-only (ui.visibility ["app"]): called by the in-chat player, never the model
       if (t.name !== "gbk_cancel_render" && t.name !== "gbk_publish_composition") assert.match(t.description, /^Use this/, t.name);
       assert.equal(t.annotations.openWorldHint, t.name === "gbk_publish_composition", t.name);
-      assert.equal(t.annotations.destructiveHint, t.name === "gbk_delete_composition", t.name);
+      assert.equal(t.annotations.destructiveHint, ["gbk_delete_composition", "gbk_cancel_render", "gbk_publish_composition", "gbk_claim_composition"].includes(t.name), t.name); // full table: mcp-annotations.test.ts
     }
     assert.match(tools.find((t) => t.name === "gbk_render_composition")!.description, /renders it on the GBK server/);
   } finally { await s.app.close(); }
