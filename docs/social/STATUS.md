@@ -20,6 +20,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Apple IAP: `POST /api/iap/apple` (x5c → pinned Apple Root CA G3, receipt OID, ES256, bundle/product/env checks, 409 ownership, idempotent, pending claim by app_account_token), ASN v2 webhook `POST /api/iap/apple/notifications`, `me.pro*` fields, pro = 10× agent token budget, guest merge moves purchases, account delete detaches | done (server) |
 | Studio MIDI upload: Settings "Import JSON / MIDI…" accepts .mid/.midi (iOS Files picker too), desktop drag-and-drop; SMF type 0/1 via smf.ts (tracks, programs, tempo/time sig, CC, pitch bend; conductor track dropped); open as new project or add to current (undoable, PPQ rescaled); errors for empty/invalid/no-notes | done (web) |
 | Profile tab not gated: signed-out users see a Guest profile with a Sign in button that opens the sheet; Inbox still gates on tap | done (web) |
+| Hardware MIDI keyboard (web): 🎛 MIDI button next to Keys/Hum (requests Web MIDI on first tap, opens Keys with input picker, hot-plug), sustain baked into note durations per docs/social/midi-input.md, CC/bend recorded; Safari/iOS WKWebView: disabled with "MIDI keyboards need Chrome/Edge or the iOS app" | done (web) |
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |

@@ -14,7 +14,7 @@ interface InputLike { id: string; name?: string | null; manufacturer?: string | 
 interface AccessLike { inputs: { values(): IterableIterator<InputLike> }; onstatechange: ((e: unknown) => void) | null }
 export interface NavigatorLike { requestMIDIAccess?: (o?: { sysex?: boolean }) => Promise<AccessLike> }
 
-export const MIDI_UNSUPPORTED_MESSAGE = "This browser has no Web MIDI (Safari and iOS do not support it). Use Chrome, Edge or Firefox for a MIDI keyboard; the on-screen and computer keyboard still work.";
+export const MIDI_UNSUPPORTED_MESSAGE = "MIDI keyboards need Chrome/Edge or the iOS app";
 export const MIDI_DENIED_MESSAGE = "MIDI permission was denied. Allow MIDI devices for this site in the browser's site settings, then press Enable MIDI again.";
 
 export class MidiInputManager {

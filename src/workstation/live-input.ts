@@ -105,14 +105,22 @@ export class LiveInputSession {
   shiftOctave(d: number) { this.octave = Math.max(MIN_OCTAVE, Math.min(MAX_OCTAVE, this.octave + d)); this.emit(); }
   shiftVelocity(d: number) { this.velocity = Math.max(1, Math.min(127, this.velocity + d)); this.emit(); }
 
+  /** Sustain pedal (docs/social/midi-input.md §2): noteOffs are held while CC64 >= 64 and released at pedal up. */
+  private sustain = false; private held = new Set<number>();
+  get sustained(): boolean { return this.sustain; }
   noteOn(note: number, velocity = this.velocity) {
     const tid = this.trackId; if (!tid) return;
-    if (this.active.has(note)) this.noteOff(note);
+    if (this.active.has(note)) { this.held.delete(note); this.release(note); }
     this.active.set(note, tid); this.sink.noteOn(tid, note, velocity);
     if (this.recording) { this.beginTake(tid); this.pending.set(note, { tick: this.tickNow(), velocity }); }
     this.emit();
   }
   noteOff(note: number) {
+    if (!this.active.has(note)) return;
+    if (this.sustain) { this.held.add(note); return; }
+    this.release(note);
+  }
+  private release(note: number) {
     const tid = this.active.get(note); if (tid === undefined) return;
     this.active.delete(note); this.sink.noteOff(tid, note);
     const pn = this.pending.get(note);
@@ -120,6 +128,11 @@ export class LiveInputSession {
     this.emit();
   }
   controlChange(controller: number, value: number) {
+    if (controller === 64) { // baked into note durations; never forwarded or recorded
+      const down = value >= 64; if (down === this.sustain) return; this.sustain = down;
+      if (!down) { const h = [...this.held]; this.held.clear(); for (const n of h) this.release(n); }
+      this.emit(); return;
+    }
     const tid = this.trackId; if (!tid) return;
     this.sink.controlChange(tid, controller, value);
     if (this.recording) { this.beginTake(tid); this.take.ccs.push({ controller, value, tick: this.tickNow() }); }
@@ -138,7 +151,7 @@ export class LiveInputSession {
     else if (m.type === "bend") this.pitchBend(m.value);
     return m;
   }
-  panic() { for (const n of [...this.active.keys()]) this.noteOff(n); this.sink.allNotesOff(); }
+  panic() { this.sustain = false; this.held.clear(); for (const n of [...this.active.keys()]) this.release(n); this.sink.allNotesOff(); }
   private beginTake(tid: string) { if (!this.takeTrack) this.takeTrack = tid; }
 
   /** Commit the take (notes still held end now) as one undoable user edit. Returns the edit's revision or null. */

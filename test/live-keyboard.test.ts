@@ -75,7 +75,8 @@ test("record: only when armed AND playing; notes with velocity + duration land o
   const notes = c.project.notes.map((n) => [n.trackId, n.channel, n.pitch, n.tick, n.duration, n.velocity]);
   assert.deepEqual(notes, [[b.id, 3, 60, 480, 480, 100], [b.id, 3, 64, 1000, 440, 70]]);
   assert.ok(c.project.notes.every((n) => n.trackId !== a.id));
-  assert.deepEqual(c.project.ccs.filter((x) => x.trackId === b.id).map((x) => [x.controller, x.tick, x.value]), [[64, 1000, 127], [64, 1100, 0], [1, 1200, 40]]);
+  // CC64 is baked into note durations (docs/social/midi-input.md), not recorded as a lane
+  assert.deepEqual(c.project.ccs.filter((x) => x.trackId === b.id).map((x) => [x.controller, x.tick, x.value]), [[1, 1200, 40]]);
   assert.deepEqual(c.project.pitchBends.map((x) => [x.trackId, x.tick, x.value]), [[b.id, 1200, 10000]]);
   assert.equal(c.project.revision, rev0 + 1, "one edit per take");
   assert.match(c.historyLabels().undo.slice(-1)[0], /record take \(2 notes\)/);
@@ -135,10 +136,11 @@ test("Web MIDI (fake MIDIAccess): device selection, hot-plug, notes/velocity, su
   at(140); k1.send(0xe0, 0, 0x60);         // bend up
   at(480); k1.send(0x80, 60, 0);
   at(500); k1.send(0xb0, 64, 0);
-  assert.deepEqual(sink.log, [`on ${b.id} 60 33`, `cc ${b.id} 64 127`, `cc ${b.id} 1 90`, `cc ${b.id} 74 20`, `bend ${b.id} ${0x60 << 7}`, `off ${b.id} 60`, `cc ${b.id} 64 0`]);
+  // sustain (docs/social/midi-input.md §2): CC64 is not forwarded; the noteOff at 480 is held until pedal up at 500
+  assert.deepEqual(sink.log, [`on ${b.id} 60 33`, `cc ${b.id} 1 90`, `cc ${b.id} 74 20`, `bend ${b.id} ${0x60 << 7}`, `off ${b.id} 60`]);
   c.updateTransport({ playing: false }); await flush();
-  assert.deepEqual(c.project.notes.map((n) => [n.trackId, n.pitch, n.velocity, n.tick, n.duration]), [[b.id, 60, 33, 0, 480]]);
-  assert.deepEqual(c.project.ccs.map((x) => [x.controller, x.tick, x.value]).sort((p, q) => p[1] - q[1]), [[64, 100, 127], [1, 120, 90], [74, 130, 20], [64, 500, 0]]);
+  assert.deepEqual(c.project.notes.map((n) => [n.trackId, n.pitch, n.velocity, n.tick, n.duration]), [[b.id, 60, 33, 0, 500]]);
+  assert.deepEqual(c.project.ccs.map((x) => [x.controller, x.tick, x.value]).sort((p, q) => p[1] - q[1]), [[1, 120, 90], [74, 130, 20]]);
   assert.deepEqual(c.project.pitchBends.map((x) => [x.tick, x.value]), [[140, 0x60 << 7]]);
   // unplug the selected device: listener removed, clear message
   access.unplug("in-1"); assert.equal(k1.listeners, 0);
@@ -155,4 +157,22 @@ test("Web MIDI unsupported (Safari) and permission denied give clear messages", 
   assert.deepEqual(await denied.enable(), { kind: "denied", message: MIDI_DENIED_MESSAGE });
   const broken = new MidiInputManager({ requestMIDIAccess: async () => { throw new Error("boom"); } }, () => undefined);
   assert.equal((await broken.enable()).kind, "error");
+});
+
+test("sustain: held noteOffs release at pedal up; re-strike under pedal ends the previous note; panic clears", () => {
+  const { c, b, sink, s, at } = rig(); c.setSelection({ trackIds: [b.id] });
+  s.setArmed(true); c.updateTransport({ playing: true });
+  at(0); s.handleMidi([0xb0, 64, 100]); assert.equal(s.sustained, true);
+  at(10); s.handleMidi([0x90, 60, 80]); at(50); s.handleMidi([0x80, 60, 0]);
+  at(60); s.handleMidi([0x90, 64, 70]); at(70); s.handleMidi([0x90, 64, 0]); // vel-0 noteOn = noteOff (held)
+  at(100); s.handleMidi([0x90, 60, 90]);                                       // re-strike held 60
+  assert.ok(!sink.log.some((l) => l.startsWith(`off ${b.id} 64`)));
+  at(200); s.handleMidi([0x80, 60, 0]); at(300); s.handleMidi([0xb0, 64, 0]);   // pedal up releases 60 and 64
+  assert.equal(s.sustained, false);
+  s.finishTake();
+  const notes = c.project.notes.map((n) => [n.pitch, n.tick, n.duration]).sort((p, q) => p[1] - q[1]);
+  assert.deepEqual(notes, [[60, 10, 90], [64, 60, 240], [60, 100, 200]]);
+  assert.equal(c.project.ccs.length, 0);
+  at(310); s.handleMidi([0xb0, 64, 127]); s.handleMidi([0x90, 50, 60]); s.handleMidi([0x80, 50, 0]); s.panic();
+  assert.equal(s.sustained, false); assert.ok(sink.log.includes(`off ${b.id} 50`));
 });

@@ -307,3 +307,40 @@ test("MIDI upload: Settings import accepts .mid, choose new project or add to cu
   await expect(page.getByTestId("midi-import-msg")).toContainText("Not a readable MIDI file");
   await expect(page.getByTestId("composer-input")).toBeInViewport();
 });
+
+test("hardware MIDI keyboard: button next to Keys/Hum, mocked Web MIDI plays + records into the selected track, hot-plug; unsupported -> disabled with message", async ({ page }) => {
+  const P = test.info().project.name;
+  if (P === "mobile-webkit") {
+    await page.goto("/studio");
+    const b = page.getByTestId("midi-toggle"); await expect(b).toBeDisabled();
+    await expect(b).toHaveAttribute("title", "MIDI keyboards need Chrome/Edge or the iOS app");
+    await expect(page.getByTestId("composer-input")).toBeInViewport();
+    return;
+  }
+  await page.addInitScript(() => {
+    type L = (e: { data: Uint8Array }) => void;
+    const mk = (id: string, name: string) => { const ls = new Set<L>(); return { id, name, manufacturer: "Test", state: "connected", addEventListener: (_t: string, f: L) => ls.add(f), removeEventListener: (_t: string, f: L) => ls.delete(f), send: (...b: number[]) => ls.forEach((f) => f({ data: new Uint8Array(b) })) }; };
+    const map = new Map<string, ReturnType<typeof mk>>(); const k1 = mk("k1", "Mock Keys 49"); map.set("k1", k1);
+    const access = { inputs: map, onstatechange: null as null | ((e: unknown) => void) };
+    (window as any).__midiMock = { k1, plug: (id: string, n: string) => { map.set(id, mk(id, n)); access.onstatechange?.({}); } };
+    Object.defineProperty(navigator, "requestMIDIAccess", { value: async () => access, configurable: true });
+  });
+  await page.goto("/studio");
+  await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; c.edit([{ op: "addTrack", name: "Keys In", channel: 0 }], { label: "t" }); c.setSelection({ trackIds: [c.project.tracks[c.project.tracks.length - 1].id] }); });
+  await page.getByTestId("midi-toggle").click();
+  await expect(page.getByTestId("midi-status")).toHaveAttribute("data-kind", "ready");
+  await expect(page.getByTestId("midi-device")).toContainText("Mock Keys 49");
+  await page.evaluate(() => (window as any).__midiMock.plug("k2", "Mock Pad"));
+  await expect(page.getByTestId("midi-device")).toContainText("Mock Pad");
+  const n = await page.evaluate(async () => {
+    const c = (globalThis as any).__gbkWorkstation; const live = (window as any).__gbkLive; const k1 = (window as any).__midiMock.k1;
+    live.session.setArmed(true); c.updateTransport({ playing: true });
+    k1.send(0x90, 60, 100); k1.send(0xb0, 64, 127); k1.send(0x80, 60, 0); k1.send(0xb0, 1, 64); k1.send(0xe0, 0, 0x50);
+    await new Promise((r) => setTimeout(r, 60)); k1.send(0xb0, 64, 0);
+    c.updateTransport({ playing: false }); await new Promise((r) => setTimeout(r, 20));
+    const tid = c.project.tracks[c.project.tracks.length - 1].id;
+    return { notes: c.project.notes.filter((x: any) => x.trackId === tid).map((x: any) => x.pitch), cc1: c.project.ccs.filter((x: any) => x.trackId === tid && x.controller === 1).length, cc64: c.project.ccs.filter((x: any) => x.controller === 64).length, bends: c.project.pitchBends.filter((x: any) => x.trackId === tid).length };
+  });
+  expect(n).toEqual({ notes: [60], cc1: 1, cc64: 0, bends: 1 });
+  await expect(page.getByTestId("composer-input")).toBeInViewport();
+});

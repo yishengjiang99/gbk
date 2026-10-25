@@ -13,7 +13,12 @@ import { reportError } from "./telemetry/error-reporter.ts";
 /** Is the Composer server (same-origin /api) present? Not on the GitHub Pages build: then GBK behaves as before. */
 function useComposerAvailable(): boolean | null {
   const [ok, setOk] = useState<boolean | null>(null);
-  useEffect(() => { let live = true; fetch(`${apiBase()}/config`, { credentials: "same-origin" }).then((r) => r.ok && (r.headers.get("content-type") ?? "").includes("json")).catch(() => false).then((v) => { if (live) setOk(v); }); return () => { live = false; }; }, []);
+  // Only a definitive answer (a response that is not our JSON, e.g. the static Pages build) means "no server".
+  // A network error (reload in flight, mid-deploy) is retried instead of flipping the social routes to the studio.
+  useEffect(() => { let live = true; const go = (n: number) => fetch(`${apiBase()}/config`, { credentials: "same-origin" })
+    .then((r) => { if (live) setOk(r.ok && (r.headers.get("content-type") ?? "").includes("json")); })
+    .catch(() => { if (!live) return; if (n < 4) setTimeout(() => go(n + 1), 400 * (n + 1)); else setOk(false); });
+    void go(0); return () => { live = false; }; }, []);
   return ok;
 }
 
