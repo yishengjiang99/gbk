@@ -261,6 +261,7 @@ export class CompositionService {
     const rev = () => c.project.revision;
     switch (op.type) {
       case "generate_part": {
+        if (op.kind === "counterpoint" && !op.againstTrack) throw new McpError("INVALID_ARGUMENT", "generate_part kind counterpoint needs againstTrack (the id of the track to write against)");
         const r = await this.call(tools, c, "gbk_generate_part", { trackId: op.track, range: RANGE(op), kind: op.kind, seed: op.seed, key: op.key, progression: op.progression, againstTrackId: op.againstTrack, low: op.low, high: op.high, velocity: op.velocity, baseRevision: rev() }, signal);
         return { notes: (r.data as { notes?: number }).notes };
       }
