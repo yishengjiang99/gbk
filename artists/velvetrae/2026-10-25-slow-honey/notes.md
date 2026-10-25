@@ -15,7 +15,7 @@ Hook interval pattern found 7× in the lead (3 choruses × 2 + outro); 0 long le
 - v2: reharmonized around the melody (G7b9, C7#9, Bb13sus, Dbmaj9 in verse bar 2, Db13–C7#9, outro G7b9). New bridge melody:
   hook rhythm snapped onto Dbmaj9/Cm11/Bmaj9/Bbm9, climbing to F# over B13sus as the pivot into E. Chromatic bass approach notes,
   ghost snares everywhere, pad out of verse 1, shaker + guitar in verse 2, oohs doubling the lead in chorus 2,
-  pre-chorus held lead-in note, sax louder and Rhodes/pad/guitar lower. Clashes 11 → 0.
+  pre-chorus held lead-in note, swing 14% → 19%, sax louder and Rhodes/pad/guitar lower. Clashes 11 → 0.
 - v3 (final): bridge sat as loud as the choruses (-16.4), so the bridge drums are now half-time hats with no shaker or crash.
   The final chorus gets oohs harmony a third under its long notes plus offbeat open hats, so it's the loudest section (-14.9).
-  Tempo 76 → 74 and swing raised for a lazier pocket; lead to vol 114.
+  Tempo 76 → 74 for a lazier pocket; lead to vol 114.
