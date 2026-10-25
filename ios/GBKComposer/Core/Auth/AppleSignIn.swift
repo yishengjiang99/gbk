@@ -24,7 +24,7 @@ enum AppleSignIn {
         let name = credential.fullName.flatMap { PersonNameComponentsFormatter().string(from: $0) }
         let pair = try await AuthServices.current.exchangeApple(
             identityToken: idToken, nonce: nonce, displayName: (name?.isEmpty ?? true) ? nil : name)
-        auth.store(pair)
+        auth.store(pair, anonymous: false)
         await auth.loadMe(client: client)
     }
 

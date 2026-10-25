@@ -35,7 +35,7 @@ struct ReviewerSignInSheet: View {
         busy = true; defer { busy = false }
         do {
             let token = try await ReviewerSignIn.signIn(username: username, password: password)
-            auth.store(TokenPair(accessToken: token, tokenType: "Bearer", expiresIn: nil, refreshToken: nil, me: nil))
+            auth.store(TokenPair(accessToken: token, tokenType: "Bearer", expiresIn: nil, refreshToken: nil, me: nil), anonymous: false)
             password = ""
             await auth.loadMe()
             dismiss()

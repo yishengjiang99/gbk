@@ -2,7 +2,7 @@ import Foundation
 
 enum APIError: Error, Equatable {
     case badStatus(Int, APIErrorBody?)
-    /// 404 from an endpoint that is specced but not deployed yet (or a missing resource).
+    /// 404 (missing resource / route) or 503 (feature not configured on the server, e.g. APPLE_UNAVAILABLE).
     case notAvailable
     case unauthenticated
     case invalidURL
@@ -92,19 +92,34 @@ final class APIClient: APIClientProtocol {
             let body = try? decoder.decode(APIErrorBody.self, from: data)
             switch http.statusCode {
             case 401: throw APIError.unauthenticated
-            case 404: throw APIError.notAvailable
+            case 404, 503: throw APIError.notAvailable
             default: throw APIError.badStatus(http.statusCode, body)
             }
         }
         return try decoder.decode(T.self, from: data)
     }
 
-    /// Refresh via `AuthServices.current` (iOS-1). Returns false when there is no refresh token or the route is not live.
+    /// On a 401: rotate tokens with `POST /api/auth/refresh` (the old refresh token is revoked server-side).
+    /// A rejected refresh (401 INVALID_REFRESH) signs out locally. Concurrent 401s share one refresh.
     func refreshTokens() async -> Bool {
-        guard let refresh = AuthStore.currentRefreshToken(),
-              let pair = try? await AuthServices.current.refresh(refreshToken: refresh) else { return false }
-        await AuthStore.shared.store(pair)
-        return true
+        if let inFlight = await RefreshGate.shared.current() { return await inFlight.value }
+        let task = Task<Bool, Never> {
+            guard let refresh = AuthStore.currentRefreshToken() else { return false }
+            do {
+                let pair = try await AuthServices.current.refresh(refreshToken: refresh)
+                await AuthStore.shared.store(pair)
+                return true
+            } catch APIError.unauthenticated {
+                await AuthStore.shared.clearLocal()
+                return false
+            } catch {
+                return false
+            }
+        }
+        await RefreshGate.shared.set(task)
+        let ok = await task.value
+        await RefreshGate.shared.set(nil)
+        return ok
     }
 
     // MARK: Convenience
@@ -120,4 +135,12 @@ final class APIClient: APIClientProtocol {
         baseURL.appendingPathComponent("/api/shares/\(slug)/media/\(kind)")
     }
 
+}
+
+/// Serialises token refreshes so parallel 401s don't burn the rotating refresh token twice.
+actor RefreshGate {
+    static let shared = RefreshGate()
+    private var task: Task<Bool, Never>?
+    func current() -> Task<Bool, Never>? { task }
+    func set(_ t: Task<Bool, Never>?) { task = t }
 }

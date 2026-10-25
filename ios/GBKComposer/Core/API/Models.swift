@@ -25,6 +25,9 @@ struct Me: Codable, Hashable {
     let dmPolicy: String?
     let handleChanged: Bool?
     let isAdmin: Bool?
+    /// `"google"|"apple"|"phone"|"github"|"guest"` (guest-accounts spec).
+    let provider: String?
+    let isGuest: Bool?
 
     var asUser: User {
         User(handle: handle, displayName: displayName, avatarUrl: avatarUrl, songCount: songCount, ratingAvg: ratingAvg, createdAt: createdAt)
@@ -105,18 +108,25 @@ struct Comment: Codable, Hashable, Identifiable {
 
 struct ReportResult: Codable { let ok: Bool; let id: String? }
 struct OKResult: Codable { let ok: Bool }
+struct PushUnregisterResult: Codable { let ok: Bool; let removed: Bool? }
 
 struct TagCount: Codable, Hashable { let tag: String; let count: Int }
 struct LabelCount: Codable, Hashable { let label: String; let count: Int }
 struct TopTags: Codable { let tags: [TagCount]; let labels: [LabelCount]? }
 
-/// iOS-1 (specced, not live yet).
 struct TokenPair: Codable {
     let accessToken: String
     let tokenType: String?
     let expiresIn: Int?
     let refreshToken: String?
     let me: Me?
+    /// Upgrade result when a guest bearer was sent with Apple/Google sign-in: "linked" | "merged".
+    let upgraded: String?
+
+    init(accessToken: String, tokenType: String?, expiresIn: Int?, refreshToken: String?, me: Me?, upgraded: String? = nil) {
+        self.accessToken = accessToken; self.tokenType = tokenType; self.expiresIn = expiresIn
+        self.refreshToken = refreshToken; self.me = me; self.upgraded = upgraded
+    }
 }
 
 struct WebCode: Codable { let code: String; let expiresIn: Int? }

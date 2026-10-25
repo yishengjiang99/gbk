@@ -11,6 +11,8 @@ struct FeedCardView: View {
     var onTag: (String) -> Void = { _ in }
 
     private var isPlaying: Bool { playback?.isPlaying ?? false }
+    @EnvironmentObject private var auth: AuthStore
+    @Environment(\.requestSignIn) private var requestSignIn
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -34,7 +36,10 @@ struct FeedCardView: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { Task { await quickLove() } }
+                .onTapGesture(count: 2) {
+                    guard !song.isMine, auth.requireSession("Sign in to rate songs.", prompt: requestSignIn) else { return }
+                    Task { await quickLove() }
+                }
                 .onTapGesture(perform: onTap)
 
             HStack(spacing: 10) {
@@ -82,8 +87,7 @@ struct FeedCardView: View {
 
     /// Double-tap = 5 stars (doc: "like" maps to rating).
     private func quickLove() async {
-        guard !song.isMine, AuthStore.currentAccessToken() != nil,
-              let r = try? await APIClient.shared.send(Endpoints.rate(song.slug, stars: 5), as: RatingSummary.self) else { return }
+        guard let r = try? await APIClient.shared.send(Endpoints.rate(song.slug, stars: 5), as: RatingSummary.self) else { return }
         var s = song; s.ratingAvg = r.ratingAvg; s.ratingCount = r.ratingCount; s.myRating = r.myRating
         onRated(s)
     }

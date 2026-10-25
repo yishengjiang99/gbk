@@ -6,6 +6,7 @@ struct CommentsSheet: View {
     /// +1 on post, -1 on delete.
     let onCountChange: (Int) -> Void
     @EnvironmentObject private var auth: AuthStore
+    @Environment(\.requestSignIn) private var requestSignIn
     @Environment(\.dismiss) private var dismiss
     @State private var items: [Comment] = []
     @State private var cursor: String?
@@ -44,6 +45,7 @@ struct CommentsSheet: View {
             .safeAreaInset(edge: .bottom) { composer }
             .sheet(item: $reportTarget) { c in ReportBlockSheet(kind: "comment", target: c.id, author: c.author.handle) }
         }
+        .signInPrompting()
     }
 
     @ViewBuilder private var composer: some View {
@@ -56,7 +58,8 @@ struct CommentsSheet: View {
                         .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 500)
                 }
             } else {
-                Text("Sign in to comment.").font(.footnote).foregroundStyle(Theme.textSecondary)
+                Button("Sign in to comment") { requestSignIn("Sign in to join the conversation.") }
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Theme.accent)
             }
         }
         .padding().background(.ultraThinMaterial)

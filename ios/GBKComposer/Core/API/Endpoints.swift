@@ -65,7 +65,7 @@ enum Endpoints {
     static func block(_ handle: String) -> Endpoint { Endpoint(path: "/api/blocks/\(handle)", method: .post, body: [:]) }
     static func unblock(_ handle: String) -> Endpoint { Endpoint(path: "/api/blocks/\(handle)", method: .delete) }
 
-    // MARK: Native auth (iOS-1, specced, not live: 404 today)
+    // MARK: Native auth (live; Apple answers 503 until configured)
     static func appleExchange(identityToken: String, nonce: String, displayName: String?) -> Endpoint {
         var b: [String: Any] = ["identityToken": identityToken, "nonce": nonce]
         if let displayName { b["displayName"] = displayName }
@@ -77,14 +77,22 @@ enum Endpoints {
     static func refresh(_ refreshToken: String) -> Endpoint {
         Endpoint(path: "/api/auth/refresh", method: .post, body: ["refresh_token": refreshToken], isAuthCall: true)
     }
-    static let logout = Endpoint(path: "/api/auth/logout", method: .post, body: [:], isAuthCall: true)
+    static func logout(refreshToken: String?) -> Endpoint {
+        Endpoint(path: "/api/auth/logout", method: .post, body: refreshToken.map { ["refresh_token": $0] } ?? [:], isAuthCall: true)
+    }
     static let webCode = Endpoint(path: "/api/auth/web-code", method: .post, body: [:])
     static func webCodeRedeemPath(code: String, returnPath: String) -> Endpoint {
         Endpoint(path: "/api/auth/web-code/redeem", query: q("code", code) + q("return", returnPath))
     }
     static let deleteMe = Endpoint(path: "/api/me", method: .delete)
 
-    // MARK: Push (P5, not live)
+    /// Guest account (docs/social-api.md "Guest accounts", spec 7692a7a; 404 until deployed):
+    /// `{ deviceId, username }` → TokenPair. Idempotent per device; 409 HANDLE_TAKEN for a new device whose handle exists.
+    static func anonymous(deviceID: String, username: String) -> Endpoint {
+        Endpoint(path: "/api/auth/anonymous", method: .post, body: ["deviceId": deviceID, "username": username], isAuthCall: true)
+    }
+
+    // MARK: Push (live)
     static func pushRegister(installId: String, token: String, environment: String) -> Endpoint {
         Endpoint(path: "/api/push/register", method: .post, body: ["installId": installId, "token": token, "environment": environment])
     }

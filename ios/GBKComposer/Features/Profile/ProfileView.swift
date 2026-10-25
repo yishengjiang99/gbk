@@ -64,16 +64,17 @@ struct UserProfileView: View {
     }
 }
 
-/// Profile tab: `GET /api/me` then the public profile; sign-in gated.
+/// Profile tab. Works signed out: shows the install's two-word username. Apple/Google sign-in links it later.
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthStore
+    @Environment(\.requestSignIn) private var requestSignIn
     @State private var confirmDelete = false
     @State private var message: String?
 
     var body: some View {
         NavigationStack {
             Group {
-                if let me = auth.me {
+                if auth.isLinkedAccount, let me = auth.me {
                     UserProfileView(handle: me.handle)
                         .toolbar {
                             Menu {
@@ -81,13 +82,16 @@ struct ProfileView: View {
                                 Button("Delete account", role: .destructive) { confirmDelete = true }
                             } label: { Image(systemName: "gearshape") }
                         }
-                } else if auth.isSignedIn {
+                } else if auth.isLinkedAccount {
                     ProgressView().task { await auth.loadMe() }
                 } else {
-                    SignInView(reason: "Sign in to see your profile and songs.")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Theme.background.ignoresSafeArea())
-                        .navigationTitle("Profile")
+                    AnonymousProfileView(username: auth.me?.displayName ?? auth.anonymousUsername,
+                                         hasAnonymousSession: auth.isSignedIn) {
+                        requestSignIn("Sign in with Apple or Google to keep your name and songs on every device.")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.background.ignoresSafeArea())
+                    .navigationTitle("Profile")
                 }
             }
             .toolbar { ToolbarItem(placement: .topBarLeading) { ProButton() } }
@@ -103,5 +107,28 @@ struct ProfileView: View {
         do { try await auth.deleteAccount() }
         catch let e as APIError { message = e == .notAvailable ? "Account deletion isn't available yet." : e.userMessage }
         catch { message = "Couldn't delete the account." }
+    }
+}
+
+/// Signed-out / anonymous profile: the random two-word username plus a sign-in button.
+struct AnonymousProfileView: View {
+    let username: String
+    let hasAnonymousSession: Bool
+    let onSignIn: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "person.crop.circle.fill").font(.system(size: 72)).foregroundStyle(Theme.accent)
+            Text(username).font(.title.bold()).foregroundStyle(Theme.text)
+                .accessibilityIdentifier("anonymous-username")
+            Text(hasAnonymousSession ? "This is your name on GBK. Sign in to keep it across devices."
+                                     : "Your name on GBK. Listen, explore and create without an account.")
+                .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(Theme.textSecondary)
+            Button(action: onSignIn) { Text("Sign in").frame(maxWidth: 260, minHeight: 44) }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .foregroundStyle(Theme.onAccent)
+        }
+        .padding(32)
     }
 }

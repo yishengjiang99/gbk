@@ -5,17 +5,21 @@ struct RatingView: View {
     let song: Song
     let onChange: (Song) -> Void
     @EnvironmentObject private var auth: AuthStore
+    @Environment(\.requestSignIn) private var requestSignIn
     @State private var busy = false
     @State private var error: String?
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(1...5, id: \.self) { star in
-                Button { Task { await rate(star) } } label: {
+                Button {
+                    guard auth.requireSession("Sign in to rate songs.", prompt: requestSignIn) else { return }
+                    Task { await rate(star) }
+                } label: {
                     Image(systemName: star <= (song.myRating ?? 0) ? "star.fill" : "star")
                 }
                 .buttonStyle(.plain)
-                .disabled(busy || song.isMine || !auth.isSignedIn)
+                .disabled(busy || song.isMine)
                 .accessibilityLabel("\(star) stars")
             }
             Text(summary).font(.caption).foregroundStyle(Theme.textSecondary).padding(.leading, 4)

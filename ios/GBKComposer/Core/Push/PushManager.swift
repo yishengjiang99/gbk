@@ -29,7 +29,7 @@ enum InstallIdentity {
     }
 }
 
-/// APNs registration via `AuthServicing` (P5 `/api/push/*`; mock no-op while those 404).
+/// APNs registration via `AuthServicing` (`POST /api/push/register` / `unregister`, live).
 /// Never prompts on launch; the prompt appears only via `enable()` (an explicit user action).
 @MainActor
 final class PushManager: ObservableObject {
@@ -74,7 +74,8 @@ final class PushManager: ObservableObject {
 
     func refresh() async {
         status = await center.authorizationStatus()
-        if enabledInApp && isAllowedBySystem { registerRemote() }
+        // Register only after sign-in (never for signed-out or anonymous installs).
+        if enabledInApp && isAllowedBySystem && AuthStore.shared.isLinkedAccount { registerRemote() }
     }
 
     @discardableResult
@@ -95,14 +96,29 @@ final class PushManager: ObservableObject {
         enabledInApp = false
         defaults.set(false, forKey: Self.enabledKey)
         unregisterRemote()
-        if let token = defaults.string(forKey: Self.tokenKey) {
-            try? await service.unregisterPush(installId: InstallIdentity.installIdString)
-            defaults.removeObject(forKey: Self.tokenKey)
-        }
+        await unregisterFromServer()
+    }
+
+    /// Sign-out: stop pushes for this install on the server (needs the bearer, so call before logout)
+    /// but keep the user's toggle so the next sign-in re-registers.
+    func signedOut() async {
+        await unregisterFromServer()
+    }
+
+    /// After sign-in: register if the user already allowed notifications and left the toggle on.
+    func signedIn() async {
+        defaults.removeObject(forKey: Self.tokenKey)
+        await refresh()
+    }
+
+    private func unregisterFromServer() async {
+        guard defaults.string(forKey: Self.tokenKey) != nil else { return }
+        try? await service.unregisterPush(installId: InstallIdentity.installIdString)
+        defaults.removeObject(forKey: Self.tokenKey)
     }
 
     func didRegister(deviceToken: Data) async {
-        guard enabledInApp else { return }
+        guard enabledInApp, AuthStore.shared.isLinkedAccount else { return }
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
         let installId = InstallIdentity.installIdString
         do {

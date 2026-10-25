@@ -10,6 +10,11 @@ settings:
     MARKETING_VERSION: "0.1.0"
     DEVELOPMENT_TEAM: 83D36RPMUM
     CURRENT_PROJECT_VERSION: "1"
+    # Google sign-in (iOS OAuth client). Placeholder until Yisheng creates the iOS client in Google Cloud Console:
+    # set both, e.g. 1234-abc.apps.googleusercontent.com / com.googleusercontent.apps.1234-abc, and add the client ID
+    # to the server's GOOGLE_IOS_CLIENT_IDS. Empty client ID = the app shows "not available yet".
+    GOOGLE_IOS_CLIENT_ID: ""
+    GOOGLE_REVERSED_CLIENT_ID: com.googleusercontent.apps.placeholder
 packages:
   SF2Player:
     url: https://github.com/yishengjiang99/sf2player-swift.git

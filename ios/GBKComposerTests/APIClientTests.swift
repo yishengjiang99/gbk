@@ -141,3 +141,89 @@ final class CrossfadeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(FeedPlayer.fadeOutGain(0.3), FeedPlayer.fadeOutGain(0.6))
     }
 }
+
+/// Stubs URLSession responses by path.
+final class StubProtocol: URLProtocol {
+    static var handler: ((URLRequest) -> (Int, String))?
+    static var requests: [URLRequest] = []
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.append(request)
+        let (status, body) = Self.handler?(request) ?? (500, "{}")
+        let resp = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": "application/json"])!
+        client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+
+    static func session() -> URLSession {
+        let c = URLSessionConfiguration.ephemeral
+        c.protocolClasses = [StubProtocol.self]
+        return URLSession(configuration: c)
+    }
+}
+
+final class LiveEndpointTests: XCTestCase {
+    override func tearDown() { StubProtocol.handler = nil; StubProtocol.requests = [] }
+
+    func testApple503IsNotAvailable() async {
+        StubProtocol.handler = { _ in (503, #"{"code":"APPLE_UNAVAILABLE","message":"Sign in with Apple is not configured yet"}"#) }
+        let service = LiveAuthService(client: APIClient(session: StubProtocol.session(), tokenProvider: { nil }))
+        do { _ = try await service.exchangeApple(identityToken: "jwt", nonce: "n", displayName: nil); XCTFail("expected error") }
+        catch { XCTAssertEqual(error as? APIError, .notAvailable) }
+    }
+
+    func testGoogleExchangeDecodesTokenPair() async throws {
+        StubProtocol.handler = { req in
+            XCTAssertEqual(req.url?.path, "/api/auth/google/native")
+            return (200, #"{"access_token":"a1","token_type":"Bearer","expires_in":3600,"refresh_token":"r1","me":{"id":"u1","handle":"yisheng","display_name":"Yisheng","avatar_url":null,"song_count":1,"rating_avg":null,"created_at":0,"dm_policy":"all","handle_changed":false,"is_admin":false}}"#)
+        }
+        let service = LiveAuthService(client: APIClient(session: StubProtocol.session(), tokenProvider: { nil }))
+        let pair = try await service.exchangeGoogle(idToken: "google-jwt")
+        XCTAssertEqual(pair.accessToken, "a1")
+        XCTAssertEqual(pair.me?.handle, "yisheng")
+    }
+
+    func testWebCodeBuildsRedeemURL() async throws {
+        StubProtocol.handler = { _ in (200, #"{"code":"abc123","expires_in":60}"#) }
+        let client = APIClient(session: StubProtocol.session(), tokenProvider: { "tok" })
+        let code = try await client.send(Endpoints.webCode, as: WebCode.self)
+        let url = try client.url(for: Endpoints.webCodeRedeemPath(code: code.code, returnPath: "/studio"))
+        XCTAssertEqual(url.absoluteString, "https://compose.grepawk.com/api/auth/web-code/redeem?code=abc123&return=/studio")
+        XCTAssertEqual(StubProtocol.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+    }
+
+    func testPushAndDeleteRequestShapes() async throws {
+        StubProtocol.handler = { _ in (200, #"{"ok":true,"removed":true}"#) }
+        let service = LiveAuthService(client: APIClient(session: StubProtocol.session(), tokenProvider: { "tok" }))
+        try await service.registerPush(installId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", token: "ab12", environment: "sandbox")
+        try await service.unregisterPush(installId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
+        try await service.deleteAccount()
+        let reqs = StubProtocol.requests
+        XCTAssertEqual(reqs.map { "\($0.httpMethod!) \($0.url!.path)" },
+                       ["POST /api/push/register", "POST /api/push/unregister", "DELETE /api/me"])
+        let body = try JSONSerialization.jsonObject(with: reqs[0].httpBodyStream.map(Self.read) ?? reqs[0].httpBody ?? Data()) as? [String: String]
+        XCTAssertEqual(body?["installId"], "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        XCTAssertEqual(body?["environment"], "sandbox")
+    }
+
+    func testGooglePKCEAndConfig() {
+        // RFC 7636 appendix B test vector.
+        XCTAssertEqual(GoogleSignIn.codeChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+        let c = GoogleSignIn.Config(clientID: "1234-abc.apps.googleusercontent.com")
+        XCTAssertEqual(c.reversedClientID, "com.googleusercontent.apps.1234-abc")
+        XCTAssertEqual(c.redirectURI, "com.googleusercontent.apps.1234-abc:/oauth2redirect")
+        let url = GoogleSignIn.authorizationURL(config: c, verifier: "v", state: "s")
+        XCTAssertTrue(url.absoluteString.contains("code_challenge_method=S256"))
+        XCTAssertNil(GoogleSignIn.Config.fromBundle(), "placeholder build setting = not available yet")
+    }
+
+    private static func read(_ stream: InputStream) -> Data {
+        stream.open(); defer { stream.close() }
+        var data = Data(); var buf = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable { let n = stream.read(&buf, maxLength: buf.count); if n <= 0 { break }; data.append(buf, count: n) }
+        return data
+    }
+}

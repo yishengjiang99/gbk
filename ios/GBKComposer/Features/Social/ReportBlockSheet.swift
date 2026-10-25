@@ -33,6 +33,7 @@ struct ReportBlockSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
+        .signInPrompting()
     }
 
     private func report() async {

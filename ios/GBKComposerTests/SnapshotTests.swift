@@ -56,6 +56,8 @@ final class SnapshotTests: XCTestCase {
         return (0.2126 * CGFloat(px[0]) + 0.7152 * CGFloat(px[1]) + 0.0722 * CGFloat(px[2])) / 255
     }
 
+    override func setUp() async throws { AuthStore.shared.clearLocal() }
+
     func testFeedCardLightAndDark() throws {
         let card = ZStack { Theme.background.ignoresSafeArea(); FeedCardView(song: PreviewFixtures.song, playback: nil) }
         let light = try render(card, name: "feed-card-light", style: .light)
@@ -76,6 +78,16 @@ final class SnapshotTests: XCTestCase {
         let light = try render(view, name: "paywall-light", style: .light, size: size)
         let dark = try render(view, name: "paywall-dark", style: .dark, size: size)
         XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, "paywall must follow Dark Mode")
+    }
+
+    func testSignedOutProfileAndInbox() throws {
+        AuthStore.shared.clearLocal()
+        XCTAssertFalse(AuthStore.shared.isSignedIn)
+        for (name, view) in [("profile-signed-out", AnyView(ProfileView())), ("inbox-signed-out", AnyView(InboxView()))] {
+            let light = try render(view, name: "\(name)-light", style: .light)
+            let dark = try render(view, name: "\(name)-dark", style: .dark)
+            XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, name)
+        }
     }
 
     func testAllThemeColorsResolveInBothAppearances() {

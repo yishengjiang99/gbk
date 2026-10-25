@@ -2,8 +2,9 @@
 
 ## iOS
 
-- Swap `MockAuthService` fallbacks out once iOS-1 routes ship (`/api/auth/apple`, `/api/auth/google/native`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/web-code`, `DELETE /api/me`) and P5 push routes ship.
-- Google Sign-In SDK integration (needs iOS OAuth client id).
+- GBK Social: deploy guest accounts (`POST /api/auth/anonymous`, specced in docs/social-api.md 7692a7a; prod returns 404 today). The iOS client already sends `{ deviceId, username }`, retries a new two-word name on 409/422, and sends the guest bearer on Apple/Google sign-in for the linked/merged upgrade.
+
+- Sign in with Apple: server answers 503 until `APPLE_BUNDLE_ID` is set; the app shows "not available yet".
 - SF2 playback on `SF2Engine`: copy the sequencer and MIDI parsing from earsheet's `Packages/SF2Player`.
 - Web: add a dark palette (prefers-color-scheme) to social.css; iOS dark variants live in Assets.xcassets and can be copied.
 - Web: decide whether finished notes should vanish at the playhead (iOS does) and whether to add the oscilloscope.
@@ -16,6 +17,9 @@
 - App Store playbook `make_screenshots.py` uses `Image.Lanczos` (breaks on current Pillow); use `Image.LANCZOS`.
 
 ### Needs Yisheng
+
+- Create an iOS OAuth client in Google Cloud Console (same project as the web `GOOGLE_CLIENT_ID`, bundle ID com.grepawk.moviefone). Put its ID in `ios/project.yml` `GOOGLE_IOS_CLIENT_ID` (and the reversed form in `GOOGLE_REVERSED_CLIENT_ID`), and add it to the server env `GOOGLE_IOS_CLIENT_IDS`. None exists in the repo or server config today.
+- Set `APPLE_BUNDLE_ID` on the server to enable Sign in with Apple (`/api/auth/apple` returns 503 until then), and `IOS_APP_IDS` for the AASA file (404 today).
 
 - Give the App Store Connect issuer ID (ASC > Users and Access > Integrations > App Store Connect API, shown above the keys list) so it can be set as `APP_STORE_CONNECT_ISSUER_ID`; key 95M27GJTV7 returned 401 with every issuer UUID found on the box. Then confirm Push, Sign in with Apple and Associated Domains on `com.grepawk.moviefone` and run ios-release.yml.
 - App Review notes: reviewer account `openai-reviewer` (password in server config; enter it in App Store Connect review notes) — confirm REVIEWER_LOGIN_ENABLED stays on during review.
