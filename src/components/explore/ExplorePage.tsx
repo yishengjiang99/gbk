@@ -51,7 +51,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
   return (
     <div className="xp" data-testid="explore-page">
       <header className="xp-hero">
-        <div><h1>GBK Composer</h1><p>Describe music in plain words; an AI agent composes it with GBK's MIDI workstation and SoundFont synth, right in your browser.</p></div>
+        <div><h1>GBK Composer</h1><p>Describe music in plain words; an AI agent composes it with GBK's MIDI workstation and SoundFont synth, right in your browser.</p><p><a href="/chatgpt/gallery" data-testid="gallery-link">Hear demos made with GBK →</a></p></div>
         <button className="xp-cta" data-testid="compose-cta" onClick={() => onCompose()}>Compose your own →</button>
       </header>
       <video className="xp-video" data-testid="launch-video" controls playsInline preload="metadata" poster="/media/compose-launch-cover.jpg" src="/media/compose-launch-v4.mp4" aria-label="GBK Composer launch video" />
@@ -91,7 +91,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
         ))}
       </div>
       <nav className="ws-row xp-pager"><button disabled={!page} onClick={() => setPage(page - 1)}>← Newer</button><span className="ws-dim">page {page + 1}</span><button disabled={!more} onClick={() => setPage(page + 1)} data-testid="explore-next">Older →</button></nav>
-      <footer className="ws-row ws-dim xp-footer"><a href="https://compose.grepawk.com/chatgpt">ChatGPT plugin</a><a href="https://compose.grepawk.com/privacy">Privacy</a><a href="https://compose.grepawk.com/terms">Terms</a><a href="https://compose.grepawk.com/support">Support</a></footer>
+      <footer className="ws-row ws-dim xp-footer"><a href="https://compose.grepawk.com/chatgpt">ChatGPT plugin</a><a href="https://compose.grepawk.com/chatgpt/gallery">Demo gallery</a><a href="https://compose.grepawk.com/privacy">Privacy</a><a href="https://compose.grepawk.com/terms">Terms</a><a href="https://compose.grepawk.com/support">Support</a></footer>
     </div>
   );
 }

@@ -1,9 +1,9 @@
 # Demo gallery (#72 Phase 4)
 
-Status: **built, private preview only.** The six demos live on the server in `$COMPOSER_DATA_DIR/gallery`
-(not in git, not public). `GET /chatgpt/gallery` and its WAV/MIDI downloads return 404 for everyone except
-`COMPOSER_ADMIN_USERS`. The page is noindex and no-store and isn't in the sitemap. Nothing is linked from
-/chatgpt, Explore, or song pages until the owner approves the assets (see "Making it public").
+Status: **public** (owner approved on 2026-10-24: "Yes go public"). The six demos live on the server in
+`$COMPOSER_DATA_DIR/gallery` (not in git). They are served at `/chatgpt/gallery` (indexable, in the sitemap),
+linked from /chatgpt (three featured: fugue, orchestral cue, ambient piano), from Explore, and from the site footer.
+The fugue says plainly on the page that all four voices enter together; the game loop's seam is marked unverified.
 
 ## How demos are made (no hand-made data)
 
@@ -39,12 +39,5 @@ controllers), the explanation, WAV/MIDI downloads, and the recipe JSON plus seed
 Finding: `gbk_edit_composition`'s `generate_part kind: counterpoint` requires an `againstTrack` field, but the
 tool description doesn't mention it. Models will hit INVALID_ARGUMENT ("counterpoint needs againstTrackId").
 Worth a description fix in a later PR (server-only, no package change).
-
-## Making it public (needs owner approval)
-
-1. The owner reviews the six demos at /chatgpt/gallery (signed in as an admin).
-2. On approval: a follow-up PR removes the admin gate, adds the page to the sitemap, and links three featured
-   demos (`featured: true`: fugue, orchestral cue, ambient piano) from /chatgpt and Explore.
-3. Until then no demo media or composition is public.
 
 Package effect: none (server and docs only; the uploaded ZIP is unchanged).

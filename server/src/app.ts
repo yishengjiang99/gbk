@@ -66,7 +66,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const funnel = new FunnelStore(persist ? join(cfg.dataDir, "analytics.sqlite") : ":memory:");
   pageRoutes(app, cfg, funnel);
   funnelRoutes(app, cfg, sessions, funnel);
-  galleryRoutes(app, cfg, sessions);
+  galleryRoutes(app, cfg);
   openaiChallengeRoute(app, cfg.openaiAppsChallenge);
   agentRoutes(app, cfg, sessions, new RateLimiter(cfg.security.loginPerMinute), accounts, limits, ledger);
   reviewerRoutes(app, cfg, sessions, accounts);

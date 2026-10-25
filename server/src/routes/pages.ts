@@ -4,6 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import type { FunnelStore } from "../persistence/funnel.ts";
 import type { Config } from "../config.ts";
+import { loadGallery } from "../gallery.ts";
 
 export const STARTER_PROMPTS = [
   "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.",
@@ -33,7 +34,7 @@ pre{background:#fff;border:1px solid #ece3cf;border-radius:10px;padding:10px 14p
 footer{margin-top:48px;padding:24px 20px 40px;border-top:1px solid #ece3cf;color:#5b6070;font-size:14px}footer a{margin-right:16px}`;
 
 export function footerLinks(): string {
-  return `<a href="/">Home</a><a href="/explore">Explore</a><a href="/studio">Studio</a><a href="/chatgpt">ChatGPT plugin</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/support">Support</a>`;
+  return `<a href="/">Home</a><a href="/explore">Explore</a><a href="/studio">Studio</a><a href="/chatgpt">ChatGPT plugin</a><a href="/chatgpt/gallery">Demo gallery</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/support">Support</a>`;
 }
 
 function page(cfg: Config, path: string, title: string, description: string, body: string, jsonLd?: object): string {
@@ -68,6 +69,14 @@ function otherAiApps(cfg: Config): string {
 <script>document.querySelectorAll("button.copy").forEach(function(b){b.addEventListener("click",function(){navigator.clipboard.writeText(b.dataset.copy).then(function(){b.textContent="Copied";setTimeout(function(){b.textContent="Copy"},1500)})})})</script>`;
 }
 
+function featured(cfg: Config): string {
+  const demos = (loadGallery(cfg.dataDir)?.demos ?? []).filter((d) => d.featured);
+  if (!demos.length) return "";
+  return `<h2 id="listen">Listen: pieces made with GBK</h2><p>Composed by GBK's engine through the same tools ChatGPT uses, then rendered on our server.</p>
+${demos.map((d) => `<h3>${esc(d.title)}</h3><audio controls preload="none" src="/chatgpt/gallery/${esc(d.slug)}/song.wav" aria-label="Play ${esc(d.title)}" style="width:100%"></audio><p>${esc(d.explanation[0] ?? "")} <a href="/chatgpt/gallery#${esc(d.slug)}">Details, piano roll and downloads</a></p>`).join("\n")}
+<p><a class="cta alt" href="/chatgpt/gallery">See all demos</a></p>`;
+}
+
 function chatgpt(cfg: Config): string {
   const install = cfg.chatgptPluginUrl
     ? `<a class="cta" href="${esc(cfg.chatgptPluginUrl)}" rel="noopener">Install in ChatGPT</a>`
@@ -77,6 +86,7 @@ function chatgpt(cfg: Config): string {
 <p class="lead">Describe a piece of music in a chat. GBK Composer writes it as real, editable MIDI, lets you revise one passage at a time, and plays and renders it to WAV and MIDI. No account needed.</p>
 ${install}<a class="cta alt" href="/studio">Open GBK Studio</a>
 <h2>Try these prompts</h2><ol class="prompts">${STARTER_PROMPTS.map((p) => `<li>${esc(p)}</li>`).join("")}</ol>
+${featured(cfg)}
 <h2>What it does</h2><ul>
 <li><strong>Compose</strong> in five styles: baroque (with a Bach-style fugue generator and continuo), classical, pop, jazz and ambient. Choose key, tempo, meter, length and instruments.</li>
 <li><strong>Edit precisely.</strong> Add a melody, bass, walking bass, chords, arpeggio, drums or counterpoint part; transpose, invert, quantize, humanize or vary notes; double a line at the octave; shape dynamics with CC curves; change tempo, instruments or the mix. Each edit is saved as a new revision and leaves other sections untouched.</li>
@@ -139,7 +149,7 @@ export function pageRoutes(app: FastifyInstance, cfg: Config, funnel?: FunnelSto
   app.get("/robots.txt", async (_r, reply) => reply.type("text/plain; charset=utf-8").send(
     `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /oauth/\nDisallow: /mcp\nSitemap: ${cfg.publicOrigin}/sitemap.xml\n`));
   app.get("/sitemap.xml", async (_r, reply) => reply.type("application/xml; charset=utf-8").send(
-    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${["/", "/explore", ...PAGE_PATHS].map((p) => `  <url><loc>${cfg.publicOrigin}${p}</loc></url>`).join("\n")}\n</urlset>\n`));
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${["/", "/explore", ...PAGE_PATHS, "/chatgpt/gallery"].map((p) => `  <url><loc>${cfg.publicOrigin}${p}</loc></url>`).join("\n")}\n</urlset>\n`));
 }
 
 /** OpenAI plugin domain verification: serve the exact portal token as plain text (OPENAI_APPS_CHALLENGE). 404 until set. */
