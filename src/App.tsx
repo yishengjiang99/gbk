@@ -14,6 +14,9 @@ import MidiReader from "./midireader";
 import ErrorBoundary from "./ErrorBoundary";
 import { MidiRecorderUI } from "./MidiRecorderUI";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
+import { DEFAULT_SOUNDFONT_LABEL, DEFAULT_SOUNDFONT_PATH } from "./audio/soundfont-assets.ts";
+import { fetchSoundFontBytes } from "./audio/sf2-fetch.ts";
+import { playerBridge } from "./workstation/player-bridge.ts";
 import { primeSoundFontCache, setActiveSoundFont } from "./audio/soundfont-loader.ts";
 import { volumeToMasterGainDb } from "./sf2/master-bus.ts";
 import { synthEvent } from "./synth-ingress.ts";
@@ -122,8 +125,8 @@ interface PresetRegionCache {
 
 const SAMPLE_FILES: SampleFile[] = [
   {
-    label: "GeneralUser-GS.sf2",
-    path: `${import.meta.env.BASE_URL}static/GeneralUser-GS.sf2`,
+    label: DEFAULT_SOUNDFONT_LABEL,
+    path: `${import.meta.env.BASE_URL}${DEFAULT_SOUNDFONT_PATH}`,
   },
 ];
 const DEFAULT_SF2 = SAMPLE_FILES[0];
@@ -993,10 +996,15 @@ export default function App() {
       : 30_000;
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(path, { signal: controller.signal });
-      if (!res.ok) throw new Error(`Failed to fetch ${label}`);
-      const buffer = await res.arrayBuffer();
-      await parseFromU8(new Uint8Array(buffer), label, path);
+      playerBridge.onSf2Progress(0);
+      let lastPct = -1;
+      const u8 = await fetchSoundFontBytes(path, { signal: controller.signal, onProgress: (l, t) => {
+        const pct = t ? Math.min(99, Math.floor((100 * l) / t)) : -1;
+        if (pct === lastPct) return; lastPct = pct;
+        setLoadingStage(`Downloading SoundFont: ${label} (${mb} MB)…${pct >= 0 ? ` ${pct}%` : ""}`);
+        playerBridge.onSf2Progress(pct >= 0 ? pct / 100 : null);
+      } }).catch((e) => { throw new Error(`Failed to fetch ${label}: ${(e as Error).message}`); });
+      await parseFromU8(u8, label, path);
     } catch (e) {
       setLoading(false);
       setError(controller.signal.aborted

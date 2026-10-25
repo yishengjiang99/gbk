@@ -1,3 +1,4 @@
+import { DEFAULT_SOUNDFONT_PATH } from "../audio/soundfont-assets.ts";
 // In-chat player renderer (ChatGPT / MCP Apps widget). Bundled by scripts/build-widget.mjs into ONE classic script
 // served by the GBK server at /api/mcp/widget/gbk-widget-render.js; the widget HTML (server/src/mcp/ui.ts) loads it on
 // demand and calls window.GbkWidgetRender.render(). Synthesis is the canonical browser path: renderProjectOffline ->
@@ -38,7 +39,7 @@ export async function render(i: WidgetRenderInput): Promise<RenderResult & { wor
   const report = i.onProgress ?? (() => undefined);
   report(0, "worklet");
   const w = await prepareWorklet(i.base, i.signal);
-  const soundFont = await loadSoundFont({ url: `${i.base}/api/mcp/widget/soundfont.sf2`, signal: i.signal, timeoutMs: 180_000,
+  const soundFont = await loadSoundFont({ url: `${i.base}/api/mcp/widget/soundfont.sf2?v=${DEFAULT_SOUNDFONT_PATH.match(/\.([0-9a-f]{12})\.sf2$/)?.[1] ?? ""}`, signal: i.signal, timeoutMs: 180_000,
     onProgress: (l, t) => report(t ? 0.4 * (l / t) : 0.05, "soundfont") });
   const prog: ProgressFn = (p, stage) => report(stage === "loading" || stage === "resolving" ? 0.4 : 0.4 + 0.6 * Math.max(0, Math.min(1, p)), stage);
   const r = await renderProjectOffline(i.project, i.options, i.signal, prog, { soundFont });

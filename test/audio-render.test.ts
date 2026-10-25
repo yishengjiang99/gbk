@@ -158,7 +158,7 @@ test("invalid / missing SoundFont -> structured errors", async () => {
   clearSoundFontCache();
   const fetchImpl = (async () => new Response("nope", { status: 404 })) as typeof fetch;
   await assert.rejects(loadSoundFont({ url: "/gbk/static/missing.sf2", fetchImpl }), (e: RenderError) => e.code === "SOUNDFONT_FETCH_FAILED");
-  assert.equal(defaultSoundFontUrl(), "/static/GeneralUser-GS.sf2"); // Vite injects /gbk/ in the app build
+  assert.match(defaultSoundFontUrl(), /^\/static\/sf\/GeneralUser-GS\.[0-9a-f]{12}\.sf2$/); // Vite injects /gbk/ in the app build
 });
 
 test("render plan honours mute/solo and program changes", () => {

@@ -4,9 +4,9 @@ import { WorkstationController } from "../../src/workstation/controller.ts";
 import { parseSmf } from "../../src/workstation/smf.ts";
 import { runTool, type ToolResult } from "../../src/webmcp/tools.ts";
 import { buildAllTools } from "../../src/webmcp/registry.ts";
-import { primeSoundFontCache, parseSoundFont } from "../../src/audio/soundfont-loader.ts";
+import { primeSoundFontCache, parseSoundFont, defaultSoundFontUrl } from "../../src/audio/soundfont-loader.ts";
 
-primeSoundFontCache("/static/GeneralUser-GS.sf2", parseSoundFont(new Uint8Array(readFileSync("public/static/GeneralUser-GS.sf2"))).sf);
+primeSoundFontCache(defaultSoundFontUrl(), parseSoundFont(new Uint8Array(readFileSync("public/static/GeneralUser-GS.sf2"))).sf);
 
 export function setup(initial?: Uint8Array) {
   const c = new WorkstationController(initial ? parseSmf(initial, "user song") : undefined);

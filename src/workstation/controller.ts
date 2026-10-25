@@ -14,7 +14,7 @@ export interface Proposal {
   validation: { ok: boolean; warnings: string[] }; status: ProposalStatus;
   original: Project; candidate: Project; // refs: original = snapshot at baseRevision
 }
-export interface TransportState { playing: boolean; positionTick: number; audioReady: boolean; starting?: boolean }
+export interface TransportState { playing: boolean; positionTick: number; audioReady: boolean; starting?: boolean; /** SoundFont download progress (0..1, null unknown) while not ready. */ sf2Progress?: number | null }
 export interface TransportDriver {
   play(fromTick: number): Promise<void> | void; /** Synchronous audio unlock, called inside the user gesture. */ unlock?(): void; pause(): void; stop(): void; seek(tick: number): void;
   isAudioReady(): boolean;

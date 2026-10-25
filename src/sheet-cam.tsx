@@ -8,12 +8,13 @@ import {
 import { isOmrModelAvailable, transcribePhotoWithOmr } from "./omr-sheet-bridge.ts";
 import type { Song } from "./midi-timer.worker.ts";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
+import { DEFAULT_SOUNDFONT_PATH } from "./audio/soundfont-assets.ts";
 import "./sheet-cam.css";
 
 type Phase = "camera" | "scanning" | "ready";
 type CameraState = "idle" | "starting" | "live" | "denied" | "unsupported" | "error";
 
-const SF2_URL = `${import.meta.env.BASE_URL}static/GeneralUser-GS.sf2`;
+const SF2_URL = `${import.meta.env.BASE_URL}${DEFAULT_SOUNDFONT_PATH}`;
 
 function fmtTime(sec: number): string {
   const s = Math.max(0, Math.floor(sec));

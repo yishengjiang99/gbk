@@ -12,7 +12,9 @@
 // credentials actually presented (same user), so refreshed/narrower tokens take effect immediately,
 // and an anonymous session may upgrade to an authenticated one. Idle sessions are evicted.
 import { createHmac, randomUUID } from "node:crypto";
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { DEFAULT_SOUNDFONT_PATH } from "../../../src/audio/soundfont-assets.ts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Config } from "../config.ts";
@@ -221,7 +223,18 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
     reply.header("access-control-allow-origin", "*").header("cross-origin-resource-policy", "cross-origin");
     let path: string; let type: string;
     try {
-      if (file === "soundfont.sf2") { path = resolveSoundFontPath(cfg); type = "application/octet-stream"; reply.header("cache-control", "public, max-age=86400"); }
+      if (file === "soundfont.sf2") {
+        path = resolveSoundFontPath(cfg); type = "application/octet-stream";
+        // ?v=<sha12> (the widget's pinned font) is immutable; precompressed gzip sibling from the build when accepted.
+        const v = String((req.query as { v?: string }).v ?? "");
+        const pinned = v && DEFAULT_SOUNDFONT_PATH.includes(`.${v}.sf2`);
+        reply.header("cache-control", pinned ? "public, max-age=31536000, immutable" : "public, max-age=86400").header("vary", "Accept-Encoding");
+        const gz = join(dirname(path), "sf", `${basename(DEFAULT_SOUNDFONT_PATH)}.gz`);
+        if (/\bgzip\b/.test(String(req.headers["accept-encoding"] ?? "")) && existsSync(gz)) {
+          reply.type(type).header("content-encoding", "gzip").header("content-length", String(statSync(gz).size));
+          return reply.send(createReadStream(gz));
+        }
+      }
       else if (widgetFiles[file]) { path = resolveWidgetAsset(file); type = widgetFiles[file]; reply.header("cache-control", "public, max-age=300"); }
       else return reply.code(404).send({ code: "NOT_FOUND", message: "no such widget asset" });
     } catch (e) { return reply.code(404).send({ code: "NOT_FOUND", message: (e as Error).message }); }

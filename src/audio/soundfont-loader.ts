@@ -4,7 +4,11 @@
 import { SF2SoundFont, type SF2Region } from "../sf2/soundfont.ts";
 import { RenderError, throwIfAborted } from "./render-error.ts";
 
-export const DEFAULT_SOUNDFONT_FILE = "static/GeneralUser-GS.sf2";
+import { DEFAULT_SOUNDFONT_PATH } from "./soundfont-assets.ts";
+import { fetchSoundFontBytes } from "./sf2-fetch.ts";
+
+/** Content-hashed (immutable) default font path, see soundfont-assets.ts. */
+export const DEFAULT_SOUNDFONT_FILE = DEFAULT_SOUNDFONT_PATH;
 
 /** Deployment base ("/gbk/" on GitHub Pages, "/" elsewhere). */
 export function deploymentBase(): string {
@@ -43,23 +47,13 @@ async function fetchSoundFont(url: string, o: LoadOptions): Promise<LoadedSoundF
   o.signal?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? 120_000);
   try {
-    let res: Response;
-    try { res = await f(url, { signal: ctl.signal }); } catch (e) {
-      throwIfAborted(o.signal);
-      throw new RenderError("SOUNDFONT_FETCH_FAILED", `could not fetch SoundFont ${url}: ${(e as Error).message}`);
-    }
-    if (!res.ok) throw new RenderError("SOUNDFONT_FETCH_FAILED", `SoundFont ${url}: HTTP ${res.status}`);
-    const total = Number(res.headers.get("content-length")) || null;
     let bytes: Uint8Array;
-    if (res.body && typeof res.body.getReader === "function") {
-      const reader = res.body.getReader(); const parts: Uint8Array[] = []; let loaded = 0;
-      for (;;) {
-        const { done, value } = await reader.read().catch((e) => { throwIfAborted(o.signal); throw new RenderError("SOUNDFONT_FETCH_FAILED", `SoundFont download failed: ${(e as Error).message}`); });
-        if (done) break;
-        parts.push(value); loaded += value.length; o.onProgress?.(loaded, total);
-      }
-      bytes = new Uint8Array(loaded); let off = 0; for (const p of parts) { bytes.set(p, off); off += p.length; }
-    } else { bytes = new Uint8Array(await res.arrayBuffer()); o.onProgress?.(bytes.length, bytes.length); }
+    try { bytes = await fetchSoundFontBytes(url, { signal: ctl.signal, onProgress: o.onProgress, fetchImpl: f }); }
+    catch (e) {
+      throwIfAborted(o.signal);
+      const st = (e as { status?: number }).status;
+      throw new RenderError("SOUNDFONT_FETCH_FAILED", st ? `SoundFont ${url}: HTTP ${st}` : `could not fetch SoundFont ${url}: ${(e as Error).message}`);
+    }
     throwIfAborted(o.signal);
     return parseSoundFont(bytes, url, url.split("/").pop() ?? url);
   } finally { clearTimeout(timer); o.signal?.removeEventListener("abort", onAbort); }

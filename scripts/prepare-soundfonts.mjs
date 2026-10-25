@@ -37,7 +37,8 @@ for (const font of catalog.fonts) {
     const dest = join(root, "public", "static", font.file);
     if (!existsSync(src)) throw new Error(`bundled SoundFont missing after fetch: ${src}`);
     copyFileSync(src, dest);
-    entry.path = `static/${font.file}`;
+    // Content-hashed URL (immutable cache); vite.config.ts writes dist/static/sf/<name>.<sha12>.sf2 (+ .gz).
+    entry.path = `static/sf/${font.file.replace(/\.sf2$/i, "")}.${font.sha256.slice(0, 12)}.sf2`;
   } else if (font.delivery === "server") {
     if (!includeServer) continue;
     entry.path = font.serverPath;

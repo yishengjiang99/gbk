@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, copyFileSync, writeFileSync, utimesSync, createReadStream, statSync } from "node:fs";
+import { join } from "node:path";
+import { gzipSync, constants as zc } from "node:zlib";
 import { execSync } from "node:child_process";
 
 /** Release id baked into the bundle for error reports: GBK_RELEASE_ID (deploy.sh) or the git short sha. */
@@ -31,8 +33,42 @@ function webMcpOriginTrial(): Plugin {
   };
 }
 
+/**
+ * Content-hashed SoundFonts (src/audio/soundfont-assets.ts): build writes dist/static/sf/<name>.<sha12>.sf2 plus a
+ * gzip -9 sibling for nginx gzip_static, with a fixed mtime so ETag/Last-Modified are stable across deploys. Dev serves
+ * the hashed URL from public/static/<name>.sf2.
+ */
+function hashedSoundFonts(): Plugin {
+  const fonts = (JSON.parse(readFileSync("soundfonts/catalog.json", "utf8")).fonts as { file: string; sha256: string; delivery: string }[]).filter((f) => f.delivery === "bundled");
+  const hashed = (f: { file: string; sha256: string }) => `${f.file.replace(/\.sf2$/i, "")}.${f.sha256.slice(0, 12)}.sf2`;
+  let outDir = "dist";
+  const FIXED = new Date("2020-01-01T00:00:00Z");
+  return {
+    name: "gbk-hashed-soundfonts",
+    configResolved(c) { outDir = c.build.outDir; },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const m = /\/static\/sf\/([^/?]+)\.[0-9a-f]{12}\.sf2(\?.*)?$/.exec(req.url ?? "");
+        const src = m && join("public", "static", `${m[1]}.sf2`);
+        if (!src || !existsSync(src)) return next();
+        res.setHeader("content-type", "application/octet-stream"); res.setHeader("content-length", String(statSync(src).size));
+        createReadStream(src).pipe(res);
+      });
+    },
+    closeBundle() {
+      const dir = join(outDir, "static", "sf"); mkdirSync(dir, { recursive: true });
+      for (const f of fonts) {
+        const src = join(outDir, "static", f.file); if (!existsSync(src)) continue;
+        const dest = join(dir, hashed(f)); copyFileSync(src, dest);
+        writeFileSync(`${dest}.gz`, gzipSync(readFileSync(dest), { level: zc.Z_BEST_COMPRESSION }));
+        for (const p of [dest, `${dest}.gz`]) utimesSync(p, FIXED, FIXED);
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), webMcpOriginTrial()],
+  plugins: [react(), webMcpOriginTrial(), hashedSoundFonts()],
   define: { __GBK_RELEASE__: JSON.stringify(releaseId()) },
   // "/" for compose.grepawk.com (default), "/gbk/" for the GitHub Pages build (GBK_BASE_PATH=/gbk/).
   base: process.env.GBK_BASE_PATH ?? "/",

@@ -80,6 +80,8 @@ class PlayerBridge {
     if (this.playerPlaying) return Promise.resolve();
     return new Promise((res, rej) => { const t = setTimeout(() => rej(new Error("Playback did not start; press Play again")), ms); this.playingWaiters.push(() => { clearTimeout(t); res(); }); });
   }
+  /** SoundFont download progress 0..1 (null = unknown size) for the studio Play button. */
+  onSf2Progress(frac: number | null) { this.ctrl?.updateTransport({ sf2Progress: frac }); }
   onReady() { this.ctrl?.updateTransport({ audioReady: !!this.handle?.isReady() }); }
 
   waitSong(): Promise<void> { return new Promise((r) => this.songWaiters.push(r)); }
