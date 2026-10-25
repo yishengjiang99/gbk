@@ -6,4 +6,4 @@
   in quarters, dynamic swell — the "lantern lit" moment. Ends on A–A7 to return home.
 - **A2 (17–24):** varied reprise (bass descends lower, ii°6 predominant), decrescendo, ends on a Picardy D major.
 - Voice leading checked programmatically (see prompt.md). Fully original; no borrowed material.
-- **Share URL:** not published yet — maestroaria artist token/docs were not available.
+- **Share URL:** https://compose.grepawk.com/s/lantern-adagio-f77cakgh (published 2026-10-25 as @maestroaria; labels classical, cinematic)
