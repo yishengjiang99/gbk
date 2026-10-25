@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { parseWavHeader, validateWav } from "../../src/audio/audio-validation.ts";
 
 const SHOTS = process.env.GBK_SHOTS ?? "/workspace/shots";
+mkdirSync(SHOTS, { recursive: true });
 const PROMPT = "Compose a four-voice Baroque fugue in D minor with expressive strings, add CC11 dynamics, and render it to WAV.";
 const ws = (page: Page) => page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; const p = c.project; return { id: p.id, name: p.name, owner: p.meta?.owner, tracks: p.tracks.map((t: any) => t.name), programs: p.programs.map((g: any) => g.program), notes: p.notes.length, cc11: p.ccs.filter((e: any) => e.controller === 11).length, cc1: p.ccs.filter((e: any) => e.controller === 1).length, effects: p.sound?.effects ?? null, voice: p.sound?.tracks ?? {}, revision: p.revision, readOnly: c.readOnlyReason }; });
 
@@ -357,7 +358,7 @@ test("mobile composer view fills the screen height; other tabs restore the roll"
   expect(ib.y + ib.height).toBeLessThanOrEqual(H + 0.5);
   const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, fs: parseFloat(getComputedStyle(document.querySelector("[data-testid=composer-input] textarea, textarea[data-testid=composer-input]") as Element).fontSize), ov: getComputedStyle(document.querySelector(".cmp-messages")!).overflowY }));
   expect(m.sw).toBeLessThanOrEqual(W); expect(m.sh).toBeLessThanOrEqual(H + 0.5); expect(m.fs).toBeGreaterThanOrEqual(16); expect(m.ov).toBe("auto");
-  if (test.info().project.name === "mobile-webkit") await page.screenshot({ path: "/workspace/shots/composer-fullheight.png" });
+  if (test.info().project.name === "mobile-webkit") await page.screenshot({ path: `${SHOTS}/composer-fullheight.png` });
   await page.getByTestId("tab-tracks").click();
   await expect(page.locator(".ws-main")).toBeVisible();
   await expect(page.locator(".ws-roll-slot")).toBeVisible();

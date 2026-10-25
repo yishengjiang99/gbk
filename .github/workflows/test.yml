@@ -68,3 +68,4 @@ jobs:
       - run: npm run test:e2e:composer -- --project=chrome-no-webmcp --project=mobile
         env:
           PW_CHROME_CHANNEL: chromium
+          GBK_SHOTS: ${{ runner.temp }}/shots
