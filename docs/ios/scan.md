@@ -30,7 +30,7 @@ Yisheng chose to license `ios/` AGPL-3.0-or-later (2026-10-25), so the real reco
 ## Tests
 
 - `ScanTests.swift`: Score → SMF → Score round trip (tempo, time sig, key, names, programs, retriggered pitches, channels), SMF reader, the `gbk:midi-file` hand-off against a stand-in chooser page (file name, type, bytes), "studio not ready" on a page without the import, nothing recognized, no `scan` capability flag, and the real pipeline on `GBKComposerTests/Fixtures/c_major_scale.png` (pitches 60 62 64 65 67 69 71 72; CI sets `OMR_REQUIRE_MODELS=1`).
-- `ScanUITests.swift` (live compose.grepawk.com/studio): bar button → sheet → **Use test sheet** → real recognition (~3 min on the simulator) → studio chooser → **Open as new project** → "Imported 1 track, 8 notes"; composer input hittable throughout. Dark run checks the bar + sheet.
+- `ScanUITests.swift` (live compose.grepawk.com/studio): bar button → sheet → **Use test sheet** → real recognition (~3 min on the simulator) → studio chooser → **Open as new project** → "Imported 1 track, 8 notes"; composer input hittable throughout. The app is locked to Light (`UIUserInterfaceStyle`), so dark is checked by the snapshot tests.
 - Snapshots: `scan-entry`, `scan-error`, `studio-scan-bar` (light/dark) + UI screenshots `scan-ui-*` in the `ios-snapshots` artifact.
 
 ## AGPL §13 note
