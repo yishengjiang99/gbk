@@ -12,7 +12,7 @@ export interface VideoModel {
   barTimes: number[];            // bar start times (s)
   pitchLo: number; pitchHi: number;
 }
-export interface VideoOptions { width: number; height: number; fps: number; windowSeconds: number; playheadFrac: number }
+export interface VideoOptions { width: number; height: number; fps: number; windowSeconds: number; playheadFrac: number; theme?: "dark" | "light" }
 export const DEFAULT_VIDEO: VideoOptions = { width: 1920, height: 1080, fps: 30, windowSeconds: 8, playheadFrac: 0.3 };
 
 /** Build the time-domain model from a project. `duration` is the audio length (WAV incl. tail) so frames == audio. */
@@ -41,13 +41,17 @@ export const frameTime = (i: number, fps: number) => i / fps;
 export const activeNotes = (m: VideoModel, t: number) => m.notes.filter((n) => n.t0 <= t + 1e-9 && n.t1 > t);
 export const sectionAt = (m: VideoModel, t: number) => [...m.sections].reverse().find((s) => s.t <= t + 1e-9) ?? null;
 
-const BG = "#0f1115", GRID = "#1c2028", BAR = "#2a3040", TEXT = "#e8eaf0", DIM = "#8a93a6";
+const PALETTES = {
+  dark: { BG: "#0f1115", GRID: "#1c2028", BAR: "#2a3040", TEXT: "#e8eaf0", DIM: "#8a93a6", ROW: "#13161c", SECTION: "#ffd54f", HEAD: "#ffffff", WHITE: "#ddd", BLACK: "#222", PROG: "#4fc3f7", OUTLINE: "#ffffff" },
+  light: { BG: "#ffffff", GRID: "#e6e9f0", BAR: "#c5cbd8", TEXT: "#1a2029", DIM: "#5b6475", ROW: "#f2f4f8", SECTION: "#c27c00", HEAD: "#e5396b", WHITE: "#f7f7f7", BLACK: "#3a3f4a", PROG: "#2f6fd6", OUTLINE: "#1a2029" },
+};
 export const KEYBOARD_W = 90;
 const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(p % 12);
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 export function drawFrame(ctx: Ctx, m: VideoModel, t: number, o: VideoOptions = DEFAULT_VIDEO) {
   const { width: W, height: H } = o;
+  const { BG, GRID, BAR, TEXT, DIM, ROW, SECTION, HEAD, WHITE, BLACK, PROG, OUTLINE } = PALETTES[o.theme ?? "dark"];
   const top = 150, bottom = H - 70, rollH = bottom - top;
   const rows = m.pitchHi - m.pitchLo + 1, rowH = rollH / rows;
   const pxPerSec = (W - KEYBOARD_W) / o.windowSeconds;
@@ -55,11 +59,11 @@ export function drawFrame(ctx: Ctx, m: VideoModel, t: number, o: VideoOptions = 
   const x = (s: number) => headX + (s - t) * pxPerSec;
   const y = (pitch: number) => bottom - (pitch - m.pitchLo + 1) * rowH;
   ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
-  for (let pch = m.pitchLo; pch <= m.pitchHi; pch++) if (isBlack(pch)) { ctx.fillStyle = "#13161c"; ctx.fillRect(KEYBOARD_W, y(pch), W, rowH); }
+  for (let pch = m.pitchLo; pch <= m.pitchHi; pch++) if (isBlack(pch)) { ctx.fillStyle = ROW; ctx.fillRect(KEYBOARD_W, y(pch), W, rowH); }
   // bar lines + section bands
   for (const [i, bt] of m.barTimes.entries()) { const bx = x(bt); if (bx < KEYBOARD_W || bx > W) continue; ctx.fillStyle = i % 4 === 0 ? BAR : GRID; ctx.fillRect(Math.round(bx), top, 1, rollH); }
   ctx.textBaseline = "top";
-  for (const s of m.sections) { const sx = x(s.t); if (sx > W || sx < KEYBOARD_W - 400) continue; ctx.fillStyle = "#ffd54f"; ctx.fillRect(Math.round(sx), top - 34, 2, rollH + 34); ctx.font = "600 22px sans-serif"; ctx.fillText(s.name, Math.round(sx) + 8, top - 32); }
+  for (const s of m.sections) { const sx = x(s.t); if (sx > W || sx < KEYBOARD_W - 400) continue; ctx.fillStyle = SECTION; ctx.fillRect(Math.round(sx), top - 34, 2, rollH + 34); ctx.font = "600 22px sans-serif"; ctx.fillText(s.name, Math.round(sx) + 8, top - 32); }
   // notes
   const lit = new Map<number, string>();
   for (const n of m.notes) {
@@ -71,23 +75,23 @@ export function drawFrame(ctx: Ctx, m: VideoModel, t: number, o: VideoOptions = 
     ctx.fillStyle = color;
     const nx = Math.max(KEYBOARD_W, x0);
     ctx.fillRect(nx, y(n.pitch) + 1, Math.max(2, x1 - nx - 1), Math.max(2, rowH - 2));
-    if (on) { ctx.globalAlpha = 1; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.strokeRect(nx, y(n.pitch) + 1, Math.max(2, x1 - nx - 1), Math.max(2, rowH - 2)); lit.set(n.pitch, color); }
+    if (on) { ctx.globalAlpha = 1; ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2; ctx.strokeRect(nx, y(n.pitch) + 1, Math.max(2, x1 - nx - 1), Math.max(2, rowH - 2)); lit.set(n.pitch, color); }
   }
   ctx.globalAlpha = 1;
   // keyboard (lit keys in track color)
-  for (let pch = m.pitchLo; pch <= m.pitchHi; pch++) { ctx.fillStyle = lit.get(pch) ?? (isBlack(pch) ? "#222" : "#ddd"); ctx.fillRect(0, y(pch), KEYBOARD_W - 4, rowH - 1); }
-  ctx.fillStyle = "#ffffff"; ctx.fillRect(Math.round(headX) - 1, top, 2, rollH);
+  for (let pch = m.pitchLo; pch <= m.pitchHi; pch++) { ctx.fillStyle = lit.get(pch) ?? (isBlack(pch) ? BLACK : WHITE); ctx.fillRect(0, y(pch), KEYBOARD_W - 4, rowH - 1); }
+  ctx.fillStyle = HEAD; ctx.fillRect(Math.round(headX) - 1, top, 2, rollH);
   // header
   ctx.fillStyle = TEXT; ctx.font = "700 48px sans-serif"; ctx.fillText(m.title, 40, 28);
   ctx.fillStyle = DIM; ctx.font = "400 24px sans-serif"; ctx.fillText(m.subtitle, 40, 88);
   const sec = sectionAt(m, t);
-  ctx.textAlign = "right"; ctx.fillStyle = "#ffd54f"; ctx.font = "600 30px sans-serif"; ctx.fillText(sec?.name ?? "", W - 40, 32);
+  ctx.textAlign = "right"; ctx.fillStyle = SECTION; ctx.font = "600 30px sans-serif"; ctx.fillText(sec?.name ?? "", W - 40, 32);
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   ctx.fillStyle = DIM; ctx.font = "400 24px monospace"; ctx.fillText(`${mmss(t)} / ${mmss(m.duration)}`, W - 40, 80); ctx.textAlign = "left";
   // legend + progress
   let lx = 40; ctx.font = "500 22px sans-serif"; ctx.textBaseline = "middle";
   for (const tr of m.tracks) { ctx.fillStyle = tr.color; ctx.fillRect(lx, H - 40, 18, 18); ctx.fillStyle = TEXT; ctx.fillText(tr.name, lx + 26, H - 31); lx += 40 + ctx.measureText(tr.name).width; }
-  ctx.fillStyle = GRID; ctx.fillRect(0, H - 6, W, 6); ctx.fillStyle = "#4fc3f7"; ctx.fillRect(0, H - 6, W * Math.min(1, t / m.duration), 6);
+  ctx.fillStyle = GRID; ctx.fillRect(0, H - 6, W, 6); ctx.fillStyle = PROG; ctx.fillRect(0, H - 6, W * Math.min(1, t / m.duration), 6);
   ctx.textBaseline = "alphabetic";
 }
 

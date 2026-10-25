@@ -27,6 +27,7 @@ import { FloatingWindow } from "./FloatingWindow.tsx";
 import { selectedTrackId } from "../../workstation/live-input.ts";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
+import { VideoExportButton } from "./VideoExport.tsx";
 import { ComposerPanel } from "../composer/ComposerPanel.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
 import { funnelBeacon } from "../../telemetry/funnel.ts";
@@ -65,6 +66,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [follow, setFollow] = useState(true);
   const [keysOn, setKeysOn] = useState(false);
   const narrow = useMedia("(max-width: 900px)");
+  const phone = useMedia("(max-width: 600px)");
   const [mainRef, mainBox] = useBox<HTMLElement>();
   const [rollRef, rollBox] = useBox<HTMLDivElement>();
   const tabs = useMemo(() => [...(narrow ? ["Tracks"] : []), ...(composer ? ["Composer"] : []), "Agent", "Sound", "Files"], [narrow, composer]);
@@ -120,6 +122,17 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
     await workstation.createProject({ name: "Untitled", owner: "user", replaceCurrent: !workstation.host.checkpoint });
   });
 
+  const transportCore = (<>
+    <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>
+    {state.transport.playing ? <button className="ws-playbtn" onClick={() => workstation.pause()} aria-label="Pause">⏸</button> : <button className="ws-playbtn" onClick={() => run(() => workstation.play())} aria-label="Play" data-testid="ws-play">▶</button>}
+    <button onClick={() => workstation.stop()} aria-label="Stop">⏹</button>
+    <span className="ws-pos" data-testid="ws-pos" data-pos-tick={pos}>{bb.bar}.{Math.floor(bb.beat) + 1} · {tickToSec(p, pos).toFixed(2)}s</span>
+  </>);
+  const transportExtras = (<>
+          <button onClick={() => setKeysOn(!keysOn)} aria-pressed={keysOn} data-testid="keys-toggle" title="Piano keyboard (on-screen, computer keys A-K, Web MIDI)">🎹 Keys</button>
+          <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
+          <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
+  </>);
   return (
     <div className="ws" data-testid="workstation">
       <header className="ws-header">
@@ -128,15 +141,11 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
         <button className="ws-new" onClick={newProject} data-testid="new-project" title="Start a new, empty project">＋ New project</button>
         {workstation.readOnlyReason && <span className="ws-pill off" data-testid="readonly-pill" title={workstation.readOnlyReason}>read-only · <button className="ws-link" onClick={() => workstation.fork()}>Fork</button></span>}
         <span className="ws-name" title={p.name}>{p.name}</span>
-        <div className="ws-transport" role="toolbar" aria-label="Transport">
-          <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>
-          {state.transport.playing ? <button onClick={() => workstation.pause()} aria-label="Pause">⏸</button> : <button onClick={() => run(() => workstation.play())} aria-label="Play" data-testid="ws-play">▶</button>}
-          <button onClick={() => workstation.stop()} aria-label="Stop">⏹</button>
-          <span className="ws-pos" data-testid="ws-pos" data-pos-tick={pos}>{bb.bar}.{Math.floor(bb.beat) + 1} · {tickToSec(p, pos).toFixed(2)}s</span>
-          <button onClick={() => setKeysOn(!keysOn)} aria-pressed={keysOn} data-testid="keys-toggle" title="Piano keyboard (on-screen, computer keys A-K, Web MIDI)">🎹 Keys</button>
-          <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
-          <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
-        </div>
+        {!phone && <div className="ws-transport" role="toolbar" aria-label="Transport">
+          {transportCore}
+          {transportExtras}
+        </div>}
+        {phone && transportExtras}
         <span className="ws-dim">{p.ppq} PPQ · {Math.round(60e6 / (p.tempos[0]?.microPerQuarter ?? 500000))} bpm{p.tempos.length > 1 ? "*" : ""} · {p.timeSigs[0]?.numerator}/{p.timeSigs[0]?.denominator}</span>
         <button onClick={() => setView({ ...view, pxPerTick: view.pxPerTick * 1.25 })} aria-label="Zoom in">＋</button>
         <button onClick={() => setView({ ...view, pxPerTick: view.pxPerTick / 1.25 })} aria-label="Zoom out">－</button>
@@ -144,11 +153,13 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
         <button disabled={!state.canRedo} onClick={() => workstation.redo()}>Redo</button>
         <button onClick={exportMidi} data-testid="export-midi">Export MIDI</button>
         <button onClick={exportWav} data-testid="export-wav">Export WAV</button>
+        <VideoExportButton />
         <label className={`ws-pill ${agent.on && agent.available ? "on" : "off"}`} data-testid="agent-mode" data-mode={agent.mode} title={agent.mode === "webmcp" ? "Expose gbk_* tools to in-browser agents via WebMCP (document.modelContext)" : "WebMCP not in this browser: tools are exposed in-page as window.gbkTools (shim)"}>
           <input type="checkbox" data-testid="agent-toggle" checked={agent.on} disabled={!agent.available} onChange={(e) => agent.setOn(e.target.checked)} /> Enable Agent Tools {agent.mode === "shim" ? "(shim)" : ""}
         </label>
         <button className="ws-player-btn" onClick={onOpenPlayer} data-testid="open-player">Player / Library</button>
       </header>
+      {phone && <div className="ws-transport ws-transport-row" role="toolbar" aria-label="Transport" data-testid="transport-row">{transportCore}</div>}
       {keysOn && <FloatingWindow title="🎹 Keys" storageKey="gbk.keysWindowPos" testId="keys-window" onClose={() => setKeysOn(false)}>
         {() => <LiveKeyboard workstation={workstation} />}
       </FloatingWindow>}
@@ -235,7 +246,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
             {composer && <div hidden={activeTab !== "Composer"} className="ws-tabfill"><ComposerPanel project={p} readOnly={workstation.readOnlyReason} /></div>}
             {activeTab === "Agent" && <AgentPanel state={state} focusProposal={focus} setFocus={setFocus} />}
             {activeTab === "Sound" && <SoundPanel project={p} trackId={trackForLanes?.id} proposal={focus} />}
-            {activeTab === "Files" && <ArtifactPanel />}
+            {activeTab === "Files" && <><div className="ws-row"><VideoExportButton /></div><ArtifactPanel /></>}
           </div>
         </div>
       </div>
