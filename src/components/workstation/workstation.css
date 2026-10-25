@@ -227,3 +227,7 @@ html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-
 .ws-tabbody[hidden] { display: none !important; }
 /* Side column never shrinks below its tab strip + docked composer input. */
 .ws:has(.ws-cmp-dock) .ws-side { min-height: calc(96px + env(safe-area-inset-bottom)); }
+/* MIDI import chooser: small floating card above the composer dock; never covers the composer input. */
+.ws-midi-imp{position:fixed;left:50%;transform:translateX(-50%);top:calc(56px + env(safe-area-inset-top));z-index:60;max-width:min(92vw,460px);background:#fff;border:1px solid #c9dbe8;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:14px;box-sizing:border-box}
+.ws-midi-imp .ws-row{flex-wrap:wrap;gap:6px}
+.ws-midi-imp b{word-break:break-all}

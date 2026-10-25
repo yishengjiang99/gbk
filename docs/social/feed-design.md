@@ -16,7 +16,7 @@ Constants also live in `docs/social-api.md` → "Client behavior".
 
 ## Design rule: sign-in only when an action needs it (web + iOS)
 - **No standalone Sign in button anywhere**: not in the header, the feed, the studio, or the composer. Guests browse, play, read comments, open songs in the studio, and type in the composer freely.
-- **Gated actions open the sign-in sheet.** These are: rate, comment, follow, DM, report, publish/save, Send in the composer, and the Profile and Inbox tabs.
+- **Gated actions open the sign-in sheet.** These are: rate, comment, follow, DM, report, publish/save, Send in the composer, and the Inbox tab. **Profile is not gated**: a signed-out or guest user can open their own Profile tab. It shows the guest name (web: "Guest"; iOS: the two-word guest name) and offers the sign-in sheet from there. Only Inbox opens the sheet when its tab is tapped.
   - On phones the sheet is a bottom sheet; on desktop it is a centred modal.
   - It lists only the methods the server has configured, in this order: Apple, Google, GitHub, SMS, invite code, reviewer. Web reads these from `/api/session` (`providers`, `apple`, `sms`, `loginAvailable`, `reviewerLogin`).
   - It shows a one-line reason ("Sign in to rate songs.") and "Guests can browse, play and read without an account."

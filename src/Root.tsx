@@ -3,6 +3,7 @@ import App from "./App";
 import { WorkstationView } from "./components/workstation/WorkstationView.tsx";
 import { SocialApp } from "./components/social/SocialApp.tsx";
 import { SignInSheet } from "./components/auth/SignInSheet.tsx";
+import { MidiImportChooser } from "./components/workstation/MidiImportChooser.tsx";
 import "./components/social/social.css";
 import { parseRoute, navigate, appUrl, type Route } from "./agent/routes.ts";
 import { apiBase } from "./agent/bridge-client.ts";
@@ -54,6 +55,7 @@ export default function Root() {
         </div>
       </div>
       <SignInSheet />
+      {!explore && <MidiImportChooser />}
     </>
   );
 }

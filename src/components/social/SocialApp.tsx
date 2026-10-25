@@ -228,7 +228,7 @@ function ProfileView({ handle, me, onSheet, setMe }: { handle: string | null; me
   const [name, setName] = useState(""); const [hd, setHd] = useState(""); const [msg, setMsg] = useState("");
   useEffect(() => { setD(null); setErr(""); if (h) void social.user(h).then(setD).catch((e) => setErr((e as Error).message)); }, [h]);
   useEffect(() => { if (me) { setName(me.display_name); setHd(me.handle); } }, [me]);
-  if (!h) return <div className="so-pad so-dim" data-testid="profile-guest">Your profile and songs appear here after you sign in. Tap Profile to sign in.</div>;
+  if (!h) return <div className="so-pad" data-testid="profile-guest"><div className="so-row"><div className="so-av">G</div><div className="so-grow"><h2>Guest</h2><div className="so-dim">Browsing as a guest. Sign in to rate, comment, publish and keep your songs.</div></div></div><p><button className="so-btn pri" data-testid="profile-signin" onClick={() => needSignIn("Sign in to set up your profile.", { kind: "profile" })}>Sign in</button></p></div>;
   if (err) return <div className="so-pad so-err">{err}</div>;
   if (!d) return <div className="so-pad so-dim">Loading…</div>;
   const mine = me?.handle === d.user.handle;
@@ -304,7 +304,7 @@ export function SocialApp({ route, onOpen }: { route: SocialRoute; onOpen: (slug
         <button className={tab === "feed" ? "on" : ""} data-testid="tab-feed" onClick={() => navigate("")}>▶<br />Feed</button>
         <button data-testid="tab-create" onClick={() => navigate("studio")}>＋<br />Create</button>
         <button className={tab === "inbox" ? "on" : ""} data-testid="tab-inbox" onClick={() => (me || !meChecked ? navigate("inbox") : needSignIn("Sign in to see your messages.", { kind: "inbox" }))}>✉<br />Inbox</button>
-        <button className={tab === "me" ? "on" : ""} data-testid="tab-profile" onClick={() => (me ? navigate(`u/${me.handle}`) : meChecked ? needSignIn("Sign in to see your profile.", { kind: "profile" }) : navigate("me"))}>◉<br />Profile</button>
+        <button className={tab === "me" ? "on" : ""} data-testid="tab-profile" onClick={() => navigate(me ? `u/${me.handle}` : "me")}>◉<br />Profile</button>
       </nav>
       {sheet && <div className="so-scrim" onClick={() => setSheet(null)} />}
       {sheet && (

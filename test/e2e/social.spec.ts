@@ -254,7 +254,9 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
     await page.getByTestId("tab-profile").click(); await page.getByTestId("signout").click();
     await expect(page.getByTestId("social-app")).toBeVisible(); await expect(page.getByTestId("me-handle")).toHaveCount(0);
     // profile tab signed out -> sheet; rating resumes after sign-in
-    await page.getByTestId("tab-profile").click(); await expect(page.getByTestId("signin-sheet")).toBeVisible(); await page.getByTestId("signin-close").click();
+    await page.getByTestId("tab-profile").click(); await expect(page.getByTestId("profile-guest")).toBeVisible(); await expect(page.getByTestId("signin-sheet")).toBeHidden();
+    await page.getByTestId("profile-signin").click(); await expect(page.getByTestId("signin-sheet")).toBeVisible(); await page.getByTestId("signin-close").click();
+    await page.getByTestId("tab-inbox").click(); await expect(page.getByTestId("signin-sheet")).toBeVisible(); await page.getByTestId("signin-close").click();
     await page.goto("/feed?sort=new"); const c2 = page.getByTestId("feed-card").filter({ hasText: title }).first(); await expect(c2).toBeVisible();
     await c2.getByTestId("star-5").click(); await signInViaSheet();
     await expect(page.getByTestId("feed-card").filter({ hasText: title }).first().getByTestId("star-5")).toHaveClass(/on/);
@@ -282,4 +284,26 @@ test("dark mode: palette follows prefers-color-scheme, --viz-* derive from it, n
     expect(v.overflow).toBeFalsy();
     await page.screenshot({ path: `${shots}/feed-${scheme}-${P}.png` });
   }
+});
+
+test("MIDI upload: Settings import accepts .mid, choose new project or add to current; bad file shows an error; composer input stays visible", async ({ page, baseURL }) => {
+  const base = new URL(baseURL!).origin; await apiLogin(page.request, base, "e2e-code-2");
+  await page.goto("/studio"); const tab = page.getByTestId("tab-composer"); if (await tab.isVisible()) await tab.click();
+  await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
+  const input = page.getByTestId("import-input");
+  expect(await input.getAttribute("accept")).toContain(".mid");
+  const fixture = new URL("../fixtures/import-test.mid", import.meta.url).pathname;
+  await input.setInputFiles(fixture);
+  await expect(page.getByTestId("midi-import")).toBeVisible();
+  await page.getByTestId("midi-import-new").click();
+  await expect(page.getByTestId("midi-import-msg")).toHaveText("Imported 2 tracks, 3 notes.");
+  const ws = () => page.evaluate(() => { const p = (globalThis as any).__gbkWorkstation.project; return { name: p.name, tracks: p.tracks.map((t: any) => t.name), notes: p.notes.length }; });
+  expect(await ws()).toEqual({ name: "import-test", tracks: ["Piano", "Violin"], notes: 3 });
+  await input.setInputFiles(fixture); await page.getByTestId("midi-import-merge").click();
+  await expect(page.getByTestId("midi-import-msg")).toHaveText("Imported 2 tracks, 3 notes.");
+  expect((await ws()).tracks).toHaveLength(4);
+  await input.setInputFiles({ name: "broken.mid", mimeType: "audio/midi", buffer: Buffer.from("not midi at all") });
+  await page.getByTestId("midi-import-new").click();
+  await expect(page.getByTestId("midi-import-msg")).toContainText("Not a readable MIDI file");
+  await expect(page.getByTestId("composer-input")).toBeInViewport();
 });
