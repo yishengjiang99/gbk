@@ -25,6 +25,9 @@
 - App Store playbook `make_screenshots.py` uses `Image.Lanczos` (breaks on current Pillow); use `Image.LANCZOS`.
 
 ### Needs Yisheng
+- [ ] #108 real-iPhone check, native app (TestFlight build): open Feed, play a song, scroll to the next card. Only the playing card's piano roll moves; the old song fades out fast (~58 ms, no click), the new one starts at full volume right away.
+- [ ] #108 real-iPhone check, Safari: open https://compose.grepawk.com/feed, tap play once, then swipe up. The next song should play without another tap, the page shouldn't scroll sideways, and the playing card should animate smoothly (Settings > Developer > Show FPS, or just look for stutter). Check both light and dark mode.
+- [ ] Native Hum on device: Create > open a song > Hum, allow the mic, hum ~5 s, Stop. A track appears (needs GBK Social's `window.gbkHum` bridge).
 - AGPL decision for omr-homr-ios: **decided 2026-10-25**, `ios/` is AGPL-3.0-or-later and links omr-homr-ios. Remaining: confirm the App Store listing's open-source paragraph (docs/asc/metadata/en-US/description.txt) and that distributing an AGPL binary via the App Store is acceptable to you (the App Store's usage rules are the known GPL-family friction; we own the gbk iOS copyright, homr upstream is liebharc's).
 - App Store Connect → App Information → App Store Server Notifications v2: set Production and Sandbox URL to `https://compose.grepawk.com/api/iap/apple/notifications` (endpoint is live).
 - Decide whether prod accepts sandbox IAP receipts (App Review/TestFlight need it): `IAP_ALLOW_SANDBOX=1` in the prod env.
