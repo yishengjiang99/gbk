@@ -37,6 +37,9 @@ import { NativeStore } from "./persistence/native.ts";
 import { createNotifier } from "./push/notifier.ts";
 import type { ApnsSender } from "./push/apns.ts";
 import { nativeRoutes } from "./routes/native.ts";
+import { IapStore } from "./persistence/iap.ts";
+import { iapRoutes } from "./routes/iap.ts";
+import { appleRoot } from "./iap/apple-jws.ts";
 import { currentSession } from "./routes/agent.ts";
 import { authExtraRoutes } from "./routes/auth-extra.ts";
 import { socialRoutes } from "./routes/social.ts";
@@ -48,9 +51,9 @@ import type { McpMetrics } from "./mcp/server.ts";
 
 export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
 
-export interface AppDeps { model?: ModelClient; persist?: boolean; logger?: boolean | object; fetch?: typeof fetch; now?: () => number; apns?: ApnsSender }
+export interface AppDeps { iapRoots?: import("node:crypto").X509Certificate[]; model?: ModelClient; persist?: boolean; logger?: boolean | object; fetch?: typeof fetch; now?: () => number; apns?: ApnsSender }
 export interface McpHandle { store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; close: () => Promise<void> }
-export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; shares: ShareStore; mcp: McpHandle; accounts: AccountStore; clientErrors: ClientErrorStore }> {
+export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; limits: AccountLimits; shares: ShareStore; mcp: McpHandle; accounts: AccountStore; clientErrors: ClientErrorStore }> {
   const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers[\"x-gbk-project-token\"]", "req.headers[\"x-gbk-csrf\"]"] }, bodyLimit: 64 * 1024, trustProxy: "127.0.0.1", disableRequestLogging: false });
   const sessions = new SessionStore(cfg, deps.now, deps.persist !== false ? join(cfg.dataDir, "sessions.sqlite") : ":memory:");
   const catalog = new ToolCatalog();
@@ -102,7 +105,10 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const notify = createNotifier(cfg, native, (o) => app.log.info(o), deps.apns);
   const events = new EventStore(shares.database, deps.now);
   const ranker = new Ranker(shares.database, deps.now);
-  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker);
+  const iap = new IapStore(shares.database, deps.now);
+  limits.pro = (u) => iap.pro(u).pro;
+  iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now });
+  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap);
   eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers);
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
@@ -114,7 +120,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   });
   // Unknown /api routes: Fastify's {message,error,statusCode} plus our `code` so clients can rely on one shape.
   app.all("/api/*", async (req, reply) => reply.code(404).send({ code: "NOT_FOUND", message: `Route ${req.method}:${req.url.split("?")[0]} not found`, error: "Not Found", statusCode: 404 }));
-  const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, me: socialApi.me, fetch: deps.fetch });
+  const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, iap, me: socialApi.me, fetch: deps.fetch });
   authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
   // Nightly (03:30 server time) retrain of the pointwise ranking model; no-op until enough impressions exist.
   const trainTimer = setInterval(() => { const d = new Date(); if (d.getHours() === 3 && d.getMinutes() >= 30 && d.getMinutes() < 40) { try { events.prune(); const r = ranker.train(); if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, auc: r.auc }); } catch (e) { app.log.warn({ evt: "rank_train_error", message: (e as Error).message }); } } }, 600_000); trainTimer.unref();
@@ -146,5 +152,5 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const sweepSessions = () => { try { sessions.sweep(); } catch (e) { app.log.warn({ evt: "session_sweep_failed", message: (e as Error).message }); } };
   sweepSessions(); const sweep = setInterval(sweepSessions, 3_600_000); sweep.unref?.();
   app.addHook("preClose", async () => { clearInterval(sweep); for (const c of hub.wss.clients) c.terminate(); });
-  return { app, hub, sessions, ledger, shares, mcp, accounts, clientErrors };
+  return { app, hub, sessions, ledger, limits, shares, mcp, accounts, clientErrors };
 }

@@ -10,6 +10,7 @@
 - Ranking: admin metrics UI view and offline eval script (API `GET /api/admin/metrics` exists) (iOS impressions client done).
 - Guest DMs restrictions (no send/receive) land with P4 DMs; guest push for DMs off.
 - iOS: follow the sign-in-only-on-demand rule (feed-design.md): remove standalone Sign in, keep pending action in memory and replay.
+- IAP pro render limits (120 renders/hour up to 600 s vs 30/h, 300 s) not enforced yet: there is no per-hour render limiter to hook into (daily only).
 - Inbox/DMs and blocks list (P4), notifications (P5).
 - Align `docs/social-api.md` with prod for `preview`, `/api/session`, and 404 error bodies.
 
@@ -19,7 +20,7 @@
 - App Store playbook `make_screenshots.py` uses `Image.Lanczos` (breaks on current Pillow); use `Image.LANCZOS`.
 
 ### Needs Yisheng
-- App Store Connect → App Information → App Store Server Notifications v2: set Production and Sandbox URL to `https://compose.grepawk.com/api/iap/apple/notifications` (after IAP ships).
+- App Store Connect → App Information → App Store Server Notifications v2: set Production and Sandbox URL to `https://compose.grepawk.com/api/iap/apple/notifications` (endpoint is live).
 - Decide whether prod accepts sandbox IAP receipts (App Review/TestFlight need it): `IAP_ALLOW_SANDBOX=1` in the prod env.
 
 - IAP: accept the **Paid Apps agreement** and fill **banking + tax** in ASC > Business (IAPs can't be sold/sandbox-purchased without it); then `ASC_ISSUER_ID=… python3 docs/asc/scripts/push_iap.py` (creates group "GBK Pro", pro_monthly $5.99, pro_yearly $47.99, lifetime $99.99) and `--verify`. Confirm lifetime at $99.99 (no $99.00 App Store price point) and that lifetime is still wanted. Set the App Store Server Notifications v2 URL once GBK Social ships the webhook. Attach the IAPs to the next version when submitting (manual; nothing is submitted by scripts). Add paid-plan terms/EULA link before selling.

@@ -5,10 +5,14 @@ import type { AccountStore } from "../persistence/accounts.ts";
 
 /** Per-account daily limits. Accounts younger than auth.newAccountDays get the smaller "new account" limits. */
 export class AccountLimits {
+  /** Pro entitlement (Apple IAP): 10x the daily agent token budget. Set by app.ts once the IAP store exists. */
+  pro: (user: string) => boolean = () => false;
+  static PRO_TOKEN_MULTIPLIER = 10;
   constructor(private cfg: Config, private accounts: AccountStore | null, private now: () => number = Date.now) {}
   isNew(user: string) { const a = this.accounts?.get(user); return !!a && this.now() - a.created_at < this.cfg.auth.newAccountDays * 86_400_000; }
   for(user: string) {
     const fresh = this.isNew(user);
+    if (this.pro(user)) return { newAccount: false, dailyTokens: this.cfg.agent.dailyTokenBudget * AccountLimits.PRO_TOKEN_MULTIPLIER, dailyRenders: this.cfg.mcp.maxRendersPerDay };
     return { newAccount: fresh, dailyTokens: fresh ? Math.min(this.cfg.agent.newAccountDailyTokenBudget, this.cfg.agent.dailyTokenBudget) : this.cfg.agent.dailyTokenBudget,
       dailyRenders: fresh ? Math.min(this.cfg.mcp.newAccountRendersPerDay, this.cfg.mcp.maxRendersPerDay) : this.cfg.mcp.maxRendersPerDay };
   }

@@ -21,7 +21,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 
 export const GUEST_NAME = /^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$/, GUEST_DEVICE = /^[A-Za-z0-9_-]{16,128}$/;
 const bearer = (req: FastifyRequest) => { const a = req.headers.authorization; return typeof a === "string" && /^Bearer\s+\S+$/i.test(a) ? a.replace(/^Bearer\s+/i, "").trim() : null; };
 
-export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: SessionStore; accounts: AccountStore; native: NativeStore; shares: ShareStore; social: SocialStore; me: (user: string) => object; fetch?: typeof fetch }) {
+export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: SessionStore; accounts: AccountStore; native: NativeStore; shares: ShareStore; social: SocialStore; iap?: import("../persistence/iap.ts").IapStore; me: (user: string) => object; fetch?: typeof fetch }) {
   const { sessions, accounts, native } = d;
   const authLimiter = new RateLimiter(cfg.security.loginPerMinute), codeLimiter = new RateLimiter(20), pushLimiter = new RateLimiter(30);
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
@@ -40,7 +40,7 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
     if (guest) {
       const existing = accounts.byProvider(provider, who.sub);
       if (!existing) { accounts.link(guest, provider, who.sub, who.name, who.email); native.revokeUser(guest); req.log.info({ evt: "login", via: `${provider}-native`, user: guest, upgraded: "linked" }); return { ...pair(guest), upgraded: "linked" }; }
-      d.social.mergeUser(guest, existing.id); native.movePush(guest, existing.id); native.purgeUser(guest); sessions.destroy(gs!.id); accounts.delete(guest);
+      d.social.mergeUser(guest, existing.id); native.movePush(guest, existing.id); d.iap?.moveUser(guest, existing.id); native.purgeUser(guest); sessions.destroy(gs!.id); accounts.delete(guest);
       accounts.upsertOAuth(provider, who.sub, who.name, who.email);
       req.log.info({ evt: "login", via: `${provider}-native`, user: existing.id, upgraded: "merged" }); return { ...pair(existing.id), upgraded: "merged" };
     }
@@ -130,7 +130,7 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
     if (!s || isGuest(s.user)) return reply.code(401).send({ code: "UNAUTHENTICATED", message: "sign in first" });
     if (!guardWrite(cfg, req, reply, s)) return;
     const u = s.user;
-    d.shares.deleteOwner(u); d.social.purgeUser(u); native.purgeUser(u); sessions.destroyUser(u); accounts.delete(u);
+    d.shares.deleteOwner(u); d.social.purgeUser(u); d.iap?.detach(u); native.purgeUser(u); sessions.destroyUser(u); accounts.delete(u);
     req.log.info({ evt: "account_deleted", user: u });
     if (!bearer(req)) reply.header("set-cookie", cookie(COOKIE, "", cfg, { maxAge: 0 }));
     return { ok: true };

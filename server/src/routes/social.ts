@@ -17,7 +17,7 @@ export const MODEL_VERSION = "heur-1";
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const lim = (v: unknown, d = 20, max = 50) => Math.min(max, Math.max(1, Number(v) || d));
 
-export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker) {
+export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker, iap?: import("../persistence/iap.ts").IapStore) {
   const origin = cfg.publicOrigin;
   const L = { comment: new RateLimiter(10), rating: new RateLimiter(60), report: new RateLimiter(10, 3_600_000), play: new RateLimiter(120) };
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
@@ -25,7 +25,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   const prof = (u: string) => social.ensureProfile(u, nameOf(u));
   const user = (u: string) => { const p = prof(u); return { handle: p.handle, display_name: p.display_name, bio: p.bio ?? null, badge: p.badge ?? null, avatar_url: null, ...social.userStats(u), created_at: p.created_at }; };
   const guestComments = new RateLimiter(20, 86_400_000);
-  const me = (u: string) => { const p = prof(u); const a = accounts.get(u); return { ...user(u), id: u, provider: a?.provider ?? null, is_guest: a?.provider === "guest", dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u) }; };
+  const me = (u: string) => { const p = prof(u); const a = accounts.get(u); return { ...user(u), id: u, provider: a?.provider ?? null, is_guest: a?.provider === "guest", ...(() => { const e = iap?.pro(u); return { pro: !!e?.pro, pro_source: e?.pro ? "apple" : null, pro_expires_at: e?.expires_at ?? null, pro_environment: e?.environment ?? null }; })(), dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u) }; };
   /** Signed-in, non-guest account required for social writes. */
   const auth = (req: FastifyRequest, reply: FastifyReply, write = true) => {
     const s = currentSession(req, sessions);

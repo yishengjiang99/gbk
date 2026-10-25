@@ -17,6 +17,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Guest accounts `POST /api/auth/anonymous` (two-word username, idempotent per device via HMAC, 409 HANDLE_TAKEN, 422s, 5 new/20 calls per IP/h), `me.provider`/`is_guest`, guest limits (no publish → 403 GUEST_LIMITED, 20 comments/day, two-word settings), Apple/Google upgrade with guest bearer (`upgraded: linked|merged`) | done (server, prod) |
 | Web sign-in only on demand: no standalone Sign in button; gated actions open the sign-in sheet (configured methods) and resume the action after sign-in; Sign out in Profile (feed-design.md) | done (web) |
 | Web dark mode: `--so-*` palette on :root with prefers-color-scheme dark set; `--viz-*` derived (LiveRoll); sign-in sheet themed; e2e light/dark | done (web) |
+| Apple IAP: `POST /api/iap/apple` (x5c → pinned Apple Root CA G3, receipt OID, ES256, bundle/product/env checks, 409 ownership, idempotent, pending claim by app_account_token), ASN v2 webhook `POST /api/iap/apple/notifications`, `me.pro*` fields, pro = 10× agent token budget, guest merge moves purchases, account delete detaches | done (server) |
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |

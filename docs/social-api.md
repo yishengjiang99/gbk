@@ -181,7 +181,7 @@ APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.co
 - The first tap unlocks audio (iOS). After that, settling on a card autoplays it. Pause everything when the tab or app is hidden.
 - Web applies gain through Web Audio GainNodes, because iOS Safari ignores `HTMLMediaElement.volume`.
 
-## In-app purchases — Apple (spec; implementation follows)
+## In-app purchases — Apple (live)
 
 Products (bundle `com.grepawk.moviefone`, see `docs/asc/iap.md`) all grant the same `pro` entitlement as Stripe Pro.
 
@@ -191,7 +191,7 @@ Products (bundle `com.grepawk.moviefone`, see `docs/asc/iap.md`) all grant the s
 | `com.grepawk.moviefone.pro_yearly` | auto-renewable, group "GBK Pro" | `pro_yearly` |
 | `com.grepawk.moviefone.lifetime` | non-consumable | `lifetime` |
 
-`pro` means 10× the Studio composer-agent daily token budget (2M vs 200k) and 120 server renders per hour of up to 600 s (vs 30/h, 300 s).
+`pro` means 10× the Studio composer-agent daily token budget (2M vs 200k). Planned, not yet enforced: 120 server renders per hour of up to 600 s (vs 30/h, 300 s); see TODO.
 
 ### `POST /api/iap/apple`
 
@@ -200,7 +200,7 @@ Auth: optional Bearer. A guest or signed-in session is fine; with no auth the pu
 Body: `{ "signed_transaction": "<StoreKit 2 JWSTransaction>", "app_account_token": "<uuid>" }`.
 
 Verification:
-- The JWS header `x5c` chain must verify up to **Apple Root CA - G3**. The root certificate is pinned in the repo at `server/certs/AppleRootCA-G3.cer`. Each certificate must be within its validity window, and the leaf must carry the Apple Mac App Store receipt-signing OID `1.2.840.113635.100.6.11.1`.
+- The JWS header `x5c` chain must verify up to **Apple Root CA - G3**. The root certificate is pinned in the repo at `server/certs/AppleRootCA-G3.cer`; it is embedded in `server/src/iap/apple-root.ts` because the server ships as one bundle, and a test checks that both hold the same bytes. Each certificate must be within its validity window, and the leaf must carry the Apple Mac App Store receipt-signing OID `1.2.840.113635.100.6.11.1`.
 - `alg` is `ES256`. The signature is checked with the leaf key.
 - Payload: `bundleId == "com.grepawk.moviefone"`, `productId` must be one of the three above, and `appAccountToken` (when present in the payload) must equal `app_account_token`.
 - **Environment:** `Production` is always accepted. `Sandbox` / `Xcode` is accepted only when the server runs with `IAP_ALLOW_SANDBOX=1`. That is the default off production, and on production it allows App Review / TestFlight sandbox purchases.
