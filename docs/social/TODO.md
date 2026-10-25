@@ -2,6 +2,7 @@
 
 ## iOS
 
+- GBK Social: App Store IAP verification — `POST /api/iap/apple {signed_transaction, app_account_token}` → `{entitlements, expires_at}`, App Store Server Notifications v2 webhook `POST /api/iap/apple/notifications`, `pro` in `/api/me`; shapes in docs/asc/iap.md. iOS falls back to a local mock while it 404s.
 - GBK Social: deploy guest accounts (`POST /api/auth/anonymous`, specced in docs/social-api.md 7692a7a; prod returns 404 today). The iOS client already sends `{ deviceId, username }`, retries a new two-word name on 409/422, and sends the guest bearer on Apple/Google sign-in for the linked/merged upgrade.
 
 - Sign in with Apple: server answers 503 until `APPLE_BUNDLE_ID` is set; the app shows "not available yet".
@@ -18,6 +19,8 @@
 
 ### Needs Yisheng
 
+- IAP: accept the **Paid Apps agreement** and fill **banking + tax** in ASC > Business (IAPs can't be sold/sandbox-purchased without it); then `ASC_ISSUER_ID=… python3 docs/asc/scripts/push_iap.py` (creates group "GBK Pro", pro_monthly $5.99, pro_yearly $47.99, lifetime $99.99) and `--verify`. Confirm lifetime at $99.99 (no $99.00 App Store price point) and that lifetime is still wanted. Set the App Store Server Notifications v2 URL once GBK Social ships the webhook. Attach the IAPs to the next version when submitting (manual; nothing is submitted by scripts). Add paid-plan terms/EULA link before selling.
+- Web Studio inside the app must not show Stripe buy buttons (guideline 3.1.1): the iOS WebView intercepts /pricing, compose checkout and stripe.com and opens the paywall instead; keep any new buy links on those paths.
 - Create an iOS OAuth client in Google Cloud Console (same project as the web `GOOGLE_CLIENT_ID`, bundle ID com.grepawk.moviefone). Put its ID in `ios/project.yml` `GOOGLE_IOS_CLIENT_ID` (and the reversed form in `GOOGLE_REVERSED_CLIENT_ID`), and add it to the server env `GOOGLE_IOS_CLIENT_IDS`. None exists in the repo or server config today.
 - Set `APPLE_BUNDLE_ID` on the server to enable Sign in with Apple (`/api/auth/apple` returns 503 until then), and `IOS_APP_IDS` for the AASA file (404 today).
 
