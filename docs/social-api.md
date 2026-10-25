@@ -20,7 +20,7 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
 - **Cursor format.** `next_cursor` is an opaque base64url string; never parse or build it. Same filters must be resent with it.
 - **Backward compatibility.** `GET /api/shares` (offset pagination, camelCase `ShareView`) stays unchanged; new social fields live only on the new endpoints.
 - **Deep links.** `https://compose.grepawk.com/s/<slug>` (song), `/u/<handle>` (profile), `/t/<tag>` (tag), `/inbox/<handle>` (DM thread).
-  `GET /.well-known/apple-app-site-association` (live; 404 until `IOS_APP_IDS` is set) lists paths `/s/*`, `/u/*`, `/t/*` for the app id.
+  `GET /.well-known/apple-app-site-association` (live; app id `83D36RPMUM.com.grepawk.moviefone` by default, override with `IOS_APP_IDS`, set it empty to disable) lists paths `/s/*`, `/u/*`, `/t/*` for the app id.
 - **Text.** All user text is plain text; clients must render it as text (no HTML/markdown).
 
 ### Objects
@@ -57,7 +57,7 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 | Method + path | Phase | Notes |
 |---|---|---|
 | `GET /api/session` | live | `{ user, csrf, me }` (web) |
-| `POST /api/auth/apple` | live (503 `APPLE_UNAVAILABLE` until `APPLE_BUNDLE_ID` is set) | `{ identityToken, nonce, displayName? }`. Verifies Apple JWT (JWKS, `aud` = bundle id, `sha256(nonce)` = claim). → `TokenPair` |
+| `POST /api/auth/apple` | live; client id = bundle `com.grepawk.moviefone` by default (`APPLE_BUNDLE_ID` overrides; empty disables → 503 `APPLE_UNAVAILABLE`) | `{ identityToken, nonce, displayName? }`. Verifies Apple JWT (JWKS, `aud` = bundle id, `sha256(nonce)` = claim). → `TokenPair` |
 | `POST /api/auth/google/native` | live | `{ idToken }` (`aud` = iOS client id). → `TokenPair` |
 | `GET /api/auth/apple/web?return=` | live (503 until `APPLE_SERVICES_ID`) | web Sign in with Apple (form_post to `POST /api/auth/apple/callback`, id_token verified, nonce bound to a state cookie) |
 | `GET /api/auth/sms/config` | live | `{ enabled, turnstileSiteKey, countries }` |
@@ -139,12 +139,12 @@ APNs sender (token-based .p8 auth, ported from earsheet apns.ts) fires on: comme
 Payload: `{ aps: { alert: { title, body }, sound }, kind: "comment|fork|dm", link }`. Dead tokens (410/BadDeviceToken) are dropped.
 
 Server env (all optional; never commit values): `APPLE_SERVICES_ID`, `TWILIO_ACCOUNT_SID`, `TWILIO_VERIFY_SID`, `TWILIO_AUTH_TOKEN` (or `TWILIO_API_KEY` + `TWILIO_API_SECRET`), `TURNSTILE_SECRET`, `TURNSTILE_SITE_KEY`, `SMS_COUNTRY_PREFIXES`, `APPLE_BUNDLE_ID`, `GOOGLE_IOS_CLIENT_IDS` (comma list; the web `GOOGLE_CLIENT_ID` is also accepted as audience),
-`IOS_APP_IDS` (e.g. `TEAMID.com.grepawk.gbk`, enables AASA), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8` or `APNS_P8_PATH`, `APNS_TOPIC` (defaults to bundle id).
+`IOS_APP_IDS` (e.g. `83D36RPMUM.com.grepawk.moviefone` (default), enables AASA), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8` or `APNS_P8_PATH`, `APNS_TOPIC` (defaults to the bundle id `com.grepawk.moviefone`).
 APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.com/inbox/<handle>" }`. No email notifications.
 
 ## Client behavior (web + iOS)
 
-- **Feed audio crossfade:** `CROSSFADE_MS = 400`. Equal-power curves: outgoing gain `cos(t·π/2)`, incoming `sin(t·π/2)`, `t` from 0 to 1 over 400 ms.
+- **Feed audio switch:** `FADE_OUT_MS = 58`. The next song starts immediately at full volume (no fade-in, no waiting). The previous song fades out over 58 ms with gain `cos(t·π/2)`, `t` from 0 to 1.
 - The fade starts when the scroll settles on a snapped card (web: `scrollend`, or 120 ms without scroll events). It does not start while the user is still scrolling.
 - At most one voice fades out at a time. A new switch during a fade stops the stale fading voice at once, so audio never piles up.
 - Preload the active card's audio plus the next and previous cards.

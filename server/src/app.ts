@@ -103,6 +103,8 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     const text = typeof first?.content === "string" ? first.content : Array.isArray(first?.content) ? (first!.content as { text?: string }[]).map((x) => x.text ?? "").join(" ") : "";
     return { prompt: text.trim().slice(0, 4000) || null, sameProject: !!row.project_id && c.projectId === row.project_id };
   });
+  // Unknown /api routes: Fastify's {message,error,statusCode} plus our `code` so clients can rely on one shape.
+  app.all("/api/*", async (req, reply) => reply.code(404).send({ code: "NOT_FOUND", message: `Route ${req.method}:${req.url.split("?")[0]} not found`, error: "Not Found", statusCode: 404 }));
   const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, me: socialApi.me, fetch: deps.fetch });
   authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();

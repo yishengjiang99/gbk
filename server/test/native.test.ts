@@ -74,7 +74,7 @@ test("native: google exchange, bearer, refresh rotation + reuse detection, web-c
 });
 
 test("native: Apple answers 503 until configured; verifies nonce + bundle audience when configured", async () => {
-  let s = await start({});
+  let s = await start({ APPLE_BUNDLE_ID: "", IOS_APP_IDS: "" });
   try {
     assert.equal((await post(s.base, "/api/auth/apple", { identityToken: "x", nonce: "n" })).status, 503);
     assert.equal((await fetch(`${s.base}/.well-known/apple-app-site-association`)).status, 404);

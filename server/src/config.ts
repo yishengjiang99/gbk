@@ -83,10 +83,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       smsPrefixes: env.SMS_COUNTRY_PREFIXES ? list(env.SMS_COUNTRY_PREFIXES) : ["+1"],
     },
     native: {
-      appleBundleId: (env.APPLE_BUNDLE_ID ?? "").trim(),
+      // iOS bundle id: Sign in with Apple client id (id_token aud) and APNs topic. Set APPLE_BUNDLE_ID="" to disable.
+      appleBundleId: (env.APPLE_BUNDLE_ID ?? "com.grepawk.moviefone").trim(),
       googleClientIds: list(env.GOOGLE_IOS_CLIENT_IDS),
-      iosAppIds: list(env.IOS_APP_IDS),
-      apns: { keyId: (env.APNS_KEY_ID ?? "").trim(), teamId: (env.APNS_TEAM_ID ?? "").trim(), privateKey: apnsKey(env), topic: (env.APNS_TOPIC ?? env.APPLE_BUNDLE_ID ?? "").trim() },
+      iosAppIds: env.IOS_APP_IDS === undefined ? ["83D36RPMUM.com.grepawk.moviefone"] : list(env.IOS_APP_IDS),
+      apns: { keyId: (env.APNS_KEY_ID ?? "").trim(), teamId: (env.APNS_TEAM_ID ?? "").trim(), privateKey: apnsKey(env), topic: (env.APNS_TOPIC ?? env.APPLE_BUNDLE_ID ?? "com.grepawk.moviefone").trim() },
     },
     auth: {
       github: env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } : null,

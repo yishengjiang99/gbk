@@ -1,8 +1,8 @@
-// Feed audio crossfader. One "current" voice plays; on a switch the old voice fades out and the new one fades in over
-// FADE_MS with equal-power curves (out = cos(t·π/2), in = sin(t·π/2)), matching GBK iOS. At most one voice is fading:
+// Feed audio switcher. One "current" voice plays; on a switch the new voice starts at once at full gain and the old
+// voice fades out over FADE_MS (58 ms) on a cos(t·π/2) curve, matching GBK iOS. At most one voice is fading:
 // a new switch while a fade runs stops the stale fading voice immediately, so fast scrolls never pile up audio.
 // Gain goes through Web Audio (iOS ignores HTMLMediaElement.volume); without an AudioContext it falls back to volume.
-export const FADE_MS = 400;
+export const FADE_MS = 58;
 const STEPS = 33;
 export const curve = (dir: "in" | "out") => Float32Array.from({ length: STEPS }, (_, i) => { const t = i / (STEPS - 1); return dir === "in" ? Math.sin((t * Math.PI) / 2) : Math.cos((t * Math.PI) / 2); });
 
@@ -47,10 +47,10 @@ export class Crossfader {
     if (prev) { this.fading = prev; this.ramp(prev, "out", () => { if (this.fading === prev) { prev.el.pause(); this.fading = null; this.emit(); } }); }
     this.current = null;
     if (!src) { this.emit(); return true; }
-    const v = this.voice(src); this.current = v; this.set(v, prev ? 0 : 1);
+    const v = this.voice(src); this.current = v; this.set(v, 1);
     try { await v.el.play(); } catch { if (this.current === v) this.current = null; this.emit(); return false; }
     if (this.current !== v) return false;
-    this.unlocked = true; if (prev) this.ramp(v, "in"); this.emit(); return true;
+    this.unlocked = true; this.emit(); return true;
   }
   /** Immediate stop of everything (tab hidden, filter change). */
   stop() { for (const v of this.pool.values()) this.hard(v); this.current = this.fading = null; this.emit(); }

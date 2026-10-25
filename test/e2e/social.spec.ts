@@ -115,7 +115,7 @@ test("social prompt sharing: off by default, owner opts in, feed shows prompt, R
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
 
-test("social feed crossfade: 400ms equal-power fade on settle, one fading voice max, preload neighbours, pause when hidden", async ({ page, browser, baseURL }) => {
+test("social feed switch: next starts at once, old fades out 58ms on settle, one fading voice max, preload neighbours, pause when hidden", async ({ page, browser, baseURL }) => {
   const base = new URL(baseURL!).origin;
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const slugs: string[] = [];
@@ -134,9 +134,9 @@ test("social feed crossfade: 400ms equal-power fade on settle, one fading voice 
     // neighbours preloaded (current + next)
     await expect.poll(() => page.getByTestId("feed-audio").evaluate((h) => h.querySelectorAll("audio").length)).toBeGreaterThanOrEqual(2);
     // settle on card 2: card 1 fades out while card 2 fades in, then only one voice plays
+    const sawFade = page.evaluate(() => new Promise<string>((res) => { const f = document.querySelector("[data-testid=feed]")!; const o = new MutationObserver(() => { if (f.getAttribute("data-fading")) { o.disconnect(); res(f.getAttribute("data-fading")!); } }); o.observe(f, { attributes: true }); setTimeout(() => res(""), 3000); }));
     await feed.evaluate((f) => f.scrollBy({ top: f.clientHeight }));
-    await expect(feed).toHaveAttribute("data-fading", slugs[0]);
-    expect(await playing()).toBe(2);
+    expect(await sawFade).toBe(slugs[0]);
     await expect(cards.nth(1)).toHaveAttribute("data-playing", "1");
     await expect(feed).toHaveAttribute("data-fading", "", { timeout: 2000 });
     expect(await playing()).toBe(1);
