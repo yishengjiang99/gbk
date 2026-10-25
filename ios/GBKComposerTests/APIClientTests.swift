@@ -130,6 +130,7 @@ final class ReviewerSignInTests: XCTestCase {
     }
 }
 
+@MainActor
 final class CrossfadeTests: XCTestCase {
     func testOutgoingFadeOnly58ms() {
         XCTAssertEqual(FeedPlayer.crossfadeDuration, 0.058)
@@ -225,5 +226,14 @@ final class LiveEndpointTests: XCTestCase {
         var data = Data(); var buf = [UInt8](repeating: 0, count: 4096)
         while stream.hasBytesAvailable { let n = stream.read(&buf, maxLength: buf.count); if n <= 0 { break }; data.append(buf, count: n) }
         return data
+    }
+}
+
+@MainActor
+final class StudioKeyboardTests: XCTestCase {
+    func testScrollResetOnlyWhenPageFits() {
+        XCTAssertTrue(WebView.Coordinator.shouldReset(contentHeight: 700, boundsHeight: 700, offsetY: 120))
+        XCTAssertFalse(WebView.Coordinator.shouldReset(contentHeight: 700, boundsHeight: 700, offsetY: 0))
+        XCTAssertFalse(WebView.Coordinator.shouldReset(contentHeight: 1400, boundsHeight: 700, offsetY: 120), "scrollable pages keep their offset")
     }
 }

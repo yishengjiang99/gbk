@@ -50,14 +50,27 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: $(TEST_HOST)
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/GBKComposer.app/GBKComposer
+  GBKComposerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: GBKComposerUITests
+    dependencies:
+      - target: GBKComposer
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: GBKComposer
 schemes:
   GBKComposer:
     build:
       targets:
         GBKComposer: all
         GBKComposerTests: [test]
+        GBKComposerUITests: [test]
     run:
       storeKitConfiguration: StoreKit/GBKComposer.storekit
     test:
       targets:
         - GBKComposerTests
+        - GBKComposerUITests
