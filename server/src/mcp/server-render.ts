@@ -33,6 +33,7 @@ function workerEntry(): { url: URL | string; eval?: boolean } {
 
 export class ServerRenderPool {
   private slots: Slot[] = [];
+  private spawning = new Set<Worker>();
   private queue: Task[] = [];
   private stopped = false;
   soundFont: Record<string, unknown> | null = null;
@@ -60,14 +61,20 @@ export class ServerRenderPool {
     for (const t of this.queue.splice(0)) t.reject(fail("SERVER_STOPPING", "server restarted before this render ran; submit the render again"));
     await Promise.all(this.slots.map(async (s) => { clearTimeout(s.timer); s.task?.reject(fail("SERVER_STOPPING", "server restarted mid-render; submit the render again")); await s.w.terminate().catch(() => 0); }));
     this.slots = [];
+    // Workers still initializing (e.g. a respawn after a cancel) are not in slots yet; stop them too.
+    await Promise.all([...this.spawning].map((w) => w.terminate().catch(() => 0)));
+    this.spawning.clear();
   }
 
   private spawn(): Promise<void> {
     const entry = workerEntry();
     const w = new Worker(entry.url, { ...(entry.eval ? { eval: true } : {}), resourceLimits: { maxOldGenerationSizeMb: this.cfg.serverRender.workerHeapMb } });
     const slot: Slot = { w };
+    this.spawning.add(w);
     return new Promise<void>((resolve, reject) => {
       const onInit = (m: { type: string; message?: string; soundFont?: Record<string, unknown> }) => {
+        if (m.type === "ready" || m.type === "init-error") this.spawning.delete(w);
+        if (m.type === "ready" && this.stopped) { w.off("message", onInit); void w.terminate(); resolve(); return; }
         if (m.type === "ready") { w.off("message", onInit); this.soundFont = m.soundFont ?? null; this.slots.push(slot); this.log({ evt: "server_render_worker_ready", soundFont: m.soundFont }); this.pump(); resolve(); }
         if (m.type === "init-error") { w.off("message", onInit); void w.terminate(); reject(new Error(m.message)); }
       };
@@ -84,6 +91,7 @@ export class ServerRenderPool {
         }
       });
       w.on("exit", (code) => {
+        this.spawning.delete(w);
         const i = this.slots.indexOf(slot); if (i >= 0) this.slots.splice(i, 1);
         if (slot.task) { clearTimeout(slot.timer); slot.task.reject(fail("RENDER_FAILED", `render worker exited (code ${code}) mid-job; no artifact was published`)); slot.task = undefined; }
         if (!this.stopped) void this.spawn().then(() => this.pump()).catch((e) => this.log({ evt: "server_render_respawn_failed", message: (e as Error).message }));

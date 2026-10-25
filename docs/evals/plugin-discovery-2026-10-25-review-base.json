@@ -1,0 +1,233 @@
+{
+ "meta": {
+  "ranAt": "2026-10-25T02:31:32.942Z",
+  "mcpUrl": "https://compose.grepawk.com/mcp",
+  "model": "grok-4.20-0309-non-reasoning",
+  "liveTools": [
+   "gbk_get_capabilities",
+   "gbk_list_soundfonts",
+   "gbk_create_composition",
+   "gbk_get_composition",
+   "gbk_list_compositions",
+   "gbk_edit_composition",
+   "gbk_render_composition",
+   "gbk_get_render_status",
+   "gbk_cancel_render",
+   "gbk_get_artifacts",
+   "gbk_open_workstation",
+   "gbk_publish_composition",
+   "gbk_delete_composition",
+   "gbk_claim_composition",
+   "gbk_show_composition_ui",
+   "gbk_widget_render_start",
+   "gbk_widget_render_finish"
+  ],
+  "distractors": [
+   "web_search",
+   "image_generation",
+   "python"
+  ],
+  "usage": {
+   "inputTokens": 61007,
+   "outputTokens": 463,
+   "estimatedUsd": 0.19,
+   "budgetUsd": 0.9,
+   "stoppedForBudget": false
+  }
+ },
+ "scored": [
+  {
+   "id": "R01",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "R02",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "R03",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "R04",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "R05",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "R06",
+   "firstTool": "gbk_get_capabilities",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": true,
+   "invocationCorrect": false,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "R07",
+   "firstTool": "gbk_list_compositions",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": true,
+   "invocationCorrect": false,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "R08",
+   "firstTool": "web_search",
+   "category": "C",
+   "expect": "no_tool",
+   "invokedGbk": false,
+   "invocationCorrect": true,
+   "firstToolCorrect": null
+  },
+  {
+   "id": "R09",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "R10",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  },
+  {
+   "id": "R11",
+   "firstTool": "gbk_get_capabilities",
+   "category": "A",
+   "expect": "tool",
+   "invokedGbk": true,
+   "invocationCorrect": true,
+   "firstToolCorrect": true
+  }
+ ],
+ "totals": {
+  "fixtures": 11,
+  "run": 11,
+  "errors": 0
+ },
+ "invocationAccuracy": {
+  "correct": 9,
+  "total": 11,
+  "rate": 0.818
+ },
+ "recall": {
+  "correct": 8,
+  "total": 8,
+  "rate": 1
+ },
+ "falsePositiveRate": 0.667,
+ "firstToolAccuracy": {
+  "correct": 8,
+  "total": 8,
+  "rate": 1
+ },
+ "byCategory": {
+  "A": {
+   "correct": 8,
+   "total": 8,
+   "rate": 1
+  },
+  "B": {
+   "correct": 0,
+   "total": 0,
+   "rate": null
+  },
+  "C": {
+   "correct": 1,
+   "total": 3,
+   "rate": 0.333
+  }
+ },
+ "borderline": {
+  "total": 0,
+  "invokedGbk": 0
+ },
+ "argChecks": [
+  {
+   "id": "R01",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R02",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R03",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R04",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R05",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R06",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R07",
+   "tool": "gbk_list_compositions",
+   "valid": true
+  },
+  {
+   "id": "R09",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R10",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  },
+  {
+   "id": "R11",
+   "tool": "gbk_get_capabilities",
+   "valid": true
+  }
+ ]
+}

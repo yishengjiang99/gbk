@@ -41,3 +41,21 @@ test("no stale contradictions: status, delete, claim, browser-only rendering", (
   const create = read("server/src/mcp/server.ts").match(/title: "Create a composition", description: "([^"]+)"/)![1];
   assert.match(create, /GBK server/);
 });
+
+test("review test cases and starter prompts work in a clean conversation and name only real tools", () => {
+  const plugin = JSON.parse(read("plugins/gbk-composer/plugin.json"));
+  const oa = plugin.extensions["com.openai"];
+  const { positive, negative } = oa.review.test_cases as { positive: Record<string, string>[]; negative: Record<string, string>[] };
+  const history = /\bmy (last|latest|previous|jazz|recent)\b|\bin my\b|\bthe piece I\b/i;
+  for (const p of [...oa.interface.defaultPrompt as string[], ...positive.map((c) => c.prompt), ...negative.map((c) => c.prompt)])
+    if (!/Delete all of my GBK compositions/.test(p)) assert.doesNotMatch(p, history, p);
+  for (const c of positive) {
+    const tools = c.tools_triggered.match(/gbk_[a-z_]+/g)!;
+    for (const t of tools) assert.ok(registry.includes(t), t);
+    assert.equal(tools[0] === "gbk_create_composition" || tools[0] === "gbk_get_capabilities", true, `${c.prompt} starts by composing`);
+    if (tools.includes("gbk_publish_composition")) assert.match(c.prompt, /\bpublish\b/i, "publish only on explicit request");
+    assert.doesNotMatch(c.expected_behavior, /\b(lyrics?|vocals?|sings?|singer)\b/i);
+  }
+  const fx = JSON.parse(read("test/fixtures/plugin-review/R-review.json")).fixtures as { prompt: string }[];
+  assert.deepEqual(fx.map((f) => f.prompt), [...positive.map((c) => c.prompt), ...negative.map((c) => c.prompt), ...oa.interface.defaultPrompt], "review eval fixtures mirror plugin.json");
+});

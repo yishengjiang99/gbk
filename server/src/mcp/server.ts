@@ -152,7 +152,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- discovery (public, read-only) ----------------------------------------------------------------
   server.registerTool("gbk_get_capabilities", {
-    title: "GBK capabilities", description: "Use this when you need to know what GBK Composer supports: the five styles (baroque, classical, pop, jazz, ambient), edit operations, instrument names and their SoundFont presets, audible MIDI controllers, render formats and per-account limits. Call it before composing instead of guessing. Read-only; no sign-in required.",
+    title: "GBK capabilities", description: "Use this when you need to know what GBK Composer supports: the five styles (baroque, classical, pop, jazz, ambient), edit operations, instrument names and their SoundFont presets, audible MIDI controllers, render formats and per-account limits. Call it before composing instead of guessing. Not for general music-theory or music-history questions (chords, scales, forms, how a fugue works) and not for lyrics or singing (GBK is instrumental only): answer those directly without GBK tools. Read-only; no sign-in required.",
     inputSchema: {}, annotations: annotations(true, true),
   }, async () => run("gbk_get_capabilities", null, {}, async () => ({ capabilities: service.capabilities() })));
 

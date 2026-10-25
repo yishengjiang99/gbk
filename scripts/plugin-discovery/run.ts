@@ -14,6 +14,7 @@
 //   set -a; . /etc/gbk-composer.env; set +a; node plugin-discovery-eval.mjs --fixtures DIR --out DIR
 // or locally:  LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=... npm run eval:discovery
 import { readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+import Ajv from "ajv";
 import { join } from "node:path";
 import { summarize, type Fixture, type Outcome } from "./score.ts";
 
@@ -23,6 +24,7 @@ const MCP = opt("mcp", process.env.EVAL_MCP_URL ?? "https://compose.grepawk.com/
 const FIX = opt("fixtures", "test/fixtures/plugin-discovery");
 const OUT = opt("out", "docs/evals");
 const LIMIT = Number(opt("limit", "1000"));
+const TAG = opt("tag", ""); // appended to the output file names so repeated runs do not overwrite each other
 const base = (process.env.LLM_BASE_URL ?? "").replace(/\/$/, ""), key = process.env.LLM_API_KEY ?? "";
 const model = opt("model", process.env.EVAL_MODEL ?? process.env.LLM_MODEL ?? "");
 const maxUsd = Number(process.env.EVAL_MAX_USD ?? 1);
@@ -57,6 +59,10 @@ async function main() {
   const mcpTools = await liveTools();
   const tools = [...mcpTools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } })),
     ...DISTRACTORS.map((d) => ({ type: "function", function: d }))];
+  // Validate the first call's arguments against the LIVE input schema (catches params the model invents).
+  const ajv = new Ajv({ strict: false, allErrors: true });
+  const validators = new Map(mcpTools.map((t) => [t.name, ajv.compile(t.inputSchema)]));
+  const argChecks: { id: string; tool: string; valid: boolean; errors?: string }[] = [];
   const outcomes: Outcome[] = []; let spent = 0, stoppedForBudget = false, inTok = 0, outTok = 0;
   for (const f of fixtures) {
     if (spent >= maxUsd) { stoppedForBudget = true; break; }
@@ -64,7 +70,11 @@ async function main() {
       const r = await fetch(`${base}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
         body: JSON.stringify({ model, temperature: 0, max_tokens: 400, tool_choice: "auto", tools, messages: [{ role: "system", content: SYSTEM }, { role: "user", content: f.prompt }] }) });
       if (!r.ok) { outcomes.push({ id: f.id, firstTool: null, error: `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}` }); continue; }
-      const j = await r.json() as { choices: { message: { tool_calls?: { function: { name: string } }[] } }[]; usage?: { prompt_tokens: number; completion_tokens: number } };
+      const j = await r.json() as { choices: { message: { tool_calls?: { function: { name: string; arguments?: string } }[] } }[]; usage?: { prompt_tokens: number; completion_tokens: number } };
+      const call = j.choices[0]?.message?.tool_calls?.[0]?.function;
+      const v = call && validators.get(call.name);
+      if (call && v) { let a: unknown = {}; try { a = JSON.parse(call.arguments || "{}"); } catch { a = null; }
+        const ok = a !== null && v(a) as boolean; argChecks.push({ id: f.id, tool: call.name, valid: ok, ...(ok ? {} : { errors: ajv.errorsText(v.errors).slice(0, 200) }) }); }
       const u = j.usage ?? { prompt_tokens: 0, completion_tokens: 0 }; inTok += u.prompt_tokens; outTok += u.completion_tokens;
       spent += (u.prompt_tokens * pIn + u.completion_tokens * pOut) / 1e6;
       outcomes.push({ id: f.id, firstTool: j.choices[0]?.message?.tool_calls?.[0]?.function?.name ?? null });
@@ -75,9 +85,9 @@ async function main() {
   const s = summarize(fixtures, outcomes);
   const meta = { ranAt: new Date().toISOString(), mcpUrl: MCP, model, liveTools: mcpTools.map((t) => t.name), distractors: DISTRACTORS.map((d) => d.name),
     usage: { inputTokens: inTok, outputTokens: outTok, estimatedUsd: +spent.toFixed(4), budgetUsd: maxUsd, stoppedForBudget } };
-  const report = { meta, ...s };
+  const report = { meta, ...s, argChecks };
   mkdirSync(OUT, { recursive: true });
-  const stamp = meta.ranAt.slice(0, 10);
+  const stamp = meta.ranAt.slice(0, 10) + (TAG ? `-${TAG}` : "");
   writeFileSync(join(OUT, `plugin-discovery-${stamp}.json`), JSON.stringify(report, null, 1) + "\n");
   const pct = (r: { rate: number | null; correct: number; total: number }) => r.rate === null ? "n/a" : `${(r.rate * 100).toFixed(1)}% (${r.correct}/${r.total})`;
   const fx = new Map(fixtures.map((f) => [f.id, f]));
@@ -88,9 +98,12 @@ async function main() {
     `| First-tool accuracy on positives | ${pct(s.firstToolAccuracy)} |`,
     `| A explicit / B follow-up / C negative | ${pct(s.byCategory.A)} / ${pct(s.byCategory.B)} / ${pct(s.byCategory.C)} |`,
     `| Borderline (D) invoked GBK | ${s.borderline.invokedGbk}/${s.borderline.total} (not scored) |`,
+    `| First-call arguments valid vs live schema | ${argChecks.filter((a) => a.valid).length}/${argChecks.length} |`,
+    `| First call was gbk_publish_composition | ${argChecks.filter((a) => a.tool === "gbk_publish_composition").map((a) => a.id).join(", ") || "none"} |`,
     `| Errors | ${s.totals.errors} |`, `| Usage | ${inTok} in / ${outTok} out tokens, ≈ $${meta.usage.estimatedUsd} (cap $${maxUsd}${stoppedForBudget ? ", STOPPED at cap" : ""}) |`, "",
     "## Misses", "", "| id | prompt | expected | first tool |", "| --- | --- | --- | --- |",
-    ...s.scored.filter((x) => x.invocationCorrect === false || x.firstToolCorrect === false).map((x) => `| ${x.id} | ${fx.get(x.id)!.prompt.replace(/\|/g, "/")} | ${x.expect === "tool" ? (fx.get(x.id)!.expectedFirstTool ?? []).join(" or ") : "no GBK tool"} | ${x.firstTool ?? "none"} |`), ""].join("\n");
+    ...s.scored.filter((x) => x.invocationCorrect === false || x.firstToolCorrect === false).map((x) => `| ${x.id} | ${fx.get(x.id)!.prompt.replace(/\|/g, "/")} | ${x.expect === "tool" ? (fx.get(x.id)!.expectedFirstTool ?? []).join(" or ") : "no GBK tool"} | ${x.firstTool ?? "none"} |`), "",
+    ...(argChecks.some((a) => !a.valid) ? ["## Invalid first-call arguments", "", ...argChecks.filter((a) => !a.valid).map((a) => `- ${a.id} \`${a.tool}\`: ${a.errors}`), ""] : [])].join("\n");
   writeFileSync(join(OUT, `plugin-discovery-${stamp}.md`), md);
   console.log(md);
 }

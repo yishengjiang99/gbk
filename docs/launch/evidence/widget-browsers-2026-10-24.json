@@ -1,0 +1,144 @@
+{
+ "declaredDomains": [
+  "http://127.0.0.1:43555"
+ ],
+ "sandboxAttr": "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox",
+ "chromium/strict": {
+  "status": "Done: 0:11 rendered in your browser and saved. Press Play.",
+  "worklet": "origin",
+  "renderSeconds": 2,
+  "playerMode": "buf",
+  "playback": {
+   "playing": true,
+   "audioContextState": "running",
+   "seekValue": "136"
+  },
+  "wavHref": "http://127.0.0.1:43555/api/mcp/artifacts/art_LeSq4cU8H0WhTnRh?exp=1792896160&sig=\u2026",
+  "downloadClick": {
+   "popup": "http://127.0.0.1:43555/api/mcp/artifacts/art_LeSq4cU8H0WhTnRh?exp=1792896160&sig=\u2026",
+   "download": null
+  },
+  "stop": "ok",
+  "cspViolations": []
+ },
+ "chromium/basicHost": {
+  "status": "Done: 0:11 rendered in your browser and saved. Press Play.",
+  "worklet": "origin",
+  "renderSeconds": 2,
+  "playerMode": "buf",
+  "playback": {
+   "playing": true,
+   "audioContextState": "running",
+   "seekValue": "135"
+  },
+  "wavHref": "http://127.0.0.1:43555/api/mcp/artifacts/art_LkwlQMHQMc70_1pm?exp=1792896169&sig=\u2026",
+  "downloadClick": {
+   "popup": "http://127.0.0.1:43555/api/mcp/artifacts/art_LkwlQMHQMc70_1pm?exp=1792896169&sig=\u2026",
+   "download": null
+  },
+  "stop": "ok",
+  "cspViolations": []
+ },
+ "chromium/undeclared": {
+  "status": "Render failed: could not load the renderer from http://127.0.0.1:43555 (blocked by the host?)",
+  "worklet": null,
+  "renderSeconds": 0,
+  "playerMode": null,
+  "error": "render did not complete",
+  "cspViolations": [
+   "Loading the script 'http://127.0.0.1:43555/api/mcp/widget/gbk-widget-render.js' violates the following Content Security Policy directive: \"script-src 'self' 'unsafe-inline'\". Note that 'script-src-elem' was not explicitly set, so 'script-sr"
+  ]
+ },
+ "webkit/strict": {
+  "status": "Done: 0:11 rendered in your browser and saved. Press Play.",
+  "worklet": "origin",
+  "renderSeconds": 2,
+  "playerMode": "buf",
+  "playback": {
+   "playing": true,
+   "audioContextState": "running",
+   "seekValue": "139"
+  },
+  "wavHref": "http://127.0.0.1:43555/api/mcp/artifacts/art_rGh7Cex3rftN_Mc4?exp=1792896178&sig=\u2026",
+  "downloadClick": {
+   "popup": "http://127.0.0.1:43555/api/mcp/artifacts/art_rGh7Cex3rftN_Mc4?exp=1792896178&sig=\u2026",
+   "download": null
+  },
+  "stop": "ok",
+  "cspViolations": []
+ },
+ "webkit/basicHost": {
+  "status": "Done: 0:11 rendered in your browser and saved. Press Play.",
+  "worklet": "origin",
+  "renderSeconds": 2,
+  "playerMode": "buf",
+  "playback": {
+   "playing": true,
+   "audioContextState": "running",
+   "seekValue": "138"
+  },
+  "wavHref": "http://127.0.0.1:43555/api/mcp/artifacts/art_3ENrWAUox2ANSJt3?exp=1792896187&sig=\u2026",
+  "downloadClick": {
+   "popup": "http://127.0.0.1:43555/api/mcp/artifacts/art_3ENrWAUox2ANSJt3?exp=1792896187&sig=\u2026",
+   "download": null
+  },
+  "stop": "ok",
+  "cspViolations": []
+ },
+ "webkit/undeclared": {
+  "status": "Render failed: could not load the renderer from http://127.0.0.1:43555 (blocked by the host?)",
+  "worklet": null,
+  "renderSeconds": 0,
+  "playerMode": null,
+  "error": "render did not complete",
+  "cspViolations": [
+   "Refused to load http://127.0.0.1:43555/api/mcp/widget/gbk-widget-render.js because it does not appear in the script-src directive of the Content Security Policy."
+  ]
+ },
+ "webkit-iphone/strict": {
+  "status": "Done: 0:11 rendered in your browser and saved. Press Play.",
+  "worklet": "origin",
+  "renderSeconds": 2,
+  "playerMode": "buf",
+  "playback": {
+   "playing": true,
+   "audioContextState": "running",
+   "seekValue": "139"
+  },
+  "wavHref": "http://127.0.0.1:40781/api/mcp/artifacts/art_s2N4xcHhvSym4wTg?exp=1792896212&sig=\u2026",
+  "downloadClick": {
+   "popup": "http://127.0.0.1:40781/api/mcp/artifacts/art_s2N4xcHhvSym4wTg?exp=1792896212&sig=\u2026",
+   "download": null
+  },
+  "stop": "ok",
+  "cspViolations": []
+ },
+ "webkit-iphone/basicHost": {
+  "status": "Done: 0:11 rendered in your browser and saved. Press Play.",
+  "worklet": "origin",
+  "renderSeconds": 2,
+  "playerMode": "buf",
+  "playback": {
+   "playing": true,
+   "audioContextState": "running",
+   "seekValue": "138"
+  },
+  "wavHref": "http://127.0.0.1:40781/api/mcp/artifacts/art_1nQgzwJJF-u10GgA?exp=1792896221&sig=\u2026",
+  "downloadClick": {
+   "popup": "http://127.0.0.1:40781/api/mcp/artifacts/art_1nQgzwJJF-u10GgA?exp=1792896221&sig=\u2026",
+   "download": null
+  },
+  "stop": "ok",
+  "cspViolations": []
+ },
+ "webkit-iphone/undeclared": {
+  "status": "Render failed: could not load the renderer from http://127.0.0.1:40781 (blocked by the host?)",
+  "worklet": null,
+  "renderSeconds": 0,
+  "playerMode": null,
+  "error": "render did not complete",
+  "cspViolations": [
+   "Refused to load http://127.0.0.1:40781/api/mcp/widget/gbk-widget-render.js because it does not appear in the script-src directive of the Content Security Policy."
+  ]
+ }
+}
