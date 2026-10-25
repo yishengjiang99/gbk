@@ -3,6 +3,7 @@
 ## iOS
 
 Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.yml` (macOS, simulator build + unit tests, unsigned).
+CI trigger: `ios.yml` push/PR runs only on changes to `ios/**`, `ios.yml`, `ios-release.yml`, `src/native/**` (plus manual workflow_dispatch).
 
 | Area | State |
 |---|---|
