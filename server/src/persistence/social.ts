@@ -189,6 +189,6 @@ export class SocialStore {
   purgeUser(userId: string) {
     for (const c of this.db.prepare("SELECT id FROM comments WHERE user_id = ? AND deleted_at IS NULL").all(userId) as { id: number }[]) this.removeComment(Number(c.id), "deleted_at");
     for (const r of this.db.prepare("SELECT share_id FROM ratings WHERE user_id = ?").all(userId) as { share_id: string }[]) this.rate(r.share_id, userId, null);
-    this.db.prepare("DELETE FROM reports WHERE reporter = ?").run(userId); this.db.prepare("DELETE FROM profiles WHERE user_id = ?").run(userId);
+    this.db.prepare("DELETE FROM reports WHERE reporter = ?").run(userId); try { this.db.prepare("DELETE FROM impressions WHERE actor = ?").run(userId); } catch { /* table not created yet */ } this.db.prepare("DELETE FROM profiles WHERE user_id = ?").run(userId);
   }
 }

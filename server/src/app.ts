@@ -40,6 +40,9 @@ import { nativeRoutes } from "./routes/native.ts";
 import { currentSession } from "./routes/agent.ts";
 import { authExtraRoutes } from "./routes/auth-extra.ts";
 import { socialRoutes } from "./routes/social.ts";
+import { eventRoutes } from "./routes/events.ts";
+import { EventStore } from "./persistence/events.ts";
+import { Ranker } from "./ranking/ranker.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
 
@@ -97,7 +100,10 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const social = new SocialStore(shares.database, deps.now);
   const native = new NativeStore(persist ? join(cfg.dataDir, "native.sqlite") : ":memory:", deps.now);
   const notify = createNotifier(cfg, native, (o) => app.log.info(o), deps.apns);
-  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify);
+  const events = new EventStore(shares.database, deps.now);
+  const ranker = new Ranker(shares.database, deps.now);
+  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker);
+  eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers);
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
     const s = currentSession(req, sessions); const row = shares.bySlug((req.params as { slug: string }).slug);
@@ -110,6 +116,8 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   app.all("/api/*", async (req, reply) => reply.code(404).send({ code: "NOT_FOUND", message: `Route ${req.method}:${req.url.split("?")[0]} not found`, error: "Not Found", statusCode: 404 }));
   const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, me: socialApi.me, fetch: deps.fetch });
   authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
+  // Nightly (03:30 server time) retrain of the pointwise ranking model; no-op until enough impressions exist.
+  const trainTimer = setInterval(() => { const d = new Date(); if (d.getHours() === 3 && d.getMinutes() >= 30 && d.getMinutes() < 40) { try { events.prune(); const r = ranker.train(); if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, auc: r.auc }); } catch (e) { app.log.warn({ evt: "rank_train_error", message: (e as Error).message }); } } }, 600_000); trainTimer.unref();
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless

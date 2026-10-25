@@ -20,7 +20,7 @@ const qs = (o: Record<string, string | number | null | undefined>) => { const p 
 
 export const social = {
   me: () => call<Me>("GET", "/me").catch((e) => { if ((e as { status?: number }).status === 401) return null; throw e; }),
-  feed: (o: { sort?: string; label?: string; tag?: string; cursor?: string | null; limit?: number }) => call<Page<Song>>("GET", `/feed${qs(o)}`),
+  feed: (o: { sort?: string; label?: string; tag?: string; cursor?: string | null; limit?: number }) => call<Page<Song> & { model_version?: string }>("GET", `/feed${qs(o)}`),
   song: (slug: string) => call<Song>("GET", `/songs/${encodeURIComponent(slug)}`),
   setMeta: (slug: string, m: { labels?: string[]; tags?: string[]; prompt_shared?: boolean; prompt_text?: string | null }) => call<Song>("PATCH", `/songs/${encodeURIComponent(slug)}/meta`, m),
   promptSuggestion: (slug: string) => call<{ prompt: string | null }>("GET", `/songs/${encodeURIComponent(slug)}/prompt-suggestion`).catch(() => ({ prompt: null })),

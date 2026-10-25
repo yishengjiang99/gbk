@@ -8,12 +8,15 @@ import type { AccountStore } from "../persistence/accounts.ts";
 import { SocialStore, encCursor, decCursor, normLabels, normTags, badText, LABELS, TAG_RE, type CommentRow } from "../persistence/social.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import { currentSession, guardWrite } from "./agent.ts";
+import { parseCookies } from "../security/authentication.ts";
 import { isGuest } from "../mcp/guest.ts";
 
+/** Ranker that produced the feed; clients echo it on every impression (docs/social/ranking.md). */
+export const MODEL_VERSION = "heur-1";
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const lim = (v: unknown, d = 20, max = 50) => Math.min(max, Math.max(1, Number(v) || d));
 
-export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify) {
+export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker) {
   const origin = cfg.publicOrigin;
   const L = { comment: new RateLimiter(10), rating: new RateLimiter(60), report: new RateLimiter(10, 3_600_000), play: new RateLimiter(120) };
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
@@ -69,6 +72,17 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     const sort = q.sort === "new" || q.sort === "top" ? q.sort : "for_you";
     const label = q.label && (LABELS as readonly string[]).includes(q.label) ? q.label : undefined;
     const t = tag ?? q.tag; if (t !== undefined && !TAG_RE.test(t)) return reply.code(400).send({ code: "INVALID_TAG", message: "bad tag" });
+    // Personalized For you (no filters): ranked list + offset cursor carrying the seed, so pages stay consistent.
+    if (sort === "for_you" && !label && t === undefined && ranker) {
+      const v = viewerOf(req); const n = lim(q.limit); const c = decCursor<{ r?: number; p?: number; sd?: number }>(q.cursor);
+      const ck = parseCookies(req.headers.cookie).gbk_gid; const inst = String(req.headers["x-gbk-install"] ?? "");
+      const actor = v ?? (ck && /^[A-Za-z0-9_-]{8,64}$/.test(ck) ? `gid:${ck}` : /^[A-Za-z0-9_-]{8,64}$/.test(inst) ? `inst:${inst}` : null);
+      const session = typeof (req.query as { session?: string }).session === "string" ? (req.query as { session: string }).session.slice(0, 64) : null;
+      const seed = c?.r === 1 && typeof c.sd === "number" ? c.sd : Math.floor(Math.random() * 2 ** 31); const p0 = c?.r === 1 && typeof c.p === "number" ? Math.max(0, c.p) : 0;
+      const rk = ranker.rank({ actor, session, seed, viewer: v });
+      const page = rk.ids.slice(p0, p0 + n).map((id) => shares.byId(id)).filter((r): r is ShareRow => !!r && !!r.public);
+      return { items: page.map((r) => song(r, v)), next_cursor: p0 + n < rk.ids.length ? encCursor({ r: 1, p: p0 + n, sd: seed }) : null, model_version: rk.version };
+    }
     const f = social.feed({ sort, label, tag: t, cursor: q.cursor, limit: lim(q.limit) }); const v = viewerOf(req);
     // Light diversity on For you: never more than 2 consecutive songs by one author, across pages too. We read a
     // look-ahead window, pick greedily, and the cursor carries the last two authors (o) plus the ids already shown
@@ -98,7 +112,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
         next = encCursor({ ...("k" in base ? base : {}), o: owners().slice(-2), x: x.slice(-200) });
       }
     }
-    return { items: rows.map((r) => song(r, v)), next_cursor: next };
+    return { items: rows.map((r) => song(r, v)), next_cursor: next, model_version: sort === "for_you" ? MODEL_VERSION : `${sort}-1` };
   };
   app.get("/api/feed", (req, reply) => feed(req, reply));
   app.get("/api/tags/top", async (req) => social.topTags(lim((req.query as { limit?: string }).limit, 30, 100)));
