@@ -3,7 +3,7 @@ import Security
 
 /// Minimal Keychain wrapper for generic-password items.
 enum Keychain {
-    static let service = "com.grepawk.gbkcomposer"
+    static let service = "com.grepawk.gbk"
 
     static func set(_ value: String?, for key: String) {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,

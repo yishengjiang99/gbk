@@ -35,7 +35,7 @@ jobs:
       ARCHIVE_PATH: ${{ github.workspace }}/build/GBKComposer.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
       TEAM_ID: 83D36RPMUM
-      BUNDLE_ID: com.grepawk.gbkcomposer
+      BUNDLE_ID: com.grepawk.gbk
       PROFILE_NAME: ${{ github.event.inputs.profile_name }}
 
     steps:

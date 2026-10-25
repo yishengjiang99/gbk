@@ -11,13 +11,13 @@
 
 ### Needs Yisheng
 
-- Team ID is almost certainly `83D36RPMUM` (the team every other iOS app here uses); confirm reusing it, plus the existing team-wide APNs .p8 key and the App Store Connect API key from finalcut (gbk repo has no ASC secrets yet).
-- Apple Developer App ID `com.grepawk.gbkcomposer` with Push, Sign in with Apple and Associated Domains enabled.
-- Signing (development team in Xcode / CI signing secrets for archive builds).
-- AASA file at `https://compose.grepawk.com/.well-known/apple-app-site-association` needs the team ID (`<TEAMID>.com.grepawk.gbkcomposer`).
-- App icon (1024×1024) for `ios/GBKComposer/Resources/Assets.xcassets/AppIcon.appiconset`.
-- TestFlight / App Store Connect app record and approval.
-- APNs .p8 key for the server sender (P5).
+- Register App ID `com.grepawk.gbk` under team 83D36RPMUM (set in project.yml) with Push, Sign in with Apple and Associated Domains, and create the App Store Connect app record.
+- Create the "GBK Composer App Store" provisioning profile (or pass another name to the ios-release workflow input).
+- Add the App Store Connect API key secrets to the gbk repo (same names as finalcut): `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_P8`, `IOS_DISTRIBUTION_P12_BASE64`, `IOS_DISTRIBUTION_P12_PASSWORD`, `IOS_APPSTORE_PROFILE_BASE64`.
+- Approve the final app icon (current one is a generated placeholder: light-blue gradient with a #2d6a93 note).
+- Approve TestFlight submission (`.github/workflows/ios-release.yml` is workflow_dispatch only and has never been run).
+- AASA at `/.well-known/apple-app-site-association` (server, iOS-1): app id `83D36RPMUM.com.grepawk.gbk`.
+- Server push (P5) reuses the existing team-wide APNs key; configure it on the server only, never copy key material.
 
 ## Commercialization
 
