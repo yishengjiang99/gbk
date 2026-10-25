@@ -24,6 +24,7 @@ final class FeedPlayer: ObservableObject {
     /// Spectrum for the active item; cards pull from it per frame.
     let analyzer = SpectrumAnalyzer()
     private var tapTask: Task<Void, Never>?
+    private var pcmTask: Task<Void, Never>?
 
     nonisolated static func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
@@ -59,7 +60,7 @@ final class FeedPlayer: ObservableObject {
             currentSlug = slug
             onStart?(slug)
             loopOnEnd(item, player: incoming)
-            attachTap(to: item)
+            attachTap(to: item, url: url)
             if hadPrevious { fadeOut(outgoing) } else { outgoing.pause() }
         } else {
             active.play()
@@ -99,15 +100,23 @@ final class FeedPlayer: ObservableObject {
     }
 
     /// Install an MTAudioProcessingTap (via AVAudioMix) on the item's audio track for the spectrum.
-    private func attachTap(to item: AVPlayerItem) {
+    /// Also decodes the same mp3 so the spectrum still renders when the tap delivers nothing (seen on device).
+    private func attachTap(to item: AVPlayerItem, url: URL) {
         tapTask?.cancel()
+        pcmTask?.cancel()
         let sink = AudioTapSink()
         analyzer.sink = sink
+        analyzer.pcm = nil
         analyzer.reset()
         tapTask = Task { @MainActor in
             guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first, !Task.isCancelled,
                   let mix = sink.makeAudioMix(for: track) else { return }
             item.audioMix = mix
+        }
+        pcmTask = Task { @MainActor [analyzer] in
+            let pcm = await DecodedPCM.load(url: url)
+            guard !Task.isCancelled, analyzer.sink === sink else { return }
+            analyzer.pcm = pcm
         }
     }
 

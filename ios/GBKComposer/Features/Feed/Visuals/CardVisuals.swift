@@ -41,8 +41,10 @@ struct NowPlayingVizView: View {
         ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: sH)), with: .color(Theme.vizBg))
         ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: 1)), with: .color(Theme.vizGrid))
 
-        let analyzer = live ? playback?.analyzer : nil
-        let levels = analyzer?.bars(now: now) ?? []
+        let frame = live ? playback?.analyzer?.frame(now: now, mediaTime: t) : nil
+        let levels = frame?.levels ?? []
+        // Web colours bars/wave with the live palette only while the analyser is connected; same here: live = audio present.
+        let hasAudio = frame?.samples != nil
         let bw = W / CGFloat(FeedVisuals.barCount)
         var bars = Path()
         for b in 0..<FeedVisuals.barCount {
@@ -50,9 +52,9 @@ struct NowPlayingVizView: View {
             let h = max(1, v * (sH - 4))
             bars.addRect(CGRect(x: CGFloat(b) * bw + 1, y: H - h, width: max(1, bw - 2), height: h))
         }
-        ctx.fill(bars, with: .color((analyzer != nil ? Theme.vizBar : Theme.vizDim).opacity(FeedVisuals.barAlpha)))
+        ctx.fill(bars, with: .color((hasAudio ? Theme.vizBar : Theme.vizDim).opacity(FeedVisuals.barAlpha)))
 
-        let samples = analyzer?.sink.map { WaveformMath.points($0.latest(FeedVisuals.fftSize)) }
+        let samples = frame?.samples.map { WaveformMath.points($0) }
             ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
         let mid = rH + sH / 2, amp = sH / 2 - 2
         var wave = Path()
@@ -60,7 +62,7 @@ struct NowPlayingVizView: View {
             let p = CGPoint(x: CGFloat(k) / CGFloat(samples.count - 1) * W, y: mid - CGFloat(s) * amp)
             if k == 0 { wave.move(to: p) } else { wave.addLine(to: p) }
         }
-        ctx.stroke(wave, with: .color(analyzer != nil ? Theme.vizWave : Theme.vizDim), lineWidth: max(1, H / 200))
+        ctx.stroke(wave, with: .color(hasAudio ? Theme.vizWave : Theme.vizDim), lineWidth: max(1, H / 200))
     }
 
     private func drawRoll(_ ctx: inout GraphicsContext, W: CGFloat, H: CGFloat, t: Double, dur: Double) {

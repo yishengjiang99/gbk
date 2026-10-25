@@ -17,7 +17,11 @@ enum Theme {
     static let textSecondary = Color("TextSecondary")
     static let border = Color("Border")
     static let chip = Color("Chip")
-    /// Feed viz palette: web LiveRoll `DEF.light` / `DEF.dark` (gbk #108).
+    /// Tag chips: web `.so-chip` (bg --so-roll-bg, border --so-border-hover, text --so-accent); labels are `.so-chip.lab`.
+    static let tagChipBorder = Color("TagChipBorder")
+    static let tagChipText = Color("TagChipText")
+    static let tagLabelText = Color("TagLabelText")
+    /// Feed viz palette: the shipped web values, i.e. social.css `--viz-*` (which override LiveRoll `DEF`, gbk #108).
     static let vizBg = Color("VizBg")
     static let vizGrid = Color("VizGrid")
     static let vizRow = Color("VizRow")
