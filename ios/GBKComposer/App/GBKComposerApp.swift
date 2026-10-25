@@ -1,0 +1,25 @@
+import SwiftUI
+
+@main
+struct GBKComposerApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var auth = AuthStore.shared
+    @StateObject private var router = DeepLinkRouter()
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some Scene {
+        WindowGroup {
+            RootTabView()
+                .environmentObject(auth)
+                .environmentObject(router)
+                .tint(Theme.accent)
+                .onOpenURL { router.handle($0) }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL { router.handle(url) }
+                }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await PushManager.shared.refresh() } }
+        }
+    }
+}
