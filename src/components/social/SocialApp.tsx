@@ -1,6 +1,7 @@
 // gbk Social web UI: one Feed tab (Explore merged: chips + Browse sheet), Create, Inbox, Profile; song ratings,
 // flat comments, reports, profiles and the admin report queue. All user text renders as React text nodes.
 import { Crossfader, type FadeState } from "./crossfade.ts";
+import { startImpression, endImpression, attachAudio, markAction } from "./impressions.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { social, LABELS, type Me, type Song, type SComment, type SUser } from "../../agent/social-client.ts";
 import { PianoRoll } from "../explore/ExplorePage.tsx";
@@ -19,7 +20,7 @@ function Stars({ song, me, onNeedSignIn, onChange }: { song: Song; me: Me | null
   const [err, setErr] = useState("");
   const set = async (n: number) => {
     if (!me) return onNeedSignIn(); if (song.is_mine) { setErr("You can't rate your own song"); return; }
-    try { const r = await social.rate(song.slug, song.my_rating === n ? null : n); onChange({ ...song, ...r }); setErr(""); } catch (e) { setErr((e as Error).message); }
+    try { const r = await social.rate(song.slug, song.my_rating === n ? null : n); markAction(song.slug, "rate"); onChange({ ...song, ...r }); setErr(""); } catch (e) { setErr((e as Error).message); }
   };
   return (
     <div className="so-stars" data-testid="stars">
@@ -40,8 +41,8 @@ function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter
       <div className="so-rollwrap" onClick={() => onPlay(song)}>{song.preview ? <LiveRoll p={song.preview} playing={playing} source={viz} /> : <div className="so-noroll" />}<span className="so-playbadge" data-testid="card-play">{playing ? "❚❚" : "▶"}</span></div>
       <div className="so-side">
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
-        <button aria-label="Open in Studio" data-testid="card-open" onClick={() => onOpen(song.slug, false)}>✎<small>open</small></button>
-        <button aria-label="Remix (fork)" data-testid="card-fork" onClick={() => onOpen(song.slug, true)}>⑂<small>{song.fork_count}</small></button>
+        <button aria-label="Open in Studio" data-testid="card-open" onClick={() => { markAction(song.slug, "open_studio"); onOpen(song.slug, false); }}>✎<small>open</small></button>
+        <button aria-label="Remix (fork)" data-testid="card-fork" onClick={() => { markAction(song.slug, "remix"); onOpen(song.slug, true); }}>⑂<small>{song.fork_count}</small></button>
         <button aria-label="Report song" data-testid="card-report" onClick={() => (me ? onSheet({ kind: "report", what: "song", target: song.slug, label: song.title }) : onSheet({ kind: "signin", why: "Sign in to report." }))}>⚑</button>
       </div>
       <div className="so-meta">
@@ -71,7 +72,7 @@ function useAudio() {
   const start = useCallback((s: Song, gesture = false) => {
     const x = xf.current!; const src = srcOf(s); if (gesture) x.unlock(); if (!src) { void x.play(null); return; }
     slugBySrc.current.set(src, s.slug);
-    void x.play(src).then((ok) => { if (!ok) return; setUnlocked(true); if (!counted.current.has(s.slug)) { counted.current.add(s.slug); void social.play(s.slug); } });
+    void x.play(src).then((ok) => { if (!ok) { if (!gesture && !x.playingCount) setUnlocked(false); return; } setUnlocked(true); if (!counted.current.has(s.slug)) { counted.current.add(s.slug); void social.play(s.slug); } });
   }, []);
   const cur = st.current ? slugBySrc.current.get(st.current) ?? null : null;
   const toggle = useCallback((s: Song) => { if (cur === s.slug) void xf.current!.play(null); else start(s, true); }, [cur, start]);
@@ -79,17 +80,18 @@ function useAudio() {
   const preload = useCallback((ss: (Song | undefined)[]) => xf.current?.preload(ss.map((s) => s && srcOf(s))), []);
   const fading = st.fading ? slugBySrc.current.get(st.fading) ?? null : null;
   const viz = useCallback((): VizSource => ({ el: xf.current?.currentEl ?? null, analyser: xf.current?.analyser ?? null }), []);
-  return { cur, fading, unlocked, start, toggle, stop, preload, host, viz };
+  const currentEl = useCallback(() => xf.current?.currentEl ?? null, []);
+  return { cur, fading, unlocked, start, toggle, stop, preload, host, viz, currentEl };
 }
 
 function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; filter: { sort: string; label?: string; tag?: string }; setFilter: (f: { sort: string; label?: string; tag?: string }) => void; onSheet: (s: Sheet) => void; onOpen: (slug: string, fork: boolean) => void }) {
   const [items, setItems] = useState<Song[]>([]); const [cursor, setCursor] = useState<string | null>(null); const [done, setDone] = useState(false); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
-  const [labels, setLabels] = useState<string[]>([]); const audio = useAudio();
+  const [labels, setLabels] = useState<string[]>([]); const audio = useAudio(); const mv = useRef("unknown");
   const key = `${filter.sort}|${filter.label ?? ""}|${filter.tag ?? ""}`; const live = useRef(key);
   useEffect(() => { void social.tags().then((t) => setLabels(t.labels.map((l) => l.label).filter((l) => l !== "wip").slice(0, 4))).catch(() => undefined); }, []);
   const load = useCallback(async (reset: boolean) => {
     setLoading(true); setErr("");
-    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key) return; setItems((p) => reset ? r.items : [...p, ...r.items.filter((x) => !p.some((y) => y.slug === x.slug))]); setCursor(r.next_cursor); setDone(!r.next_cursor); }
+    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key) return; setItems((p) => reset ? r.items : [...p, ...r.items.filter((x) => !p.some((y) => y.slug === x.slug))]); setCursor(r.next_cursor); setDone(!r.next_cursor); if (r.model_version) mv.current = r.model_version; }
     catch (e) { setErr((e as Error).message); } finally { setLoading(false); }
   }, [filter.sort, filter.label, filter.tag, cursor, key]);
   useEffect(() => { live.current = key; setItems([]); setCursor(null); setDone(false); audio.stop(); void load(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
@@ -100,6 +102,8 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
     const io = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting && e.intersectionRatio >= 0.6) setCandidate(Number((e.target as HTMLElement).dataset.idx)); }, { root, threshold: [0.6] });
     root.querySelectorAll("[data-idx]").forEach((el) => io.observe(el)); return () => io.disconnect();
   }, [items.length]);
+  useEffect(() => { if (audio.cur) attachAudio(audio.cur, audio.currentEl()); }, [audio.cur]);
+  useEffect(() => () => endImpression(), []);
   // Snap settle: the crossfade starts only once scrolling stops (scrollend, or 120 ms without scroll events).
   const [settled, setSettled] = useState(0);
   useEffect(() => {
@@ -109,7 +113,20 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
     root.addEventListener("scroll", on, { passive: true }); root.addEventListener("scrollend", done);
     return () => { clearTimeout(t); root.removeEventListener("scroll", on); root.removeEventListener("scrollend", done); };
   }, []);
-  useEffect(() => { const s = items[active]; if (!s) return; audio.preload([items[active], items[active + 1], items[active - 1]]); if (audio.unlocked) audio.start(s); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [active, settled, items.length > 0, audio.unlocked]);
+  // Any first gesture (not just "Tap to play") unlocks audio and starts the visible card; after that, scroll switches autoplay.
+  const visible = useRef<Song | undefined>(undefined); visible.current = items[active];
+  useEffect(() => {
+    if (audio.unlocked) return;
+    const evs = ["pointerdown", "touchstart", "touchend", "keydown", "click", "wheel"] as const;
+    const off = () => evs.forEach((e) => window.removeEventListener(e, on, true));
+    const on = (e: Event) => {
+      const s = visible.current; if (!s || !srcOf(s)) return;
+      const t = e.target as HTMLElement | null; if (t?.closest?.("[data-testid=tap-to-play],.so-rollwrap,.so-sheet,input,textarea,select")) return; // these handle their own start / are not a play intent
+      audio.start(s, true); // listeners stay until play actually succeeds (iOS only honors touchend/click), then the effect removes them
+    };
+    evs.forEach((e) => window.addEventListener(e, on, { capture: true, passive: true })); return off;
+  }, [audio.unlocked, audio.start, items.length > 0]);
+  useEffect(() => { const s = items[active]; if (!s) return; startImpression(s.slug, active, filter.tag ? "tag" : filter.label ? "label" : filter.sort, mv.current); audio.preload([items[active], items[active + 1], items[active - 1]]); if (audio.unlocked) audio.start(s); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [active, settled, items.length > 0, audio.unlocked]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return; if (document.querySelector(".so-sheet")) return;
@@ -150,7 +167,7 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
 function CommentsSheet({ song, me, onSheet, onCount }: { song: Song; me: Me | null; onSheet: (s: Sheet) => void; onCount: () => void }) {
   const [items, setItems] = useState<SComment[] | null>(null); const [next, setNext] = useState<string | null>(null); const [text, setText] = useState(""); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   useEffect(() => { void social.comments(song.slug).then((r) => { setItems(r.items); setNext(r.next_cursor); }).catch((e) => setErr((e as Error).message)); }, [song.slug]);
-  const post = async () => { const b = text.trim(); if (!b) return; setBusy(true); setErr(""); try { const c = await social.comment(song.slug, b); setItems((p) => [c, ...(p ?? [])]); setText(""); onCount(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
+  const post = async () => { const b = text.trim(); if (!b) return; setBusy(true); setErr(""); try { const c = await social.comment(song.slug, b); markAction(song.slug, "comment"); setItems((p) => [c, ...(p ?? [])]); setText(""); onCount(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
   return (
     <div data-testid="comments-sheet">
       {song.prompt_shared && song.prompt_text && <div className="so-prompt">Prompt: {song.prompt_text} <button className="so-link" data-testid="sheet-remix" onClick={() => remix(song.prompt_text!)}>Remix</button></div>}

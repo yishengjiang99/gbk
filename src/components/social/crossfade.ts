@@ -12,6 +12,7 @@ export type FadeState = { current: string | null; fading: string | null };
 export class Crossfader {
   private ctx: AudioContext | null = null;
   private pool = new Map<string, Voice>();
+  private spares: Voice[] = [];
   private current: Voice | null = null; private fading: Voice | null = null;
   unlocked = false;
   /** Shared analyser for the now-playing visualization (#108); every voice routes gain -> analyser -> destination. */
@@ -21,6 +22,10 @@ export class Crossfader {
 
   private voice(src: string): Voice {
     let v = this.pool.get(src); if (v) return v;
+    // Reuse a gesture-blessed element when one is free: iOS lets an element that played inside a gesture play later
+    // without one, even after its src changes; a fresh element would be blocked on scroll autoplay.
+    const spare = this.spares.pop();
+    if (spare) { spare.el.src = src; spare.el.dataset.src = src; spare.src = src; this.pool.set(src, spare); this.wire(spare); return spare; }
     const el = document.createElement("audio"); el.preload = "auto"; el.loop = true; el.setAttribute("playsinline", ""); el.src = src; el.dataset.src = src; this.host.appendChild(el);
     v = { src, el, gain: null }; this.pool.set(src, v); this.wire(v); return v;
   }
@@ -40,6 +45,8 @@ export class Crossfader {
   unlock() {
     if (!this.ctx) { const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext; if (AC) { try { this.ctx = new AC(); const a = this.ctx.createAnalyser(); a.fftSize = 2048; a.smoothingTimeConstant = 0; a.connect(this.ctx.destination); this.analyser = a; } catch { this.ctx = null; } } for (const v of this.pool.values()) this.wire(v); }
     void this.ctx?.resume().catch(() => undefined);
+    // Bless every warm element now (silent play+pause inside the gesture) so later scroll switches can autoplay.
+    for (const v of this.pool.values()) if (v !== this.current && v.el.paused) { this.set(v, 0); const p = v.el.play(); v.el.pause(); void p?.catch(() => undefined); }
   }
 
   /** Crossfade to src (null = fade everything out). */
@@ -60,8 +67,8 @@ export class Crossfader {
   /** Keep only these sources (plus current/fading) warm; start loading them. */
   preload(srcs: (string | null | undefined)[]) {
     const keep = new Set(srcs.filter((s): s is string => !!s)); for (const s of keep) this.voice(s);
-    for (const [s, v] of this.pool) if (!keep.has(s) && v !== this.current && v !== this.fading) { this.hard(v); v.el.removeAttribute("src"); v.el.remove(); this.pool.delete(s); }
+    for (const [s, v] of this.pool) if (!keep.has(s) && v !== this.current && v !== this.fading) { this.hard(v); v.el.removeAttribute("src"); v.el.load(); this.pool.delete(s); this.spares.push(v); }
   }
   get playingCount() { let n = 0; for (const v of this.pool.values()) if (!v.el.paused) n++; return n; }
-  dispose() { this.stop(); for (const v of this.pool.values()) { v.el.removeAttribute("src"); v.el.remove(); } this.pool.clear(); void this.ctx?.close().catch(() => undefined); }
+  dispose() { this.stop(); for (const v of [...this.pool.values(), ...this.spares]) { v.el.removeAttribute("src"); v.el.remove(); } this.pool.clear(); this.spares = []; void this.ctx?.close().catch(() => undefined); }
 }

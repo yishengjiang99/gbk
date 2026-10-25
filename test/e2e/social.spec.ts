@@ -202,3 +202,23 @@ test("social studio: composer input always visible + in viewport on every tab, k
   const play = page.getByTestId("ws-play");
   if (await play.isVisible()) { await play.click(); await page.waitForTimeout(800); await check("during playback"); await play.click().catch(() => undefined); }
 });
+
+test("feed impressions: settling on cards logs dwell/skip events with model_version via beacon", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const slugs: string[] = [];
+  for (const t of ["Imp Two", "Imp One"]) { const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json(); slugs.unshift(sh.slug); }
+  try {
+    await page.goto("/feed?sort=new");
+    await expect(page.getByTestId("feed-card").first()).toHaveAttribute("data-slug", slugs[0]);
+    const req = page.waitForRequest((r) => r.url().endsWith("/api/events") && r.method() === "POST");
+    await page.getByTestId("feed").evaluate((f) => f.scrollBy({ top: f.clientHeight }));
+    await expect(page.getByTestId("feed")).toHaveAttribute("data-active", "1");
+    await page.evaluate(() => { const g = (window as unknown as { __gbkImpressions: { end: () => void; flush: () => void } }).__gbkImpressions; g.end(); g.flush(); });
+    await req; // the beacon reached POST /api/events (beacon bodies are not exposed to Playwright, so read the sent log)
+    const body = { events: await page.evaluate(() => (window as unknown as { __gbkImpressions: { sentLog: unknown[] } }).__gbkImpressions.sentLog) };
+    const first = body.events.find((e: { song: string }) => e.song === slugs[0]);
+    expect(first).toMatchObject({ position: 0, feed: "new", model_version: "heur-1", fast_skip: true });
+    expect(body.events.some((e: { song: string; position: number }) => e.song === slugs[1] && e.position === 1)).toBeTruthy();
+  } finally { for (const s of slugs) await owner.request.delete(`/api/shares/${s}`, { headers: oh }); await owner.close(); }
+});

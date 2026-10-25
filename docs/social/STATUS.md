@@ -13,6 +13,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Feed card visuals: row 1 windowed piano roll (playhead 25%, 4 s window = 1 s behind / 3 s ahead, finished notes vanish, active notes brightened 45% + glow, black-key row stripes, loops); row 2 48 log-spaced spectrum bars (40 Hz–16 kHz, instant attack, 150 ms decay) + oscilloscope, both from one MTAudioProcessingTap; TimelineView(.animation)+Canvas, active card only, paused with audio | done (constants from web LiveRoll.tsx; device run unverified) |
 | Dark Mode: all colours in asset colour sets with light/dark variants, no hard-coded white/black; previews + light/dark snapshot tests uploaded as the `ios-snapshots` CI artifact | done (dark palette defined on iOS; web has no dark palette yet) |
 | Background audio policy: the feed pauses when the app goes to the background (decided) | done |
+| Feed ranking: impressions `POST /api/events` (beacon, model_version), personalized For you (candidates + LR nightly + 12% explore + diversity + session steer), admin metrics, privacy line, 60-day retention (docs/social/ranking.md); iOS should send impressions with `x-gbk-install` + `session` | done (web, server) |
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |

@@ -247,3 +247,12 @@ No App Store Server API key is needed for JWS verification. An In-App Purchase k
 ## Rate limits
 
 Per user + IP, in-memory: comments 10/min, ratings 60/min, DMs 20/min, reports 10/hour, plays 120/min.
+
+## Feed events (impressions)
+`POST /api/events` body `{session, client, events:[{song, dwell_ms, listen_ratio, completed, fast_skip?, actions?, model_version, position, feed?}]}`. It returns `{accepted}`.
+- Actor: the session user, else the `gbk_gid` cookie or the `x-gbk-install` header.
+- Limits: ≤50 events per batch, 30 batches/min per actor.
+- `GET /api/feed` (For you, unfiltered) accepts `session=` and returns `model_version` (`heur-2` or `lr-YYYYMMDD`).
+- Admin: `GET /api/admin/metrics?days=7`.
+
+See docs/social/ranking.md.
