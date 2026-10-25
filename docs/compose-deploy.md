@@ -2,8 +2,9 @@
 
 The Composer is a server-hosted LLM agent loop. The browser is the tool executor: the server's model calls the canonical
 `gbk_*` tools (`buildAllTools` / `runTool`), each call is sent over a WebSocket (`/api/agent/ws`) to the open tab, the tab
-runs it against its local project, and the result is sent back. Synthesis and rendering stay in the browser, and the server never holds audio
-unless someone explicitly clicks **Share**.
+runs it against its local project, and the result is sent back. In the website's Composer, synthesis and rendering stay in the browser. Separately, MCP clients
+(ChatGPT/Codex plugin) can render on the server: `gbk_render_composition` renders WAV + MIDI headlessly in a worker
+thread (`server/dist/render-worker.mjs`, `SERVER_RENDER=0` turns it off) and stores the files as expiring artifacts.
 
 - Server: `server/src` (Fastify 5 + ws, Node 22 `node:sqlite`). Bundled with `npm run build:server` to `server/dist/index.mjs`.
 - Frontend: `npm run build:compose` (base `/`). GitHub Pages keeps using `GBK_BASE_PATH=/gbk/` (deploy workflow). The Composer UI appears

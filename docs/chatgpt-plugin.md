@@ -77,10 +77,12 @@ open the same composition in GBK Studio afterwards.
 
 ## Public MCP tools
 
-`gbk_get_capabilities` (public, read-only) · `gbk_create_composition` · `gbk_get_composition` ·
+`gbk_get_capabilities` (public, read-only) · `gbk_list_soundfonts` (public, read-only) · `gbk_create_composition` · `gbk_get_composition` ·
 `gbk_list_compositions` · `gbk_edit_composition` · `gbk_render_composition` ·
 `gbk_get_render_status` · `gbk_cancel_render` · `gbk_get_artifacts` · `gbk_open_workstation` ·
-`gbk_publish_composition` (explicit publish only) · `gbk_show_composition_ui`.
+`gbk_publish_composition` (explicit publish only) · `gbk_delete_composition` (guest edit key, explicit request) ·
+`gbk_claim_composition` · `gbk_show_composition_ui`. App-only (player): `gbk_widget_render_start`, `gbk_widget_render_finish`.
+The registry in `server/src/mcp/server.ts` is the source of truth (17 tools; `server/test/launch-consistency.test.ts` checks the docs).
 
 Scopes: `gbk:compositions.read`, `gbk:compositions.write`, `gbk:renders.create`,
 `gbk:artifacts.read`, `gbk:shares.publish`.
