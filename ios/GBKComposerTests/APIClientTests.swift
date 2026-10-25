@@ -131,12 +131,13 @@ final class ReviewerSignInTests: XCTestCase {
 }
 
 final class CrossfadeTests: XCTestCase {
-    func testEqualPowerCurve() {
-        XCTAssertEqual(FeedPlayer.crossfadeDuration, 0.4)
-        let s = FeedPlayer.equalPowerGains(0), m = FeedPlayer.equalPowerGains(0.5), e = FeedPlayer.equalPowerGains(1)
-        XCTAssertEqual(s.out, 1, accuracy: 1e-6); XCTAssertEqual(s.in, 0, accuracy: 1e-6)
-        XCTAssertEqual(e.out, 0, accuracy: 1e-6); XCTAssertEqual(e.in, 1, accuracy: 1e-6)
-        XCTAssertEqual(m.out, Float(sqrt(0.5)), accuracy: 1e-6)
-        XCTAssertEqual(m.out * m.out + m.in * m.in, 1, accuracy: 1e-6) // constant power
+    func testOutgoingFadeOnly150ms() {
+        XCTAssertEqual(FeedPlayer.crossfadeDuration, 0.15)
+        XCTAssertEqual(FeedPlayer.incomingGain, 1, "next song starts at full volume immediately")
+        XCTAssertEqual(FeedPlayer.fadeOutGain(0), 1, accuracy: 1e-6)
+        XCTAssertEqual(FeedPlayer.fadeOutGain(0.5), Float(sqrt(0.5)), accuracy: 1e-6)
+        XCTAssertEqual(FeedPlayer.fadeOutGain(1), 0, accuracy: 1e-6)
+        XCTAssertEqual(FeedPlayer.fadeOutGain(2), 0, accuracy: 1e-6)
+        XCTAssertGreaterThanOrEqual(FeedPlayer.fadeOutGain(0.3), FeedPlayer.fadeOutGain(0.6))
     }
 }

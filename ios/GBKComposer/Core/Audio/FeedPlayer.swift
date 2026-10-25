@@ -2,11 +2,12 @@ import AVFoundation
 import Foundation
 
 /// Plays the visible feed item's mp3, preloads the next one, and crossfades between items.
-/// Crossfade matches web: 400 ms equal-power (outgoing gain cos(t·π/2), incoming sin(t·π/2)), started on scroll settle.
+/// Song switch (Yisheng, 2026-10-25): the next song starts immediately at full volume; only the outgoing song
+/// fades out, over 150 ms with gain cos(t·π/2). Started on scroll settle.
 /// TODO: SF2Engine (sf2player-swift) playback later; sequencer + MIDI parsing to be copied from earsheet's Packages/SF2Player.
 @MainActor
 final class FeedPlayer: ObservableObject {
-    static let crossfadeDuration: TimeInterval = 0.4
+    static let crossfadeDuration: TimeInterval = 0.15
     private static let fadeStep: TimeInterval = 1.0 / 60.0
 
     @Published private(set) var currentSlug: String?
@@ -30,11 +31,12 @@ final class FeedPlayer: ObservableObject {
         try? session.setActive(true)
     }
 
-    /// Equal-power gains for progress t in 0...1: (outgoing, incoming).
-    nonisolated static func equalPowerGains(_ t: Double) -> (out: Float, in: Float) {
-        let c = min(max(t, 0), 1) * .pi / 2
-        return (Float(cos(c)), Float(sin(c)))
+    /// Outgoing gain for fade progress t in 0...1 (cos curve). The incoming song is always at 1.
+    nonisolated static func fadeOutGain(_ t: Double) -> Float {
+        Float(cos(min(max(t, 0), 1) * .pi / 2))
     }
+    /// Incoming gain: full volume from the first frame (no fade-in).
+    nonisolated static let incomingGain: Float = 1
 
     init() {
         active.automaticallyWaitsToMinimizeStalling = true
@@ -49,7 +51,7 @@ final class FeedPlayer: ObservableObject {
             let incoming = standby
             fadeTask?.cancel()
             incoming.replaceCurrentItem(with: item)
-            incoming.volume = currentSlug == nil ? 1 : 0
+            incoming.volume = Self.incomingGain
             incoming.play()
             active = incoming
             standby = outgoing
@@ -58,7 +60,7 @@ final class FeedPlayer: ObservableObject {
             onStart?(slug)
             loopOnEnd(item, player: incoming)
             attachTap(to: item)
-            if hadPrevious { crossfade(from: outgoing, to: incoming) } else { outgoing.pause(); incoming.volume = 1 }
+            if hadPrevious { fadeOut(outgoing) } else { outgoing.pause() }
         } else {
             active.play()
         }
@@ -66,23 +68,19 @@ final class FeedPlayer: ObservableObject {
         if let next { preload(slug: next.slug, url: next.url) }
     }
 
-    private func crossfade(from outgoing: AVPlayer, to incoming: AVPlayer) {
-        fadeTask = Task { @MainActor [weak self] in
+    /// Fade only the outgoing player; a newer switch cancels this and silences it at once.
+    private func fadeOut(_ outgoing: AVPlayer) {
+        fadeTask = Task { @MainActor in
             let start = Date()
             while !Task.isCancelled {
                 let t = Date().timeIntervalSince(start) / Self.crossfadeDuration
-                let g = Self.equalPowerGains(t)
-                outgoing.volume = g.out
-                incoming.volume = g.in
+                outgoing.volume = Self.fadeOutGain(t)
                 if t >= 1 { break }
                 try? await Task.sleep(nanoseconds: UInt64(Self.fadeStep * 1_000_000_000))
             }
-            // Finished or superseded: silence the outgoing player either way.
             outgoing.pause()
             outgoing.volume = 0
             outgoing.replaceCurrentItem(with: nil)
-            if !Task.isCancelled { incoming.volume = 1 }
-            _ = self
         }
     }
 
