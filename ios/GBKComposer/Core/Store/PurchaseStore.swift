@@ -16,10 +16,10 @@ final class PurchaseStore: ObservableObject {
 
     private var updates: Task<Void, Never>?
     private let verifier: IAPVerifying
-    private let accountId: () -> String?
+    private let accountId: @MainActor () -> String?
 
     init(verifier: IAPVerifying = IAPVerificationServices.current,
-         accountId: @escaping () -> String? = { AuthStore.shared.me?.id }) {
+         accountId: @escaping @MainActor () -> String? = { AuthStore.shared.me?.id }) {
         self.verifier = verifier
         self.accountId = accountId
     }
