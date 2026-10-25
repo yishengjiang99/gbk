@@ -1,0 +1,59 @@
+name: iOS simulator checks (#108)
+
+# Manual: native feed viz (only the playing card animates) and web prod /feed in Simulator Safari, light + dark.
+on:
+  workflow_dispatch:
+
+jobs:
+  sim-checks:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: Fetch OMR models
+        run: scripts/fetch-models
+      - run: xcodegen generate
+      - name: Pick and boot simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          ios=sorted([(k,v) for k,v in d.items() if "iOS" in k], key=lambda kv: [int(x) for x in kv[0].split("iOS-")[-1].split("-")])
+          for k,v in reversed(ios):
+              for dev in v:
+                  if dev["name"].startswith("iPhone"): print(dev["udid"]); sys.exit()
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Build for testing
+        run: |
+          xcodebuild build-for-testing -project GBKComposer.xcodeproj -scheme GBKComposer \
+            -destination "id=${{ steps.sim.outputs.udid }}" CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Light and dark passes
+        run: |
+          U=${{ steps.sim.outputs.udid }}
+          mkdir -p snapshots
+          for mode in light dark; do
+            xcrun simctl ui "$U" appearance $mode
+            xcrun simctl openurl "$U" https://compose.grepawk.com/feed
+            sleep 10
+            xcrun simctl io "$U" screenshot "snapshots/web-feed-simctl-$mode.png"
+            TEST_RUNNER_SIM_CHECKS=1 TEST_RUNNER_APPEARANCE=$mode TEST_RUNNER_SNAPSHOT_DIR="$PWD/snapshots" \
+              xcodebuild test-without-building -project GBKComposer.xcodeproj -scheme GBKComposer \
+              -destination "id=$U" -only-testing:GBKComposerUITests/SimChecksUITests \
+              -resultBundlePath "SimChecks-$mode.xcresult" CODE_SIGNING_ALLOWED=NO | grep -E "SIMCHECK|Test Case|error" || true
+          done
+          cat snapshots/simchecks-*.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-sim-checks
+          path: |
+            ios/snapshots/*.png
+            ios/snapshots/*.txt
