@@ -114,26 +114,24 @@ jobs:
             archive
           test -d "$ARCHIVE_PATH"
 
-      - name: Drop static frameworks embedded in the app
-        # onnxruntime.xcframework (ORT pod archive) is a static library; Xcode still copies the
-        # .framework into Frameworks/, and App Store processing rejects it (ITMS-90208, no Mach-O
-        # minimum OS). It is already linked into the app binary, so remove the copy; export re-signs.
+      - name: Fix embedded framework MinimumOSVersion
+        # The onnxruntime SPM wrapper framework is built at the app's deployment target but ships the
+        # ORT pod Info.plist (MinimumOSVersion 15.1); App Store processing rejects the mismatch (ITMS-90208).
+        # Set each embedded framework's MinimumOSVersion to its binary's LC_BUILD_VERSION minos; export re-signs.
         run: |
           set -euo pipefail
           APP=$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name '*.app' | head -1)
           for fw in "$APP"/Frameworks/*.framework; do
             [[ -d "$fw" ]] || continue
-            bin="$fw/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$fw/Info.plist")"
-            ls -la "$fw"; [[ -f "$bin" ]] && file "$bin"
-            if [[ ! -f "$bin" ]] || ! file "$bin" | grep -q 'dynamically linked shared library'; then
-              name=$(basename "$fw" .framework)
-              if otool -L "$APP/$(basename "$APP" .app)" | grep -q "$name.framework"; then
-                echo "::error::$name is loaded dynamically but not a dylib"; exit 1
-              fi
-              echo "removing static $fw"; rm -rf "$fw"
-            fi
+            plist="$fw/Info.plist"
+            bin="$fw/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")"
+            minos=$(xcrun vtool -show-build "$bin" | awk '/minos/{print $2; exit}')
+            cur=$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$plist" 2>/dev/null || echo none)
+            echo "$(basename "$fw"): plist=$cur binary=$minos"
+            [[ -n "$minos" && "$cur" != "$minos" ]] || continue
+            /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion $minos" "$plist" 2>/dev/null \
+              || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string $minos" "$plist"
           done
-          ls "$APP/Frameworks" 2>/dev/null || true
 
       - name: Export IPA
         run: |
