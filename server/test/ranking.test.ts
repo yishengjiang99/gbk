@@ -41,3 +41,38 @@ test("ranking: personalized For you learns from dwell/skips, session-aware, pagi
     assert.equal(aucOf([0.1, 0.9, 0.4, 0.8], [0, 1, 0, 1]), 1);
   } finally { await s.app.close(); }
 });
+
+// ---- v2 unit tests on synthetic fixtures (rank-fixture.ts) ----
+import { Ranker, trainInWorker, FEATURES, HEURISTIC } from "../src/ranking/ranker.ts";
+import { fixture, rand, H as HR, D } from "./rank-fixture.ts";
+
+const randomWorld = (fx: ReturnType<typeof fixture>, seed: number, n = 1600) => {
+  const r = rand(seed); const songs = Array.from({ length: 40 }, (_, i) => fx.song({ owner: `o${i % 8}`, labels: [["lofi", "jazz", "classical"][i % 3]], tags: [`t${i % 5}`], score: r() }));
+  for (let k = 0; k < n; k++) fx.imp({ actor: `a${Math.floor(r() * 60)}`, song: songs[Math.floor(r() * songs.length)], at: fx.now() - Math.floor(r() * 20 * D) - HR, good: r() < 0.5 });
+  return songs;
+};
+
+test("ranking v2 / phase 1: leakage — random labels give holdout AUC near 0.5; holdout is time-split; trains in a worker", async () => {
+  const fx = fixture({ file: true }); randomWorld(fx, 7);
+  const rk = new Ranker(fx.db, fx.now); const res = rk.train()!;
+  assert.ok(res && res.auc !== null, "trained"); assert.ok(res.auc! < 0.65 && res.auc! > 0.35, `holdout auc ${res.auc}`);
+  assert.ok(res.holdout > 0 && res.n > res.holdout, "time split: older rows train, last 3 days hold out"); assert.equal(res.promoted, true, "no promoted model yet -> promote");
+  assert.equal(rk.version, res.version);
+  // worker: same result shape, main ranker reloads the promoted model
+  fx.db.prepare("DELETE FROM rank_models").run(); const rk2 = new Ranker(fx.db, fx.now); assert.match(rk2.version, /^heur-/);
+  const w = await trainInWorker(rk2, fx.file, fx.now()); assert.ok(w && w.promoted); assert.equal(rk2.version, w!.version);
+});
+
+test("ranking v2 / phase 1: promotion gate keeps a better promoted model and stores the worse candidate unpromoted", () => {
+  const fx = fixture(); const r = rand(3);
+  const songs = Array.from({ length: 40 }, (_, i) => fx.song({ owner: `o${i % 8}`, score: i / 40 }));
+  // train window: random labels; holdout (last 3 days): label = popular song
+  for (let k = 0; k < 1500; k++) { const s = Math.floor(r() * 40); const at = fx.now() - Math.floor(r() * 20 * D) - HR; const hold = at >= fx.now() - 3 * D; fx.imp({ actor: `a${Math.floor(r() * 50)}`, song: songs[s], at, good: hold ? s >= 20 : r() < 0.5 }); }
+  const good = { ...Object.fromEntries(FEATURES.map((k) => [k, 0])), bias: 0, popularity: 5 };
+  new Ranker(fx.db, fx.now); fx.db.prepare("INSERT INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES ('lr-good', ?, 1, 0.99, ?, 1)").run(JSON.stringify(good), fx.now() - D);
+  const rk = new Ranker(fx.db, fx.now); assert.equal(rk.version, "lr-good");
+  const res = rk.train()!; assert.equal(res.promoted, false); assert.ok(res.previous_auc! > res.auc!);
+  assert.equal(rk.version, "lr-good"); assert.equal(new Ranker(fx.db, fx.now).version, "lr-good", "startup loads the promoted model");
+  assert.equal((fx.db.prepare("SELECT promoted FROM rank_models WHERE version = ?").get(res.version) as { promoted: number }).promoted, 0);
+  void HEURISTIC;
+});

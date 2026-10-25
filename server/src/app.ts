@@ -45,7 +45,7 @@ import { authExtraRoutes } from "./routes/auth-extra.ts";
 import { socialRoutes } from "./routes/social.ts";
 import { eventRoutes } from "./routes/events.ts";
 import { EventStore } from "./persistence/events.ts";
-import { Ranker } from "./ranking/ranker.ts";
+import { Ranker, trainInWorker } from "./ranking/ranker.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
 
@@ -122,8 +122,13 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   app.all("/api/*", async (req, reply) => reply.code(404).send({ code: "NOT_FOUND", message: `Route ${req.method}:${req.url.split("?")[0]} not found`, error: "Not Found", statusCode: 404 }));
   const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, iap, me: socialApi.me, fetch: deps.fetch });
   authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
-  // Nightly (03:30 server time) retrain of the pointwise ranking model; no-op until enough impressions exist.
-  const trainTimer = setInterval(() => { const d = new Date(); if (d.getHours() === 3 && d.getMinutes() >= 30 && d.getMinutes() < 40) { try { events.prune(); const r = ranker.train(); if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, auc: r.auc }); } catch (e) { app.log.warn({ evt: "rank_train_error", message: (e as Error).message }); } } }, 600_000); trainTimer.unref();
+  // Nightly (03:30 server time) retrain of the ranking model in a worker thread; one run per day (lastTrain guard).
+  let lastTrain = ""; let training = false;
+  const trainTimer = setInterval(() => { const d = new Date(); const day = d.toISOString().slice(0, 10);
+    if (d.getHours() !== 3 || d.getMinutes() < 30 || d.getMinutes() >= 40 || lastTrain === day || training) return; lastTrain = day; training = true;
+    try { events.prune(); } catch { /* best effort */ }
+    trainInWorker(ranker, shares.database.location()).then((r) => { if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, holdout: r.holdout, auc: r.auc, promoted: r.promoted, previous: r.previous, previous_auc: r.previous_auc, ms: r.ms }); })
+      .catch((e) => app.log.warn({ evt: "rank_train_error", message: (e as Error).message })).finally(() => { training = false; }); }, 600_000); trainTimer.unref();
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
   // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless
