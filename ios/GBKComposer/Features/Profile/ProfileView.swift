@@ -79,6 +79,7 @@ struct ProfileView: View {
                     UserProfileView(handle: me.handle)
                         .toolbar {
                             Menu {
+                                Button("Bluetooth MIDI…") { BluetoothMIDIPairing.present() }
                                 if auth.isLinkedAccount { Button("Sign out") { Task { await auth.signOut() } } }
                                 Button("Delete account", role: .destructive) { confirmDelete = true }
                                 AboutMenuItems()

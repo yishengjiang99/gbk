@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import StoreKit
 
 /// StoreKit 2: loads products, buys, restores, listens to `Transaction.updates`, and forwards each
@@ -17,18 +18,27 @@ final class PurchaseStore: ObservableObject {
     private var updates: Task<Void, Never>?
     private let verifier: IAPVerifying
     private let accountId: @MainActor () -> String?
+    private let serverPro: @MainActor () -> Bool
+    private var localPro = false
+    private var meSub: AnyCancellable?
 
     init(verifier: IAPVerifying = IAPVerificationServices.current,
-         accountId: @escaping @MainActor () -> String? = { AuthStore.shared.me?.id }) {
+         accountId: @escaping @MainActor () -> String? = { AuthStore.shared.me?.id },
+         serverPro: @escaping @MainActor () -> Bool = { AuthStore.shared.me?.hasActivePro() ?? false }) {
         self.verifier = verifier
         self.accountId = accountId
+        self.serverPro = serverPro
     }
+
+    /// Pro = StoreKit entitlement on this device OR server `/api/me` `pro` (Stripe or Apple, any device).
+    func recompute() { isPro = localPro || serverPro() }
 
     var appAccountToken: UUID { AppAccountToken.resolve(accountId: accountId()) }
 
     /// Start once at launch: transaction listener + current entitlements.
     func start() {
         guard updates == nil else { return }
+        meSub = AuthStore.shared.$me.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.recompute() }
         updates = Task { [weak self] in
             for await result in Transaction.updates { await self?.handle(result) }
         }
@@ -72,15 +82,17 @@ final class PurchaseStore: ObservableObject {
             pro = true
             if resubmit { _ = try? await verifier.submit(signedTransaction: result.jwsRepresentation, appAccountToken: appAccountToken) }
         }
-        isPro = pro
+        localPro = pro
+        recompute()
     }
 
     private func handle(_ result: VerificationResult<Transaction>) async {
         guard case .verified(let t) = result else { message = "Purchase couldn't be verified."; return }
         do {
             let r = try await verifier.submit(signedTransaction: result.jwsRepresentation, appAccountToken: t.appAccountToken ?? appAccountToken)
-            if r.entitlements.contains(StoreCatalog.proEntitlement) { isPro = true }
+            if r.entitlements.contains(StoreCatalog.proEntitlement) { localPro = true; recompute() }
             await t.finish()
+            await AuthStore.shared.loadMe() // pick up pro / pro_source / pro_expires_at / pro_environment
         } catch {
             // Leave unfinished so StoreKit redelivers via Transaction.updates; unlock locally meanwhile.
             message = "Purchased. We'll finish activating Pro shortly."

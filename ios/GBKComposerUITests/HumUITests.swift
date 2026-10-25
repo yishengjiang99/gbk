@@ -12,7 +12,7 @@ final class HumUITests: XCTestCase {
         app.tabBars.buttons["Create"].tap()
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 20))
-        XCTAssertTrue(web.staticTexts["native: hum,scan"].waitForExistence(timeout: 20), "gbkNative capability injected")
+        XCTAssertTrue(web.staticTexts["native: hum,scan,midi"].waitForExistence(timeout: 20), "gbkNative capability injected")
         let hum = web.buttons["Hum"]
         XCTAssertTrue(hum.waitForExistence(timeout: 10))
         attach(app, "hum-idle")

@@ -2,7 +2,9 @@
 
 ## iOS
 
-- GBK Social: App Store IAP verification — `POST /api/iap/apple {signed_transaction, app_account_token}` → `{entitlements, expires_at}`, App Store Server Notifications v2 webhook `POST /api/iap/apple/notifications`, `pro` in `/api/me`; shapes in docs/asc/iap.md. iOS falls back to a local mock while it 404s.
+- Web (GBK Social): in the Keys/MIDI UI, when `window.gbkMidiNative?.bluetooth`, show a "Bluetooth MIDI" button calling `window.gbkMidiNative.openBluetoothPairing()` (iOS app pairing sheet; today only in Profile ⚙︎). Contract: docs/ios/midi.md.
+- iOS MIDI: test with a real USB keyboard, a BLE MIDI device and a network session on device; measure end-to-end (key → sound) latency on device.
+- iOS: manually verify the studio import picker lists .mid/.midi from Files and the import lands (CI can't drive the Files sheet).
 
 - Sign in with Apple: server answers 503 until `APPLE_BUNDLE_ID` is set; the app shows "not available yet".
 - SF2 playback on `SF2Engine`: copy the sequencer and MIDI parsing from earsheet's `Packages/SF2Player`.

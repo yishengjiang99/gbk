@@ -29,12 +29,17 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(AppAccountToken.resolve(accountId: "u_123"), AppAccountToken.resolve(accountId: nil))
     }
 
-    func testVerifierFallsBackToMockWhileEndpointMissing() async throws {
-        struct Missing: IAPVerifying {
-            func submit(signedTransaction: String, appAccountToken: UUID) async throws -> EntitlementsResponse { throw APIError.notAvailable }
-        }
-        let r = try await FallbackIAPVerifier(live: Missing()).submit(signedTransaction: "jws", appAccountToken: UUID())
-        XCTAssertEqual(r.entitlements, ["pro"])
+    func testLiveVerifierIsDefaultAndMeDecodesPro() throws {
+        XCTAssertTrue(IAPVerificationServices.current is LiveIAPVerifier)
+        let json = #"{"id":"a","handle":"h","pro":true,"pro_source":"apple","pro_expires_at":4102444800000,"pro_environment":"Sandbox"}"#
+        let me = try APIClient.makeDecoder().decode(Me.self, from: Data(json.utf8))
+        XCTAssertEqual(me.proSource, "apple"); XCTAssertEqual(me.proEnvironment, "Sandbox")
+        XCTAssertTrue(me.hasActivePro())
+        XCTAssertFalse(me.hasActivePro(now: Date(timeIntervalSince1970: 4_102_444_800_001 / 1000)))
+        let old = try APIClient.makeDecoder().decode(Me.self, from: Data(#"{"id":"a","handle":"h"}"#.utf8))
+        XCTAssertFalse(old.hasActivePro())
+        let r = try APIClient.makeDecoder().decode(EntitlementsResponse.self, from: Data(#"{"entitlements":["pro"],"expires_at":null,"product_id":"lifetime","environment":"Production"}"#.utf8))
+        XCTAssertEqual(r.entitlements, ["pro"]); XCTAssertNil(r.expiresAt); XCTAssertEqual(r.environment, "Production")
     }
 
     func testLiveVerifierRequestShape() throws {

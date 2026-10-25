@@ -47,9 +47,12 @@ struct WebView: UIViewRepresentable {
         // snapshots the configuration at init, so the old post-creation call never registered
         // the gbkScan handler on the live web view.
         scan?.install(on: config)
+        let midi = MIDIBridge.install(in: config) // Web MIDI polyfill backed by CoreMIDI (Core/MIDI, docs/ios/midi.md)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
         scan?.webView = view
+        midi.webView = view
+        context.coordinator.midi = midi
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         context.coordinator.observeMicrophone(view)
@@ -80,6 +83,7 @@ struct WebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var loaded: URL?
         let hum = HumBridge()
+        var midi: MIDIBridge?
         private var offsetObservation: NSKeyValueObservation?
         private var micObservation: NSKeyValueObservation?
 

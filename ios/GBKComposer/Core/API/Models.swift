@@ -28,6 +28,21 @@ struct Me: Codable, Hashable {
     /// `"google"|"apple"|"phone"|"github"|"guest"` (guest-accounts spec).
     let provider: String?
     let isGuest: Bool?
+    /// Entitlements (social-api.md "Entitlements in GET /api/me"), guests too.
+    var pro: Bool? = nil
+    /// `"stripe" | "apple" | nil`
+    var proSource: String? = nil
+    /// Unix ms; nil = lifetime (or no Pro).
+    var proExpiresAt: Int64? = nil
+    /// `"Production" | "Sandbox" | nil`
+    var proEnvironment: String? = nil
+
+    /// Server says Pro and it hasn't expired.
+    func hasActivePro(now: Date = Date()) -> Bool {
+        guard pro == true else { return false }
+        guard let e = proExpiresAt else { return true }
+        return Double(e) / 1000 > now.timeIntervalSince1970
+    }
 
     var asUser: User {
         User(handle: handle, displayName: displayName, avatarUrl: avatarUrl, songCount: songCount, ratingAvg: ratingAvg, createdAt: createdAt)
@@ -153,7 +168,7 @@ struct Conversation: Codable, Hashable, Identifiable {
 
 /// Fixed label set from the doc.
 enum SongLabel {
-    static let all = ["ambient", "lofi", "classical", "jazz", "electronic", "cinematic", "game", "pop", "experimental", "wip"]
+    static let all = ["ambient", "lofi", "classical", "jazz", "rnb", "electronic", "cinematic", "game", "pop", "experimental", "wip"]
 }
 
 struct APIErrorBody: Codable, Hashable { let code: String?; let message: String? }

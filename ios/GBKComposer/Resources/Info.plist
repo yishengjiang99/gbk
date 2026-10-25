@@ -30,6 +30,9 @@
 	<dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Hum a tune in the studio and GBK turns it into notes. Audio is transcribed on your device and isn't uploaded.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key><string>Connect Bluetooth MIDI keyboards to play and record in the studio.</string>
+	<key>NSLocalNetworkUsageDescription</key><string>Connect network MIDI sessions to play and record in the studio.</string>
+	<key>NSBonjourServices</key><array><string>_apple-midi._udp</string></array>
 	<key>UIBackgroundModes</key><array><string>remote-notification</string></array>
 	<key>UILaunchScreen</key><dict/>
 	<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>

@@ -4,6 +4,8 @@ import Foundation
 struct EntitlementsResponse: Codable, Equatable {
     let entitlements: [String]
     let expiresAt: Int64?
+    var productId: String? = nil
+    var environment: String? = nil
 }
 
 /// Grants the entitlement server-side from a StoreKit 2 signed transaction (JWS).
@@ -11,9 +13,8 @@ protocol IAPVerifying {
     func submit(signedTransaction: String, appAccountToken: UUID) async throws -> EntitlementsResponse
 }
 
-/// `POST /api/iap/apple {signed_transaction, app_account_token}` → `{entitlements, expires_at}`.
-/// Not deployed yet (owned by GBK Social, see docs/asc/iap.md); `IAPVerificationServices.current`
-/// falls back to the mock on 404 so purchases still unlock Pro locally.
+/// `POST /api/iap/apple {signed_transaction, app_account_token}` → `{entitlements, expires_at, product_id, environment}`
+/// (live, docs/social-api.md). Bearer when signed in/guest; errors (400 INVALID_JWS…, 409 IAP_OWNED_BY_OTHER, 429) throw.
 struct LiveIAPVerifier: IAPVerifying {
     var client: APIClient = .shared
     func submit(signedTransaction: String, appAccountToken: UUID) async throws -> EntitlementsResponse {
@@ -24,25 +25,15 @@ struct LiveIAPVerifier: IAPVerifying {
     }
 }
 
-/// Local stand-in: trusts StoreKit's on-device verification and returns `pro`.
+/// Test/preview stand-in: trusts StoreKit's on-device verification and returns `pro`.
 struct MockIAPVerifier: IAPVerifying {
     func submit(signedTransaction: String, appAccountToken: UUID) async throws -> EntitlementsResponse {
         EntitlementsResponse(entitlements: [StoreCatalog.proEntitlement], expiresAt: nil)
     }
 }
 
-/// Tries the live endpoint, falls back to the mock while it 404s.
-struct FallbackIAPVerifier: IAPVerifying {
-    var live: IAPVerifying = LiveIAPVerifier()
-    var mock: IAPVerifying = MockIAPVerifier()
-    func submit(signedTransaction: String, appAccountToken: UUID) async throws -> EntitlementsResponse {
-        do { return try await live.submit(signedTransaction: signedTransaction, appAccountToken: appAccountToken) }
-        catch APIError.notAvailable { return try await mock.submit(signedTransaction: signedTransaction, appAccountToken: appAccountToken) }
-    }
-}
-
 enum IAPVerificationServices {
-    static var current: IAPVerifying = FallbackIAPVerifier()
+    static var current: IAPVerifying = LiveIAPVerifier()
 }
 
 /// Stable per-account UUID for `appAccountToken`. Uses the account id when it is a UUID (guest and

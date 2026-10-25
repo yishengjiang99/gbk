@@ -15,7 +15,7 @@ import WebKit
 @MainActor
 final class HumBridge: NSObject, WKScriptMessageHandler {
     static let handlerName = "hum"
-    static let capabilityScript = #"window.gbkNative = Object.freeze({ platform: "ios", version: 1, capabilities: ["hum", "scan"], scan: true });"#
+    static let capabilityScript = #"window.gbkNative = Object.freeze({ platform: "ios", version: 1, capabilities: ["hum", "scan", "midi"], scan: true });"#
 
     enum Phase: String { case idle, recording, transcribing }
 
