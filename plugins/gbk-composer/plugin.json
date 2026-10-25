@@ -11,7 +11,7 @@
           "Interactive",
           "Write"
         ],
-        "category": "Productivity",
+        "category": "Entertainment",
         "defaultPrompt": [
           "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.",
           "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.",
@@ -19,8 +19,8 @@
         ],
         "developerName": "Yisheng Jiang",
         "displayName": "GBK Composer",
-        "longDescription": "GBK Composer writes and edits real MIDI music from a chat. Ask for a piece in one of five styles (baroque, classical, pop, jazz, ambient) with a key, tempo, meter, length and instruments, and GBK builds a structured, multi-track arrangement with a deterministic, seeded engine. Baroque requests use a Bach-style fugue generator with continuo.\n\nFollow-up prompts change one passage without touching the rest: add a melody, bass, walking bass, chords, arpeggio, drums or counterpoint part; transpose, invert, quantize, humanize or vary notes; double a line at the octave; shape dynamics with CC curves such as a CC11 crescendo; and change tempo, instruments or the mix. Every edit is saved as a new revision.\n\nInstruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.\n\nTo hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. Press Render in the player and the WAV is rendered in your browser with the GBK SoundFont engine; it plays right in the chat and can be downloaded. Clients without a browser (such as Codex) get the same WAV rendered on GBK's server with the same engine, returned as a download link together with a Standard MIDI file. No account is needed.\n\nEach composition is private and opened only with the access key returned to your chat (or your GBK account, if you sign in). GBK publishes a public share page only when you ask it to.",
-        "shortDescription": "Compose and edit MIDI music",
+        "longDescription": "GBK Composer is an AI music composition tool. Describe a piece (style, key, tempo and instruments) and it writes an original multi-track instrumental arrangement, lets you edit it one passage at a time, plays it back right in the chat, and exports it as a WAV audio file or a MIDI file.\n\nGBK Composer writes and edits real MIDI music from a chat. Ask for a piece in one of five styles (baroque, classical, pop, jazz, ambient) with a key, tempo, meter, length and instruments, and GBK builds a structured, multi-track arrangement with a deterministic, seeded engine. Baroque requests use a Bach-style fugue generator with continuo.\n\nFollow-up prompts change one passage without touching the rest: add a melody, bass, walking bass, chords, arpeggio, drums or counterpoint part; transpose, invert, quantize, humanize or vary notes; double a line at the octave; shape dynamics with CC curves such as a CC11 crescendo; and change tempo, instruments or the mix. Every edit is saved as a new revision.\n\nInstruments come from the bundled GeneralUser GS SoundFont, including violin, viola, cello, strings, harpsichord, piano, organ, flute, oboe, clarinet, bassoon, horn, trumpet, guitar, bass, choir and drums.\n\nTo hear a piece, GBK shows an in-chat player with a piano roll, track list and dynamics lanes. Press Render in the player and the WAV is rendered in your browser with the GBK SoundFont engine; it plays right in the chat and can be downloaded. Clients without a browser (such as Codex) get the same WAV rendered on GBK's server with the same engine, returned as a download link together with a Standard MIDI file. No account is needed.\n\nEach composition is private and opened only with the access key returned to your chat (or your GBK account, if you sign in). GBK publishes a public share page only when you ask it to.",
+        "shortDescription": "Compose music, export WAV/MIDI",
         "websiteURL": "https://compose.grepawk.com/chatgpt",
         "logo": "./assets/icon.png",
         "composerIcon": "./assets/icon.png",
@@ -70,7 +70,7 @@
               "prompt": "Write lyrics for a summer pop song and have a singer perform them."
             },
             {
-              "description": "There is no delete tool; the plugin must not claim to delete or modify unrelated data.",
+              "description": "Bulk deletion is not supported: GBK can delete only one account-free composition at a time with its edit key, so it must not claim to delete all compositions or modify unrelated data.",
               "prompt": "Delete all of my GBK compositions."
             },
             {

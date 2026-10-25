@@ -18,14 +18,14 @@ human account owner have not been performed by preparing this packet.
 - **MCP server:** `gbk_composer` — Streamable HTTP at
   `https://compose.grepawk.com/mcp`, no authentication required (per-project
   access keys); OAuth sign-in optional for existing GBK accounts
-- **Category:** Productivity
+- **Category:** Entertainment
 - **Capabilities:** Interactive, Write
 
 **Display name:** GBK Composer
 
 **Short description** (≤30 chars)
 
-> Compose and edit MIDI music
+> Compose music, export WAV/MIDI
 
 **Long description**
 
