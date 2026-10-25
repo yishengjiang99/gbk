@@ -11,11 +11,15 @@ const PROMPT = "Compose a four-voice Baroque fugue in D minor with expressive st
 const ws = (page: Page) => page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; const p = c.project; return { id: p.id, name: p.name, owner: p.meta?.owner, tracks: p.tracks.map((t: any) => t.name), programs: p.programs.map((g: any) => g.program), notes: p.notes.length, cc11: p.ccs.filter((e: any) => e.controller === 11).length, cc1: p.ccs.filter((e: any) => e.controller === 1).length, effects: p.sound?.effects ?? null, voice: p.sound?.tracks ?? {}, revision: p.revision, readOnly: c.readOnlyReason }; });
 
 async function signIn(page: Page, code = "e2e-code") {
-  // Phones open on the Tracks tab; the composer lives behind its tab there.
+  // No standalone Sign in button: open the sign-in sheet the way a gated action does, then use the invite-code path.
+  await expect(page.getByTestId("workstation").or(page.getByTestId("social-app")).first()).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("gbk:need-signin", { detail: { why: "Sign in", pending: null } })));
+  await expect(page.getByTestId("signin-sheet")).toBeVisible();
+  await page.getByTestId("signin-code").fill(code); await page.getByTestId("signin-code-submit").click();
+  await expect(page.getByTestId("signin-sheet")).toBeHidden({ timeout: 15_000 });
+  // Phones open on the Tracks tab after the reload; the composer lives behind its tab there.
   await expect(page.getByTestId("workstation").or(page.getByTestId("social-app")).first()).toBeVisible();
   const tab = page.getByTestId("tab-composer"); if (await tab.isVisible() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
-  await expect(page.getByTestId("composer-login")).toBeVisible();
-  await page.getByLabel("Access code").fill(code); await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
 }
 
@@ -118,7 +122,7 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   expect((await ws(v2)).readOnly).toBeNull();
   await v2.screenshot({ path: `${SHOTS}/composer-e2e-forked.png` });
   await page.goto("/"); await expect(page.getByTestId("feed-card").first()).toBeVisible();
-  const top = page.getByTestId("feed-card").first();
+  const top = page.getByTestId("feed-card").filter({ hasText: "Midnight Fugue" }).first(); // For you is personalized: find our song, not "the top card"
   await expect(top.getByTestId("card-pianoroll")).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/composer-e2e-explore.png` });
   await anon.close();

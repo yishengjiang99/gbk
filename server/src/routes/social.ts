@@ -1,6 +1,7 @@
 // gbk Social P1 routes: /api/me, /api/users/:handle, /api/feed, tags, ratings, comments, plays, reports, admin queue.
 // JSON for web + native iOS (cookie or Bearer). Contract: docs/social-api.md.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { isGuestAccount } from "../persistence/accounts.ts";
 import type { Config } from "../config.ts";
 import type { SessionStore } from "../security/authentication.ts";
 import type { ShareStore, ShareRow } from "../persistence/shares.ts";
@@ -23,7 +24,8 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   const nameOf = (u: string) => accounts.get(u)?.name || u;
   const prof = (u: string) => social.ensureProfile(u, nameOf(u));
   const user = (u: string) => { const p = prof(u); return { handle: p.handle, display_name: p.display_name, bio: p.bio ?? null, badge: p.badge ?? null, avatar_url: null, ...social.userStats(u), created_at: p.created_at }; };
-  const me = (u: string) => { const p = prof(u); return { ...user(u), id: u, dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u) }; };
+  const guestComments = new RateLimiter(20, 86_400_000);
+  const me = (u: string) => { const p = prof(u); const a = accounts.get(u); return { ...user(u), id: u, provider: a?.provider ?? null, is_guest: a?.provider === "guest", dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u) }; };
   /** Signed-in, non-guest account required for social writes. */
   const auth = (req: FastifyRequest, reply: FastifyReply, write = true) => {
     const s = currentSession(req, sessions);
@@ -53,6 +55,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     if (b.display_name !== undefined) { if (typeof b.display_name !== "string" || !b.display_name.trim() || b.display_name.length > 40 || badText(b.display_name)) return reply.code(422).send({ code: "INVALID_NAME", message: "1-40 characters" }); o.display_name = b.display_name.trim(); }
     if (b.handle !== undefined) { const h = String(b.handle).toLowerCase(); if (!HANDLE_RE.test(h) || badText(h)) return reply.code(422).send({ code: "INVALID_HANDLE", message: "3-20 of a-z, 0-9, _" }); o.handle = h; }
     if (b.dm_policy !== undefined) { if (b.dm_policy !== "all" && b.dm_policy !== "off") return reply.code(422).send({ code: "INVALID_ARGUMENT", message: "dm_policy is all or off" }); o.dm_policy = b.dm_policy; }
+    if (isGuestAccount(s.user) && ((o.display_name !== undefined && !/^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$/.test(o.display_name)) || (o.handle !== undefined && !/^[a-z]{4,20}$/.test(o.handle)))) return reply.code(422).send({ code: "INVALID_USERNAME", message: "guests use two capitalized words, letters only (sign in to choose freely)" });
     const r = social.updateProfile(s.user, o);
     if (r === "HANDLE_TAKEN") return reply.code(409).send({ code: r, message: "that handle is taken" });
     if (r === "HANDLE_LOCKED") return reply.code(403).send({ code: r, message: "handle can only be changed once" });
@@ -170,6 +173,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     const body = String((req.body as { body?: unknown } | null)?.body ?? "").trim();
     if (!body || body.length > 500) return reply.code(422).send({ code: "INVALID_TEXT", message: "comment is 1-500 characters" });
     if (badText(body)) return reply.code(422).send({ code: "INVALID_TEXT", message: "please keep it kind" });
+    if (isGuestAccount(s.user) && !guestComments.take(s.user)) return reply.code(429).header("retry-after", String(guestComments.retryAfterSec(s.user))).send({ code: "RATE_LIMITED", message: "guests can post 20 comments a day; sign in to lift the limit" });
     if (limited(reply, L.comment, s.user)) return;
     if (social.countComments(s.user, 86_400_000) >= 100) return reply.code(429).send({ code: "RATE_LIMITED", message: "daily comment limit reached" });
     const c = social.addComment(r.id, s.user, body); req.log.info({ evt: "comment_create", user: s.user, slug: r.slug });

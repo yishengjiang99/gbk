@@ -37,6 +37,7 @@ export class NativeStore {
   }
   revokeRefresh(t: string) { this.db.prepare("DELETE FROM refresh_tokens WHERE hash = ?").run(h(t)); }
   revokeSession(sessionId: string) { this.db.prepare("DELETE FROM refresh_tokens WHERE session_id = ?").run(sessionId); }
+  movePush(from: string, to: string) { this.db.prepare("UPDATE push_devices SET user_id = ? WHERE user_id = ?").run(to, from); }
   revokeUser(user: string) { this.db.prepare("DELETE FROM refresh_tokens WHERE user = ?").run(user); }
   issueCode(user: string): string { const c = randomBytes(24).toString("base64url"); this.db.prepare("INSERT INTO web_codes VALUES (?,?,?)").run(h(c), user, this.now() + CODE_TTL_MS); this.db.prepare("DELETE FROM web_codes WHERE expires_at < ?").run(this.now()); return c; }
   redeemCode(c: unknown): string | null {

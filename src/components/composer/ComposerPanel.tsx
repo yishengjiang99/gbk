@@ -2,6 +2,7 @@ import { songAutosaver } from "../../agent/autosave.ts";
 // AI Composer panel: prompt -> server agent -> real gbk_* tools in THIS page via the authenticated bridge.
 import { useEffect, useRef, useState } from "react";
 import { useAgentSession } from "../../agent/useAgentSession.ts";
+import { needSignIn, takePending } from "../auth/gate.ts";
 import { ComposerMessages } from "./ComposerMessages.tsx";
 import { ComposerSettings } from "./ComposerSettings.tsx";
 import { SharePanel } from "./SharePanel.tsx";
@@ -27,11 +28,13 @@ export function ComposerPanel({ project, readOnly, dock = false }: { project: Pr
     if (last?.role === "error") return;
     void songAutosaver.flush().then((song) => { if (song && !song.public) setPublishReq((x) => x + 1); });
   }, [s.run, s.items]);
-  const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; }); const [code, setCode] = useState("");
+  const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; }); 
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { const f = () => { const d = sessionStorage.getItem("gbk.composerDraft"); if (d) { sessionStorage.removeItem("gbk.composerDraft"); setText(d); } input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   const submit = (t = text) => { if (s.send(t)) setText(""); };
+  // Resume a Send that asked for sign-in: once connected, send exactly that text.
+  useEffect(() => { if (s.conn.state !== "connected") return; const p = takePending("compose"); if (p && s.send(p.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   const busy = !!s.run;
   return (
     <aside className={`cmp${dock ? " cmp-dock" : ""}`} aria-label="AI Composer" data-testid="composer-panel">
@@ -41,30 +44,13 @@ export function ComposerPanel({ project, readOnly, dock = false }: { project: Pr
       </div>
       {!s.auth.checked ? <div className="ws-dim">…</div> : !s.auth.authenticated ? (
         <>
-        {/* Signed out / guest: the input is always there; only sending needs an account. The draft survives sign-in. */}
-        <form className="cmp-input" onSubmit={(e) => { e.preventDefault(); if (text.trim()) sessionStorage.setItem("gbk.composerDraft", text); location.href = `/api/auth/${s.auth.providers?.[0] ?? "google"}?return=${encodeURIComponent(location.pathname + location.search)}`; }}>
-          <textarea ref={input} data-testid="composer-input" value={text} rows={3} maxLength={12000} placeholder="Describe a song… (sign in to send)" aria-label="Describe a song"
-            onChange={(e) => { setText(e.target.value); sessionStorage.setItem("gbk.composerDraft", e.target.value); }} />
-          <button type="submit" data-testid="composer-send" disabled={!s.auth.providers?.length} title="Sign in to send">Send</button>
+        {/* Signed out / guest: the input is always there; Send opens the sign-in sheet and the text is sent after sign-in. */}
+        <form className="cmp-input" onSubmit={(e) => { e.preventDefault(); const t = text.trim(); if (!t) { input.current?.focus(); return; } sessionStorage.setItem("gbk.composerDraft", text); needSignIn("Sign in to compose with the AI. It's free, with a daily limit.", { kind: "compose", text: t }); }}>
+          <textarea ref={input} data-testid="composer-input" value={text} rows={3} maxLength={12000} placeholder="Describe a song…" aria-label="Describe a song"
+            onChange={(e) => { setText(e.target.value); sessionStorage.setItem("gbk.composerDraft", e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} />
+          <button type="submit" data-testid="composer-send">Send</button>
         </form>
-        <div className="cmp-login" data-testid="composer-login">
-          <div className="ws-dim">Sign in to compose with the AI. It's free, with a daily limit. (Shared songs play without signing in.)</div>
-          {(s.auth.providers ?? []).map((p) => (
-            <a key={p} className="cmp-signin" data-testid={`signin-${p}`} href={`/api/auth/${p}?return=${encodeURIComponent(location.pathname + location.search)}`}>{p === "github" ? "Sign in with GitHub" : "Sign in with Google"}</a>
-          ))}
-          {!s.auth.providers?.length && !s.auth.codeLogin && <div className="ws-dim">Sign-in is not available right now.</div>}
-          {s.auth.codeLogin && (
-            <details className="cmp-code" open={!s.auth.providers?.length}>
-              <summary>Have an invite code?</summary>
-              <form onSubmit={(e) => { e.preventDefault(); void s.login(code); }}>
-                <input type="password" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Access code" aria-label="Access code" autoComplete="current-password" />
-                <button type="submit">Sign in</button>
-              </form>
-            </details>
-          )}
-          {s.auth.reviewerLogin && <a className="ws-dim" data-testid="reviewer-signin" href={`/signin/reviewer?return=${encodeURIComponent(location.pathname + location.search)}`}>Reviewer sign-in</a>}
-          {s.auth.error && <div className="cmp-error">{s.auth.error}</div>}
-        </div>
+        {s.auth.error && <div className="cmp-error">{s.auth.error}</div>}
         </>
       ) : (<>
         {s.conn.state !== "connected" && s.conn.state !== "connecting" && <div className="cmp-error">{STATUS[s.conn.state]} {s.conn.detail ?? ""} <button onClick={s.reconnect}>Reconnect</button></div>}

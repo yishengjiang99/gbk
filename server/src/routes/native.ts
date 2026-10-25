@@ -2,10 +2,11 @@
 // Apple / Google ID-token exchange -> bearer access + rotating refresh, logout, web-view one-time code,
 // DELETE /api/me, APNs device registration, apple-app-site-association.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import type { Config } from "../config.ts";
 import { COOKIE, CSRF_COOKIE, cookie, type SessionStore } from "../security/authentication.ts";
-import type { AccountStore } from "../persistence/accounts.ts";
+import { isGuestAccount, type AccountStore } from "../persistence/accounts.ts";
+import { badText } from "../persistence/social.ts";
 import type { NativeStore } from "../persistence/native.ts";
 import type { ShareStore } from "../persistence/shares.ts";
 import type { SocialStore } from "../persistence/social.ts";
@@ -17,6 +18,7 @@ import { isGuest } from "../mcp/guest.ts";
 
 export const ACCESS_TTL_MS = 3_600_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, APNS_TOKEN = /^[0-9a-f]{64,200}$/i;
+export const GUEST_NAME = /^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$/, GUEST_DEVICE = /^[A-Za-z0-9_-]{16,128}$/;
 const bearer = (req: FastifyRequest) => { const a = req.headers.authorization; return typeof a === "string" && /^Bearer\s+\S+$/i.test(a) ? a.replace(/^Bearer\s+/i, "").trim() : null; };
 
 export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: SessionStore; accounts: AccountStore; native: NativeStore; shares: ShareStore; social: SocialStore; me: (user: string) => object; fetch?: typeof fetch }) {
@@ -33,10 +35,39 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
       req.log.warn({ evt: "native_signin_failed", provider, err: e instanceof IdTokenError ? e.message : "verify error" });
       return reply.code(401).send({ code: "INVALID_TOKEN", message: "could not verify the sign-in token" });
     }
+    // Guest upgrade (docs/social-api.md): a valid guest bearer is linked in place, or merged into an existing account.
+    const gs = bearer(req) ? currentSession(req, sessions) : null; const guest = gs && isGuestAccount(gs.user) && accounts.get(gs.user) ? gs.user : null;
+    if (guest) {
+      const existing = accounts.byProvider(provider, who.sub);
+      if (!existing) { accounts.link(guest, provider, who.sub, who.name, who.email); native.revokeUser(guest); req.log.info({ evt: "login", via: `${provider}-native`, user: guest, upgraded: "linked" }); return { ...pair(guest), upgraded: "linked" }; }
+      d.social.mergeUser(guest, existing.id); native.movePush(guest, existing.id); native.purgeUser(guest); sessions.destroy(gs!.id); accounts.delete(guest);
+      accounts.upsertOAuth(provider, who.sub, who.name, who.email);
+      req.log.info({ evt: "login", via: `${provider}-native`, user: existing.id, upgraded: "merged" }); return { ...pair(existing.id), upgraded: "merged" };
+    }
     const { account, created } = accounts.upsertOAuth(provider, who.sub, who.name, who.email);
     req.log.info({ evt: "login", via: `${provider}-native`, user: account.id, created });
     return pair(account.id);
   };
+
+  // ---- Guest accounts (iOS): two-word username, idempotent per device, 409 on handle collision ----
+  const guestNew = new RateLimiter(5, 3_600_000), guestAll = new RateLimiter(20, 3_600_000);
+  const err = (reply: FastifyReply, status: number, code: string, message: string, error: string) => reply.code(status).send({ code, message, error, statusCode: status });
+  app.post("/api/auth/anonymous", async (req, reply) => {
+    if (!guestAll.take(req.ip)) return reply.code(429).header("retry-after", String(guestAll.retryAfterSec(req.ip))).send({ code: "RATE_LIMITED", message: "slow down", error: "Too Many Requests", statusCode: 429 });
+    const b = (req.body ?? {}) as { deviceId?: unknown; username?: unknown };
+    if (typeof b.deviceId !== "string" || !GUEST_DEVICE.test(b.deviceId)) return err(reply, 422, "INVALID_DEVICE", "deviceId must be 16-128 of A-Z a-z 0-9 - _", "Unprocessable Entity");
+    const pid = createHmac("sha256", cfg.security.sessionSecret).update(`gbk-guest-device:${b.deviceId}`).digest("hex").slice(0, 32);
+    const known = accounts.byProvider("guest", pid);
+    if (known) { req.log.info({ evt: "login", via: "guest", user: known.id, created: false }); const p = pair(known.id); return { ...p, token: p.access_token, refreshToken: p.refresh_token, user: p.me }; }
+    if (typeof b.username !== "string" || !GUEST_NAME.test(b.username) || b.username.length < 4 || b.username.length > 20 || badText(b.username) || badText(b.username.replace(/([a-z])([A-Z])/g, "$1 $2"))) return err(reply, 422, "INVALID_USERNAME", "username must be two capitalized words, letters only, 4-20 characters", "Unprocessable Entity");
+    const handle = b.username.toLowerCase();
+    if (d.social.byHandle(handle)) return err(reply, 409, "HANDLE_TAKEN", "that username is taken; pick another", "Conflict");
+    if (!guestNew.take(req.ip)) return reply.code(429).header("retry-after", String(guestNew.retryAfterSec(req.ip))).send({ code: "RATE_LIMITED", message: "too many new guests; try later", error: "Too Many Requests", statusCode: 429 });
+    const { account } = accounts.upsertOAuth("guest", pid, b.username, null);
+    if (!d.social.createProfileExact(account.id, handle, b.username)) { accounts.delete(account.id); return err(reply, 409, "HANDLE_TAKEN", "that username is taken; pick another", "Conflict"); }
+    req.log.info({ evt: "login", via: "guest", user: account.id, created: true });
+    const p = pair(account.id); return { ...p, token: p.access_token, refreshToken: p.refresh_token, user: p.me };
+  });
 
   app.post("/api/auth/apple", async (req, reply) => {
     if (!cfg.native.appleBundleId) return reply.code(503).send({ code: "APPLE_UNAVAILABLE", message: "Sign in with Apple is not configured yet" });

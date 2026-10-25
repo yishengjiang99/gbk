@@ -10,7 +10,7 @@ Code: `server/src/ranking/ranker.ts`, `server/src/persistence/events.ts`, `serve
 - Limits: 50 events per batch, 30 batches/min per actor, 120/min per IP. Origin is checked for cookie posts.
 - Retention: 60 days (nightly prune). Events are deleted with the account (`purgeUser`).
 
-## Pipeline (in-process, cached song table 30 s)
+## Pipeline (in-process; song table cached up to 30 s, invalidated when the public set changes)
 1. **Candidates.** Every public non-`wip` song, top 1000 by score. Features per song:
    - `affinity`: decayed (14 d) per-actor preference over tags, labels, artist, and instrument family.
    - `coeng`: item-item co-engagement from other actors who engaged with what this actor liked.

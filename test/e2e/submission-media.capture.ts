@@ -25,7 +25,8 @@ class Mcp {
 }
 
 async function signIn(page: Page) {
-  await page.getByLabel("Access code").fill("e2e-code"); await page.getByRole("button", { name: "Sign in" }).click();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("gbk:need-signin", { detail: { why: "Sign in", pending: null } })));
+  await page.getByTestId("signin-code").fill("e2e-code"); await page.getByTestId("signin-code-submit").click(); await page.getByTestId("signin-sheet").waitFor({ state: "hidden" });
   await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
 }
 

@@ -1,5 +1,6 @@
 // Song sharing + forking. Uploading requires login + an explicit Share click (consent); viewing is public.
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { isGuestAccount } from "../persistence/accounts.ts";
 import type { Config } from "../config.ts";
 import type { SessionStore } from "../security/authentication.ts";
 import type { RateLimiter } from "../security/rate-limit.ts";
@@ -25,6 +26,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (!guardWrite(cfg, req, reply, s)) return;
     if (!uploadLimiter.take(s.user) || store.countRecent(s.user, 86_400_000) >= 100) return reply.code(429).send({ code: "RATE_LIMITED", message: "too many shares; try later" });
     const b = (req.body ?? {}) as { title?: unknown; project?: unknown; parentSlug?: unknown; public?: unknown };
+    if (b.public === true && isGuestAccount(s.user)) return reply.code(403).send({ code: "GUEST_LIMITED", message: "sign in with Apple or Google to publish", error: "Forbidden", statusCode: 403 });
     let project;
     try { project = sanitizeSharedProject(b.project); } catch (e) { if (e instanceof ShareValidationError) return reply.code(422).send({ code: e.code, message: e.message }); throw e; }
     const title = (typeof b.title === "string" && b.title.trim() ? b.title.trim() : project.name).slice(0, SHARE_LIMITS.titleChars);
@@ -136,6 +138,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (!row || row.owner !== s.user) return reply.code(404).send({ code: "NOT_FOUND", message: "no such share of yours" });
     const b = (req.body ?? {}) as { public?: unknown; title?: unknown };
     if (b.public !== undefined && typeof b.public !== "boolean") return reply.code(400).send({ code: "INVALID_ARGUMENT", message: "public must be boolean" });
+    if (b.public === true && isGuestAccount(s.user)) return reply.code(403).send({ code: "GUEST_LIMITED", message: "sign in with Apple or Google to publish", error: "Forbidden", statusCode: 403 });
     if (b.title !== undefined && (typeof b.title !== "string" || !b.title.trim())) return reply.code(400).send({ code: "INVALID_ARGUMENT", message: "title must be a non-empty string" });
     if (typeof b.title === "string") store.setTitle(row.slug, b.title.trim().slice(0, SHARE_LIMITS.titleChars));
     if (typeof b.public === "boolean") { store.setPublic(row.slug, b.public); if (b.public) onPublish?.(row.id); }

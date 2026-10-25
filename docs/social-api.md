@@ -71,7 +71,7 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 
 `TokenPair` = `{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, me: Me }`.
 
-### Guest accounts (iOS, spec; implementation follows)
+### Guest accounts (iOS; live)
 
 Reads need no auth: `GET /api/feed`, `/api/tags/top`, `/api/tags/:tag`, `/api/songs/:slug`, `/api/users/:handle`, `/api/shares/:slug/comments`, plus the `/s/<slug>`, `/u/<handle>` and `/t/<tag>` pages.
 Reads with a guest or full bearer add viewer fields (`my_rating`, `is_mine`, `can_delete`).

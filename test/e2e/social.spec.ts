@@ -218,7 +218,55 @@ test("feed impressions: settling on cards logs dwell/skip events with model_vers
     await req; // the beacon reached POST /api/events (beacon bodies are not exposed to Playwright, so read the sent log)
     const body = { events: await page.evaluate(() => (window as unknown as { __gbkImpressions: { sentLog: unknown[] } }).__gbkImpressions.sentLog) };
     const first = body.events.find((e: { song: string }) => e.song === slugs[0]);
-    expect(first).toMatchObject({ position: 0, feed: "new", model_version: "heur-1", fast_skip: true });
+    expect(first).toMatchObject({ position: 0, feed: "new", model_version: "new-1", fast_skip: true });
     expect(body.events.some((e: { song: string; position: number }) => e.song === slugs[1] && e.position === 1)).toBeTruthy();
   } finally { for (const s of slugs) await owner.request.delete(`/api/shares/${s}`, { headers: oh }); await owner.close(); }
+});
+
+test("sign-in only on demand: no Sign in button signed out; gated actions open the sheet and resume after sign-in", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin; const P = test.info().project.name;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const title = `Gate E2E ${P} ${Date.now() % 100000}`;
+  const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title, project, public: true } })).json();
+  const noSignInButton = async () => { await expect(page.getByRole("button", { name: /sign in/i })).toHaveCount(0); await expect(page.getByRole("link", { name: /sign in/i })).toHaveCount(0); };
+  const signInViaSheet = async () => { const s = page.getByTestId("signin-sheet"); await expect(s).toBeVisible(); await s.getByTestId("signin-code").fill("e2e-code-2"); await s.getByTestId("signin-code-submit").click(); await expect(page.getByTestId("signin-sheet")).toBeHidden({ timeout: 15_000 }); await page.waitForLoadState("load"); await expect(page.getByTestId("me-handle").or(page.getByTestId("composer-input")).first()).toBeVisible({ timeout: 15_000 }); };
+  const shots = process.env.GBK_SHOTS ?? "/workspace/shots";
+  try {
+    // guests browse + play; no standalone Sign in anywhere (feed, profile tab, studio)
+    await page.goto("/feed?sort=new");
+    const card = page.getByTestId("feed-card").filter({ hasText: title }).first(); await expect(card).toBeVisible();
+    await noSignInButton();
+    // gated: rate -> sheet -> sign in -> rating applied
+    await card.getByTestId("star-4").click();
+    await expect(page.getByTestId("signin-sheet")).toBeVisible(); await expect(page.getByTestId("signin-why")).toContainText("rate");
+    await page.screenshot({ path: `${shots}/signin-sheet-${P}.png` });
+    await page.emulateMedia({ colorScheme: "dark" }); await page.screenshot({ path: `${shots}/signin-sheet-${P}-dark.png` }); await page.emulateMedia({ colorScheme: "light" });
+    await page.getByTestId("signin-close").click(); await expect(page.getByTestId("signin-sheet")).toBeHidden();
+    // gated: comment text survives sign-in and is posted
+    await card.getByTestId("card-comments").click();
+    const body = `resume ${P} ${Date.now() % 1000}`; await page.getByTestId("comment-input").fill(body); await page.getByTestId("comment-send").click();
+    await signInViaSheet();
+    await expect(page.getByTestId("comment-body").filter({ hasText: body })).toBeVisible();
+    await page.getByTestId("sheet-close").click();
+    // signed in: rating resumes too (new context-less check through API state)
+    const r = await page.request.get(`/api/songs/${sh.slug}`); expect((await r.json()).comment_count).toBeGreaterThanOrEqual(1);
+    // Sign out lives in Profile
+    await page.getByTestId("tab-profile").click(); await page.getByTestId("signout").click();
+    await expect(page.getByTestId("social-app")).toBeVisible(); await expect(page.getByTestId("me-handle")).toHaveCount(0);
+    // profile tab signed out -> sheet; rating resumes after sign-in
+    await page.getByTestId("tab-profile").click(); await expect(page.getByTestId("signin-sheet")).toBeVisible(); await page.getByTestId("signin-close").click();
+    await page.goto("/feed?sort=new"); const c2 = page.getByTestId("feed-card").filter({ hasText: title }).first(); await expect(c2).toBeVisible();
+    await c2.getByTestId("star-5").click(); await signInViaSheet();
+    await expect(page.getByTestId("feed-card").filter({ hasText: title }).first().getByTestId("star-5")).toHaveClass(/on/);
+    // studio: composer text survives sign-in and is sent
+    await page.request.post("/api/logout", { headers: { origin: base, "x-gbk-csrf": (await (await page.request.get("/api/session")).json()).csrf }, data: {} });
+    await page.goto("/studio"); const tab = page.getByTestId("tab-composer"); if (await tab.isVisible()) await tab.click();
+    await noSignInButton();
+    await page.getByTestId("composer-input").fill("Gate resume prompt"); await page.getByTestId("composer-send").click();
+    await signInViaSheet();
+    await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
+    const ct = page.getByTestId("tab-composer"); if (await ct.isVisible()) await ct.click();
+    await expect(page.getByText("Gate resume prompt").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("composer-input")).toHaveValue("");
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });

@@ -5,19 +5,22 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-export type Provider = "github" | "google" | "apple" | "phone" | "legacy";
+export type Provider = "github" | "google" | "apple" | "phone" | "guest" | "legacy";
+/** Guest accounts (POST /api/auth/anonymous): ids start with "gu-" and provider is "guest" until upgraded (linked). */
+let current: AccountStore | null = null;
+export const isGuestAccount = (id: string) => id.startsWith("gu-") && current?.get(id)?.provider === "guest";
 export interface Account { id: string; provider: Provider; provider_id: string; name: string; email: string | null; created_at: number; last_login: number | null }
 export interface UsageRow { tokens: number; cost: number; renders: number }
 
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 /** Account ids follow the existing user-name alphabet ([\w.-], max 40) so no downstream store needs a migration. */
-export const accountIdFor = (provider: Exclude<Provider, "legacy">, providerId: string) => `${provider === "github" ? "gh" : provider === "apple" ? "ap" : provider === "phone" ? "ph" : "g"}-${providerId.replace(/[^\w.-]/g, "")}`.slice(0, 40);
+export const accountIdFor = (provider: Exclude<Provider, "legacy">, providerId: string) => `${provider === "github" ? "gh" : provider === "apple" ? "ap" : provider === "phone" ? "ph" : provider === "guest" ? "gu" : "g"}-${providerId.replace(/[^\w.-]/g, "")}`.slice(0, 40);
 
 export class AccountStore {
   private db: DatabaseSync;
   constructor(file: string, private now: () => number = Date.now) {
     if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
-    this.db = new DatabaseSync(file);
+    this.db = new DatabaseSync(file); current = this; // eslint-disable-line @typescript-eslint/no-this-alias
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_id TEXT NOT NULL, name TEXT NOT NULL, email TEXT,
         created_at INTEGER NOT NULL, last_login INTEGER, UNIQUE(provider, provider_id));
@@ -32,6 +35,10 @@ export class AccountStore {
     this.db.prepare("INSERT INTO accounts (id, provider, provider_id, name, email, created_at, last_login) VALUES (?,?,?,?,?,?,?)").run(id, provider, providerId, name.slice(0, 80), email, now, now);
     return { account: this.get(id)!, created: true };
   }
+  byProvider(provider: string, providerId: string): Account | null { return (this.db.prepare("SELECT * FROM accounts WHERE provider = ? AND provider_id = ?").get(provider, providerId) as unknown as Account) ?? null; }
+  /** Guest upgrade in place: attach an external identity to the guest's account (same id). */
+  link(id: string, provider: Exclude<Provider, "legacy" | "guest">, providerId: string, name: string, email: string | null) { this.db.prepare("UPDATE accounts SET provider = ?, provider_id = ?, name = ?, email = ?, last_login = ? WHERE id = ?").run(provider, providerId, name.slice(0, 80), email, this.now(), id); }
+  delete(id: string) { this.db.prepare("DELETE FROM accounts WHERE id = ?").run(id); this.db.prepare("DELETE FROM usage WHERE user = ?").run(id); }
   /** Migration of pre-sign-in users (access-code names and existing song owners). They count as established accounts. */
   ensureLegacy(user: string, createdAt = 0): boolean {
     if (!user || this.get(user)) return false;
