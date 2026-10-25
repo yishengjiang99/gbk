@@ -24,3 +24,6 @@ songs/*/song.wav
 public/songs/
 server/dist/
 composer-data/
+
+# Basic Pitch ONNX model staged for the build (fetched pinned + sha256-verified, scripts/prepare-hum-model.mjs)
+public/hum-models/
