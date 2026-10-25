@@ -1,0 +1,32 @@
+[Unit]
+Description=GBK Composer STANDBY (deploy-time only, :8793) + remote MCP (compose.grepawk.com)
+After=network.target
+# The MCP endpoint (/mcp) and OAuth endpoints run inside this same process. MCP renders run in the user's
+# connected Studio tab (never on this server); compositions/artifacts live under COMPOSER_DATA_DIR (already in
+# ReadWritePaths), and the SoundFont is read from the release's dist/static for preset metadata only. MCP_* env lives in
+# /etc/gbk-composer.env (see deploy/compose.env.example).
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/gbk-composer/current
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/dist/index.mjs
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8793
+Environment=COMPOSER_DATA_DIR=/var/lib/gbk-composer
+EnvironmentFile=/etc/gbk-composer.env
+Restart=on-failure
+RestartSec=3
+# Graceful drain: SIGTERM stops accepting, in-flight requests finish (index.ts forces exit after 15s).
+TimeoutStopSec=25
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/gbk-composer
+
+[Install]
+# Not enabled: started/stopped by deploy/remote-install.sh only.
+WantedBy=multi-user.target

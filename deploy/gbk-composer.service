@@ -17,6 +17,8 @@ Environment=COMPOSER_DATA_DIR=/var/lib/gbk-composer
 EnvironmentFile=/etc/gbk-composer.env
 Restart=on-failure
 RestartSec=3
+# Graceful drain: SIGTERM stops accepting, in-flight requests finish (index.ts forces exit after 15s).
+TimeoutStopSec=25
 User=www-data
 Group=www-data
 NoNewPrivileges=true
