@@ -3,12 +3,12 @@ import Foundation
 
 /// Plays the visible feed item's mp3, preloads the next one, and crossfades between items.
 /// Song switch (Yisheng, 2026-10-25): the next song starts immediately at full volume; only the outgoing song
-/// fades out, over 150 ms with gain cos(t·π/2). Started on scroll settle.
+/// fades out, over exactly 58 ms with gain cos(t·π/2). Started on scroll settle.
 /// TODO: SF2Engine (sf2player-swift) playback later; sequencer + MIDI parsing to be copied from earsheet's Packages/SF2Player.
 @MainActor
 final class FeedPlayer: ObservableObject {
-    static let crossfadeDuration: TimeInterval = 0.15
-    private static let fadeStep: TimeInterval = 1.0 / 60.0
+    static let crossfadeDuration: TimeInterval = 0.058
+    private static let fadeStep: TimeInterval = 1.0 / 240.0 // ~4 ms steps so the 58 ms fade is smooth
 
     @Published private(set) var currentSlug: String?
     @Published private(set) var isPlaying = false

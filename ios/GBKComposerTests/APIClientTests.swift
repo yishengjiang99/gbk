@@ -131,8 +131,8 @@ final class ReviewerSignInTests: XCTestCase {
 }
 
 final class CrossfadeTests: XCTestCase {
-    func testOutgoingFadeOnly150ms() {
-        XCTAssertEqual(FeedPlayer.crossfadeDuration, 0.15)
+    func testOutgoingFadeOnly58ms() {
+        XCTAssertEqual(FeedPlayer.crossfadeDuration, 0.058)
         XCTAssertEqual(FeedPlayer.incomingGain, 1, "next song starts at full volume immediately")
         XCTAssertEqual(FeedPlayer.fadeOutGain(0), 1, accuracy: 1e-6)
         XCTAssertEqual(FeedPlayer.fadeOutGain(0.5), Float(sqrt(0.5)), accuracy: 1e-6)
