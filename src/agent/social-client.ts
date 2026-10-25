@@ -23,6 +23,7 @@ export const social = {
   feed: (o: { sort?: string; label?: string; tag?: string; cursor?: string | null; limit?: number }) => call<Page<Song>>("GET", `/feed${qs(o)}`),
   song: (slug: string) => call<Song>("GET", `/songs/${encodeURIComponent(slug)}`),
   setMeta: (slug: string, m: { labels?: string[]; tags?: string[]; prompt_shared?: boolean; prompt_text?: string | null }) => call<Song>("PATCH", `/songs/${encodeURIComponent(slug)}/meta`, m),
+  promptSuggestion: (slug: string) => call<{ prompt: string | null }>("GET", `/songs/${encodeURIComponent(slug)}/prompt-suggestion`).catch(() => ({ prompt: null })),
   tags: () => call<{ tags: { tag: string; count: number }[]; labels: { label: string; count: number }[] }>("GET", "/tags/top"),
   rate: (slug: string, stars: number | null) => call<{ rating_avg: number | null; rating_count: number; my_rating: number | null }>(stars === null ? "DELETE" : "PUT", `/shares/${encodeURIComponent(slug)}/rating`, stars === null ? undefined : { stars }),
   comments: (slug: string, cursor?: string | null) => call<Page<SComment>>("GET", `/shares/${encodeURIComponent(slug)}/comments${qs({ cursor })}`),

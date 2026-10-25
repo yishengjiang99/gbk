@@ -9,6 +9,8 @@ import type { SocialRoute } from "../../agent/routes.ts";
 
 type Sheet = null | { kind: "comments"; song: Song } | { kind: "browse" } | { kind: "signin"; why: string } | { kind: "report"; what: "song" | "comment" | "user"; target: string; label: string };
 const signInUrl = () => `/api/auth/google?return=${encodeURIComponent(location.pathname + location.search)}`;
+/** Opens the Studio with the Composer prefilled (never auto-run). */
+export const remix = (prompt: string) => { sessionStorage.setItem("gbk.focusComposer", "1"); sessionStorage.setItem("gbk.composerDraft", prompt.slice(0, 4000)); navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50); };
 const ago = (t: number) => { const s = (Date.now() - t) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
 
 function Stars({ song, me, onNeedSignIn, onChange }: { song: Song; me: Me | null; onNeedSignIn: () => void; onChange: (s: Song) => void }) {
@@ -45,6 +47,7 @@ function Card({ idx, song, me, playing, onPlay, onUpdate, onSheet, onFilter, onO
         <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a>{song.author.badge && <span className="so-badge">{song.author.badge}</span>} · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""}</div>
         <Stars song={song} me={me} onNeedSignIn={() => onSheet({ kind: "signin", why: "Sign in to rate songs." })} onChange={onUpdate} />
         <Chips song={song} onFilter={onFilter} />
+        {song.prompt_shared && song.prompt_text && <div className="so-prompt" data-testid="card-prompt"><span className="so-clamp">“{song.prompt_text}”</span><button className="so-btn" data-testid="card-remix" onClick={() => remix(song.prompt_text!)}>Remix this prompt</button></div>}
         {!song.media.mp3 && !song.media.wav && <div className="so-dim">No audio preview yet. Open in Studio to play.</div>}
       </div>
     </article>
@@ -135,7 +138,7 @@ function CommentsSheet({ song, me, onSheet, onCount }: { song: Song; me: Me | nu
   const post = async () => { const b = text.trim(); if (!b) return; setBusy(true); setErr(""); try { const c = await social.comment(song.slug, b); setItems((p) => [c, ...(p ?? [])]); setText(""); onCount(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
   return (
     <div data-testid="comments-sheet">
-      {song.prompt_shared && song.prompt_text && <div className="so-prompt">Prompt: {song.prompt_text}</div>}
+      {song.prompt_shared && song.prompt_text && <div className="so-prompt">Prompt: {song.prompt_text} <button className="so-link" data-testid="sheet-remix" onClick={() => remix(song.prompt_text!)}>Remix</button></div>}
       {items === null && !err && <div className="so-dim">Loading…</div>}
       {items && !items.length && <div className="so-dim" data-testid="comments-empty">No comments yet.</div>}
       {(items ?? []).map((c) => (

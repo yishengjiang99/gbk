@@ -95,3 +95,22 @@ test("social feed autoplay: tap unlocks audio, active card plays, snapping to th
     for (const s of slugs) await owner.request.delete(`/api/shares/${s}`, { headers: oh }); await owner.close();
   }
 });
+
+test("social prompt sharing: off by default, owner opts in, feed shows prompt, Remix prefills the Composer (not run)", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const title = `Prompt Share ${test.info().project.name} ${Date.now() % 100000}`;
+  const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title, project, public: true } })).json();
+  try {
+    const before = await (await owner.request.get(`/api/songs/${sh.slug}`)).json(); expect(before.prompt_shared).toBe(false); expect(before.prompt_text).toBeNull();
+    await owner.request.patch(`/api/songs/${sh.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: "a stormy sea shanty in A minor" } });
+    await apiLogin(page.request, base, "e2e-code-2");
+    await page.goto("/feed?sort=new");
+    const card = page.getByTestId("feed-card").filter({ hasText: title }).first();
+    await expect(card.getByTestId("card-prompt")).toContainText("a stormy sea shanty in A minor");
+    await card.getByTestId("card-remix").click();
+    await expect(page).toHaveURL(/\/studio$/);
+    const tab = page.getByTestId("tab-composer"); if (await tab.isVisible() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+    await expect(page.getByTestId("composer-input")).toHaveValue("a stormy sea shanty in A minor");
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});

@@ -36,6 +36,7 @@ import { NativeStore } from "./persistence/native.ts";
 import { createNotifier } from "./push/notifier.ts";
 import type { ApnsSender } from "./push/apns.ts";
 import { nativeRoutes } from "./routes/native.ts";
+import { currentSession } from "./routes/agent.ts";
 import { authExtraRoutes } from "./routes/auth-extra.ts";
 import { socialRoutes } from "./routes/social.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
@@ -94,6 +95,14 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const native = new NativeStore(persist ? join(cfg.dataDir, "native.sqlite") : ":memory:", deps.now);
   const notify = createNotifier(cfg, native, (o) => app.log.info(o), deps.apns);
   const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify);
+  // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
+  app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
+    const s = currentSession(req, sessions); const row = shares.bySlug((req.params as { slug: string }).slug);
+    if (!s || !row || row.owner !== s.user) return reply.code(404).send({ code: "NOT_FOUND", message: "no such song of yours" });
+    const c = convs.get(s.user); const first = c.messages.find((m) => m.role === "user");
+    const text = typeof first?.content === "string" ? first.content : Array.isArray(first?.content) ? (first!.content as { text?: string }[]).map((x) => x.text ?? "").join(" ") : "";
+    return { prompt: text.trim().slice(0, 4000) || null, sameProject: !!row.project_id && c.projectId === row.project_id };
+  });
   const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, me: socialApi.me, fetch: deps.fetch });
   authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
