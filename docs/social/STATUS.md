@@ -8,6 +8,7 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 |---|---|
 | M0 scaffold (tabs, theme, API client, Keychain auth store, push manager, feed player, deep links, studio web view) | done |
 | Feed: `GET /api/feed` cursor paging, For you/New/Top chips, label menu, tag filter, `/t/<tag>` deep link | done (live API) |
+| Feed crossfade: 400 ms equal-power (cos/sin) on scroll settle, two AVPlayers (matches web) | done |
 | Play counting `POST /api/shares/:slug/play` | done (live API) |
 | Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
 | Comments sheet (flat, post, delete own, report) | done (live API) |

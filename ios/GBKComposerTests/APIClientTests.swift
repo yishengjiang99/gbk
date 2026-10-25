@@ -129,3 +129,14 @@ final class ReviewerSignInTests: XCTestCase {
         XCTAssertEqual(body, "password=a%26b%3Dc%20d%2B&username=openai-reviewer")
     }
 }
+
+final class CrossfadeTests: XCTestCase {
+    func testEqualPowerCurve() {
+        XCTAssertEqual(FeedPlayer.crossfadeDuration, 0.4)
+        let s = FeedPlayer.equalPowerGains(0), m = FeedPlayer.equalPowerGains(0.5), e = FeedPlayer.equalPowerGains(1)
+        XCTAssertEqual(s.out, 1, accuracy: 1e-6); XCTAssertEqual(s.in, 0, accuracy: 1e-6)
+        XCTAssertEqual(e.out, 0, accuracy: 1e-6); XCTAssertEqual(e.in, 1, accuracy: 1e-6)
+        XCTAssertEqual(m.out, Float(sqrt(0.5)), accuracy: 1e-6)
+        XCTAssertEqual(m.out * m.out + m.in * m.in, 1, accuracy: 1e-6) // constant power
+    }
+}
