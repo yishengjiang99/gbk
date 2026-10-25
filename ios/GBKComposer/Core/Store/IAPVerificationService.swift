@@ -52,9 +52,11 @@ enum AppAccountToken {
 
     static func resolve(accountId: String?) -> UUID {
         if let accountId, let u = UUID(uuidString: accountId) { return u }
-        if let s = Keychain.get(key), let u = UUID(uuidString: s) { return u }
+        // Keychain first (survives reinstall); UserDefaults backs it up where the Keychain is unavailable (unsigned test host).
+        if let s = Keychain.get(key) ?? UserDefaults.standard.string(forKey: key), let u = UUID(uuidString: s) { return u }
         let u = UUID()
         Keychain.set(u.uuidString, for: key)
+        UserDefaults.standard.set(u.uuidString, forKey: key)
         return u
     }
 }
