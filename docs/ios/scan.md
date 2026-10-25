@@ -12,7 +12,9 @@ Scan printed sheet music (camera, photos or PDF) into new tracks of the open stu
 
 Errors shown in the sheet: camera denied (with Open Settings), nothing recognized, read-only project (checked from `scan.start` and again from the `applyNativeOps` result), models missing, unreadable file.
 
-## Web contract (implemented in this repo, `src/native/scan-bridge.ts`)
+## Web contract (owned by GBK Social; proposed implementation handed off as a patch, not on main)
+
+Without it the app still works: no Scan button appears (nothing starts a scan), and if `window.gbkStudio.applyNativeOps` is missing when ops are applied the sheet shows "The studio page doesn't support Scan yet" (`ScanError.studioNotReady`).
 
 - `window.gbkNative.capabilities` includes `"scan"` (also `window.gbkNative.scan === true`); one shared object with Hum.
 - `webkit.messageHandlers.gbkScan.postMessage({type: "scan.start", project})`.
@@ -43,7 +45,7 @@ Yisheng chose to license `ios/` AGPL-3.0-or-later (2026-10-25), so the real reco
 
 - `ScanTests.swift`: Score → ops (empty and existing project, channels, read-only, nothing recognized, exact op JSON), SMF reader, bridge message decode / scripts, controller errors, and the real pipeline on `GBKComposerTests/Fixtures/c_major_scale.png` (omr-sheet-cam `fixtures/mono.c_major_scale`) asserting pitches 60 62 64 65 67 69 71 72. CI sets `OMR_REQUIRE_MODELS=1` so that test can't silently skip.
 - `SnapshotTests.testScanEntryAndErrorLightAndDark`: `scan-entry`, `scan-error`, `scan-read-only` light/dark in the `ios-snapshots` artifact.
-- Web: `test/native-scan-bridge.test.ts`.
+- Web (in the GBK Social patch): `test/native-scan-bridge.test.ts`.
 
 ## AGPL §13 note
 

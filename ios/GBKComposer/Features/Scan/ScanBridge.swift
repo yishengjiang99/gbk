@@ -106,6 +106,7 @@ final class ScanController: NSObject, ObservableObject, WKScriptMessageHandler {
         let raw = try await webView.evaluateJavaScript(try ScanBridge.applyScript(ops: ops))
         guard let s = raw as? String, let r = try? JSONDecoder().decode(ScanBridge.ApplyResult.self, from: Data(s.utf8)) else { return }
         if !r.ok {
+            if r.error == "studio bridge missing" { throw ScanError.studioNotReady }
             if (r.error ?? "").uppercased().contains("READ_ONLY") || (r.error ?? "").lowercased().contains("read-only") { throw ScanError.readOnlyProject }
             throw ScanError.failed(r.error ?? "the studio rejected the new tracks")
         }

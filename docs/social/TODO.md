@@ -12,6 +12,7 @@
 - iOS: follow the sign-in-only-on-demand rule (feed-design.md): remove standalone Sign in, keep pending action in memory and replay.
 - IAP pro render limits (120 renders/hour up to 600 s vs 30/h, 300 s) not enforced yet: there is no per-hour render limiter to hook into (daily only).
 - Inbox/DMs and blocks list (P4), notifications (P5).
+- GBK Social: land the web half of Scan (docs/ios/scan.md "Web contract": Scan button next to Hum when `gbkNative.capabilities` has "scan", `webkit.messageHandlers.gbkScan.postMessage({type:"scan.start", project})`, `window.gbkStudio.applyNativeOps(ops)`); patch from iOS worker.
 - Scan sheet music (docs/ios/scan.md): consider on-demand model download (~102 MB bundled today); multi-voice/chord accuracy is whatever omr-homr-ios gives; web Scan button only appears inside the app.
 - Align `docs/social-api.md` with prod for `preview`, `/api/session`, and 404 error bodies.
 

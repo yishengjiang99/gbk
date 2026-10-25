@@ -41,6 +41,7 @@ enum ScanError: Error, Equatable, LocalizedError {
     case readOnlyProject
     case recognizerUnavailable(String)
     case unreadableInput(String)
+    case studioNotReady
     case failed(String)
 
     var errorDescription: String? {
@@ -50,6 +51,7 @@ enum ScanError: Error, Equatable, LocalizedError {
         case .readOnlyProject: return "This project is read-only. Remix or open your own project, then scan again."
         case .recognizerUnavailable(let m): return "Sheet recognition isn't available: \(m)"
         case .unreadableInput(let m): return "Couldn't read that file: \(m)"
+        case .studioNotReady: return "The studio page doesn't support Scan yet. Your sheet was read, but no tracks were added; try again after the studio updates."
         case .failed(let m): return "Recognition failed: \(m)"
         }
     }

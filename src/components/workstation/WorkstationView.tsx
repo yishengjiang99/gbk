@@ -30,7 +30,6 @@ import { AddTrackButton } from "./AddTrack.tsx";
 import { HumButton } from "./HumButton.tsx";
 import { liveRig } from "./LiveKeyboard.tsx";
 import { MIDI_UNSUPPORTED_MESSAGE } from "../../workstation/midi-input.ts";
-import { ScanButton } from "./ScanButton.tsx";
 import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { VideoExportButton } from "./VideoExport.tsx";
@@ -153,7 +152,6 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           {(() => { const r = liveRig(workstation); const ok = r.midi.supported; const on = r.midi.status.kind === "ready";
             return <button data-testid="midi-toggle" disabled={!ok} aria-pressed={on} title={ok ? "Play and record with a MIDI keyboard (Web MIDI)" : MIDI_UNSUPPORTED_MESSAGE}
               onClick={() => { setKeysOn(true); void r.sink.prepare().catch(() => undefined); if (!on) void r.midi.enable().then(() => setMidiTick((x) => x + 1)); }}>🎛 MIDI</button>; })()}
-          <ScanButton />
           <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
           <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
   </>);

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import WebKit
 import XCTest
 @testable import GBKComposer
 
@@ -100,6 +101,17 @@ final class ScanBridgeTests: XCTestCase {
         XCTAssertTrue(js.contains(#"applyNativeOps([{"key":"F","op":"setMeta"}], {label: "scan sheet music", source: 'scan'})"#), js)
         XCTAssertEqual(ScanBridge.eventScript(status: "added", tracks: 2, notes: 9),
                        #"window.dispatchEvent(new CustomEvent('gbknative:scan', {detail: {"notes":9,"status":"added","tracks":2}}));"#)
+    }
+
+    func testMissingWebBridgeShowsStudioNotReady() async throws {
+        let c = ScanController(recognizer: FixtureSheetRecognizer(result: .success(FixtureSheetRecognizer.twoParts)))
+        let web = WKWebView()
+        c.webView = web
+        web.loadHTMLString("<html><body>no bridge</body></html>", baseURL: nil)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        c.recognize([SheetPage(image: try XCTUnwrap(UIImage(systemName: "music.note")?.cgImage))])
+        for _ in 0..<100 where c.phase == .working { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertEqual(c.phase, .error(.studioNotReady))
     }
 
     func testNothingRecognizedSurfacesError() async throws {
