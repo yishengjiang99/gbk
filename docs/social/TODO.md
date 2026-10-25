@@ -49,3 +49,5 @@ Open items (owner in brackets):
 - [ ] Confirm price: $6/mo or $48/yr (lifetime $99 flagged risky)
 - [ ] Submit X Ads API application
 - [ ] Approve the launch email
+
+- [ ] GBK Launch: wire Pro limits. `/etc/gbk-composer.env` now has `COMPOSE_ENTITLEMENT_TOKEN` (same value as grepawk.com's); gbk has no consumer yet. Call `GET https://grepawk.com/api/compose/entitlement?email=…` with `Authorization: Bearer $COMPOSE_ENTITLEMENT_TOKEN` and raise limits when `pro: true`. See docs/stripe.md.

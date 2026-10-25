@@ -50,7 +50,7 @@ Only partly, and the doc has to be honest about it. OpenAI's plugin guidelines
 
 What this means for GBK:
 - **ChatGPT is a free acquisition channel, not a checkout.** Revenue has to come from the website (`/pricing`) and GBK Studio.
-- The MCP server **may** read an entitlement for a signed-in (OAuth) user and apply higher limits. It **may not** say "upgrade for $6", show plans, or link to `/pricing`. On a quota error it may say "this exceeds the free plan's limit" and link to an **informational** page; this PR adds `/plans` for exactly that (no buttons, no checkout links, test-enforced).
+- The MCP server **may** read an entitlement for a signed-in (OAuth) user and apply higher limits. It **may not** say "upgrade for $5.99", show plans, or link to `/pricing`. On a quota error it may say "this exceeds the free plan's limit" and link to an **informational** page; this PR adds `/plans` for exactly that (no buttons, no checkout links, test-enforced).
 - Costs: inside ChatGPT the LLM is ChatGPT's, so GBK's marginal cost there is server rendering CPU. The real cost centre is the **composer agent inside GBK Studio** (GBK pays the model tokens; config has `AGENT_DAILY_TOKEN_BUDGET` 2,000,000 and `AGENT_NEW_ACCOUNT_DAILY_TOKEN_BUDGET` 200,000 per user/day, `AGENT_DAILY_COST_BUDGET_USD` 5). So Pro should mostly buy **Studio AI budget**, plus server-render headroom for no-browser clients (Codex etc.).
 - Plan parity rule: whatever Pro unlocks must unlock it in ChatGPT too (for a signed-in Pro user), never be better on the web.
 
