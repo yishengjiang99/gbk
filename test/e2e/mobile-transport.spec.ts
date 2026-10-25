@@ -51,3 +51,21 @@ test("export video produces a playable file", async ({ page }) => {
   await d.saveAs(path);
   expect(d.suggestedFilename()).toMatch(/\.(mp4|webm)$/);
 });
+
+test("scrubber seeks across the whole song (touch + keyboard) and still fits", async ({ page }) => {
+  await page.goto(BASE);
+  await page.waitForFunction(() => !!(globalThis as { __gbkWorkstation?: unknown }).__gbkWorkstation);
+  await page.evaluate(`(${SEED})()`);
+  const s = page.getByTestId("scrubber");
+  await expect(s).toBeVisible();
+  const b = (await s.boundingBox())!; expect(b.width).toBeGreaterThan(330); expect(b.height).toBeGreaterThanOrEqual(28);
+  await page.touchscreen.tap(b.x + b.width * 0.75, b.y + b.height / 2);
+  await expect.poll(async () => Number(await page.getByTestId("ws-pos").getAttribute("data-pos-tick"))).toBeGreaterThan(2000);
+  const before = Number(await page.getByTestId("ws-pos").getAttribute("data-pos-tick"));
+  await s.focus(); await page.keyboard.press("ArrowLeft");
+  await expect.poll(async () => Number(await page.getByTestId("ws-pos").getAttribute("data-pos-tick"))).toBeLessThan(before);
+  await expect(s).toHaveAttribute("aria-valuetext", /seconds/);
+  const m = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, h: innerHeight }));
+  expect(m.sh).toBeLessThanOrEqual(m.h);
+  await page.screenshot({ path: `${SHOTS}/mobile-transport.png` });
+});

@@ -31,7 +31,7 @@ import { VideoExportButton } from "./VideoExport.tsx";
 import { ComposerPanel } from "../composer/ComposerPanel.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
 import { funnelBeacon } from "../../telemetry/funnel.ts";
-import { tickToBarBeat, tickToSec } from "../../workstation/timing.ts";
+import { tickToBarBeat, tickToSec, barBeatToTick } from "../../workstation/timing.ts";
 
 export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: { onOpenPlayer: () => void; composer?: boolean; onExplore?: () => void }) {
   const state = useWorkstation();
@@ -133,6 +133,24 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
           <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
   </>);
+  // Scrubber: whole-song seek bar. Moves the playhead (seeks playback if playing) and scrolls the roll there.
+  const songEnd = Math.max(1, p.endTick, ...p.notes.map((n) => n.tick + n.duration));
+  const scrubTo = (tick: number) => {
+    const t = Math.max(0, Math.min(songEnd, Math.round(tick)));
+    workstation.seek(t);
+    setView((v) => { const span = rollPx.current / v.pxPerTick; return t < v.scrollTick || t > v.scrollTick + span ? { ...v, scrollTick: Math.max(0, t - span * 0.25) } : v; });
+  };
+  const scrubAt = (el: HTMLElement, x: number) => { const r = el.getBoundingClientRect(); const thumb = 13; scrubTo(((x - r.left - thumb) / Math.max(1, r.width - 2 * thumb)) * songEnd); };
+  const posText = `bar ${bb.bar}.${Math.floor(bb.beat) + 1}, ${tickToSec(p, pos).toFixed(1)} of ${tickToSec(p, songEnd).toFixed(1)} seconds`;
+  const scrubber = (
+    <div className="ws-scrub" data-testid="scrubber-wrap">
+      {(p.meta?.sections ?? []).map((sec) => { const t = barBeatToTick(p, sec.startBar); return t <= songEnd ? <span key={sec.name + sec.startBar} className="ws-scrub-mark" style={{ left: `${(t / songEnd) * 100}%` }} title={sec.name}>{sec.name}</span> : null; })}
+      <input type="range" aria-label="Song position" data-testid="scrubber" min={0} max={songEnd} step={Math.max(1, Math.round(p.ppq / 4))} value={Math.min(pos, songEnd)} aria-valuetext={posText}
+        onChange={(e) => scrubTo(+e.target.value)}
+        // Tap/drag anywhere on the track (iOS range inputs only move by dragging the thumb).
+        onPointerDown={(e) => { const el = e.currentTarget; e.preventDefault(); el.focus(); el.setPointerCapture?.(e.pointerId); scrubAt(el, e.clientX); }}
+        onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture?.(e.pointerId)) scrubAt(e.currentTarget, e.clientX); }} />
+    </div>);
   return (
     <div className="ws" data-testid="workstation">
       <header className="ws-header">
@@ -160,6 +178,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
         <button className="ws-player-btn" onClick={onOpenPlayer} data-testid="open-player">Player / Library</button>
       </header>
       {phone && <div className="ws-transport ws-transport-row" role="toolbar" aria-label="Transport" data-testid="transport-row">{transportCore}</div>}
+      {scrubber}
       {keysOn && <FloatingWindow title="🎹 Keys" storageKey="gbk.keysWindowPos" testId="keys-window" onClose={() => setKeysOn(false)}>
         {() => <LiveKeyboard workstation={workstation} />}
       </FloatingWindow>}
