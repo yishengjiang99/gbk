@@ -14,6 +14,9 @@ export class Crossfader {
   private pool = new Map<string, Voice>();
   private current: Voice | null = null; private fading: Voice | null = null;
   unlocked = false;
+  /** Shared analyser for the now-playing visualization (#108); every voice routes gain -> analyser -> destination. */
+  analyser: AnalyserNode | null = null;
+  get currentEl() { return this.current?.el ?? null; }
   constructor(private host: HTMLElement, private onChange: (s: FadeState) => void, private fadeMs = FADE_MS) {}
 
   private voice(src: string): Voice {
@@ -21,7 +24,7 @@ export class Crossfader {
     const el = document.createElement("audio"); el.preload = "auto"; el.loop = true; el.setAttribute("playsinline", ""); el.src = src; el.dataset.src = src; this.host.appendChild(el);
     v = { src, el, gain: null }; this.pool.set(src, v); this.wire(v); return v;
   }
-  private wire(v: Voice) { if (!this.ctx || v.gain) return; try { const g = this.ctx.createGain(); this.ctx.createMediaElementSource(v.el).connect(g).connect(this.ctx.destination); v.gain = g; } catch { v.gain = null; } }
+  private wire(v: Voice) { if (!this.ctx || v.gain) return; try { const g = this.ctx.createGain(); this.ctx.createMediaElementSource(v.el).connect(g).connect(this.analyser ?? this.ctx.destination); v.gain = g; } catch { v.gain = null; } }
   private set(v: Voice, x: number) { if (v.gain) { v.gain.gain.cancelScheduledValues(0); v.gain.gain.value = x; } else v.el.volume = x; }
   private ramp(v: Voice, dir: "in" | "out", done?: () => void) {
     this.cancel(v); const c = curve(dir);
@@ -35,7 +38,7 @@ export class Crossfader {
 
   /** Call inside the first user gesture: creates/resumes the AudioContext (iOS unlock). */
   unlock() {
-    if (!this.ctx) { const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext; if (AC) { try { this.ctx = new AC(); } catch { this.ctx = null; } } for (const v of this.pool.values()) this.wire(v); }
+    if (!this.ctx) { const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext; if (AC) { try { this.ctx = new AC(); const a = this.ctx.createAnalyser(); a.fftSize = 2048; a.smoothingTimeConstant = 0; a.connect(this.ctx.destination); this.analyser = a; } catch { this.ctx = null; } } for (const v of this.pool.values()) this.wire(v); }
     void this.ctx?.resume().catch(() => undefined);
   }
 

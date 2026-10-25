@@ -4,6 +4,7 @@ import { Crossfader, type FadeState } from "./crossfade.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { social, LABELS, type Me, type Song, type SComment, type SUser } from "../../agent/social-client.ts";
 import { PianoRoll } from "../explore/ExplorePage.tsx";
+import { LiveRoll, type VizSource } from "./LiveRoll.tsx";
 import { MySongs } from "../songs/MySongs.tsx";
 import { navigate } from "../../agent/routes.ts";
 import type { SocialRoute } from "../../agent/routes.ts";
@@ -33,10 +34,10 @@ function Chips({ song, onFilter }: { song: Song; onFilter: (f: { label?: string;
   return <div className="so-chips">{song.labels.map((l) => <button key={l} className={`so-chip lab ${l === "wip" ? "wip" : ""}`} onClick={() => onFilter({ label: l })}>{l}</button>)}{song.tags.map((t) => <button key={t} className="so-chip" onClick={() => onFilter({ tag: t })}>#{t}</button>)}</div>;
 }
 
-function Card({ idx, song, me, playing, onPlay, onUpdate, onSheet, onFilter, onOpen }: { idx: number; song: Song; me: Me | null; playing: boolean; onPlay: (s: Song) => void; onUpdate: (s: Song) => void; onSheet: (s: Sheet) => void; onFilter: (f: { label?: string; tag?: string }) => void; onOpen: (slug: string, fork: boolean) => void }) {
+function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter, onOpen }: { idx: number; song: Song; me: Me | null; playing: boolean; viz: () => VizSource; onPlay: (s: Song) => void; onUpdate: (s: Song) => void; onSheet: (s: Sheet) => void; onFilter: (f: { label?: string; tag?: string }) => void; onOpen: (slug: string, fork: boolean) => void }) {
   return (
     <article className="so-card" data-testid="feed-card" data-slug={song.slug} data-idx={idx} data-playing={playing ? "1" : "0"}>
-      <div className="so-rollwrap" onClick={() => onPlay(song)}>{song.preview ? <PianoRoll p={song.preview} /> : <div className="so-noroll" />}<span className="so-playbadge" data-testid="card-play">{playing ? "❚❚" : "▶"}</span></div>
+      <div className="so-rollwrap" onClick={() => onPlay(song)}>{song.preview ? <LiveRoll p={song.preview} playing={playing} source={viz} /> : <div className="so-noroll" />}<span className="so-playbadge" data-testid="card-play">{playing ? "❚❚" : "▶"}</span></div>
       <div className="so-side">
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
         <button aria-label="Open in Studio" data-testid="card-open" onClick={() => onOpen(song.slug, false)}>✎<small>open</small></button>
@@ -77,7 +78,8 @@ function useAudio() {
   const stop = useCallback(() => xf.current?.stop(), []);
   const preload = useCallback((ss: (Song | undefined)[]) => xf.current?.preload(ss.map((s) => s && srcOf(s))), []);
   const fading = st.fading ? slugBySrc.current.get(st.fading) ?? null : null;
-  return { cur, fading, unlocked, start, toggle, stop, preload, host };
+  const viz = useCallback((): VizSource => ({ el: xf.current?.currentEl ?? null, analyser: xf.current?.analyser ?? null }), []);
+  return { cur, fading, unlocked, start, toggle, stop, preload, host, viz };
 }
 
 function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; filter: { sort: string; label?: string; tag?: string }; setFilter: (f: { sort: string; label?: string; tag?: string }) => void; onSheet: (s: Sheet) => void; onOpen: (slug: string, fork: boolean) => void }) {
@@ -136,7 +138,7 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
       <div className="so-feed" data-testid="feed" ref={feedEl} data-active={active} data-unlocked={audio.unlocked ? "1" : "0"} data-fading={audio.fading ?? ""} data-candidate={candidate}>
         <div ref={audio.host} hidden data-testid="feed-audio" />
         {!audio.unlocked && items.some(srcOf) && <button className="so-unlock" data-testid="tap-to-play" onClick={() => { const s = items[active]; if (s) audio.start(s, true); }}>🔊 Tap to play</button>}
-        {items.map((s, i) => <Card key={s.slug} idx={i} song={s} me={me} playing={audio.cur === s.slug} onPlay={audio.toggle} onUpdate={(n) => setItems((p) => p.map((x) => x.slug === n.slug ? n : x))} onSheet={onSheet} onFilter={(f) => setFilter({ sort: "new", ...f })} onOpen={onOpen} />)}
+        {items.map((s, i) => <Card key={s.slug} idx={i} song={s} me={me} playing={audio.cur === s.slug} viz={audio.viz} onPlay={audio.toggle} onUpdate={(n) => setItems((p) => p.map((x) => x.slug === n.slug ? n : x))} onSheet={onSheet} onFilter={(f) => setFilter({ sort: "new", ...f })} onOpen={onOpen} />)}
         {!loading && !items.length && !err && <div className="so-empty" data-testid="feed-empty">Nothing here yet. <button className="so-btn pri" onClick={() => navigate("studio")}>Compose the first one</button></div>}
         {err && <div className="so-empty so-err">{err} <button className="so-btn" onClick={() => void load(true)}>Retry</button></div>}
         <div ref={sentinel} className="so-sentinel">{loading ? "Loading…" : done && items.length ? "You're all caught up." : ""}</div>
