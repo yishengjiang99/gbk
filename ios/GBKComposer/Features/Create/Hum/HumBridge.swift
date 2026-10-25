@@ -123,7 +123,7 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         return Self.parseContext(raw)
     }
 
-    static func parseContext(_ raw: [String: Any]) -> HumProjectContext {
+    nonisolated static func parseContext(_ raw: [String: Any]) -> HumProjectContext {
         var c = HumProjectContext()
         if let ppq = raw["ppq"] as? Int, ppq > 0 { c.ppq = ppq }
         if let t = raw["tempos"] as? [[String: Any]] {
