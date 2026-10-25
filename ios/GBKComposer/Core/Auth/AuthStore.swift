@@ -4,12 +4,17 @@ import Security
 /// Minimal Keychain wrapper for generic-password items.
 enum Keychain {
     static let service = "com.grepawk.gbk"
+    /// Process-local mirror so values persist within a run when the Keychain is unavailable
+    /// (unsigned simulator test host returns errSecMissingEntitlement).
+    private static var memory: [String: String] = [:]
+    private static let lock = NSLock()
 
     static func set(_ value: String?, for key: String) {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service,
                                    kSecAttrAccount as String: key]
         SecItemDelete(base as CFDictionary)
+        lock.lock(); memory[key] = value; lock.unlock()
         guard let value, let data = value.data(using: .utf8) else { return }
         var add = base
         add[kSecValueData as String] = data
@@ -24,7 +29,10 @@ enum Keychain {
                                 kSecReturnData as String: true,
                                 kSecMatchLimit as String: kSecMatchLimitOne]
         var out: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else {
+            lock.lock(); defer { lock.unlock() }
+            return memory[key]
+        }
         return String(data: data, encoding: .utf8)
     }
 }
