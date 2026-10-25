@@ -22,7 +22,7 @@ npm run build:compose && npm run build:server
 tar czf rel.tgz dist server/dist server/package.json deploy     # upload to server /tmp
 bash deploy/remote-install.sh /tmp/rel.tgz <release-id>           # releases/<id>, swap current, restart, health check, auto-rollback
 ```
-nginx vhost: `deploy/nginx.conf` → `/etc/nginx/sites-available/compose.grepawk.com` (back up first, run `nginx -t` before reloading).
+nginx vhost: `deploy.sh` installs `deploy/nginx.conf` (which includes the Certbot TLS lines) through `deploy/install-nginx.sh`: it refuses a config without TLS, backs up the live site, runs `nginx -t`, reloads, probes HTTPS, and restores the backup on any failure. Never copy the file over the live site by hand. If Certbot changes the live TLS lines, copy them back into `deploy/nginx.conf`.
 TLS (once DNS resolves): `certbot --nginx -d compose.grepawk.com`. Ops: `deploy/ops.sh health|logs|releases|rollback|verify-tls`.
 
 ## SoundFonts
