@@ -72,7 +72,7 @@ function useAudio() {
   const start = useCallback((s: Song, gesture = false) => {
     const x = xf.current!; const src = srcOf(s); if (gesture) x.unlock(); if (!src) { void x.play(null); return; }
     slugBySrc.current.set(src, s.slug);
-    void x.play(src).then((ok) => { if (!ok) return; setUnlocked(true); if (!counted.current.has(s.slug)) { counted.current.add(s.slug); void social.play(s.slug); } });
+    void x.play(src).then((ok) => { if (!ok) { if (!gesture && !x.playingCount) setUnlocked(false); return; } setUnlocked(true); if (!counted.current.has(s.slug)) { counted.current.add(s.slug); void social.play(s.slug); } });
   }, []);
   const cur = st.current ? slugBySrc.current.get(st.current) ?? null : null;
   const toggle = useCallback((s: Song) => { if (cur === s.slug) void xf.current!.play(null); else start(s, true); }, [cur, start]);
@@ -113,6 +113,19 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
     root.addEventListener("scroll", on, { passive: true }); root.addEventListener("scrollend", done);
     return () => { clearTimeout(t); root.removeEventListener("scroll", on); root.removeEventListener("scrollend", done); };
   }, []);
+  // Any first gesture (not just "Tap to play") unlocks audio and starts the visible card; after that, scroll switches autoplay.
+  const visible = useRef<Song | undefined>(undefined); visible.current = items[active];
+  useEffect(() => {
+    if (audio.unlocked) return;
+    const evs = ["pointerdown", "touchstart", "touchend", "keydown", "click", "wheel"] as const;
+    const off = () => evs.forEach((e) => window.removeEventListener(e, on, true));
+    const on = (e: Event) => {
+      const s = visible.current; if (!s || !srcOf(s)) return;
+      const t = e.target as HTMLElement | null; if (t?.closest?.("[data-testid=tap-to-play],.so-rollwrap,.so-sheet,input,textarea,select")) return; // these handle their own start / are not a play intent
+      audio.start(s, true); // listeners stay until play actually succeeds (iOS only honors touchend/click), then the effect removes them
+    };
+    evs.forEach((e) => window.addEventListener(e, on, { capture: true, passive: true })); return off;
+  }, [audio.unlocked, audio.start, items.length > 0]);
   useEffect(() => { const s = items[active]; if (!s) return; startImpression(s.slug, active, filter.tag ? "tag" : filter.label ? "label" : filter.sort, mv.current); audio.preload([items[active], items[active + 1], items[active - 1]]); if (audio.unlocked) audio.start(s); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [active, settled, items.length > 0, audio.unlocked]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
