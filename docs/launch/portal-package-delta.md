@@ -17,6 +17,8 @@ metadata is NOT in the uploaded package** (the portal still has category Product
 | Studio scrubber, mobile transport, video export, durable sessions, read-only share fix | #97 #101 #98 #102 | Server/website-only |
 | History-free review cases + third starter prompt no longer says "my last piece" | #99 | **Package change: needs a replacement ZIP; reviewer test cases change** |
 
+| Demo gallery (public), /chatgpt featured demos, install-click redirect, analytics counters, againstTrack description, nginx deploy safety, CI/smoke, launch docs | #105, da5b20c, 95a3b4e, 1171aeb, Phase 5–8 commits | Server/website/docs-only: no package change after `d329875` |
+
 ## Release recommendation
 
 Build one replacement ZIP from `plugins/gbk-composer/` at the main commit that contains #99. It carries the

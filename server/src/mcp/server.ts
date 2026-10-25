@@ -103,7 +103,9 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   }
 
   /** Aggregate funnel counter for a successful first execution (replays are not counted). */
+  let firstCounted = false; // one MCP session = one server instance: count its first successful tool call once
   function track(tool: string, p: Principal | null, out: Record<string, unknown>) {
+    if (!firstCounted) { firstCounted = true; ctx.funnel?.bump("first_tool_call", p?.via === "guest" ? "guest" : p ? "account" : ""); }
     const ev = TOOL_EVENTS[tool]; if (!ev || out.status === "studio_required") return;
     ctx.funnel?.bump(ev, p?.via === "guest" ? "guest" : "account");
   }

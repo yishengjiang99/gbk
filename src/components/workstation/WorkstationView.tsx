@@ -163,7 +163,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
         <strong className="ws-title">{composer ? "GBK Composer" : "GBK Workstation"}</strong>
         {composer && onExplore && <button onClick={onExplore} data-testid="nav-explore">Explore</button>}
         <button className="ws-new" onClick={newProject} data-testid="new-project" title="Start a new, empty project">＋ New project</button>
-        {workstation.readOnlyReason && <span className="ws-pill off" data-testid="readonly-pill" title={workstation.readOnlyReason}>read-only · <button className="ws-link" onClick={() => workstation.fork()}>Fork</button></span>}
+        {workstation.readOnlyReason && <span className="ws-pill off" data-testid="readonly-pill" title={workstation.readOnlyReason}>read-only · <button className="ws-link" onClick={() => workstation.fork()}>Fork</button> · <a className="ws-link" href="/chatgpt" target="_blank" rel="noopener" data-testid="song-chatgpt-link" title="Compose something like this with ChatGPT">Make one with ChatGPT</a></span>}
         <span className="ws-name" title={p.name}>{p.name}</span>
         {!phone && <div className="ws-transport" role="toolbar" aria-label="Transport">
           {transportCore}

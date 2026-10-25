@@ -9,10 +9,12 @@ export const FUNNEL_EVENTS = [
   "page_view_landing", "page_view_chatgpt", "page_view_legal",
   "mcp_connect", "create", "edit", "render_requested", "browser_render_completed",
   "midi_download", "wav_download", "claim", "publish", "delete",
+  // Launch analytics (#72 Phase 6)
+  "page_view_gallery", "first_tool_call", "server_render_completed", "render_failed", "install_cta_click", "install_link_unavailable",
 ] as const;
 export type FunnelEvent = typeof FUNNEL_EVENTS[number];
 /** Coarse, non-identifying segment: who (guest/account) or where (widget/studio) — never an identity. */
-export const FUNNEL_SOURCES = ["", "guest", "account", "widget", "studio", "studio-tab", "web"] as const;
+export const FUNNEL_SOURCES = ["", "guest", "account", "widget", "studio", "studio-tab", "web", "server"] as const;
 export type FunnelSource = typeof FUNNEL_SOURCES[number];
 
 export class FunnelStore {
@@ -47,7 +49,9 @@ export class FunnelStore {
     const rate = (a: string, b: string) => (totals[b] ? +(totals[a] / totals[b]).toFixed(3) : null);
     return { since, days, totals, bySource, byDay,
       conversion: { createPerConnect: rate("create", "mcp_connect"), renderPerCreate: rate("render_requested", "create"),
-        browserRenderPerRequest: rate("browser_render_completed", "render_requested"), downloadPerCreate: totals.create ? +((totals.midi_download + totals.wav_download) / totals.create).toFixed(3) : null } };
+        browserRenderPerRequest: rate("browser_render_completed", "render_requested"), downloadPerCreate: totals.create ? +((totals.midi_download + totals.wav_download) / totals.create).toFixed(3) : null,
+        firstToolCallPerConnect: rate("first_tool_call", "mcp_connect"), serverRenderPerRequest: rate("server_render_completed", "render_requested"),
+        renderFailurePerRequest: rate("render_failed", "render_requested"), installClickPerChatgptView: rate("install_cta_click", "page_view_chatgpt") } };
   }
   close() { try { this.db.close(); } catch { /* closed */ } }
 }

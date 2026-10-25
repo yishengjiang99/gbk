@@ -46,7 +46,7 @@ export function AgentPanel({ state, focusProposal, setFocus }: { state: Workstat
   return (
     <aside className="ws-agent" aria-label="Agent activity" data-testid="agent-panel">
       <h3>Agent activity</h3>
-      <div className="ws-row"><span className={`ws-pill ${state.agentToolsEnabled ? "on" : "off"}`} data-testid="webmcp-status">{getModelContext() ? "WebMCP" : "Agent tools (shim: window.gbkTools)"} {state.agentToolsEnabled ? "on" : "off"}</span></div>
+      <div className="ws-row"><span className={`ws-pill ${state.agentToolsEnabled ? "on" : "off"}`} data-testid="webmcp-status">{getModelContext() ? "WebMCP" : "Agent tools (shim: window.gbkTools)"} {state.agentToolsEnabled ? "on" : "off"}</span><a className="ws-link" href="/chatgpt" target="_blank" rel="noopener" data-testid="chatgpt-link">Use GBK from ChatGPT or other AI apps</a></div>
       <div className="ws-kv"><b>Last tool</b><span data-testid="last-tool">{lastAgent ? `${lastAgent.action} ${lastAgent.ok ? "✓" : "✗"} ${lastAgent.detail ?? ""}` : "–"}</span></div>
       <div className="ws-kv"><b>Last action</b><span>{last ? `${last.source}: ${last.action}` : "–"}</span></div>
       <div className="ws-kv"><b>Selection</b><span>{state.project.selection.endTick > state.project.selection.startTick ? `ticks ${state.project.selection.startTick}–${state.project.selection.endTick}, ${state.project.selection.noteIds.length} notes` : "none"}</span></div>

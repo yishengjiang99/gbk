@@ -36,7 +36,10 @@ test("static pages render with SEO tags, footer links and normal scrolling", asy
 
 test("install button appears only when CHATGPT_PLUGIN_URL is set", async () => {
   const s = await startServer(new ScriptModel([() => reply("x")]), { CHATGPT_PLUGIN_URL: "https://chatgpt.com/apps/gbk" });
-  try { assert.match(await (await fetch(`${s.base}/chatgpt`)).text(), /href="https:\/\/chatgpt.com\/apps\/gbk"[^>]*>Install in ChatGPT/); }
+  try {
+    assert.match(await (await fetch(`${s.base}/chatgpt`)).text(), /href="\/chatgpt\/install"[^>]*>Install in ChatGPT/);
+    assert.equal((await fetch(`${s.base}/chatgpt/install`, { redirect: "manual" })).headers.get("location"), "https://chatgpt.com/apps/gbk");
+  }
   finally { await s.app.close(); }
 });
 

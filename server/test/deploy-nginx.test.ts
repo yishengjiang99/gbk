@@ -15,7 +15,7 @@ test("deploy/nginx.conf keeps HTTPS: 443 ssl, cert paths, port-80 redirect; no k
   for (const s of ["listen 443 ssl;", "listen [::]:443 ssl;", "ssl_certificate /etc/letsencrypt/live/compose.grepawk.com/fullchain.pem;", "ssl_certificate_key /etc/letsencrypt/live/compose.grepawk.com/privkey.pem;", "return 301 https://$host$request_uri;"])
     assert.ok(conf.includes(s), s);
   assert.ok(!/BEGIN [A-Z ]*PRIVATE KEY/.test(conf));
-  assert.ok(conf.includes("chatgpt(/gallery"), "gallery paths proxied");
+  assert.ok(conf.includes("chatgpt(/install|/gallery"), "install + gallery paths proxied");
 });
 
 test("deploy.sh installs nginx only through install-nginx.sh", () => {

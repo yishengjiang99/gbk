@@ -12,6 +12,18 @@ AudioWorklet, MIDI file playback and live input, and offline WAV rendering.
 The explorer UI for SF2 data and MIDI files is the manual side of the same
 workstation.
 
+## GBK Composer for ChatGPT
+
+GBK Composer is also a ChatGPT plugin and a remote MCP server (`https://compose.grepawk.com/mcp`, no auth required).
+Describe a piece in chat and GBK writes it as editable MIDI. You can then revise one passage at a time (revision-safe
+edits), view it in an in-chat piano-roll player, and render WAV + MIDI. Rendering happens in your browser (player
+or Studio) or headlessly on GBK's server for clients without a browser. New compositions are private and need no
+account; optional Google/GitHub sign-in lets you claim them.
+
+- Landing page and install notes: <https://compose.grepawk.com/chatgpt>
+- Demo gallery (engine-made pieces with audio, piano roll, and downloads): <https://compose.grepawk.com/chatgpt/gallery>
+- Plugin package: [`plugins/gbk-composer/`](plugins/gbk-composer/). Launch docs: [`docs/launch/`](docs/launch/).
+
 ## High-Level Modules
 
 ### Master output

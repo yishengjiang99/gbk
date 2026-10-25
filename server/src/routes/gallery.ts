@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { Config } from "../config.ts";
+import type { FunnelStore } from "../persistence/funnel.ts";
 import { galleryDir, loadGallery, pianoRollSvg, type GalleryDemo } from "../gallery.ts";
 import { PAGE_CSS, footerLinks } from "./pages.ts";
 
@@ -51,8 +52,9 @@ ${demos.length ? demos.map(demoHtml).join("") : "<p>No demos built yet. Run scri
 <p><a class="cta" href="/chatgpt">Compose something like this with ChatGPT</a></p></main><footer><nav>${footerLinks()}</nav></footer></body></html>`;
 }
 
-export function galleryRoutes(app: FastifyInstance, cfg: Config) {
+export function galleryRoutes(app: FastifyInstance, cfg: Config, funnel?: FunnelStore) {
   app.get("/chatgpt/gallery", async (_req, reply) => {
+    funnel?.bump("page_view_gallery");
     const m = loadGallery(cfg.dataDir);
     return reply.type("text/html; charset=utf-8").header("cache-control", "public, max-age=300").send(galleryHtml(m?.demos ?? [], cfg.publicOrigin));
   });
