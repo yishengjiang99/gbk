@@ -24,8 +24,8 @@ Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.y
 | Inbox/DMs | placeholder (P4) |
 | Signing | `DEVELOPMENT_TEAM` 83D36RPMUM in project.yml; CI builds with `CODE_SIGNING_ALLOWED=NO` |
 | App icon | approved by Yisheng (light-blue gradient, #2d6a93 note); keep as is |
-| Release | `.github/workflows/ios-release.yml` (manual TestFlight, mirrors finalcut; secrets not set yet, never run) |
-| App Store listing | `docs/asc/`: metadata (name, subtitle, description, keywords, URLs), privacy label, content rights, age rating, review notes (reviewer login), 2 x 6.9" screenshots from mockups. compose.grepawk.com /privacy, /support, /terms all 200. Bundle ID com.grepawk.gbk not registered (no ASC key usable from the box; gbk repo has no ASC secrets) |
+| Release | `.github/workflows/ios-release.yml`: manual TestFlight, automatic signing via ASC API key (`-allowProvisioningUpdates`), no p12/profile; build number = run_number; `ITSAppUsesNonExemptEncryption=NO`. Bundle switched to `com.grepawk.moviefone` (2026-10-25, Yisheng's call) to match ASC app 6826906431. Blocked: ASC issuer ID not found on the box, so the key can't authenticate and `APP_STORE_CONNECT_ISSUER_ID` isn't set |
+| App Store listing | `docs/asc/`: metadata (name, subtitle, description, keywords, URLs), privacy label, content rights, age rating, review notes (reviewer login), 2 x 6.9" screenshots from mockups. compose.grepawk.com /privacy, /support, /terms all 200. Bundle ID is com.grepawk.moviefone (matches the ASC record); com.grepawk.gbk no longer used |
 | CI | `ios.yml` (simulator build + tests, light/dark snapshots as `ios-snapshots` artifact) green on b752fff: https://github.com/yishengjiang99/gbk/actions/runs/40225529455 |
 
 ### Doc vs prod (checked 2026-10-25 against prod 44b3be2)
