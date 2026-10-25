@@ -16,6 +16,7 @@ import { ConversationStore } from "./persistence/conversations.ts";
 import { ShareStore } from "./persistence/shares.ts";
 import { AgentHub } from "./bridge/websocket.ts";
 import { healthRoutes } from "./routes/health.ts";
+import { pricingRoutes, WaitlistStore } from "./routes/pricing.ts";
 import { pageRoutes, openaiChallengeRoute } from "./routes/pages.ts";
 import { reviewerRoutes } from "./routes/reviewer.ts";
 import { configRoutes } from "./routes/config.ts";
@@ -65,6 +66,8 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   configRoutes(app, cfg);
   const funnel = new FunnelStore(persist ? join(cfg.dataDir, "analytics.sqlite") : ":memory:");
   pageRoutes(app, cfg, funnel);
+  const proWaitlist = new WaitlistStore(persist ? join(cfg.dataDir, "pro-waitlist.sqlite") : ":memory:");
+  pricingRoutes(app, cfg, sessions, accounts, proWaitlist);
   funnelRoutes(app, cfg, sessions, funnel);
   galleryRoutes(app, cfg, funnel);
   openaiChallengeRoute(app, cfg.openaiAppsChallenge);
@@ -97,7 +100,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
   const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); sessions.close(); } };
+    close: async () => { clearInterval(pruneTimer); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);
