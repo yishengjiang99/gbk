@@ -106,18 +106,27 @@ def ensure_sub(gid, s):
     if not [l for l in get_all(f"/v1/subscriptions/{sid}/subscriptionLocalizations") if l["attributes"]["locale"] == LOCALE]:
         create("subscriptionLocalizations", {"locale": LOCALE, "name": s["loc"]["displayName"], "description": s["loc"]["description"]},
                {"subscription": rel("subscriptions", sid)})
+    # Availability must exist before a USA price (else 409 UNSUPPORTED_TERRITORY).
+    if fresh or not (api("GET", f"/v1/subscriptions/{sid}/subscriptionAvailability", ok=(200, 404)) or {}).get("data"):
+        create("subscriptionAvailabilities", {"availableInNewTerritories": True},
+               {"subscription": rel("subscriptions", sid), "availableTerritories": {"data": territories()}})
     if fresh or not get_all(f"/v1/subscriptions/{sid}/prices?filter[territory]=USA"):
         pp = price_point(f"/v1/subscriptions/{sid}/pricePoints", s["price"])
         create("subscriptionPrices", {"preserveCurrentPrice": False}, {"subscription": rel("subscriptions", sid),
                "subscriptionPricePoint": rel("subscriptionPricePoints", pp), "territory": rel("territories", "USA")})
-        # Other storefronts: ASC auto-equalizes from the USA base price when no manual price is set.
-    if fresh:
-        create("subscriptionAvailabilities", {"availableInNewTerritories": True},
-               {"subscription": rel("subscriptions", sid), "availableTerritories": {"data": territories()}})
+    # Subscriptions stay MISSING_METADATA until every available territory has a price: fill from USA equalizations.
+    have = {x["relationships"]["territory"]["data"]["id"] for x in get_all(f"/v1/subscriptions/{sid}/prices?include=territory&limit=200")}
+    if len(have) < 150:
+        usa = price_point(f"/v1/subscriptions/{sid}/pricePoints", s["price"])
+        for e in get_all(f"/v1/subscriptionPricePoints/{usa}/equalizations?include=territory&limit=200"):
+            t = e["relationships"]["territory"]["data"]["id"]
+            if t in have: continue
+            create("subscriptionPrices", {"preserveCurrentPrice": False}, {"subscription": rel("subscriptions", sid),
+                   "subscriptionPricePoint": rel("subscriptionPricePoints", e["id"]), "territory": rel("territories", t)})
     if s["trial"] and not get_all(f"/v1/subscriptions/{sid}/introductoryOffers"):
         create("subscriptionIntroductoryOffers", {"duration": "ONE_WEEK", "offerMode": "FREE_TRIAL", "numberOfPeriods": 1},
-               {"subscription": rel("subscriptions", sid)})
-    if fresh: screenshot("subscriptionAppStoreReviewScreenshots", "subscription", "subscriptions", sid)
+               {"subscription": rel("subscriptions", sid), "territory": rel("territories", "USA")})
+    if fresh or not (api("GET", f"/v1/subscriptions/{sid}/appStoreReviewScreenshot", ok=(200, 404)) or {}).get("data"): screenshot("subscriptionAppStoreReviewScreenshots", "subscription", "subscriptions", sid)
     return sid
 
 def ensure_iap(p):
