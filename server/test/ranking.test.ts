@@ -155,3 +155,11 @@ test("ranking v2 / phase 6: offline eval — AUC per head, NDCG@10 per session, 
   const out = execFileSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--import", "tsx/esm", "scripts/rank-eval.ts", "--db", fx.file, "--json"], { cwd: new URL("../..", import.meta.url).pathname, encoding: "utf8" });
   assert.deepEqual(JSON.parse(out).models.map((m: { name: string }) => m.name), ["promoted", "heuristic"]);
 });
+
+test("ranking v2 / phase 7: account deletion removes every impression column (incl. scroll_v, new actions)", () => {
+  const fx = fixture(); const id = fx.song({ owner: "o" });
+  fx.events.insert([{ actor: "u1", session: "s1", share_id: id, dwell_ms: 1, listen_ratio: 0, completed: false, fast_skip: true, replay: false, actions: ["like", "profile_tap"], position: 0, feed: "for_you", model_version: "v", client: "ios", ts: 0, scroll_v: 1234 }]);
+  assert.equal(fx.events.countActor("u1"), 1); fx.social.purgeUser("u1"); assert.equal(fx.events.countActor("u1"), 0);
+  fx.events.insert([{ actor: "u2", session: "s1", share_id: id, dwell_ms: 1, listen_ratio: 0, completed: false, fast_skip: true, replay: false, actions: [], position: 0, feed: "for_you", model_version: "v", client: "web", ts: 0, scroll_v: 5 }]);
+  fx.events.purgeActor("u2"); assert.equal(fx.events.countActor("u2"), 0);
+});

@@ -1,50 +1,51 @@
-# For you ranking
+# For you ranking (v2)
 
-Code: `server/src/ranking/ranker.ts`, `server/src/persistence/events.ts`, `server/src/routes/events.ts`, client `src/components/social/impressions.ts`.
+Code: `server/src/ranking/ranker.ts` (candidates, model, re-rank, training), `server/src/ranking/train-worker.ts` (nightly worker), `server/src/ranking/eval.ts` + `scripts/rank-eval.ts` (offline eval), `server/src/persistence/events.ts`, `server/src/routes/events.ts`, clients `src/components/social/impressions.ts` and `ios/GBKComposer/Core/Analytics/ImpressionLogger.swift`. Issue #110.
 
 ## Signals (impressions)
-- The client logs one impression per song shown in the feed. It sends them with `navigator.sendBeacon` (fetch keepalive as fallback) to `POST /api/events`, flushing on pagehide or visibility change and every 20 events.
-- Every impression carries the `model_version` of the feed response that produced it, plus `position`, `feed`, `client`, and `session` (a per-tab random id).
-- An impression records `dwell_ms`, `listen_ratio`, `completed`, `fast_skip` (default: dwell < 2 s), and `actions` (rate, comment, remix, open_studio).
-- Actor: the signed-in user id, else the `gbk_gid` cookie or the `x-gbk-install` header (iOS).
+- One impression per song the user settled on in the feed, batched to `POST /api/events` (web: `navigator.sendBeacon`, fetch keepalive fallback; iOS: `client: "ios"`). Flush every 10 events, every 20 s, and when the page/app is hidden.
+- Each carries `model_version` (of the feed response), `position`, `feed`, `client`, `session` (per tab / per launch), `dwell_ms`, `listen_ratio`, `completed`, `fast_skip` (default dwell < 2 s), `replay`, `actions`, and optional `scroll_v`.
+- `actions` (max `MAX_ACTIONS = 8` per event; unknown ones dropped): `rate`, `comment`, `remix`, `open_studio`, `share`, `like` (a rating of 4+ stars, logged in addition to `rate`), `follow` (reserved: no follow feature yet), `profile_tap` (artist name on a feed card).
+- `scroll_v`: scroll speed when the user left the card, px/s (web) or pt/s (iOS, iOS 18+), clamped 0–`MAX_SCROLL_V = 20000`, column `impressions.scroll_v`. Stored only; not a model feature yet.
+- Actor: signed-in user id, else the `gbk_gid` cookie, else the `x-gbk-install` header (iOS guests).
 - Limits: 50 events per batch, 30 batches/min per actor, 120/min per IP. Origin is checked for cookie posts.
-- Retention: 60 days (nightly prune). Events are deleted with the account (`purgeUser`).
+- Retention: 60 days (nightly prune). Deleted with the account (`SocialStore.purgeUser` deletes every impression row of the actor, all columns).
 
-## Pipeline (in-process; song table cached up to 30 s, invalidated when the public set changes)
-1. **Candidates.** Every public non-`wip` song, top 1000 by score. Features per song:
-   - `affinity`: decayed (14 d) per-actor preference over tags, labels, artist, and instrument family.
-   - `coeng`: item-item co-engagement from other actors who engaged with what this actor liked.
-   - `popularity`: score / max score.
-   - `freshness`: half-life of 48 h.
-   - `session`: same as affinity, current session only.
-   - `seen`.
-   - Cold start (no history) falls back to popularity + freshness.
-2. **Value score.** `w·f`. The weights are `HEURISTIC` (version `heur-2`) until a nightly model exists.
-3. **Nightly training (03:30 server time).** Pointwise logistic regression over the last 30 days of impressions (≤ 20k).
-   - Label: completed or any action counts as positive; a fast skip or short dwell counts as negative.
-   - Training needs at least `MIN_TRAIN = 500` impressions. The model is stored in `rank_models` with version `lr-YYYYMMDD` and holdout AUC.
-4. **Re-rank.**
-   - Epsilon exploration `EPSILON = 0.12`: a slot goes to a random lower-ranked song.
-   - Diversity: max `MAX_AUTHOR_RUN = 2` songs by the same artist in a row, and max `MAX_LABEL_RUN = 3` with the same first label.
-   - The viewer's own songs are demoted.
-5. **Session-aware next item.** Pass `?session=<id>` to `/api/feed`. Fast skips and long dwell within the session steer the next pages right away; there is no need to wait for training.
-6. **Paging.** The ranked list is deterministic for a seed. The cursor `{r:1,p,sd}` carries offset and seed, so pages never repeat or drop songs.
+## Serving pipeline (`Ranker.rank`, in-process)
+Catalog: public non-`wip` songs, top `CATALOG_MAX = 5000` by score plus every song published in the last 48 h; cached ≤ 30 s and invalidated when the public set changes.
 
-Filtered feeds (`label`, `tag`, or a non-`for_you` sort) keep the original SQL path and return `model_version` `heur-1` / `<sort>-1`.
+1. **Actor context, point-in-time** (`asOf`): the actor's impressions before `asOf` (≤ 500, 60 d) give
+   - `affinity`: 14-day-decayed preference over tags, labels, artist, instrument family;
+   - `session`: the same over the current session (unchanged from v1);
+   - `seen`: prior impressions of the song;
+   - `coeng`: songs positively engaged by other actors who engaged what this actor liked (30 d).
+   Plus `popularity` (score / max) and `freshness` (48 h half-life). `FEATURES = [affinity, coeng, popularity, freshness, session, seen]`.
+2. **Candidates: named sources with quotas** (`QUOTAS`): `coeng` 200, `affinity` 250, `artists` 150 (artists the actor engaged positively, liked or followed), `trending` 300 (score), `fresh` (all songs < 48 h, always in, never cut by the cap), `cold` 400 (popularity + freshness, only for actors with no history). Union capped at `POOL_MAX = 1000` (fresh first), backfilled by score. `rank()` returns a song → sources map for debugging; it is not logged.
+3. **Session dedup.** With `?session=` (iOS), songs this actor already has impressions for in that session are excluded. Web sends no session, so this is a no-op there.
+4. **Value.** Before any model exists: `HEURISTIC · f` (version `heur-2`). With a promoted model (`lr2-YYYYMMDD`): `P(complete) · min(duration_s, 180)/180 − SKIP_LAMBDA · P(fast_skip)`, `SKIP_LAMBDA = 1.0`. Duration comes from `project_json` (last note end through the tempo map), median duration as fallback. The viewer's own songs get −0.5.
+5. **Exploration + cold start.** `EPSILON = 0.12` of slots go to a random lower-ranked song. In every block of `COLD_BLOCK = 8` slots one goes to a cold-start song (< 48 h old, < `COLD_K = 50` impressions) if one is left; it uses that block's exploration draw (or, if none came, the block's last slot, repaid from the next draw), so it is not on top of the epsilon budget.
+6. **Variety re-rank (greedy).** At most `MAX_AUTHOR_RUN = 2` in a row by one artist (with a feasibility look-ahead), at most `MAX_LABEL_RUN = 3` in a row sharing **any** label, and near-duplicates (same owner and same remix source or same title) at least `NEAR_DUP_GAP = 50` apart, i.e. at most one per page. The near-dup gap is relaxed first if nothing else fits.
+7. **Paging.** The cursor `{r:1, p, sd, t}` carries offset, seed and the first page's time `t`. Later pages rank as of `t` (catalog, features, session-seen set), so pages never duplicate or drop songs. Cursors without `t` rank as of now.
 
-## Metrics
-`GET /api/admin/metrics?days=7` (admin only). It returns overall and `by_model` figures:
-- impressions, sessions, actors
-- avg dwell, avg watch time per session
-- completion rate, skip rate, action rate
-- D1 retention (actors seen again on a later day)
+Filtered feeds (`label`, `tag`, or a non-`for_you` sort) keep the SQL path and return `model_version` `heur-1` / `<sort>-1`.
 
-Compare models by `model_version`.
-
-## Privacy
-The privacy page (`/privacy`, section "Listening activity and your feed") says that listening activity personalizes the feed. It is not sold or shared with advertisers, it is kept for 60 days, and it is deleted with the account.
-
-> GBDT: not used. Evaluate a GBDT head with `scripts/rank-eval.ts` once there are more than 20k impressions.
+## Training (nightly, 03:30 server time)
+- Runs in a `worker_thread` (`trainInWorker`; bundle `server/dist/rank-train.mjs`) with its own `DatabaseSync` on the shares file, once per day (last-run date guard). On success the main `Ranker` reloads the promoted model. In-memory databases (tests) train in-process.
+- Data: last 30 days, ≤ 20k impressions, at least `MIN_TRAIN = 500`. Features are **point-in-time**: computed as of the impression's hour (only earlier impressions, both for history and co-engagement) with the impression's own session; cached per (actor, session, hour). Training duration is logged (`rank_train` log event, `ms`).
+- Labels: complete = `completed` or `replay` or `listen_ratio ≥ 0.9`; fast skip = `fast_skip` (dwell < 2 s).
+- Two pointwise logistic-regression heads on the same features: P(complete), P(fast skip).
+- **Time-split holdout:** the last `HOLDOUT_DAYS = 3` are held out; the rest trains. `rank_models.auc` stores the holdout AUC of the complete head (the skip head's is in the stored model as `auc_skip`).
+- **Promotion gate:** every candidate is stored (`rank_models.promoted` 0/1). It is promoted only if there is no promoted lr2 model yet, or both heads' holdout AUC are ≥ the promoted model's AUC on the same holdout (HEURISTIC and legacy single-head rows count as no model). Startup loads the latest promoted model.
+- GBDT: not used. Evaluate a GBDT head with `scripts/rank-eval.ts` once there are more than 20k impressions.
 
 ## Offline eval
-`node --disable-warning=ExperimentalWarning --import tsx/esm scripts/rank-eval.ts --db /var/lib/gbk-composer/shares.sqlite --from 2026-10-20 --to 2026-10-25 [--json]` (read-only; defaults: last 3 days, `$COMPOSER_DATA_DIR/shares.sqlite`). It compares the promoted model, the latest candidate and HEURISTIC on impressions in the range, with point-in-time features: holdout AUC per head, NDCG@10 per session (replays each session's shown songs re-ranked by the model, gain = `signal()`), and the share of < 48 h songs in the top 10. Code: `server/src/ranking/eval.ts`.
+`node --disable-warning=ExperimentalWarning --import tsx/esm scripts/rank-eval.ts --db /var/lib/gbk-composer/shares.sqlite --from 2026-10-20 --to 2026-10-25 [--json]` (read-only; defaults: last 3 days, `$COMPOSER_DATA_DIR/shares.sqlite`). It compares the promoted model, the latest candidate and HEURISTIC on impressions in the range with point-in-time features:
+- AUC per head (P(complete), P(fast skip));
+- NDCG@10 per session: each session's shown songs re-ranked by the model's value, gain = `signal()`;
+- share of < 48 h songs in the top 10.
+
+## Online metrics
+`GET /api/admin/metrics?days=7` (admin only), unchanged: impressions, sessions, actors, avg dwell, watch time per session, completion/skip/action rates, D1 retention, and `by_model`.
+
+## Privacy
+The privacy page (`/privacy`, "Listening activity and your feed") lists what is recorded: song, play time, finished/skipped, scroll speed, and actions (rating, liking, commenting, following, sharing, artist profile taps). It is used only to personalize the feed and measure feed quality in aggregate, not sold or shared with advertisers, kept at most 60 days, and deleted with the account.
