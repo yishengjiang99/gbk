@@ -3,10 +3,12 @@
 This document collects the metadata, test prompts, privacy statement, and
 manual steps needed to submit GBK Composer for a public plugin listing.
 
-**Status: not submitted. Public approval has NOT occurred.** Nothing in this
-document should be read as a claim that GBK Composer is listed, approved, or
-installable from any public directory. The steps below that require the
-human account owner have not been performed by preparing this packet.
+**Status (2026-10-24): UPLOADED only.** The owner uploaded a plugin ZIP built
+from `plugins/gbk-composer/` to the OpenAI portal. It has not been confirmed as
+submitted for review, and it is NOT approved, published, or listed in any
+public directory. Which build was uploaded (main `ea1b53c` or the PR #94
+rebuild, now `17edba2`) is unconfirmed; see
+[launch/portal-package-delta.md](launch/portal-package-delta.md).
 
 ## Submission metadata
 
@@ -103,7 +105,7 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 ### Negative test cases (3)
 
 1. Prompt: "Write lyrics for a summer pop song and have a singer perform them." — Lyrics and sung vocals are out of scope: GBK writes instrumental MIDI only.
-2. Prompt: "Delete all of my GBK compositions." — There is no delete tool; the plugin must not claim to delete or modify unrelated data.
+2. Prompt: "Delete all of my GBK compositions." — Bulk deletion is not supported: `gbk_delete_composition` deletes only one account-free composition at a time with its edit key, so the plugin must not claim to delete all compositions or modify unrelated data.
 3. Prompt: "What's the weather in Paris tomorrow?" — Unrelated request; the plugin should not be invoked.
 
 ### Release notes
@@ -115,6 +117,7 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 | Tool | readOnly | openWorld | destructive | Justification |
 | --- | --- | --- | --- | --- |
 | `gbk_get_capabilities` | true | false | false | Only returns static capability data; changes nothing and calls nothing outside GBK. |
+| `gbk_list_soundfonts` | true | false | false | Lists the SoundFont catalog this deployment renders with; changes nothing. (Added after the uploaded ZIP; server-side only.) |
 | `gbk_create_composition` | false | false | false | Creates a new private composition (in the user's GBK account, or account-free with a private access key); it overwrites nothing and is not visible to anyone else. |
 | `gbk_get_composition` | true | false | false | Reads one of the user's compositions; no changes. |
 | `gbk_list_compositions` | true | false | false | Lists the user's own compositions; no changes. |

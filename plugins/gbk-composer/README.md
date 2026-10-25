@@ -62,14 +62,18 @@ clients using the declaration in `mcp.json`.
 | `gbk_get_composition` | Inspect a composition's sections, tracks, notes, and revision. |
 | `gbk_list_compositions` | List a signed-in user's compositions, or the one project an `accessToken` authorizes. |
 | `gbk_edit_composition` | Revision-safe typed edits (parts, notes, orchestration, CC curves, mix, tempo, sections). |
-| `gbk_render_composition` | Render WAV in the user's browser (Studio tab or in-chat player) plus server-exported MIDI. |
+| `gbk_render_composition` | Render a validated WAV plus a Standard MIDI file: on GBK's server when no Studio tab is connected (Codex, account-free projects), or in a connected Studio tab. Optional `soundFont`. |
+| `gbk_list_soundfonts` | List the SoundFonts this deployment can render with (pass an id as `soundFont`). |
 | `gbk_get_render_status` | Poll a render job; returns validation data and artifact references. |
+| `gbk_cancel_render` | Cancel a queued or running render job; no partial artifact is published. |
 | `gbk_get_artifacts` | Authorized, expiring download URLs for WAV/MIDI artifacts. |
 | `gbk_open_workstation` | Private deep link that opens the exact project in GBK Studio (read-only capability in the URL fragment for account-free projects). |
 | `gbk_publish_composition` | Publish a composition publicly — only on the user's explicit request. |
 | `gbk_delete_composition` | Permanently delete your own account-free project (edit key required). |
 | `gbk_claim_composition` | Move an account-free project into your signed-in GBK account. |
-| `gbk_show_composition_ui` | Show the interactive player and piano-roll component in ChatGPT. |
+| `gbk_show_composition_ui` | Show the interactive player and piano-roll component in ChatGPT; its Render button renders the WAV in the user's browser. |
+
+App-only (called by the in-chat player, hidden from the model): `gbk_widget_render_start`, `gbk_widget_render_finish`.
 
 ## Auth summary
 
