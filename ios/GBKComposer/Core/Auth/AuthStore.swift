@@ -32,26 +32,51 @@ enum Keychain {
 @MainActor
 final class AuthStore: ObservableObject {
     static let shared = AuthStore()
-    static let accessKey = "auth.accessToken"
-    static let refreshKey = "auth.refreshToken"
+    nonisolated static let accessKey = "auth.accessToken"
+    nonisolated static let refreshKey = "auth.refreshToken"
 
     @Published private(set) var accessToken: String?
+    @Published private(set) var me: Me?
     var isSignedIn: Bool { accessToken != nil }
 
     init() { accessToken = Keychain.get(Self.accessKey) }
 
-    /// Thread-safe read for APIClient.
     nonisolated static func currentAccessToken() -> String? { Keychain.get(accessKey) }
+    nonisolated static func currentRefreshToken() -> String? { Keychain.get(refreshKey) }
 
-    func store(accessToken: String, refreshToken: String?) {
-        Keychain.set(accessToken, for: Self.accessKey)
-        Keychain.set(refreshToken, for: Self.refreshKey)
-        self.accessToken = accessToken
+    func store(_ pair: TokenPair) {
+        Keychain.set(pair.accessToken, for: Self.accessKey)
+        if let r = pair.refreshToken { Keychain.set(r, for: Self.refreshKey) }
+        accessToken = pair.accessToken
+        if let m = pair.me { me = m }
     }
 
-    func signOut() {
+    /// `GET /api/me` (live). Signs out locally on 401.
+    func loadMe(client: APIClient = .shared) async {
+        guard isSignedIn else { return }
+        do { me = try await client.send(Endpoints.me, as: Me.self) }
+        catch APIError.unauthenticated { clearLocal() }
+        catch {}
+    }
+
+    /// `POST /api/auth/logout` (iOS-1; ignored while 404), then local clear.
+    func signOut() async {
+        try? await AuthServices.current.logout()
+        await PushManager.shared.disable()
+        clearLocal()
+    }
+
+    /// `DELETE /api/me` (iOS-1). Throws `APIError.notAvailable` until it ships.
+    func deleteAccount() async throws {
+        try await AuthServices.current.deleteAccount()
+        await PushManager.shared.disable()
+        clearLocal()
+    }
+
+    func clearLocal() {
         Keychain.set(nil, for: Self.accessKey)
         Keychain.set(nil, for: Self.refreshKey)
         accessToken = nil
+        me = nil
     }
 }

@@ -1,51 +1,147 @@
 import Foundation
 
-/// Mirrors ShareView in server/src (store.view()).
-struct Share: Codable, Identifiable, Hashable {
-    struct ParentRef: Codable, Hashable { let slug: String; let title: String; let owner: String }
+// Shapes from docs/social-api.md (v1), checked against prod (44b3be2).
+// Decoded with APIClient.makeDecoder() (convertFromSnakeCase). Times are epoch milliseconds.
+
+struct User: Codable, Hashable, Identifiable {
+    let handle: String
+    let displayName: String?
+    let avatarUrl: String?
+    let songCount: Int?
+    let ratingAvg: Double?
+    let createdAt: Int64?
+    var id: String { handle }
+}
+
+/// `Me` = User + private fields.
+struct Me: Codable, Hashable {
+    let id: String
+    let handle: String
+    let displayName: String?
+    let avatarUrl: String?
+    let songCount: Int?
+    let ratingAvg: Double?
+    let createdAt: Int64?
+    let dmPolicy: String?
+    let handleChanged: Bool?
+    let isAdmin: Bool?
+
+    var asUser: User {
+        User(handle: handle, displayName: displayName, avatarUrl: avatarUrl, songCount: songCount, ratingAvg: ratingAvg, createdAt: createdAt)
+    }
+}
+
+struct SongMedia: Codable, Hashable {
+    let mp3: String?
+    let wav: String?
+    let midi: String?
+}
+
+/// Piano-roll preview. Prod shape (src/agent/piano-roll-preview.ts):
+/// `{ tracks: [color], lo, hi, end, notes: [[trackIndex, start, length, pitch]] }`.
+/// The doc says `{ notes: [[pitch,start,dur,track]], duration }`; both decode here.
+struct SongPreview: Codable, Hashable {
+    let tracks: [String]?
+    let lo: Double?
+    let hi: Double?
+    let end: Double?
+    let duration: Double?
+    let notes: [[Double]]?
+}
+
+/// Feed item / song detail (`GET /api/feed`, `GET /api/songs/:slug`).
+struct Song: Codable, Hashable, Identifiable {
     let slug: String
     let title: String
-    let owner: String
-    let createdAt: String
-    let updatedAt: String?
-    let `public`: Bool
-    let projectId: String?
-    let parent: ParentRef?
-    let hasMidi: Bool
-    let hasWav: Bool
-    let hasMp3: Bool
-    let forks: Int?
-    /// Present on create/detail responses only.
     let url: String?
+    let author: User
+    let createdAt: Int64
+    let publishedAt: Int64?
+    let labels: [String]
+    let tags: [String]
+    var ratingAvg: Double?
+    var ratingCount: Int
+    var commentCount: Int
+    var playCount: Int
+    let forkCount: Int
+    var myRating: Int?
+    let media: SongMedia?
+    let preview: SongPreview?
+    let promptShared: Bool?
+    let promptText: String?
+    let parentSlug: String?
+    let isMine: Bool
 
     var id: String { slug }
+    var mp3URL: URL? { media?.mp3.flatMap(URL.init(string:)) }
 }
 
-/// One page of feed items. `nextCursor` is reserved for the future /api/feed endpoint.
-struct FeedPage: Codable {
-    let shares: [Share]
-    var nextCursor: String? = nil
+/// Generic cursor page: `{ items: [...], next_cursor }`.
+struct Page<Item: Codable>: Codable {
+    let items: [Item]
+    let nextCursor: String?
+}
+typealias FeedPage = Page<Song>
+
+struct UserProfilePage: Codable {
+    let user: User
+    let songs: [Song]
+    let nextCursor: String?
 }
 
-struct Profile: Codable, Identifiable, Hashable {
-    let user: String
-    let displayName: String?
-    let avatarURL: URL?
-    var id: String { user }
+struct RatingSummary: Codable, Hashable {
+    let ratingAvg: Double?
+    let ratingCount: Int
+    let myRating: Int?
 }
 
-struct Conversation: Codable, Identifiable, Hashable {
+struct Comment: Codable, Hashable, Identifiable {
     let id: String
-    let participants: [String]
-    let lastMessage: Message?
-    let updatedAt: String
+    let author: User
+    let body: String
+    let createdAt: Int64
+    let canDelete: Bool
 }
 
-struct Message: Codable, Identifiable, Hashable {
-    let id: String
-    let conversationId: String
-    let sender: String
-    let text: String
-    let createdAt: String
-    let shareSlug: String?
+struct ReportResult: Codable { let ok: Bool; let id: String? }
+struct OKResult: Codable { let ok: Bool }
+
+struct TagCount: Codable, Hashable { let tag: String; let count: Int }
+struct LabelCount: Codable, Hashable { let label: String; let count: Int }
+struct TopTags: Codable { let tags: [TagCount]; let labels: [LabelCount]? }
+
+/// iOS-1 (specced, not live yet).
+struct TokenPair: Codable {
+    let accessToken: String
+    let tokenType: String?
+    let expiresIn: Int?
+    let refreshToken: String?
+    let me: Me?
 }
+
+struct WebCode: Codable { let code: String; let expiresIn: Int? }
+
+/// P4 (not live). `Message` = `{ id, from: handle, body, share: Song|null, created_at }`.
+struct Message: Codable, Hashable, Identifiable {
+    let id: String
+    let from: String
+    let body: String
+    let share: Song?
+    let createdAt: Int64
+}
+
+/// P4 inbox row: `{ with: User, last: Message, unread, updated_at }`.
+struct Conversation: Codable, Hashable, Identifiable {
+    let with: User
+    let last: Message?
+    let unread: Int
+    let updatedAt: Int64
+    var id: String { with.handle }
+}
+
+/// Fixed label set from the doc.
+enum SongLabel {
+    static let all = ["ambient", "lofi", "classical", "jazz", "electronic", "cinematic", "game", "pop", "experimental", "wip"]
+}
+
+struct APIErrorBody: Codable, Hashable { let code: String?; let message: String? }

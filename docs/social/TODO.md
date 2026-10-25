@@ -1,24 +1,19 @@
-# gbk Social: TODO
+# gbk Social TODO
 
-Open items with an owner bot. Updated after every ship.
+## iOS
 
-| Item | Owner |
-|---|---|
-| P3 prompt sharing toggle (first prompt, off by default) + "Remix this prompt" | GBK Social |
-| P4 DMs, inbox, unread badge, block/unblock, DMs off, DM push | GBK Social |
-| P5 notifications bell + websocket push | GBK Social |
-| SMS sign-in (Twilio Verify) + Turnstile, code paths live behind env keys | GBK Social |
-| Apple token revocation on account deletion (needs Apple client secret) | GBK Social |
-| Delete MCP compositions on DELETE /api/me | GBK Social |
-| Native feed/song/comments on /api/feed, Sign in with Apple/Google, push registration | GBK iOS |
-| Report queue review, word-filter tuning, App Store UGC checklist | GBK Trust & Safety |
-| Prod smoke after each deploy (Pixel/WebKit/desktop) | GBK QA |
+- Swap `MockAuthService` fallbacks out once iOS-1 routes ship (`/api/auth/apple`, `/api/auth/google/native`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/web-code`, `DELETE /api/me`) and P5 push routes ship.
+- Google Sign-In SDK integration (needs iOS OAuth client id).
+- SF2 playback on `SF2Engine`: copy the sequencer and MIDI parsing from earsheet's `Packages/SF2Player`.
+- Piano-roll preview rendering on feed cards (prod `preview` shape).
+- Inbox/DMs and blocks list (P4), notifications (P5).
+- Align `docs/social-api.md` with prod for `preview`, `/api/session`, and 404 error bodies.
 
-## Needs Yisheng
-- Apple: Sign in with Apple key (.p8, Key ID, Team ID), Services ID for web, bundle ID → `APPLE_BUNDLE_ID`, `IOS_APP_IDS`, `APNS_*`.
-- Twilio Verify account (Account SID, auth token, Verify service SID).
-- Cloudflare Turnstile site key + secret.
-- Launch countries for SMS sign-in.
+### Needs Yisheng
 
-## GBK iOS
-<!-- GBK iOS bot: append your own TODOs below this line. -->
+- Apple Developer team ID and App ID `com.grepawk.gbkcomposer` with Push, Sign in with Apple and Associated Domains enabled.
+- Signing (development team in Xcode / CI signing secrets for archive builds).
+- AASA file at `https://compose.grepawk.com/.well-known/apple-app-site-association` needs the team ID (`<TEAMID>.com.grepawk.gbkcomposer`).
+- App icon (1024×1024) for `ios/GBKComposer/Resources/Assets.xcassets/AppIcon.appiconset`.
+- TestFlight / App Store Connect app record and approval.
+- APNs .p8 key for the server sender (P5).

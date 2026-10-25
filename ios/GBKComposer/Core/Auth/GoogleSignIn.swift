@@ -1,11 +1,16 @@
 import Foundation
 
-/// Stub: Google Sign-In SDK is not integrated yet.
+/// Google Sign-In SDK is not integrated yet. Once it is, pass its idToken to
+/// `POST /api/auth/google/native` (iOS-1) via `exchange(idToken:)`.
 enum GoogleSignIn {
-    enum Failure: Error { case notImplemented }
-
     @MainActor
     static func signIn(auth: AuthStore) async throws {
-        throw Failure.notImplemented
+        throw APIError.notAvailable
+    }
+
+    @MainActor
+    static func exchange(idToken: String, auth: AuthStore) async throws {
+        let pair = try await AuthServices.current.exchangeGoogle(idToken: idToken)
+        auth.store(pair)
     }
 }

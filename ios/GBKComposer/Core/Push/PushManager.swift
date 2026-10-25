@@ -29,7 +29,7 @@ enum InstallIdentity {
     }
 }
 
-/// APNs registration. Server registration is stubbed (APIClient.registerPush is a no-op for now).
+/// APNs registration via `AuthServicing` (P5 `/api/push/*`; mock no-op while those 404).
 /// Never prompts on launch; the prompt appears only via `enable()` (an explicit user action).
 @MainActor
 final class PushManager: ObservableObject {
@@ -42,18 +42,18 @@ final class PushManager: ObservableObject {
     static let tokenKey = "push.registeredToken"
 
     private let center: NotificationAuthorizing
-    private let client: APIClient
+    private let service: AuthServicing
     private let defaults: UserDefaults
     private let registerRemote: () -> Void
     private let unregisterRemote: () -> Void
 
     init(center: NotificationAuthorizing = SystemNotificationCenter(),
-         client: APIClient = .shared,
+         service: AuthServicing = AuthServices.current,
          defaults: UserDefaults = .standard,
          registerRemote: @escaping () -> Void = { UIApplication.shared.registerForRemoteNotifications() },
          unregisterRemote: @escaping () -> Void = { UIApplication.shared.unregisterForRemoteNotifications() }) {
         self.center = center
-        self.client = client
+        self.service = service
         self.defaults = defaults
         self.registerRemote = registerRemote
         self.unregisterRemote = unregisterRemote
@@ -96,7 +96,7 @@ final class PushManager: ObservableObject {
         defaults.set(false, forKey: Self.enabledKey)
         unregisterRemote()
         if let token = defaults.string(forKey: Self.tokenKey) {
-            try? await client.unregisterPush(installId: InstallIdentity.installIdString, token: token)
+            try? await service.unregisterPush(installId: InstallIdentity.installIdString)
             defaults.removeObject(forKey: Self.tokenKey)
         }
     }
@@ -104,14 +104,11 @@ final class PushManager: ObservableObject {
     func didRegister(deviceToken: Data) async {
         guard enabledInApp else { return }
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
-        let previous = defaults.string(forKey: Self.tokenKey)
         let installId = InstallIdentity.installIdString
         do {
-            try await client.registerPush(installId: installId, token: hex, environment: Self.apnsEnvironment)
+            try await service.registerPush(installId: installId, token: hex, environment: Self.apnsEnvironment)
             defaults.set(hex, forKey: Self.tokenKey)
-            if let previous, previous != hex {
-                try? await client.unregisterPush(installId: installId, token: previous)
-            }
+            // Server upserts by installId, so a rotated token replaces the previous one.
         } catch {
             // Retried on the next foreground via refresh().
         }

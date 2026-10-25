@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 
 /// Plays the visible feed item's mp3 and preloads the next one.
+/// TODO: SF2Engine (sf2player-swift) playback later; sequencer + MIDI parsing to be copied from earsheet's Packages/SF2Player.
 @MainActor
 final class FeedPlayer: ObservableObject {
     @Published private(set) var currentSlug: String?
@@ -10,6 +11,8 @@ final class FeedPlayer: ObservableObject {
     private let player = AVPlayer()
     private var preloaded: [String: AVPlayerItem] = [:]
     private var endObserver: NSObjectProtocol?
+    /// Called once per new item started (used to count plays).
+    var onStart: ((String) -> Void)?
 
     nonisolated static func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
@@ -26,6 +29,7 @@ final class FeedPlayer: ObservableObject {
             let item = preloaded.removeValue(forKey: slug) ?? AVPlayerItem(url: url)
             player.replaceCurrentItem(with: item)
             currentSlug = slug
+            onStart?(slug)
             if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
             endObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
@@ -45,7 +49,7 @@ final class FeedPlayer: ObservableObject {
         let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 5
-        preloaded = [slug: item] // keep only one preloaded item
+        preloaded = [slug: item]
         Task { _ = try? await asset.load(.isPlayable) }
     }
 

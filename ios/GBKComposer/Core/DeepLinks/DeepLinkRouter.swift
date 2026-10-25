@@ -4,7 +4,8 @@ import SwiftUI
 enum DeepLink: Equatable {
     case share(slug: String)   // /s/:slug
     case user(name: String)    // /u/:user
-    case thread(id: String)    // /t/:id
+    case tag(name: String)     // /t/:tag (doc: /t is a tag, not a thread)
+    case inbox(handle: String) // /inbox/:handle
 
     static let host = "compose.grepawk.com"
 
@@ -16,7 +17,8 @@ enum DeepLink: Equatable {
         switch parts[0] {
         case "s": self = .share(slug: value)
         case "u": self = .user(name: value)
-        case "t": self = .thread(id: value)
+        case "t": self = .tag(name: value)
+        case "inbox": self = .inbox(handle: value)
         default: return nil
         }
     }
@@ -26,14 +28,16 @@ enum DeepLink: Equatable {
 final class DeepLinkRouter: ObservableObject {
     @Published var selectedTab: AppTab = .feed
     @Published var pending: DeepLink?
+    /// Handles pushed on the Feed tab's NavigationStack.
+    @Published var feedPath: [String] = []
 
     func handle(_ url: URL) {
         guard let link = DeepLink(url: url) else { return }
         pending = link
+        if case .user(let handle) = link { feedPath = [handle] }
         switch link {
-        case .share: selectedTab = .feed
-        case .user: selectedTab = .profile
-        case .thread: selectedTab = .inbox
+        case .share, .user, .tag: selectedTab = .feed
+        case .inbox: selectedTab = .inbox
         }
     }
 }

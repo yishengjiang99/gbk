@@ -7,7 +7,11 @@ struct RootTabView: View {
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
-            FeedView()
+            NavigationStack(path: $router.feedPath) {
+                FeedView()
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationDestination(for: String.self) { UserProfileView(handle: $0) }
+            }
                 .tabItem { Label("Feed", systemImage: "play.rectangle.on.rectangle") }
                 .tag(AppTab.feed)
             StudioWebView()

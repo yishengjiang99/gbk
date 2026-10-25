@@ -1,9 +1,13 @@
 import SwiftUI
 
 struct FeedCardView: View {
-    let share: Share
+    let song: Song
     let isPlaying: Bool
     let onTap: () -> Void
+    let onRated: (Song) -> Void
+    let onComments: () -> Void
+    let onReport: () -> Void
+    let onTag: (String) -> Void
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -16,24 +20,45 @@ struct FeedCardView: View {
                         .symbolEffect(.variableColor.iterative, isActive: isPlaying)
                 }
                 .shadow(color: Theme.accent.opacity(0.15), radius: 12, y: 6)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(share.title).font(.title2.bold()).foregroundStyle(Theme.accent)
-                Text("@\(share.owner)").font(.subheadline).foregroundStyle(.secondary)
-                if let parent = share.parent {
-                    Label("Remix of \(parent.title)", systemImage: "arrow.triangle.branch")
-                        .font(.caption).foregroundStyle(.secondary)
+                .onTapGesture(count: 2) { Task { await quickLove() } }
+                .onTapGesture(perform: onTap)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(song.title).font(.title2.bold()).foregroundStyle(Theme.accent)
+                NavigationLink(value: song.author.handle) {
+                    Text("@\(song.author.handle)").font(.subheadline)
                 }
-                if let forks = share.forks, forks > 0 {
-                    Label("\(forks) remixes", systemImage: "arrow.triangle.branch").font(.caption)
-                        .foregroundStyle(Theme.accent)
+                .foregroundStyle(.secondary)
+                if !(song.labels.isEmpty && song.tags.isEmpty) {
+                    HStack(spacing: 6) {
+                        ForEach(song.labels, id: \.self) { Text($0).font(.caption.bold()).padding(4)
+                            .background(Capsule().fill(Theme.accent.opacity(0.15))) }
+                        ForEach(song.tags, id: \.self) { tag in
+                            Button("#\(tag)") { onTag(tag) }.font(.caption)
+                        }
+                    }
                 }
+                HStack(spacing: 16) {
+                    RatingView(song: song, onChange: onRated)
+                    Button(action: onComments) { Label("\(song.commentCount)", systemImage: "bubble.left") }
+                    Label("\(song.playCount)", systemImage: "play").foregroundStyle(.secondary)
+                    Spacer()
+                    if !song.isMine {
+                        Button(action: onReport) { Image(systemName: "flag") }.accessibilityLabel("Report")
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(Theme.accent)
             }
             .padding(24)
         }
         .padding(16)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Double-tap = 5 stars (doc: "like" maps to rating).
+    private func quickLove() async {
+        guard !song.isMine, AuthStore.currentAccessToken() != nil,
+              let r = try? await APIClient.shared.send(Endpoints.rate(song.slug, stars: 5), as: RatingSummary.self) else { return }
+        var s = song; s.ratingAvg = r.ratingAvg; s.ratingCount = r.ratingCount; s.myRating = r.myRating
+        onRated(s)
     }
 }

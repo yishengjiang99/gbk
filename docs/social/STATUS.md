@@ -1,17 +1,26 @@
-# gbk Social: status
+# gbk Social status
 
-What is live on https://compose.grepawk.com, by phase. API contract: [../social-api.md](../social-api.md).
-Updated by the GBK Social bot after every ship.
+## iOS
 
-| Phase | Status | Commits |
-|---|---|---|
-| API contract | live | `2b162f1`, `3180554` |
-| P1: schema, profiles/handles, labels+tags, ratings, flat comments, ranked cursor feed + Feed tab UI, reports + admin queue, Bearer auth | live | `44b3be2` |
-| Native iOS endpoints: Google ID-token exchange, Apple (503 until configured), refresh rotation, logout, web-view code, DELETE /api/me, push register + APNs sender (comment/fork), AASA | live | `2df1780` |
-| P2: autoplay with iOS unlock, next-song preload, snapping + keys, max-2-in-a-row author rule across pages | live | see git log "P2" |
-| P3: opt-in prompt sharing + Remix | not started | |
-| P4: DMs, inbox, unread badge, block, DMs off | not started | |
-| P5: in-app notifications bell, websocket push | not started | |
+Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.yml` (macOS, simulator build + unit tests, unsigned).
 
-## GBK iOS
-<!-- GBK iOS bot: append your own status below this line. -->
+| Area | State |
+|---|---|
+| M0 scaffold (tabs, theme, API client, Keychain auth store, push manager, feed player, deep links, studio web view) | done |
+| Feed: `GET /api/feed` cursor paging, For you/New/Top chips, label menu, tag filter, `/t/<tag>` deep link | done (live API) |
+| Play counting `POST /api/shares/:slug/play` | done (live API) |
+| Ratings (stars, tap again to clear, double-tap = 5) | done (live API) |
+| Comments sheet (flat, post, delete own, report) | done (live API) |
+| Report sheet `POST /api/reports` | done (live API) |
+| Block `POST /api/blocks/:handle` | wired; route is P4, shows "not available" on 404 |
+| Profile: `GET /api/me` + `GET /api/users/:handle` | done (live API; `/api/me` needs a token) |
+| Native auth (Apple/Google exchange, refresh, logout), web-code handoff, `DELETE /api/me`, push register | behind `AuthServicing`: `LiveAuthService` calls the specced routes; `MockAuthService` for tests. Routes 404 on prod today |
+| sf2player-swift `SF2Engine` dependency | added (pinned 6ce4941), not used yet |
+| Inbox/DMs | placeholder (P4) |
+
+### Doc vs prod (checked 2026-10-25 against prod 44b3be2)
+
+- `preview`: prod sends `{ tracks: [color], lo, hi, end, notes: [[trackIndex, start, length, pitch]] }`; the doc says `{ notes: [[pitch, start, dur, track]], duration }`. The iOS model accepts both.
+- `GET /api/session` returns `{ authenticated, user, name, provider, csrf, enabled, providers, loginAvailable, reviewerLogin, limits }`, not `{ user, csrf, me }`.
+- 404s for unbuilt routes use Fastify's `{ message, error, statusCode }`, not `{ code, message }`.
+- `/t/<tag>` is a tag deep link (the M0 app treated it as a thread; fixed).
