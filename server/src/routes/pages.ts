@@ -16,7 +16,7 @@ const UPDATED = "October 24, 2026";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-const CSS = `*{box-sizing:border-box}html,body{margin:0;height:auto;overflow-y:auto}
+export const PAGE_CSS = `*{box-sizing:border-box}html,body{margin:0;height:auto;overflow-y:auto}
 body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1f2330;background:#fffdf7}
 header,main,footer{max-width:860px;margin:0 auto;padding:0 20px}
 header{display:flex;align-items:center;gap:12px;padding-top:20px}header a{color:inherit;text-decoration:none;font-weight:700;font-size:18px;display:flex;align-items:center;gap:10px}
@@ -46,7 +46,7 @@ function page(cfg: Config, path: string, title: string, description: string, bod
 <meta property="og:description" content="${esc(description)}"><meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(img)}">
 <meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(description)}"><meta name="twitter:image" content="${esc(img)}">
 ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>` : ""}
-<style>${CSS}</style></head><body><header><a href="/"><img src="/icon.png" alt="" width="40" height="40">GBK Composer</a></header>
+<style>${PAGE_CSS}</style></head><body><header><a href="/"><img src="/icon.png" alt="" width="40" height="40">GBK Composer</a></header>
 <main>${body}</main><footer><nav>${footerLinks()}</nav><p>GBK Composer by Yisheng Jiang · <a href="https://github.com/yishengjiang99/gbk">Source on GitHub</a></p></footer></body></html>`;
 }
 
