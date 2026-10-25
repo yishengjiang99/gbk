@@ -71,9 +71,9 @@ These are the `defaultPrompt` starter prompts (≤128 chars each, max 3; checked
 
    Expected: A jazz composition is created, a `walking_bass` part is generated via `gbk_edit_composition`, and the in-chat player is shown (`gbk_show_composition_ui`). Pressing Render synthesizes the WAV in the browser (progress %, Stop), plays it, and saves WAV + MIDI download links. If the model calls `gbk_render_composition` instead, the WAV and MIDI are rendered on GBK's server and returned as signed download links.
 
-3. > In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo.
+3. > Compose a 16-bar ambient piano piece, then add a CC11 crescendo in bars 9–16 and show me the piano roll.
 
-   Expected: `gbk_list_compositions` finds the latest piece; one edit applies `orchestrate` (semitones -12, bars 9–16) and a `cc_curve` crescendo on CC11; revision increments and other sections are unchanged.
+   Expected: A private ambient piano composition is created, one edit adds a `cc_curve` crescendo on CC11 in bars 9–16 (revision increments, other bars unchanged), and the player shows the piano roll and CC11 lane. (This replaced "In my last piece, …", which fails in a clean conversation: see [launch/portal-package-delta.md](launch/portal-package-delta.md).)
 
 ## OpenAI review material (prepared, not submitted)
 
@@ -81,26 +81,28 @@ The test cases and release notes below are also in `plugin.json` under `extensio
 
 ### Positive test cases (5)
 
+Every case works in a **clean conversation** with no sign-in. `gbk_create_composition` returns `compositionId` and a private `accessToken`; ChatGPT passes both on each follow-up call in the same chat. A new chat starts with no project, so no case depends on "my last piece".
+
 1. **Compose a new Baroque fugue and show it in the interactive player.**
    - Prompt: "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll."
    - Tools: gbk_create_composition, gbk_show_composition_ui
-   - Expected: A new private composition (baroque, D minor, 16 bars, organ voices) is created and the GBK player shows its piano roll, tracks and CC11 lane.
+   - Expected: A new private composition (baroque, D minor, 16 bars, organ voices) is created and the GBK player shows its piano roll, tracks and CC11 lane. Works in a clean conversation with no sign-in.
 2. **Compose, add a part with a targeted edit, and render it in the in-chat player (no Studio tab).**
    - Prompt: "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat."
-   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_show_composition_ui (player calls gbk_widget_render_start / gbk_widget_render_finish); optionally gbk_render_composition (server render)
-   - Expected: A jazz composition is created and a walking_bass part generated; the GBK in-chat player is shown. Pressing Render in the player synthesizes the WAV in the user's browser with progress and Stop, plays it in the chat, and saves validated WAV and MIDI download links. If the model calls gbk_render_composition instead, it renders the WAV and MIDI on GBK's server (no Studio tab needed) and returns signed download links.
-3. **Edit only a passage of the most recent composition.**
-   - Prompt: "In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo."
-   - Tools: gbk_list_compositions, gbk_get_composition, gbk_edit_composition
-   - Expected: The latest composition is found, the bass is doubled at -12 semitones in bars 9–16 and a CC11 crescendo is added; the revision increments and other sections are reported unchanged.
-4. **Retrieve download links for rendered files.**
-   - Prompt: "Give me the download links for the WAV and MIDI of my jazz piece."
-   - Tools: gbk_list_compositions, gbk_get_artifacts
-   - Expected: Short-lived signed WAV and MIDI download URLs with size and SHA-256 are returned for the latest render.
-5. **Publish only on explicit request.**
-   - Prompt: "Publish my jazz piece as a public share page."
-   - Tools: gbk_list_compositions, gbk_publish_composition
-   - Expected: The composition becomes public and a share page URL is returned. No other composition changes visibility.
+   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition, gbk_show_composition_ui
+   - Expected: A jazz composition is created and a walking_bass part generated; the GBK in-chat player is shown. Pressing Render in the player synthesizes the WAV in the user's browser with progress and Stop, plays it in the chat, and saves validated WAV and MIDI download links. Without sign-in the WAV render and download work in the player (saved to the project when the player has the project's accessToken). If the model calls gbk_render_composition instead, the WAV and MIDI are rendered on GBK's server (no Studio tab needed) and returned as signed download links. Works in a clean conversation: gbk_create_composition returns compositionId plus a private accessToken, and the model passes both on every follow-up call in the same chat (no sign-in, no earlier history needed).
+3. **Targeted, revision-safe edit of one passage (self-contained: composes first, then edits).**
+   - Prompt: "Compose a 24-bar jazz piece in F major, then double the bass an octave lower in bars 9–16 and add a CC11 crescendo."
+   - Tools: gbk_create_composition, gbk_get_composition, gbk_edit_composition
+   - Expected: A private jazz composition is created; the bass in bars 9–16 is doubled at -12 semitones and a CC11 crescendo is added in one edit; the revision increments and the result reports untouchedSectionsUnchanged: true (bars 1–8 and 17–24 unchanged). Works in a clean conversation: gbk_create_composition returns compositionId plus a private accessToken, and the model passes both on every follow-up call in the same chat (no sign-in, no earlier history needed).
+4. **Render on GBK's server and return download links (self-contained).**
+   - Prompt: "Compose an 8-bar ambient piano piece and give me download links for its WAV and MIDI files."
+   - Tools: gbk_create_composition, gbk_render_composition (optionally gbk_get_artifacts)
+   - Expected: A private composition is created and rendered on GBK's server (no Studio tab or browser needed); short-lived signed WAV (44.1 kHz stereo PCM16) and MIDI download URLs with size and SHA-256 are returned. No audio bytes in the chat. Works in a clean conversation: gbk_create_composition returns compositionId plus a private accessToken, and the model passes both on every follow-up call in the same chat (no sign-in, no earlier history needed).
+5. **Publish only on explicit request (self-contained).**
+   - Prompt: "Compose an 8-bar classical piece for string quartet, then publish it as a public share page."
+   - Tools: gbk_create_composition, gbk_publish_composition
+   - Expected: The new composition is created private, then made public only because the user asked; a share page URL with no access key in it is returned. No other composition changes visibility. Works in a clean conversation: gbk_create_composition returns compositionId plus a private accessToken, and the model passes both on every follow-up call in the same chat (no sign-in, no earlier history needed).
 
 ### Negative test cases (3)
 

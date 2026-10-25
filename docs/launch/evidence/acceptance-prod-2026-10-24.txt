@@ -1,0 +1,43 @@
+PASS [A] tools/list works without sign-in (17 tools)
+PASS [A] anonymous create (baroque, D minor, 16 bars, organ)
+PASS [A] composition is private by default (private)
+PASS [A] multi-track structure (>= 4 voices) (4 tracks)
+PASS [A] player (piano roll + tracks) opens with the read key and never echoes the edit key
+PASS [A] headless render completes (completed)
+PASS [A] render result has no audio bytes or edit key
+PASS [A] render publishes WAV + MIDI (wav,midi)
+PASS [A] job is tied to the rendered revision (job.revision=1 expected=1)
+PASS [A] wav download 200 + sha256/size match (6801248 B)
+PASS [A] WAV is 44.1k stereo PCM16, non-silent (38.6 s)
+PASS [A] midi download 200 + sha256/size match (11957 B)
+PASS [A] MIDI is a valid SMF (format 1, 5 tracks)
+PASS [E] tampered/expired download link is refused (HTTP 401)
+PASS [B] create 24-bar jazz in F at 140
+PASS [B] jazz arrangement has a bass track (trk_mvn7iy0p152hark)
+PASS [B] walking bass generated as a new revision
+PASS [B] double bass -12 in bars 9-16 + CC11 crescendo
+PASS [B] server reports untouched sections unchanged (true)
+PASS [B] notes starting in bars 1-8 and 17-24 are identical (61174 B compared)
+PASS [E] stale expectedRevision is rejected (no lost update) (STALE_REVISION)
+PASS [B] re-render completes
+PASS [B] render publishes WAV + MIDI (wav,midi)
+PASS [B] job is tied to the rendered revision (job.revision=4 expected=4)
+PASS [B] wav download 200 + sha256/size match (7786836 B)
+PASS [B] WAV is 44.1k stereo PCM16, non-silent (44.1 s)
+PASS [B] midi download 200 + sha256/size match (9285 B)
+PASS [B] MIDI is a valid SMF (format 1, 5 tracks)
+PASS [E] tampered/expired download link is refused (HTTP 401)
+PASS [B] gbk_get_artifacts returns the latest revision's files
+PASS [C] new session (new conversation) + retained token: opens the project
+PASS [C] lost token: the id alone grants nothing (NOT_FOUND)
+PASS [C] read-only key can read but cannot edit, publish or delete (INSUFFICIENT_SCOPE/INSUFFICIENT_SCOPE/INSUFFICIENT_SCOPE)
+PASS [C] another project's token is denied (cross-project) (NOT_FOUND)
+PASS [C] nothing was published (private)
+PASS [E] malformed args are rejected with a clear error (TOOL_ERROR)
+PASS [E] unknown SoundFont is rejected before a job starts (INVALID_ARGUMENT)
+PASS [E] cancel: cancelled jobs publish no partial artifacts (cancel=ok status=cancelled)
+PASS [cleanup] delete test composition with its edit key
+PASS [cleanup] delete test composition with its edit key
+PASS [cleanup] deleted composition is gone (NOT_FOUND)
+
+41/41 checks passed against compose.grepawk.com

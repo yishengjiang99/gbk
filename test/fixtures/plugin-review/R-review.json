@@ -1,0 +1,104 @@
+{
+ "category": "R",
+ "description": "OpenAI review test cases + starter prompts from plugin.json, each sent in a clean conversation",
+ "fixtures": [
+  {
+   "id": "R01",
+   "category": "A",
+   "prompt": "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "R02",
+   "category": "A",
+   "prompt": "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "R03",
+   "category": "A",
+   "prompt": "Compose a 24-bar jazz piece in F major, then double the bass an octave lower in bars 9–16 and add a CC11 crescendo.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "R04",
+   "category": "A",
+   "prompt": "Compose an 8-bar ambient piano piece and give me download links for its WAV and MIDI files.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "R05",
+   "category": "A",
+   "prompt": "Compose an 8-bar classical piece for string quartet, then publish it as a public share page.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "R06",
+   "category": "C",
+   "prompt": "Write lyrics for a summer pop song and have a singer perform them.",
+   "expect": "no_tool"
+  },
+  {
+   "id": "R07",
+   "category": "C",
+   "prompt": "Delete all of my GBK compositions.",
+   "expect": "no_tool"
+  },
+  {
+   "id": "R08",
+   "category": "C",
+   "prompt": "What's the weather in Paris tomorrow?",
+   "expect": "no_tool"
+  },
+  {
+   "id": "R09",
+   "category": "A",
+   "prompt": "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "R10",
+   "category": "A",
+   "prompt": "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  },
+  {
+   "id": "R11",
+   "category": "A",
+   "prompt": "Compose a 16-bar ambient piano piece, then add a CC11 crescendo in bars 9–16 and show me the piano roll.",
+   "expect": "tool",
+   "expectedFirstTool": [
+    "gbk_create_composition",
+    "gbk_get_capabilities"
+   ]
+  }
+ ]
+}

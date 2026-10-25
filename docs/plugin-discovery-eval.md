@@ -44,3 +44,20 @@ Limits: this measures one model's tool selection given GBK's descriptions. It do
 2. For each fixture prompt, start a new chat, send the prompt, and record the first tool ChatGPT calls (or none).
 3. Write the outcomes as `[{ "id": "A01", "firstTool": "gbk_create_composition" }, ...]` and score them with
    `summarize()` from `scripts/plugin-discovery/score.ts`. Report only observed results; no fabricated ones.
+
+## 2026-10-25 runs (live 17-tool registry, production MCP)
+
+`--tag NAME` keeps repeated runs apart. The runner now also validates the first call's arguments against the live
+input schema (ajv) and flags any first call to `gbk_publish_composition`. `test/fixtures/plugin-review/` holds the
+5+3 review cases plus the 3 starter prompts (`launch-consistency.test.ts` keeps it in sync with `plugin.json`).
+
+| Run | Recall | First-tool | FP on C | Arg validity | Publish first | Cost |
+| --- | --- | --- | --- | --- | --- | --- |
+| base1 (42) | 22/22 | 22/22 | 2/12 (C01, C12) | 32/32 | none | $0.72 |
+| base2 (42) | 22/22 | 22/22 | 2/12 (C01, C12) | 32/32 | none | $0.72 |
+| review-base (11) | 8/8 | 8/8 | 2/3 (R06 lyrics → capabilities; R07 "delete all" → list_compositions) | 10/10 | none | $0.19 |
+
+At temperature 0 the two full runs were identical. Across the three 2026-10-24 runs plus these, the false-positive
+rate on C ranged from 8% to 33%, always from `gbk_get_capabilities` on theory or lyrics questions. PR B tightens that
+description (server-side only, no ZIP change). Post-change runs are in [launch/chatgpt-acceptance.md](launch/chatgpt-acceptance.md) once deployed.
+R07 → `gbk_list_compositions` is not a false claim (listing is read-only), but the reviewer may count it as invoking.

@@ -3,12 +3,12 @@
 // on a DIFFERENT origin (S) served with a CSP header built from the resource's declared csp (connect/resource domains),
 // talking the MCP Apps postMessage bridge (ui/initialize, tools/call, ui/notifications/tool-result). The GBK server runs
 // on origin A. Then: click Render, wait for the in-browser OfflineAudioContext render, play, and probe downloads + Stop.
-//   node --import tsx/esm test/e2e/widget-sandbox.check.ts [chromium|webkit|all]
+//   node --import tsx/esm test/e2e/widget-sandbox.check.ts [chromium|webkit|webkit-iphone|all]
 // Needs Node 22 (node:sqlite), Playwright browsers and a built widget (node scripts/build-widget.mjs).
 // Prints a JSON report; exits 1 when the strict-CSP render fails.
 import { createServer, type Server } from "node:http";
 import { type AddressInfo, createServer as netServer } from "node:net";
-import { chromium, webkit, type Browser } from "playwright";
+import { chromium, webkit, devices, type Browser, type BrowserContextOptions } from "playwright";
 import { buildApp } from "../../server/src/app.ts";
 import { testConfig, ScriptModel, reply } from "../../server/test/helpers.ts";
 
@@ -75,13 +75,15 @@ addEventListener("message", async (ev) => {
   await listen(host, ph); await listen(sandbox, ps);
 
   const report: Record<string, unknown> = { declaredDomains: declared, sandboxAttr: SANDBOX };
-  const engines: [string, () => Promise<Browser>][] = [["chromium", () => chromium.launch()], ["webkit", () => webkit.launch()]];
+  // "webkit-iphone" = WebKit with an iPhone 13 viewport, touch and UA (a stand-in, not a real iPhone or real ChatGPT).
+  const engines: [string, () => Promise<Browser>, BrowserContextOptions][] = [["chromium", () => chromium.launch(), {}], ["webkit", () => webkit.launch(), {}],
+    ["webkit-iphone", () => webkit.launch(), { ...devices["iPhone 13"] }]];
   let strictOk = true;
-  for (const [name, launch] of engines) {
+  for (const [name, launch, device] of engines) {
     if (which !== "all" && which !== name) continue;
     const browser = await launch();
     for (const variant of Object.keys(CSP_VARIANTS)) {
-      const ctx = await browser.newContext({ acceptDownloads: true }); const page = await ctx.newPage();
+      const ctx = await browser.newContext({ ...device, acceptDownloads: true }); const page = await ctx.newPage();
       const cspViolations: string[] = [];
       page.on("console", (m) => { if (/Content Security Policy|Refused|blocked/i.test(m.text())) cspViolations.push(m.text().slice(0, 240)); });
       const t0 = Date.now(); const r: Record<string, unknown> = {};

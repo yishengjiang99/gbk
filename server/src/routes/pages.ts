@@ -8,7 +8,7 @@ import type { Config } from "../config.ts";
 export const STARTER_PROMPTS = [
   "Compose a 16-bar Baroque fugue in D minor for organ, then show me the piano roll.",
   "Write a 24-bar jazz piece in F major at 140 BPM, add a walking bass, then let me render and play it in the chat.",
-  "In my last piece, double the bass an octave lower in bars 9–16 and add a CC11 crescendo.",
+  "Compose a 16-bar ambient piano piece, then add a CC11 crescendo in bars 9–16 and show me the piano roll.",
 ];
 export const SUPPORT_URL = "https://github.com/yishengjiang99/gbk/issues";
 export const PAGE_PATHS = ["/chatgpt", "/privacy", "/terms", "/support"] as const;
