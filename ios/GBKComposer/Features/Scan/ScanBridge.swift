@@ -90,7 +90,7 @@ final class ScanController: NSObject, ObservableObject, WKScriptMessageHandler {
                 try await apply(ops)
                 let tracks = ops.filter { if case .addTrack = $0 { return true }; return false }.count
                 phase = .done(tracks: tracks, notes: score.noteCount)
-                webView?.evaluateJavaScript(ScanBridge.eventScript(status: "added", tracks: tracks, notes: score.noteCount))
+                webView?.evaluateJavaScript(ScanBridge.eventScript(status: "added", tracks: tracks, notes: score.noteCount), completionHandler: nil)
                 try? await Task.sleep(nanoseconds: 900_000_000)
                 if case .done = phase { isPresented = false }
             } catch let e as ScanError {
@@ -113,7 +113,7 @@ final class ScanController: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func cancel() {
         isPresented = false
-        webView?.evaluateJavaScript(ScanBridge.eventScript(status: "cancelled"))
+        webView?.evaluateJavaScript(ScanBridge.eventScript(status: "cancelled"), completionHandler: nil)
     }
 }
 
