@@ -1,7 +1,11 @@
 // In-browser "Export video": offline SF2 render (same path as Export WAV) + moving piano roll frames on a canvas,
-// encoded with WebCodecs (H.264 + AAC/Opus) into MP4 via mp4-muxer. Fallback: MediaRecorder in real time
-// (canvas.captureStream + the rendered audio), for browsers without VideoEncoder/AudioEncoder.
+// encoded with WebCodecs (H.264 + AAC/Opus) into MP4 via mp4-muxer. Nothing is paced by the wall clock: audio comes
+// from the OfflineAudioContext render, frames are drawn per timestamp i/fps as fast as the encoder accepts them.
+// Browsers with VideoEncoder but no AudioEncoder (Safari before 26): H.264 + uncompressed PCM in a .mov (mediabunny),
+// still faster than real time. Only browsers with no VideoEncoder at all (old iOS) fall back to real-time MediaRecorder,
+// which still plays the offline-rendered buffer as its audio source.
 import { Muxer, ArrayBufferTarget } from "mp4-muxer";
+import { Output, MovOutputFormat, BufferTarget, EncodedVideoPacketSource, EncodedPacket, AudioSampleSource, AudioSample } from "mediabunny";
 import type { Project } from "../workstation/model.ts";
 import { renderJobs, safeFilename } from "../audio/render-job.ts";
 import { buildVideoModel, drawFrame, type VideoModel, type VideoOptions } from "./piano-roll-video.ts";
@@ -29,6 +33,7 @@ export async function exportVideo(project: Project, opts: { height?: number; dow
   const primed = typeof AudioEncoder === "undefined" && typeof AudioContext !== "undefined" ? new AudioContext({ sampleRate: 48000 }) : null;
   void primed?.resume().catch(() => undefined);
   set({ running: true, progress: 0, stage: "Rendering audio", error: undefined, method: undefined });
+  const t0 = performance.now(); let tAudio = 0;
   try {
     const job = renderJobs().submit(project, { sampleRate: 48000, channels: 2, format: "pcm16", tailSeconds: 2 }, { saveArtifact: false, signal });
     const unsub = renderJobs().subscribe((j) => { if (j.id === job.id) set({ progress: exportProgress("audio", j.progress) }); });
@@ -37,17 +42,21 @@ export async function exportVideo(project: Project, opts: { height?: number; dow
     if (done.status !== "completed") throw new Error(`audio render ${done.status}: ${done.error?.message ?? ""}`);
     const r = renderJobs().result(job.id); if (!r) throw new Error("audio render result missing");
     const audio = parseWav(r.bytes);
+    tAudio = performance.now() - t0;
+    assertAudible(project, audio.channels);
     const duration = audio.channels[0].length / audio.sampleRate;
     const model = buildVideoModel(project, duration, `${project.tracks.length} tracks · GBK Composer`);
     const size = evenSize(opts.height ?? 720);
     const vo: VideoOptions = { ...LOGICAL, fps: FPS, windowSeconds: 8, playheadFrac: 0.3, theme: "light" };
-    set({ stage: "Encoding video" });
+    set({ stage: "Encoding video", progress: exportProgress("audio", 1) });
     let out: { blob: Blob; ext: string; method: string };
     const wc = await pickWebCodecs(size, audio.sampleRate, audio.channels.length);
-    if (wc) out = await encodeWebCodecs(model, vo, size, audio, wc, signal);
+    if (wc?.audio) out = await encodeWebCodecs(model, vo, size, audio, { video: wc.video, audio: wc.audio, audioCodec: wc.audioCodec! }, signal);
+    else if (wc) out = await encodeVideoPcmMov(model, vo, size, audio, wc.video, signal);
     else if (typeof MediaRecorder !== "undefined") out = await encodeMediaRecorder(model, vo, size, audio, signal, primed);
     else throw new Error("This browser cannot encode video (no WebCodecs or MediaRecorder)");
     const filename = safeFilename(project.name, out.ext);
+    console.info(`[export-video] ${JSON.stringify({ method: out.method, songSeconds: +duration.toFixed(2), audioMs: Math.round(tAudio), encodeMs: Math.round(performance.now() - t0 - tAudio), totalMs: Math.round(performance.now() - t0) })}`);
     set({ running: false, progress: 1, stage: `Done (${out.method})`, method: out.method });
     opts.download?.(out.blob, filename);
     return { blob: out.blob, filename };
@@ -60,11 +69,19 @@ export async function exportVideo(project: Project, opts: { height?: number; dow
   } finally { abort = null; if (primed && primed.state !== "closed") void primed.close().catch(() => undefined); }
 }
 
+/** Never export a silent video: a project with notes must render a non-silent mix (e.g. SoundFont failed to load). */
+function assertAudible(project: Project, channels: Float32Array[]) {
+  if (!project.notes.length) return;
+  let peak = 0; for (const ch of channels) for (let i = 0; i < ch.length; i += 7) { const a = Math.abs(ch[i]); if (a > peak) peak = a; }
+  if (!(peak > 1e-4)) throw new Error("the rendered audio is silent (SoundFont not loaded or all tracks muted); not exporting a silent video");
+}
+
 type Size = { width: number; height: number };
 interface WcPlan { video: VideoEncoderConfig; audio: AudioEncoderConfig; audioCodec: "aac" | "opus" }
 
-async function pickWebCodecs(size: Size, sampleRate: number, channels: number): Promise<WcPlan | null> {
-  if (typeof VideoEncoder === "undefined" || typeof AudioEncoder === "undefined" || typeof VideoFrame === "undefined" || typeof AudioData === "undefined") return null;
+/** H.264 config plus, when the browser can encode AAC/Opus, the audio config; audio null -> PCM .mov path. */
+async function pickWebCodecs(size: Size, sampleRate: number, channels: number): Promise<{ video: VideoEncoderConfig; audio: AudioEncoderConfig | null; audioCodec?: "aac" | "opus" } | null> {
+  if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") return null;
   let video: VideoEncoderConfig | null = null;
   // H.264 High / Main / Baseline (level 3.1 covers 720p30). Safari and Chrome both encode avc1.
   for (const codec of ["avc1.640028", "avc1.4d401f", "avc1.42001f"]) {
@@ -72,11 +89,52 @@ async function pickWebCodecs(size: Size, sampleRate: number, channels: number): 
     try { if ((await VideoEncoder.isConfigSupported(c)).supported) { video = c; break; } } catch { /* try next */ }
   }
   if (!video) return null;
+  if (typeof AudioEncoder === "undefined" || typeof AudioData === "undefined") return { video, audio: null };
   for (const [codec, audioCodec] of [["mp4a.40.2", "aac"], ["opus", "opus"]] as const) {
     const c: AudioEncoderConfig = { codec, sampleRate, numberOfChannels: channels, bitrate: 160_000 };
     try { if ((await AudioEncoder.isConfigSupported(c)).supported) return { video, audio: c, audioCodec }; } catch { /* try next */ }
   }
-  return null;
+  return { video, audio: null };
+}
+
+/** Frame loop shared by both WebCodecs paths: deterministic t = i/fps, encoder backpressure only (no wall clock). */
+async function encodeFrames(m: VideoModel, vo: VideoOptions, size: Size, venc: VideoEncoder, signal: AbortSignal, failed: () => Error | null) {
+  const { c, ctx } = makeCanvas(size);
+  const frames = exportFrameCount(m.duration, FPS);
+  for (let i = 0; i < frames; i++) {
+    if (signal.aborted) throw cancelled(); const f = failed(); if (f) throw f;
+    draw(ctx, m, i / FPS, vo, size);
+    const vf = new VideoFrame(c as CanvasImageSource, { timestamp: frameTimestampUs(i, FPS), duration: frameDurationUs(i, FPS) });
+    venc.encode(vf, { keyFrame: i % (FPS * 2) === 0 }); vf.close();
+    while (venc.encodeQueueSize > 6) await tick();
+    if (i % 15 === 0) { set({ progress: exportProgress("video", i / frames) }); await tick(); }
+  }
+  await venc.flush();
+}
+
+/** Safari without AudioEncoder: H.264 frames + 16-bit PCM of the offline mix in a QuickTime .mov (plays natively on iOS/macOS). */
+async function encodeVideoPcmMov(m: VideoModel, vo: VideoOptions, size: Size, audio: { sampleRate: number; channels: Float32Array[] }, video: VideoEncoderConfig, signal: AbortSignal) {
+  const output = new Output({ format: new MovOutputFormat({ fastStart: "in-memory" }), target: new BufferTarget() });
+  const vsrc = new EncodedVideoPacketSource("avc"); output.addVideoTrack(vsrc, { frameRate: FPS });
+  const asrc = new AudioSampleSource({ codec: "pcm-s16" }); output.addAudioTrack(asrc);
+  await output.start();
+  let failure: Error | null = null; let chain: Promise<void> = Promise.resolve();
+  const venc = new VideoEncoder({ output: (ch, meta) => { chain = chain.then(() => vsrc.add(EncodedPacket.fromEncodedChunk(ch), meta)).catch((e) => { failure = e as Error; }); }, error: (e) => { failure = e as Error; } });
+  venc.configure(video);
+  try {
+    const total = audio.channels[0].length, nch = audio.channels.length;
+    for (const ch of audioChunks(total, audio.sampleRate, 48000)) {
+      const buf = new Float32Array(ch.length * nch);
+      for (let c = 0; c < nch; c++) buf.set(audio.channels[c].subarray(ch.start, ch.start + ch.length), c * ch.length);
+      const s = new AudioSample({ format: "f32-planar", sampleRate: audio.sampleRate, numberOfChannels: nch, timestamp: ch.start / audio.sampleRate, data: buf });
+      await asrc.add(s); s.close();
+    }
+    await encodeFrames(m, vo, size, venc, signal, () => failure);
+    await chain; if (failure) throw failure;
+    await output.finalize();
+    return { blob: new Blob([(output.target as BufferTarget).buffer!], { type: "video/quicktime" }), ext: "mov", method: "WebCodecs H.264 + PCM (.mov)" };
+  } catch (e) { void output.cancel().catch(() => undefined); throw e; }
+  finally { try { venc.close(); } catch { /* closed */ } }
 }
 
 function makeCanvas(size: Size) {
@@ -94,7 +152,8 @@ async function encodeWebCodecs(m: VideoModel, vo: VideoOptions, size: Size, audi
     audio: { codec: plan.audioCodec, sampleRate: audio.sampleRate, numberOfChannels: audio.channels.length } });
   let failure: Error | null = null;
   const venc = new VideoEncoder({ output: (c, meta) => muxer.addVideoChunk(c, meta), error: (e) => { failure = e as Error; } });
-  const aenc = new AudioEncoder({ output: (c, meta) => muxer.addAudioChunk(c, meta), error: (e) => { failure = e as Error; } });
+  let audioBytes = 0;
+  const aenc = new AudioEncoder({ output: (c, meta) => { audioBytes += c.byteLength; muxer.addAudioChunk(c, meta); }, error: (e) => { failure = e as Error; } });
   venc.configure(plan.video); aenc.configure(plan.audio);
   try {
     // Audio first (fast), then frames; the muxer interleaves by timestamp.
@@ -106,17 +165,9 @@ async function encodeWebCodecs(m: VideoModel, vo: VideoOptions, size: Size, audi
       aenc.encode(ad); ad.close();
       while (aenc.encodeQueueSize > 32) await tick();
     }
-    const { c, ctx } = makeCanvas(size);
-    const frames = exportFrameCount(m.duration, FPS);
-    for (let i = 0; i < frames; i++) {
-      if (signal.aborted) throw cancelled(); if (failure) throw failure;
-      draw(ctx, m, i / FPS, vo, size);
-      const vf = new VideoFrame(c as CanvasImageSource, { timestamp: frameTimestampUs(i, FPS), duration: frameDurationUs(i, FPS) });
-      venc.encode(vf, { keyFrame: i % (FPS * 2) === 0 }); vf.close();
-      while (venc.encodeQueueSize > 6) await tick();
-      if (i % 15 === 0) { set({ progress: exportProgress("video", i / frames) }); await tick(); }
-    }
-    await venc.flush(); await aenc.flush(); if (failure) throw failure;
+    await encodeFrames(m, vo, size, venc, signal, () => failure);
+    await aenc.flush(); if (failure) throw failure;
+    if (audioBytes === 0) throw new Error(`the ${plan.audioCodec.toUpperCase()} audio encoder produced no output; not exporting a silent video`);
     muxer.finalize();
     return { blob: new Blob([muxer.target.buffer], { type: "video/mp4" }), ext: "mp4", method: `WebCodecs H.264 + ${plan.audioCodec.toUpperCase()}` };
   } finally { try { venc.close(); } catch { /* closed */ } try { aenc.close(); } catch { /* closed */ } }
@@ -130,7 +181,9 @@ async function encodeMediaRecorder(m: VideoModel, vo: VideoOptions, size: Size, 
   audio.channels.forEach((d, i) => buf.copyToChannel(d as Float32Array<ArrayBuffer>, i));
   const src = ac.createBufferSource(); src.buffer = buf; const dest = ac.createMediaStreamDestination(); src.connect(dest);
   draw(ctx, m, 0, vo, size);
-  const stream = new MediaStream([...canvas.captureStream(FPS).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  const audioTracks = dest.stream.getAudioTracks();
+  if (!audioTracks.length) throw new Error("this browser gave no audio track to record; not exporting a silent video");
+  const stream = new MediaStream([...canvas.captureStream(FPS).getVideoTracks(), ...audioTracks]);
   const mime = ["video/mp4;codecs=avc1,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
   const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 3_000_000 } : {});
   const parts: Blob[] = []; rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
