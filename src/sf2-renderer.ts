@@ -81,6 +81,8 @@ class VolEnv {
   level = 0; t = 0;
   delay = 0; attack = 0.01; hold = 0; decay = 0.1; releaseSec = 0.001;
   sustainCb = 0; attCb = 0;
+  /** Memo of the SUSTAIN level, keyed on the sustainCb it was computed from (bit-exact; no per-frame Math.pow). */
+  private susCbMemo = NaN; private susLevel = 0;
   constructor(readonly sr: number) {}
   reset(): void {
     this.stage = IDLE; this.level = 0; this.t = 0; this.delay = 0; this.attack = 0.01; this.hold = 0; this.decay = 0.1;
@@ -138,7 +140,8 @@ class VolEnv {
         return this.level;
       case SUSTAIN:
         if (this.sustainCb >= 960) { this.level = 0; this.stage = IDLE; return 0; }
-        this.level = Math.pow(10, -this.sustainCb / 200);
+        if (this.sustainCb !== this.susCbMemo) { this.susLevel = Math.pow(10, -this.sustainCb / 200); this.susCbMemo = this.sustainCb; }
+        this.level = this.susLevel;
         return this.level;
       default:
         this.attCb = this.releaseSec <= 0 ? 960 : this.attCb + (1000 * dt) / this.releaseSec;
@@ -267,6 +270,8 @@ export class Sf2Voice {
   exclusiveClass = 0;
   vibToPitch = 0; modToPitch = 0; initialFc = 13500; modEnvToFc = 0; modLfoToFc = 0;
   lastFc = NaN; lastMixPan = NaN; gL = 0; gR = 0;
+  /** Memo of fcCentsToHz(fcHzCents) (pure function of the cents value, so it never needs invalidating). */
+  fcHzCents = NaN; fcHz = 0;
   mods: readonly SF2Modulator[] | null = null;
   regAtten = 0; regPan = 0; regFc = 13500; regQ = 0; regVib = 0; regModPitch = 0;
   regModEnvPitch = 0; regModLfoFc = 0; regModEnvFc = 0; regModLfoVol = 0;
@@ -1016,9 +1021,13 @@ export class Sf2SynthEngine {
       const sL = readSampleMono(v.dataL, v.pos);
       const sR = v.dataR ? readSampleMono(v.dataR, v.pos) : sL;
       const fcCents = v.initialFc + modEnv * v.modEnvToFc + modLfo * v.modLfoToFc;
-      if (fcCents !== v.lastFc) { v.lpf.setCutoffHz(fcCentsToHz(fcCents)); v.lastFc = fcCents; }
+      // Math.pow per voice per frame was the single hottest line of the export render; fc is constant for most
+      // voices (no modEnv/modLfo -> filter), so memoize the Hz value. Bit-exact: same function, same input.
+      if (fcCents !== v.fcHzCents) { v.fcHz = fcCentsToHz(fcCents); v.fcHzCents = fcCents; }
+      const fcHz = v.fcHz;
+      if (fcCents !== v.lastFc) { v.lpf.setCutoffHz(fcHz); v.lastFc = fcCents; }
       let fL: number, fR: number;
-      if (v.qCb <= 0 && fcCentsToHz(fcCents) >= bypassHz) { fL = sL; fR = sR; }   // G-08 bypass
+      if (v.qCb <= 0 && fcHz >= bypassHz) { fL = sL; fR = sR; }   // G-08 bypass
       else { fL = v.lpf.processL(sL); fR = v.lpf.processR(sR); }
       const env = v.volEnv.next();
       let gain = v.baseGain * env * v.trackVolumeMul;

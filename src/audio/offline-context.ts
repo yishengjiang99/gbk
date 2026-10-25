@@ -9,6 +9,8 @@ import type { RenderPlan } from "./offline-renderer.ts";
 import { RenderError } from "./render-error.ts";
 import { stereoPanGains } from "./orchestra-pan.ts";
 import type { SynthEvent } from "../sf2-renderer.ts";
+import { ParallelUnavailable, browserWorkerSpawn, renderPlanParallel, type PlanVoice, type SpawnWorker } from "./parallel-render.ts";
+import { reportError } from "../telemetry/error-reporter.ts";
 
 export const PROCESSOR_NAME = "sf2-processor";
 const QUANTUM = 128;
@@ -58,18 +60,54 @@ export interface OfflineRenderControl {
   /** Fail with RENDER_TIMEOUT after this long overall. Default 60 s + 3x the audio length (cap 60 min). */
   timeoutMs?: number;
   env?: OfflineEnv;
+  /**
+   * Render the tracks in parallel Web Workers (parallel-render.ts) instead of serially on the OfflineAudioContext's
+   * single render thread. Default: on whenever workers are available and no `env` is injected; `false` forces the
+   * OfflineAudioContext graph. A worker factory may be passed (tests).
+   */
+  parallel?: boolean | { spawn: SpawnWorker; workers?: number };
+}
+
+/** Audible tracks with their events (trackIndex < 0 -> every engine) and post-engine pan/fader matrix. */
+export function planVoices(plan: RenderPlan): PlanVoice[] {
+  const hasNotes = new Set<number>();
+  for (const e of plan.events) if (e.type === "noteOn") hasNotes.add(e.trackIndex ?? -1);
+  const voices: PlanVoice[] = plan.tracks.filter((t) => (t.gain ?? 1) > 0 && hasNotes.has(t.trackIndex)).map((t) => {
+    const k = plan.faders[t.trackIndex] ?? 1; const g = stereoPanGains(plan.pans[t.trackIndex] ?? 0);
+    const gains = ([[0, 0, g.ll], [1, 0, g.rl], [0, 1, g.lr], [1, 1, g.rr]] as const).filter(([, , x]) => x).map(([a, b, x]) => [a, b, x * k] as [number, number, number]);
+    return { t, events: [] as SynthEvent[], gains };
+  });
+  const byTrack = new Map(voices.map((v) => [v.t.trackIndex, v]));
+  for (const e of plan.events) { const ti = e.trackIndex ?? -1; if (ti < 0) for (const v of voices) v.events.push(e); else byTrack.get(ti)?.events.push(e); }
+  return voices;
 }
 
 const ms = (x: number) => `${Math.round(x / 1000)} s`;
 
 /** Render the plan to planar float stereo with an OfflineAudioContext. Rejects with a RenderError on cancel/stall/timeout. */
 export async function renderPlanOffline(plan: RenderPlan, sampleRate: number, totalFrames: number, o: OfflineRenderControl = {}): Promise<{ L: Float32Array; R: Float32Array }> {
-  const env = o.env ?? browserOfflineEnv();
   const aborted = () => o.signal?.aborted;
   if (aborted()) throw new RenderError("OPERATION_CANCELLED", "cancelled");
   const seconds = totalFrames / sampleRate;
   const timeoutMs = o.timeoutMs ?? Math.min(60 * 60_000, 60_000 + seconds * 3000);
   const stallMs = o.stallMs ?? 45_000;
+  const voices = planVoices(plan);
+
+  // Fast path: one engine per track across a worker pool (the OfflineAudioContext runs every track's worklet on a
+  // single thread). Falls back to the graph below if workers cannot start (old browsers, widget bundle, CSP).
+  let par: { spawn: SpawnWorker; workers?: number } | null = null;
+  if (typeof o.parallel === "object") par = o.parallel;
+  else if (o.parallel !== false && !o.env) { const spawn = await browserWorkerSpawn(); if (spawn) par = { spawn }; }
+  if (par) {
+    try {
+      return await renderPlanParallel(voices, sampleRate, totalFrames, par.spawn, { signal: o.signal, onProgress: o.onProgress, stallMs, timeoutMs, workers: par.workers });
+    } catch (e) {
+      if (!(e instanceof ParallelUnavailable)) throw e;
+      reportError(e, { where: "renderPlanParallel", fallback: "OfflineAudioContext" });
+    }
+  }
+
+  const env = o.env ?? browserOfflineEnv();
   let ctx: OfflineCtx;
   try { ctx = env.createContext(2, totalFrames, sampleRate); }
   catch (e) { throw new RenderError("RENDER_TOO_LARGE", `the browser could not create a ${seconds.toFixed(0)} s offline audio buffer at ${sampleRate} Hz (${(e as Error).message})`); }
@@ -77,12 +115,6 @@ export async function renderPlanOffline(plan: RenderPlan, sampleRate: number, to
   await ctx.audioWorklet.addModule(await env.workletUrl());
 
   // One engine per audible track, events routed exactly as before (trackIndex < 0 -> every engine).
-  const hasNotes = new Set<number>();
-  for (const e of plan.events) if (e.type === "noteOn") hasNotes.add(e.trackIndex ?? -1);
-  const voices = plan.tracks.filter((t) => (t.gain ?? 1) > 0 && hasNotes.has(t.trackIndex)).map((t) => ({ t, events: [] as SynthEvent[] }));
-  const byTrack = new Map(voices.map((v) => [v.t.trackIndex, v]));
-  for (const e of plan.events) { const ti = e.trackIndex ?? -1; if (ti < 0) for (const v of voices) v.events.push(e); else byTrack.get(ti)?.events.push(e); }
-
   const merger = ctx.createChannelMerger(2);
   merger.connect(ctx.destination);
   const ready: Promise<void>[] = [];
@@ -91,11 +123,9 @@ export async function renderPlanOffline(plan: RenderPlan, sampleRate: number, to
     ready.push(new Promise<void>((res) => { node.port.onmessage = (ev: MessageEvent) => { if ((ev.data as { type?: string })?.type === "sequenceReady") res(); }; }));
     node.port.postMessage({ type: "setOfflineTracks", tracks: [v.t], maxVoices: 64 });
     node.port.postMessage({ type: "setSequence", events: v.events });
-    const k = plan.faders[v.t.trackIndex] ?? 1; const g = stereoPanGains(plan.pans[v.t.trackIndex] ?? 0);
     const split = ctx.createChannelSplitter(2); node.connect(split);
-    for (const [from, to, gain] of [[0, 0, g.ll], [1, 0, g.rl], [0, 1, g.lr], [1, 1, g.rr]] as const) {
-      if (!gain) continue;
-      const gn = ctx.createGain(); gn.gain.value = gain * k; split.connect(gn, from); gn.connect(merger, 0, to);
+    for (const [from, to, gain] of v.gains) {
+      const gn = ctx.createGain(); gn.gain.value = gain; split.connect(gn, from); gn.connect(merger, 0, to);
     }
   }
   let readyTimer: ReturnType<typeof setTimeout> | undefined;

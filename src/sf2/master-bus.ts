@@ -38,6 +38,10 @@ export class MasterBus {
   private la = 0;            // lookahead frames
   private ringL: Float64Array; private ringR: Float64Array; private ringReq: Float64Array;
   private pos = 0; private posReq = 0;
+  /** min(ringReq[0..la]), maintained incrementally (the ring only changes one slot per frame). */
+  private reqMin = 1;
+  /** Peak below which the compressor's target reduction is certainly 0 dB (skips log10 on quiet frames). */
+  private quietPeak = 0;
   /** Maximum lookahead (ms) for which the ring is preallocated. */
   static readonly maxLookaheadMs = 10;
 
@@ -69,12 +73,15 @@ export class MasterBus {
     const la = Math.round(p.lookaheadMs * 1e-3 * sr);
     const changed = la !== this.la;
     this.p = p; this.la = la;
+    // reductionDb is 0 whenever 2 * (levelDb - threshold) <= -knee; stay 0.01 dB under that edge so rounding in
+    // log10 can never make the shortcut disagree with the full computation.
+    this.quietPeak = Math.pow(10, (p.thresholdDb - p.kneeDb / 2 - 0.01) / 20);
     if (changed) this.reset();
   }
 
   reset(): void {
     this.grDb = 0; this.limGain = 1; this.pos = 0; this.posReq = 0; this.outL = 0; this.outR = 0;
-    this.ringL.fill(0); this.ringR.fill(0); this.ringReq.fill(1);
+    this.ringL.fill(0); this.ringR.fill(0); this.ringReq.fill(1); this.reqMin = 1;
   }
 
   /** Static soft-knee gain computer: gain reduction in dB (>= 0) for an input level in dB. */
@@ -101,11 +108,11 @@ export class MasterBus {
     // 2. compressor
     const al = l < 0 ? -l : l, ar = r < 0 ? -r : r;
     const peak = al > ar ? al : ar;
-    const target = peak > 1e-10 ? MasterBus.reductionDb(20 * Math.log10(peak), p.thresholdDb, p.ratio, p.kneeDb) : 0;
+    const target = peak > 1e-10 && peak > this.quietPeak ? MasterBus.reductionDb(20 * Math.log10(peak), p.thresholdDb, p.ratio, p.kneeDb) : 0;
     const a = target > this.grDb ? this.aAtt : this.aRel;
     this.grDb = target + a * (this.grDb - target);
     if (this.grDb < GR_EPS_DB) this.grDb = 0;
-    const cg = Math.pow(10, -this.grDb / 20);
+    const cg = this.grDb === 0 ? 1 : Math.pow(10, -this.grDb / 20);
     const cl = l * cg, cr = r * cg;
     // 3. lookahead limiter
     const acl = cl < 0 ? -cl : cl, acr = cr < 0 ? -cr : cr;
@@ -118,9 +125,15 @@ export class MasterBus {
       this.ringL[i] = cl; this.ringR[i] = cr;
       this.pos = i + 1 === this.la ? 0 : i + 1;
       const j = this.posReq;                    // req window: la + 1 frames, delayed output included
+      const old = this.ringReq[j];
       this.ringReq[j] = req;
       this.posReq = j === this.la ? 0 : j + 1;
-      for (let k = 0; k <= this.la; k++) { const q = this.ringReq[k]; if (q < minReq) minReq = q; }
+      // Same result as scanning all la + 1 slots every frame (the old O(la) loop), but only rescans when the
+      // slot that just left the window held the minimum and the new value is larger. While nothing is being
+      // limited every slot is 1, so this is O(1) for almost every frame.
+      if (req <= this.reqMin) this.reqMin = req;
+      else if (old === this.reqMin) { let m = 1; for (let k = 0; k <= this.la; k++) { const q = this.ringReq[k]; if (q < m) m = q; } this.reqMin = m; }
+      minReq = this.reqMin;
     }
     if (minReq < this.limGain) this.limGain = minReq;
     else { this.limGain = minReq + this.aLim * (this.limGain - minReq); if (1 - this.limGain < LIM_EPS) this.limGain = 1; }

@@ -2,7 +2,7 @@
 // running the sf2-processor AudioWorklet (offline-context.ts) -> loudness gain -> WAV encode -> validation.
 // No realtime AudioContext, no user gesture, no player. The server never synthesizes audio.
 import type { SynthEvent, TrackState } from "../sf2-renderer.ts";
-import { renderPlanOffline, type OfflineEnv } from "./offline-context.ts";
+import { renderPlanOffline, type OfflineEnv, type OfflineRenderControl } from "./offline-context.ts";
 import type { Project } from "../workstation/model.ts";
 import { bars, tempoSegments, type TempoSeg } from "../workstation/timing.ts";
 import { normalizeEffects } from "../sf2/voice-overrides.ts";
@@ -236,7 +236,7 @@ export function normalizeMode(n: OfflineRenderOptions["normalize"]): NormalizeMo
  * Render a project to a validated WAV. Resolves only with a complete, validated file; otherwise rejects with RenderError.
  * Works in a fresh page: OfflineAudioContext only (no realtime AudioContext, no user gesture, no mounted player, no pre-loaded SoundFont).
  */
-export async function renderProjectOffline(project: Project, options: OfflineRenderOptions, signal?: AbortSignal, onProgress?: ProgressFn, deps: { soundFont?: LoadedSoundFont; offlineEnv?: OfflineEnv } = {}): Promise<RenderResult> {
+export async function renderProjectOffline(project: Project, options: OfflineRenderOptions, signal?: AbortSignal, onProgress?: ProgressFn, deps: { soundFont?: LoadedSoundFont; offlineEnv?: OfflineEnv; parallel?: OfflineRenderControl["parallel"] } = {}): Promise<RenderResult> {
   const t0 = Date.now();
   if (![44100, 48000].includes(options.sampleRate)) throw new RenderError("INVALID_ARGUMENT", "sampleRate must be 44100 or 48000");
   if (![1, 2].includes(options.channels)) throw new RenderError("INVALID_ARGUMENT", "channels must be 1 or 2");
@@ -268,7 +268,7 @@ export async function renderProjectOffline(project: Project, options: OfflineRen
   const chunk = options.chunkFrames ?? 8192;
   // The whole mix comes back from the OfflineAudioContext as one planar float AudioBuffer (8 bytes/frame).
   if (totalFrames * 8 + size > (IOS ? 768 : 2048) * 2 ** 20) throw new RenderError("RENDER_TOO_LARGE", `a ${(totalFrames / sr / 60).toFixed(1)} min render needs ${((totalFrames * 8 + size) / 2 ** 20).toFixed(0)} MiB in the browser, over this device's limit; render a shorter range (startTick/endTick) or mono`);
-  const { L, R } = await renderPlanOffline(plan, sr, totalFrames, { signal, env: deps.offlineEnv, timeoutMs: options.timeoutMs, stallMs: options.stallMs, onProgress: (x) => onProgress?.(x * 0.9, "rendering") });
+  const { L, R } = await renderPlanOffline(plan, sr, totalFrames, { signal, env: deps.offlineEnv, parallel: deps.parallel, timeoutMs: options.timeoutMs, stallMs: options.stallMs, onProgress: (x) => onProgress?.(x * 0.9, "rendering") });
   throwIfAborted(signal);
   // Whole-file gain (one value, measured on the exact signal that will be encoded).
   const meter = new LoudnessMeter(sr, options.channels);
