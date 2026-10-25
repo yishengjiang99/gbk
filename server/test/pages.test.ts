@@ -24,6 +24,9 @@ test("static pages render with SEO tags, footer links and normal scrolling", asy
     const c = await (await fetch(`${s.base}/chatgpt`)).text();
     assert.match(c, /application\/ld\+json/); assert.match(c, /coming soon/); assert.doesNotMatch(c, /Install in ChatGPT/);
     assert.match(c, /rendered on GBK.s server/);
+    assert.match(c, /id="other-ai-apps"/); assert.match(c, /href="#other-ai-apps"/); assert.match(c, /data-copy="[^"]+\/mcp"/);
+    assert.match(c, /codex mcp add gbk --url/); assert.match(c, /\[mcp_servers.gbk\]/); assert.match(c, /&quot;server_url&quot;/);
+    assert.match(c, /navigator.modelContext/); assert.match(c, /6 server renders per hour, up to 180 s/); assert.match(c, /30 server renders per hour, up to 300 s/);
     for (const p of STARTER_PROMPTS) assert.ok(c.includes(p.replace(/'/g, "&#39;")), p);
     const robots = await (await fetch(`${s.base}/robots.txt`)).text(); assert.match(robots, /Sitemap: .*\/sitemap\.xml/);
     const sm = await (await fetch(`${s.base}/sitemap.xml`)).text();

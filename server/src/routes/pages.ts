@@ -27,6 +27,9 @@ a{color:#3a2e9e}.lead{font-size:19px;color:#454a5c}
 .cta.alt{background:#fff;color:#3a2e9e;border:2px solid #3a2e9e}.soon{display:inline-block;margin-top:16px;padding:8px 14px;border-radius:10px;background:#ffefd2;color:#7a4b00;font-weight:600}
 ol.prompts li{margin:8px 0;padding:10px 14px;background:#fff;border:1px solid #ece3cf;border-radius:10px;list-style-position:inside}
 .note{padding:12px 16px;border-left:4px solid #2ec4b6;background:#effbf9;border-radius:6px}
+pre{background:#fff;border:1px solid #ece3cf;border-radius:10px;padding:10px 14px;overflow-x:auto;font-size:13px;line-height:1.5}
+.mcpurl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mcpurl code{padding:8px 12px;background:#fff;border:1px solid #ece3cf;border-radius:10px;font-size:15px}
+.copy{padding:8px 14px;border-radius:10px;border:2px solid #3a2e9e;background:#fff;color:#3a2e9e;font-weight:600;cursor:pointer}h3{margin:20px 0 6px;font-size:17px}
 footer{margin-top:48px;padding:24px 20px 40px;border-top:1px solid #ece3cf;color:#5b6070;font-size:14px}footer a{margin-right:16px}`;
 
 export function footerLinks(): string {
@@ -47,6 +50,24 @@ ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(
 <main>${body}</main><footer><nav>${footerLinks()}</nav><p>GBK Composer by Yisheng Jiang · <a href="https://github.com/yishengjiang99/gbk">Source on GitHub</a></p></footer></body></html>`;
 }
 
+function otherAiApps(cfg: Config): string {
+  const url = `${cfg.publicOrigin}/mcp`; const sr = cfg.serverRender;
+  const pre = (t: string) => `<pre><code>${esc(t)}</code></pre>`;
+  return `<h2 id="other-ai-apps">Use with other AI apps</h2>
+<p>GBK Composer is a remote MCP server (Streamable HTTP). Add it to any MCP-capable client:</p>
+<div class="mcpurl"><code id="mcp-url">${esc(url)}</code><button class="copy" type="button" data-copy="${esc(url)}">Copy</button></div>
+<p>No authentication is required: compositions made without an account get private access keys. Optional OAuth sign-in (Google or GitHub) links your GBK account.</p>
+<h3>Grok Bot</h3><p>Add a custom connector and paste the URL above.</p>
+<h3>OpenAI Codex</h3>${pre(`codex mcp add gbk --url ${url}`)}<p>or in <code>~/.codex/config.toml</code>:</p>${pre(`[mcp_servers.gbk]\nurl = "${url}"`)}
+<h3>Claude</h3><p>Settings → Connectors → Add custom connector, and enter the URL above as the remote MCP server URL.</p>
+<h3>Cursor and VS Code</h3><p>Cursor <code>.cursor/mcp.json</code>:</p>${pre(`{\n  "mcpServers": {\n    "gbk": { "url": "${url}" }\n  }\n}`)}<p>VS Code <code>.vscode/mcp.json</code>:</p>${pre(`{\n  "servers": {\n    "gbk": { "type": "http", "url": "${url}" }\n  }\n}`)}
+<h3>xAI API</h3><p>Remote MCP tool in the Responses API (<code>POST https://api.x.ai/v1/responses</code>):</p>${pre(`"tools": [{\n  "type": "mcp",\n  "server_url": "${url}",\n  "server_label": "gbk"\n}]`)}<p>With the xAI Python SDK: <code>mcp(server_url="${esc(url)}", server_label="gbk")</code>.</p>
+<h3>WebMCP</h3><p><a href="/studio">GBK Studio</a> exposes its tools to in-page agents through WebMCP (<code>navigator.modelContext</code>).</p>
+<h3>What differs from ChatGPT</h3><p>Only ChatGPT shows the in-chat player. Other clients get the WAV and MIDI rendered on GBK's server as signed download links, plus a link to open the piece in GBK Studio.</p>
+<h3>Limits</h3><ul><li>Without an account: ${sr.guestPerHour} server renders per hour, up to ${sr.guestMaxSeconds} s each.</li><li>Signed in: ${sr.accountPerHour} server renders per hour, up to ${sr.accountMaxSeconds} s each.</li></ul>
+<script>document.querySelectorAll("button.copy").forEach(function(b){b.addEventListener("click",function(){navigator.clipboard.writeText(b.dataset.copy).then(function(){b.textContent="Copied";setTimeout(function(){b.textContent="Copy"},1500)})})})</script>`;
+}
+
 function chatgpt(cfg: Config): string {
   const install = cfg.chatgptPluginUrl
     ? `<a class="cta" href="${esc(cfg.chatgptPluginUrl)}" rel="noopener">Install in ChatGPT</a>`
@@ -64,7 +85,7 @@ ${install}<a class="cta alt" href="/studio">Open GBK Studio</a>
 <h2>Rendering happens in your browser</h2>
 <p class="note">Press <strong>Render</strong> in the in-chat player and the WAV is synthesized right there in your browser with the GBK SoundFont engine, then plays in the chat with a download (MIDI downloads straight from the chat). Clients without a browser, such as Codex, get the WAV rendered on GBK's server with the same engine and a download link, together with the MIDI file. If you sign in, a WAV can also be rendered in your open <a href="/studio">GBK Studio</a> tab.</p>
 <h2>Private by default, no account needed</h2><p>From ChatGPT you can compose without signing in: each piece gets a private access key that only your chat holds. If you later sign in, you can claim a piece into your GBK account for safekeeping, or ask GBK to delete it. Either way it stays private. GBK publishes a public share page only when you explicitly ask it to. See the <a href="/privacy">privacy policy</a>.</p>
-<h2>Connect it yourself</h2><p>Developers can add the remote MCP server <code>${esc(cfg.publicOrigin)}/mcp</code> (Streamable HTTP, no authentication required; optional OAuth sign-in with Google or GitHub) to any MCP-capable client.</p>`;
+<p><a href="#other-ai-apps">Use with other AI apps</a></p>${otherAiApps(cfg)}`;
   return page(cfg, "/chatgpt", "GBK Composer for ChatGPT: compose and edit MIDI music", desc, body, {
     "@context": "https://schema.org", "@type": "SoftwareApplication", name: "GBK Composer", applicationCategory: "MultimediaApplication",
     operatingSystem: "Web", url: `${cfg.publicOrigin}/chatgpt`, image: `${cfg.publicOrigin}/icon.png`, description: desc,
