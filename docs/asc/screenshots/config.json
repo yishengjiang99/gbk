@@ -1,7 +1,46 @@
-{"app_name":"GBK Music Composer","brand":{"bg":[22,30,48],"accent":[46,196,182],"ink":[245,245,247],"muted":[170,178,196],"card":[30,40,62]},
-"output_dir":"docs/asc/screenshots/en-US","source_dir":"docs/asc/screenshots/en-US/source",
-"shots":[
-{"slug":"01-feed","hero":"Hear new music\\nin one swipe","sub":"A feed of pieces made with GBK","source":"ios-feed.png"},
-{"slug":"02-remix","hero":"Remix any\\nprompt you like","sub":"Every piece shows the prompt behind it","source":"feed-mobile.png"},
-{"slug":"03-messages","hero":"Talk with\\nother composers","sub":"Direct messages, with block and report","source":"ios-dm.png"},
-{"slug":"04-inbox","hero":"Keep up with\\nyour fans","sub":"Replies, forks and comments in one inbox","source":"inbox-mobile.png"}]}
+{
+ "app_name": "GBK Music Composer",
+ "brand": {
+  "bg": [
+   22,
+   30,
+   48
+  ],
+  "accent": [
+   46,
+   196,
+   182
+  ],
+  "ink": [
+   245,
+   245,
+   247
+  ],
+  "muted": [
+   170,
+   178,
+   196
+  ],
+  "card": [
+   30,
+   40,
+   62
+  ]
+ },
+ "output_dir": "docs/asc/screenshots/en-US",
+ "source_dir": "docs/asc/screenshots/en-US/source",
+ "shots": [
+  {
+   "slug": "01-feed",
+   "hero": "Hear new music\\nin one swipe",
+   "sub": "A feed of pieces made with GBK",
+   "source": "ios-feed.png"
+  },
+  {
+   "slug": "02-remix",
+   "hero": "Remix any\\nprompt you like",
+   "sub": "Every piece shows the prompt behind it",
+   "source": "feed-mobile.png"
+  }
+ ]
+}
