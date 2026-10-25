@@ -87,7 +87,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: "index.html",
-        "sheet-cam": "sheet-cam.html",
         "midi-clock": "midi-clock.html",
       },
     },

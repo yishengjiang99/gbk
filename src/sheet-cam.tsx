@@ -587,6 +587,6 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
   );
 }
 
-// Standalone bootstrap lives in src/sheet-cam-standalone.tsx (entry for
-// sheet-cam.html). This module exports the <SheetCam> component so the main
-// app can embed it in the Winamp UI without creating a second root.
+// This module exports the <SheetCam> component, embedded by the main app in
+// the Winamp UI (src/midireader.tsx). A standalone sheet-cam.html entry was
+// removed 2026-10-25 — nothing linked to it; this component is the only surface.
