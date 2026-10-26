@@ -62,14 +62,23 @@ test("guest publish: native app web view publishes without sign-in; sheet fits 3
   }
 });
 
-test("guest publish: native publish handler gets {projectId,title,labels,tags}; no web sheet, no sign-in event", async ({ page }) => {
+test("guest publish: native publish handler gets {projectId,slug,title,labels,tags} after the private save; no web sheet, no sign-in event", async ({ page }) => {
   await studioWithSong(page, { deviceId: randomUUID(), guestName: guestName() }, true);
   await openPublish(page);
   await expect.poll(() => page.evaluate(() => (window as any).__posted.length)).toBe(1);
   const m = await page.evaluate(() => (window as any).__posted[0]);
-  expect(Object.keys(m).sort()).toEqual(["labels", "projectId", "tags", "title"]); expect(m.title).toBe("Guest Publish E2E"); expect(typeof m.projectId).toBe("string");
-  await expect(page.getByTestId("publish-dialog")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as any).__signin)).toBe(0);
+  expect(Object.keys(m).sort()).toEqual(["labels", "projectId", "slug", "tags", "title"]); expect(m.title).toBe("Guest Publish E2E"); expect(typeof m.projectId).toBe("string");
+  expect(typeof m.slug).toBe("string"); expect(m.slug.length).toBeGreaterThan(0);
+  try {
+    const sh = await page.request.get(`/api/shares/${m.slug}`); expect(sh.status()).toBe(200); const sj = await sh.json();
+    expect(sj.public).toBe(false); expect(sj.projectId).toBe(m.projectId);
+    await expect(page.getByTestId("publish-dialog")).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__signin)).toBe(0);
+  } finally {
+    const csrf = (await page.context().cookies()).find((c) => c.name === "gbk_csrf")?.value ?? "";
+    await page.request.delete("/api/me", { headers: { origin: new URL(page.url()).origin, "x-gbk-csrf": decodeURIComponent(csrf) } });
+    expect((await page.request.get(`/api/shares/${m.slug}`)).status()).toBe(404);
+  }
 });
 
 test("guest publish: plain mobile web still asks to sign in", async ({ page }) => {
@@ -77,4 +86,14 @@ test("guest publish: plain mobile web still asks to sign in", async ({ page }) =
   await openPublish(page);
   await expect.poll(() => page.evaluate(() => (window as any).__signin)).toBe(1);
   await expect(page.getByTestId("publish-dialog")).toHaveCount(0);
+});
+
+test("guest publish: failed save shows an error and posts nothing", async ({ page }) => {
+  await studioWithSong(page, { deviceId: randomUUID(), guestName: guestName() }, true);
+  await page.route(/\/api\/(songs\/autosave|shares)$/, (r) => (["POST", "PUT"].includes(r.request().method()) ? r.fulfill({ status: 500, contentType: "application/json", body: "{}" }) : r.continue()));
+  await openPublish(page);
+  await expect(page.getByText(/Couldn't save your song/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__posted.length)).toBe(0);
+  const csrf = (await page.context().cookies()).find((c) => c.name === "gbk_csrf")?.value ?? "";
+  await page.request.delete("/api/me", { headers: { origin: new URL(page.url()).origin, "x-gbk-csrf": decodeURIComponent(csrf) } });
 });

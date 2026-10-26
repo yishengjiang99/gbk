@@ -99,8 +99,10 @@ Guests publish like anyone else: `POST /api/shares` with `public: true`, or `PAT
 - Reports, admin hide/unpublish and blocks apply to guest songs and guest users exactly as to other accounts.
 
 **Web-view guest session.** The studio web view has no cookie until the user signs in. In the app (`window.gbkNative` exists) the web Publish action does this, with no sign-in sheet and no `gbk:need-signin` event:
-1. If `webkit.messageHandlers.publish` exists, it calls `postMessage({ projectId, title, labels: [], tags: [] })` and stops; the app shows its native publish sheet. `projectId` is the studio project id; `title` is the current song name.
-2. Otherwise it calls `POST /api/auth/guest/web` and opens the web publish sheet.
+1. Without a session it first calls `POST /api/auth/guest/web` (below).
+2. It saves the song privately, exactly like the studio autosave: it creates the share if none exists yet, otherwise it updates it. If the save fails, it shows a short error and stops; no message is posted.
+3. After the save finishes, if `webkit.messageHandlers.publish` exists, it calls `postMessage({ projectId, slug, title, labels: [], tags: [] })` and stops; the app shows its native publish sheet. `projectId` is the studio project id; `slug` is the saved share (still private, `public: false`), to publish with `PATCH /api/shares/:slug { public: true }` and `PATCH /api/songs/:slug/meta`; `title` is the saved title.
+4. Otherwise it opens the web publish sheet for that share.
 
 `POST /api/auth/guest/web` (no body)
 - Headers: `X-GBK-Device: <UUID v4>` (the per-install random id the app keeps in the Keychain; any case) and `X-GBK-Guest-Name: <two-word username>` (same rule as `username` above). Same-origin `Origin` required (`403 BAD_ORIGIN`).

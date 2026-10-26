@@ -118,11 +118,13 @@ export function MobileStudio(props: MobileStudioProps) {
     if (workstation.readOnlyReason) { say("Make a copy of this song first, then publish your version."); return; }
     if (!makeCurrent(v)) return;
     if (!workstation.project.tracks.length) { say("Make something first, then publish it."); return; }
-    if (native && nativePublish({ projectId: workstation.project.id, title: workstation.project.name, labels: [], tags: [] })) return;
     setBusy("Saving your song…");
     try {
       if (native && !s.auth.authenticated) { try { await ensureGuestSession(); } catch (e) { say((e as Error).message); return; } void s.refreshAuth(); }
-      setPublish(await saveForPublish()); } catch (e) { reportError(e, { where: "studio.publish" }); say("Couldn't save your song. Check your connection and try again."); } finally { setBusy(""); }
+      const saved = await saveForPublish();
+      // App hand-off: only after the private save finished, so the native sheet can publish this exact share.
+      if (native && nativePublish({ projectId: workstation.project.id, slug: saved.slug, title: saved.title || workstation.project.name, labels: [], tags: [] })) return;
+      setPublish(saved); } catch (e) { reportError(e, { where: "studio.publish" }); say("Couldn't save your song. Check your connection and try again."); } finally { setBusy(""); }
   };
   const openEditor = (v: SongVersion | null = null) => { if (makeCurrent(v)) { setTab("Tracks"); setSheet("editor"); } };
   const newSong = async () => { setSheet(null); stopPreview(); if (await props.newProject()) { if (s.auth.authenticated) s.reset(); setText(""); } };

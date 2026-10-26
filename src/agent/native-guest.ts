@@ -4,7 +4,7 @@
 type NativeWin = { gbkNative?: { deviceId?: unknown; guestName?: unknown }; webkit?: { messageHandlers?: Record<string, { postMessage: (m: unknown) => void } | undefined> } };
 const w = () => window as unknown as NativeWin;
 export const inNativeApp = () => typeof w().gbkNative === "object" && w().gbkNative !== null;
-export interface NativePublish { projectId: string; title: string; labels: string[]; tags: string[] }
+export interface NativePublish { projectId: string; slug: string; title: string; labels: string[]; tags: string[] }
 /** Hands publishing to the app's native sheet. False when not in the app or the handler is missing (use the web sheet). */
 export function nativePublish(m: NativePublish): boolean {
   const h = inNativeApp() ? w().webkit?.messageHandlers?.publish : undefined;
