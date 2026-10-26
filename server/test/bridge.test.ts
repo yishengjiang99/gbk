@@ -153,3 +153,19 @@ test("disconnect + reconnect: run resumes on the same project; tab close without
     assert.ok(tab2.events.find((e) => e.type === "session_ready"));
   } finally { await s2.app.close(); }
 });
+
+test("a new message from a live tab supersedes a run orphaned by a closed tab (no RUN_ACTIVE for the whole grace window)", async () => {
+  const model = new ScriptModel([() => calls(tc("a", "gbk_list_tracks")), () => reply("new run")]);
+  const s = await startServer(model, { AGENT_RECONNECT_GRACE_MS: "120000" });
+  try {
+    const a = await login(s.base, "code-a");
+    const tab = new TestTab(); tab.autoRespond = false; await tab.open(s.base, a.cookie);
+    tab.send({ type: "user_message", clientMessageId: "u1", text: "go" }); await tab.waitFor("tool_call"); tab.ws.terminate();
+    await new Promise((r) => setTimeout(r, 100));
+    const tab2 = new TestTab(); await tab2.open(s.base, a.cookie);
+    const t0 = Date.now(); tab2.send({ type: "user_message", clientMessageId: "u2", text: "again" });
+    await tab2.waitFor("run_started");
+    assert.equal(tab2.events.some((e) => e.type === "error" && e.code === "RUN_ACTIVE"), false);
+    assert.ok(Date.now() - t0 < 6000);
+  } finally { await s.app.close(); }
+});

@@ -41,7 +41,7 @@ const waitReady = async (l: BrowserConnection, ms: number) => { const t0 = Date.
 export class AgentHub {
   readonly registry = new SessionRegistry<BrowserConnection>();
   readonly wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
-  private runs = new Map<string, { user: string; abort: AbortController }>();
+  private runs = new Map<string, { user: string; abort: AbortController; conn?: BrowserConnection; done?: Promise<void> }>();
   private slots: RunSlots;
   constructor(private cfg: Config, private sessions: SessionStore, private runtime: AgentRuntime, private catalog: ToolCatalog, private convs: ConversationStore, private msgLimiter: RateLimiter, private ipLimiter: RateLimiter, private log: Log) {
     this.slots = new RunSlots(cfg.agent.maxConcurrentRunsPerUser);
@@ -119,10 +119,17 @@ export class AgentHub {
     if (text.length > this.cfg.agent.maxInputChars) return conn.emit({ type: "error", code: "INPUT_TOO_LONG", message: `messages are limited to ${this.cfg.agent.maxInputChars} characters` });
     if (!this.cfg.enabled) return conn.emit({ type: "error", code: "DISABLED", message: "the Composer is switched off" });
     if (!this.msgLimiter.take(conn.user)) return conn.emit({ type: "error", code: "RATE_LIMITED", message: `too many messages; wait ${this.msgLimiter.retryAfterSec(conn.user)} s` });
-    if (!this.slots.acquire(conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "a run is already in progress; stop it or wait" });
+    if (!this.slots.acquire(conn.user)) {
+      // A run whose tab closed is only waiting out the reconnect grace. A new message from a live tab supersedes it
+      // (the user can't see or stop it), so abort it and take the slot instead of answering RUN_ACTIVE for minutes.
+      const orphans = [...this.runs.values()].filter((r) => r.user === conn.user && r.conn && r.conn !== conn && !r.conn.alive);
+      if (orphans.length) { for (const r of orphans) r.abort.abort(); await Promise.race([Promise.all(orphans.map((r) => r.done)), new Promise((ok) => setTimeout(ok, 5000))]); this.log({ evt: "run_superseded", user: conn.user, n: orphans.length }); }
+      if (!this.slots.acquire(conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "a run is already in progress; stop it or wait" });
+    }
     const model = typeof m.model === "string" && m.model ? m.model : this.cfg.llm.model;
     const runId = rid("run"); const abort = new AbortController();
-    this.runs.set(runId, { user: conn.user, abort });
+    let finished!: () => void; const done = new Promise<void>((ok) => { finished = ok; });
+    this.runs.set(runId, { user: conn.user, abort, conn, done });
     const conv = this.convs.get(conn.user);
     conn.emit({ type: "run_started", runId, clientMessageId: String(m.clientMessageId ?? "").slice(0, 60), text: text.slice(0, 200) });
     const t0 = Date.now();
@@ -133,7 +140,7 @@ export class AgentHub {
       this.log({ evt: "run_crash", runId, err: (e as Error).message });
       (this.registry.get(conn.user) ?? conn).emit({ type: "run_failed", runId, code: "INTERNAL_ERROR", message: "internal error", retryable: true });
     } finally {
-      this.runs.delete(runId); this.slots.release(conn.user); this.convs.save(conv);
+      this.runs.delete(runId); this.slots.release(conn.user); this.convs.save(conv); finished();
     }
   }
 }

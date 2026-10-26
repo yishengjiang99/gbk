@@ -99,3 +99,7 @@ Differences: iOS hides notes once they finish (per the iOS card spec), while web
 ### Real-time feed playback (2026-10-25)
 - Feed and Explore play each song's project live through the SF2 engine (`src/components/social/live-song.ts`): same render plan as WAV export (`buildRenderPlan` + `planVoices`, one `sf2-processor` worklet per audible track, project reverb/chorus/voice edits as setup events) in the realtime AudioContext, through the feed's shared AnalyserNode and the 58 ms Crossfader fade. The SoundFont warms at feed mount; the next songs' projects and render plans warm with preload. Prerendered WAV/MP3 is used only for songs without a playable project. `/s/<slug>` opens the studio, which already plays live.
 - Offline-only: LUFS loudness normalization (live uses a fixed 0.8 headroom gain). MP3 remains only for og:audio (artist CLI); the web publish path never encoded MP3.
+
+
+## Composer: orphaned runs no longer block new messages (CI e2e-composer fix)
+A run whose tab closed waits out `AGENT_RECONNECT_GRACE_MS` (120 s) and resumes on any tab of the same user. Since d4297c5 that kept a closed tab's run alive long enough to hold the user's run slot, so the next message got `RUN_ACTIVE`. Now a `user_message` from a live tab aborts runs whose originating tab is gone (waits up to 5 s for them to finish), then starts. Reconnect-and-resume without a new message is unchanged. Regression test: `server/test/bridge.test.ts`.
