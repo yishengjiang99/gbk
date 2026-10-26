@@ -381,8 +381,12 @@ test("social feed play button is accessible: aria-label Play/Pause + aria-presse
   const b = page.getByTestId("feed-card").filter({ hasText: title }).getByTestId("card-play"); await expect(b).toBeVisible();
   await expect(b).toHaveAttribute("aria-label", /^(Play|Pause)$/); await expect(b).toHaveAttribute("aria-pressed", /^(true|false)$/);
   expect(await b.evaluate((e) => e.tagName)).toBe("BUTTON");
+  // badge sits inside the roll (bottom-left) and the roll never scrolls, paused or playing
+  const inRoll = () => b.evaluate((e) => { const w = e.parentElement!, r = e.getBoundingClientRect(), q = w.getBoundingClientRect(); return getComputedStyle(e).position === "absolute" && w.scrollTop === 0 && r.bottom <= q.bottom && r.left >= q.left && r.right <= q.right; });
+  expect(await inRoll()).toBe(true);
   const was = await b.getAttribute("aria-pressed"); await b.click();
   await expect(b).toHaveAttribute("aria-pressed", was === "true" ? "false" : "true");
   await expect(b).toHaveAttribute("aria-label", was === "true" ? "Play" : "Pause");
+  expect(await inRoll()).toBe(true);
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
