@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Proposal, WorkstationState } from "../../workstation/controller.ts";
 import { diffNotes, diffSummary } from "../../workstation/diff.ts";
 import { workstation } from "./useWorkstation.ts";
@@ -26,21 +26,45 @@ export function useAgentToolsToggle() {
 
 export function AgentPanel({ state, focusProposal, setFocus }: { state: WorkstationState; focusProposal: Proposal | null; setFocus: (id: string | null) => void }) {
   const [approval, setApproval] = useState<{ p: Proposal; resolve: (ok: boolean) => void } | null>(null);
+  const approvalRef = useRef<{ p: Proposal; resolve: (ok: boolean) => void } | null>(null);
   useEffect(() => {
-    workstation.approvalHandler = (p) => new Promise<boolean>((resolve) => { setFocus(p.id); setApproval({ p, resolve }); dispatchEvent(new CustomEvent("gbk-approval-request")); });
-    return () => { workstation.approvalHandler = null; };
+    workstation.approvalHandler = (p) => new Promise<boolean>((resolve) => {
+      // One dialog slot: a newer request supersedes an unanswered one. Resolve the old waiter as
+      // declined instead of stranding it — a lost resolver hangs its commit until the tool timeout.
+      approvalRef.current?.resolve(false);
+      const entry = { p, resolve };
+      approvalRef.current = entry; setApproval(entry); setFocus(p.id);
+      dispatchEvent(new CustomEvent("gbk-approval-request"));
+    });
+    return () => { approvalRef.current?.resolve(false); approvalRef.current = null; workstation.approvalHandler = null; };
   }, [setFocus]);
+  // Keep pending proposals expiring while the page sits open (the controller also sweeps lazily).
+  useEffect(() => {
+    const t = setInterval(() => workstation.expirePendingProposals(), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  // If the dialog's proposal leaves "pending" any other way (expired, superseded, committed), close the
+  // dialog and release its waiter as declined — the controller fails that commit with the precise status.
+  useEffect(() => {
+    if (!approval) return;
+    const cur = state.proposals.find((x) => x.id === approval.p.id);
+    if (cur && cur.status !== "pending") {
+      approval.resolve(false);
+      if (approvalRef.current?.p.id === approval.p.id) approvalRef.current = null;
+      setApproval(null);
+    }
+  }, [approval, state.proposals]);
   const pending = state.proposals.filter((p) => p.status === "pending");
   const last = state.activity[state.activity.length - 1];
   const lastAgent = [...state.activity].reverse().find((a) => a.source === "agent");
   const diff = useMemo(() => (focusProposal ? diffNotes(focusProposal.original, focusProposal.candidate) : null), [focusProposal]);
   const ccDelta = focusProposal ? Math.abs(focusProposal.candidate.ccs.length - focusProposal.original.ccs.length) + focusProposal.ops.filter((o) => o.op === "setCC").reduce((s, o) => s + (o.op === "setCC" ? o.points.length : 0), 0) : 0;
   const accept = async (p: Proposal) => {
-    if (approval && approval.p.id === p.id) { approval.resolve(true); setApproval(null); return; }
+    if (approval && approval.p.id === p.id) { approval.resolve(true); if (approvalRef.current?.p.id === p.id) approvalRef.current = null; setApproval(null); return; }
     try { await workstation.commitProposal(p.id, { source: "user" }); } catch (e) { alert((e as Error).message); }
   };
   const reject = (p: Proposal) => {
-    if (approval && approval.p.id === p.id) { approval.resolve(false); setApproval(null); }
+    if (approval && approval.p.id === p.id) { approval.resolve(false); if (approvalRef.current?.p.id === p.id) approvalRef.current = null; setApproval(null); }
     workstation.discardProposal(p.id, "user");
   };
   return (

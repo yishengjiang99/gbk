@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_PLAN, PAYWALL_PLANS, fetchPaywall, isBudgetError, isHardReason, paywallSuppressed,
-  pricingHref, reportPaywall, reportExport, resetLabel, type PaywallReason,
+  pricingHref, publishPromptGate, reportPaywall, reportExport, resetLabel, type PaywallReason,
 } from "../../agent/paywall.ts";
 import "./paywall.css";
 
@@ -31,34 +31,39 @@ export function PaywallHost() {
   const open = useCallback((s: Showing) => {
     if (paywallSuppressed() || showingRef.current) return;
     showingRef.current = s; setShowing(s); setPlan(DEFAULT_PLAN);
+    publishPromptGate.notePaywallShown();
     void reportPaywall("paywall_view", s.reason);
   }, []);
 
   /** Ask the server (source of truth) whether a trigger should surface the modal right now. */
   const decide = useCallback(async (hardHint: boolean) => {
-    if (busy.current || showingRef.current || paywallSuppressed()) return;
-    busy.current = true;
+    // The publish prompt for this same trigger waits on the gate until this decision resolves.
+    publishPromptGate.beginDecision();
     try {
-      const st = await fetchPaywall();
-      if (st?.pro) return;
-      if (hardHint) {
-        // A run just failed on the AI budget: that action is blocked right now, so the failure itself is the
-        // signal. The server's soft reason can be null in this state (a dismiss cooldown suppresses it), yet
-        // the hard modal is exactly what the user needs; a hard reason already dismissed this session stays so.
-        if (!dismissedHard.current.has("ai_limit")) open({ kind: "hard", reason: "ai_limit" });
-        return;
-      }
-      if (!st) return;
-      const { eligible, reason } = st.paywall;
-      if (!reason) return;
-      if (isHardReason(reason)) {
-        if (!eligible || dismissedHard.current.has(reason)) return;
-        open({ kind: "hard", reason });
-      } else if (eligible && !shownSoft.current.has(reason)) {
-        shownSoft.current.add(reason);
-        open({ kind: "soft", reason });
-      }
-    } finally { busy.current = false; }
+      if (busy.current || showingRef.current || paywallSuppressed()) return;
+      busy.current = true;
+      try {
+        const st = await fetchPaywall();
+        if (st?.pro) return;
+        if (hardHint) {
+          // A run just failed on the AI budget: that action is blocked right now, so the failure itself is the
+          // signal. The server's soft reason can be null in this state (a dismiss cooldown suppresses it), yet
+          // the hard modal is exactly what the user needs; a hard reason already dismissed this session stays so.
+          if (!dismissedHard.current.has("ai_limit")) open({ kind: "hard", reason: "ai_limit" });
+          return;
+        }
+        if (!st) return;
+        const { eligible, reason } = st.paywall;
+        if (!reason) return;
+        if (isHardReason(reason)) {
+          if (!eligible || dismissedHard.current.has(reason)) return;
+          open({ kind: "hard", reason });
+        } else if (eligible && !shownSoft.current.has(reason)) {
+          shownSoft.current.add(reason);
+          open({ kind: "soft", reason });
+        }
+      } finally { busy.current = false; }
+    } finally { publishPromptGate.endDecision(); }
   }, [open ]);
 
   useEffect(() => {
@@ -85,6 +90,8 @@ export function PaywallHost() {
     if (!s) return;
     if (s.kind === "hard") dismissedHard.current.add(s.reason);
     if (dismiss) void reportPaywall("paywall_dismiss", s.reason);
+    // Last: release any publish prompt this presentation was holding back.
+    publishPromptGate.notePaywallClosed();
   }, []);
 
   // Soft modal only: Escape dismisses (starts the server-side 24 h cooldown via paywall_dismiss).

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useWorkstation, workstation } from "../workstation/useWorkstation.ts";
 import { useAgentSession, type ChatItem } from "../../agent/useAgentSession.ts";
 import { songAutosaver } from "../../agent/autosave.ts";
+import { publishPromptGate } from "../../agent/paywall.ts";
 import { needSignIn, takePending } from "../auth/gate.ts";
 import { PianoRollEditor, ROLL_KEY_W, rollDark, type RollTool, type View } from "../workstation/PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "../workstation/AutomationLane.tsx";
@@ -203,7 +204,9 @@ export function DesktopStudio(props: DesktopStudioProps) {
     const was = prevRun.current; prevRun.current = s.run?.runId ?? null;
     if (!was || s.run) return;
     if (s.items[s.items.length - 1]?.role === "error") return;
-    void songAutosaver.flush().then((song) => { if (song && !song.public && !workstation.readOnlyReason && workstation.project.tracks.length) setPublish(song); }).catch(() => undefined);
+    // Through the gate: if the paywall is deciding on (or showing for) this same run completion, the prompt
+    // is held until the paywall closes instead of stacking underneath it.
+    void songAutosaver.flush().then((song) => { if (song && !song.public && !workstation.readOnlyReason && workstation.project.tracks.length) publishPromptGate.offerPublish(() => setPublish(song)); }).catch(() => undefined);
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; });
   const input = useRef<HTMLTextAreaElement>(null);

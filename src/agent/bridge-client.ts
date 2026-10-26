@@ -99,7 +99,7 @@ export class BridgeClient {
     switch (m.type) {
       case "session_ready": this.sessionId = m.sessionId; this.onState("connected"); break;
       case "ping": this.send({ type: "pong", t: m.t }); return;
-      case "run_started": this.activeRunId = m.runId; break;
+      case "run_started": this.activeRunId = m.runId; this.c.supersedePendingProposals(); break;
       // A finished/failed/cancelled run never leaves browser work behind (e.g. an in-page render after Stop).
       case "run_completed": case "run_failed": this.activeRunId = null; this.bridge.cancel(); break;
       case "cancel_call": this.bridge.cancel(m.callId); break;

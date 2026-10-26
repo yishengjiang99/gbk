@@ -96,3 +96,34 @@ export function reportPaywall(event: "paywall_view" | "paywall_dismiss" | "plan_
 export function reportExport() {
   return social.engagement("export", { surface: PAYWALL_SURFACE, platform: PAYWALL_PLATFORM });
 }
+
+// ---- publish prompt coordination ----------------------------------------------
+
+/** The Studio's post-run Publish prompt and this paywall both react to a finished run, uncoordinated:
+ *  the prompt opens as soon as the song is saved while the paywall is still deciding via /api/me, and the
+ *  modal then lands on top of the dialog (seen in the 2026-10-26 production click-through). This gate
+ *  serializes them — the paywall wins: a publish offer made while a paywall decision is in flight or a
+ *  paywall is visible is held (latest offer wins) and released when the paywall closes; when the decision
+ *  ends with no paywall shown, the offer is released at once. With no paywall activity it is a pass-through,
+ *  so a publish prompt with no paywall due behaves exactly as before. */
+export class PublishPromptGate {
+  private deciding = 0;
+  private visible = false;
+  private queued: (() => void) | null = null;
+
+  offerPublish(open: () => void): void {
+    if (this.visible || this.deciding > 0) { this.queued = open; return; }
+    open();
+  }
+  beginDecision(): void { this.deciding++; }
+  endDecision(): void { if (this.deciding > 0) this.deciding--; this.flush(); }
+  notePaywallShown(): void { this.visible = true; }
+  notePaywallClosed(): void { this.visible = false; this.flush(); }
+  private flush(): void {
+    if (this.visible || this.deciding > 0) return;
+    const open = this.queued; this.queued = null;
+    open?.();
+  }
+}
+
+export const publishPromptGate = new PublishPromptGate();

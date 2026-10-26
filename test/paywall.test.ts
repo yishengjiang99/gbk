@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPricingHref, isBudgetError, isHardReason, readAttribution, resetLabel } from "../src/agent/paywall.ts";
+import { PublishPromptGate, buildPricingHref, isBudgetError, isHardReason, readAttribution, resetLabel } from "../src/agent/paywall.ts";
 
 test("pricing href carries the plan and the stored attribution ids (#116/#131)", () => {
   const href = buildPricingHref("pro_yearly", { utm_source: "reddit", utm_campaign: "launch", twclid: "abc123" });
@@ -40,4 +40,44 @@ test("resetLabel names the next UTC midnight in Pacific time, like the server", 
   assert.equal(resetLabel(Date.UTC(2026, 9, 26, 12, 0, 0)), "5 PM PT");
   // Winter: 00:00 UTC = 4 PM PST.
   assert.equal(resetLabel(Date.UTC(2026, 0, 15, 12, 0, 0)), "4 PM PT");
+});
+
+test("PublishPromptGate: with no paywall activity the publish offer fires immediately", () => {
+  const g = new PublishPromptGate();
+  let fired = 0;
+  g.offerPublish(() => { fired++; });
+  assert.equal(fired, 1);
+});
+
+test("PublishPromptGate: an offer made while the paywall decides is released when no paywall shows", () => {
+  const g = new PublishPromptGate();
+  let fired = 0;
+  g.beginDecision();
+  g.offerPublish(() => { fired++; });
+  assert.equal(fired, 0, "held while the decision is in flight");
+  g.endDecision();
+  assert.equal(fired, 1, "released once the decision ends with no paywall");
+});
+
+test("PublishPromptGate: the paywall wins — a held offer fires only after the paywall closes", () => {
+  const g = new PublishPromptGate();
+  let fired = 0;
+  g.beginDecision();
+  g.offerPublish(() => { fired++; });
+  g.notePaywallShown();
+  g.endDecision();
+  assert.equal(fired, 0, "still held while the paywall is visible");
+  g.notePaywallClosed();
+  assert.equal(fired, 1, "released on paywall close");
+});
+
+test("PublishPromptGate: an offer made while the paywall is visible waits for the close; latest offer wins", () => {
+  const g = new PublishPromptGate();
+  const fired: string[] = [];
+  g.notePaywallShown();
+  g.offerPublish(() => fired.push("first"));
+  g.offerPublish(() => fired.push("second"));
+  assert.deepEqual(fired, []);
+  g.notePaywallClosed();
+  assert.deepEqual(fired, ["second"], "only the newest held offer is released");
 });

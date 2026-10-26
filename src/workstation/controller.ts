@@ -7,7 +7,11 @@ import { newId } from "./model.ts";
 const newSharedId = () => newId("prj");
 
 export { WorkstationError };
-export type ProposalStatus = "pending" | "committed" | "discarded" | "stale";
+export type ProposalStatus = "pending" | "committed" | "discarded" | "stale" | "expired";
+/** A pending proposal (and any approval wait on it) lives at most this long. A forgotten approval must
+ *  never wedge later runs: past the TTL the proposal expires and its commit fails fast instead of
+ *  awaiting the panel until the tool-call timeout. */
+export const PROPOSAL_TTL_MS = 10 * 60_000;
 export interface Proposal {
   id: string; projectId: string; baseRevision: number; createdAt: number; source: "user" | "agent";
   range: { startTick: number; endTick: number }; trackIds: string[]; ops: Op[]; summary: string;
@@ -249,6 +253,7 @@ export class WorkstationController {
 
   // ---- proposals -----------------------------------------------------------
   propose(ops: Op[], opts: { baseRevision?: number; source?: "user" | "agent"; summary?: string } = {}): Proposal {
+    this.expirePendingProposals();
     this.assertWritable();
     this.checkRev(opts.baseRevision);
     const original = this.project;
@@ -288,17 +293,58 @@ export class WorkstationController {
   }
   private setProposal(id: string, patch: Partial<Proposal>) { this.set({ proposals: this.state.proposals.map((p) => p.id === id ? { ...p, ...patch } : p) }); }
 
+  /** Expire every pending proposal past its TTL. Returns the ids expired by this call (no state write
+   *  when nothing expired). Expiry is what un-wedges the flow: an expired proposal's commit fails fast
+   *  with PROPOSAL_EXPIRED and its approval dialog is closed by the panel watching the status. */
+  expirePendingProposals(now: number = Date.now()): string[] {
+    return this.expireWhere((p) => now - p.createdAt >= PROPOSAL_TTL_MS, "past the proposal TTL");
+  }
+
+  /** A new agent run supersedes every still-pending proposal from earlier runs. Returns their ids. */
+  supersedePendingProposals(): string[] {
+    return this.expireWhere(() => true, "superseded by a new run");
+  }
+
+  private expireWhere(pred: (p: Proposal) => boolean, why: string): string[] {
+    const hit = this.state.proposals.filter((p) => p.status === "pending" && pred(p));
+    if (!hit.length) return [];
+    const ids = new Set(hit.map((p) => p.id));
+    this.set({ proposals: this.state.proposals.map((p) => ids.has(p.id) ? { ...p, status: "expired" as const } : p) });
+    for (const p of hit) this.log(p.source, `expire ${p.id}`, true, `${why} while still pending`);
+    return hit.map((p) => p.id);
+  }
+
+  /** The approval wait is bounded by the proposal's remaining TTL: if the user never answers, the wait
+   *  ends with PROPOSAL_EXPIRED (marking the proposal expired) instead of hanging until the tool timeout. */
+  private async awaitApproval(p: Proposal): Promise<boolean> {
+    const handler = this.approvalHandler;
+    if (!handler) throw new WorkstationError("USER_APPROVAL_REQUIRED", "Commit needs the user to press Accept in the GBK proposal panel.");
+    const ms = Math.max(0, p.createdAt + PROPOSAL_TTL_MS - Date.now());
+    return await new Promise<boolean>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.setProposal(p.id, { status: "expired" });
+        this.log(p.source, `expire ${p.id}`, true, "approval wait exceeded the proposal TTL");
+        reject(new WorkstationError("PROPOSAL_EXPIRED", `proposal ${p.id} expired while waiting for the user to approve it`));
+      }, ms);
+      handler(p).then(
+        (ok) => { clearTimeout(timer); resolve(ok); },
+        (e: unknown) => { clearTimeout(timer); reject(e instanceof Error ? e : new Error(String(e))); },
+      );
+    });
+  }
+
   /** Commit = one atomic undo transaction. Agent commits require visible user approval via approvalHandler. */
   async commitProposal(id: string, opts: { source: "user" | "agent"; signal?: AbortSignal }): Promise<{ revision: number }> {
+    this.expirePendingProposals();
     const p = this.getProposal(id);
-    if (p.status !== "pending") throw new WorkstationError(p.status === "stale" ? "STALE_REVISION" : "INVALID_ARGUMENT", `proposal is ${p.status}`);
+    if (p.status !== "pending") throw new WorkstationError(p.status === "stale" ? "STALE_REVISION" : p.status === "expired" ? "PROPOSAL_EXPIRED" : "INVALID_ARGUMENT", `proposal is ${p.status}`);
     this.checkRev(p.baseRevision);
     if (opts.source === "agent" && this.autonomousAllowed(p.projectId)) {
       // Authorized autonomous session on the agent's own new project: no per-change dialog (still undoable).
     } else if (opts.source === "agent") {
-      if (!this.approvalHandler) throw new WorkstationError("USER_APPROVAL_REQUIRED", "Commit needs the user to press Accept in the GBK proposal panel.");
-      const ok = await this.approvalHandler(p);
+      const ok = await this.awaitApproval(p);
       if (opts.signal?.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
+      if (this.state.proposals.find((x) => x.id === id)?.status === "expired") throw new WorkstationError("PROPOSAL_EXPIRED", `proposal ${id} expired before it was approved`);
       if (!ok) throw new WorkstationError("USER_APPROVAL_REQUIRED", "User declined the proposal.");
       this.checkRev(p.baseRevision);
     }
