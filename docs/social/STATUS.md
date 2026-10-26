@@ -68,6 +68,10 @@ Server tests (GBK Social area): `server/test` pruned of brittle/redundant cases,
 Mirrors `src/components/social/LiveRoll.tsx`: PLAYHEAD_X 0.25, WINDOW_SEC 4, BARS 48, BAR_DECAY_MS 150, F_LO 40 / F_HI 16000, bar hue 200→340°, active note `brighten(0.45)` + glow, inactive alpha 0.85, note height 0.85 row, pitch span ≥ 12.
 Differences: iOS hides notes once they finish (per the iOS card spec), while web LiveRoll still draws them in the 1 s left of the playhead. iOS also adds the Export video's black-key row stripes. The Export video itself uses an 8 s window with the playhead at 30%; the feed cards use the LiveRoll values. Bars are scaled from dB like the AnalyserNode defaults (-100…-30 dB). The oscilloscope is iOS only for now.
 
+### Compact phone studio + Universal Links (2026-10-25)
+- `/studio` under 500px or in the iOS webview (`window.gbkNative`): title + `…` menu, Play/Stop + time, roll, prompt + Hum (web Hum moves into the prompt bar). Panels open from the menu. Studio follows `prefers-color-scheme` (bright default). Spec: `docs/social/feed-design.md`.
+- AASA at `/.well-known/apple-app-site-association` and `/apple-app-site-association` (JSON, no redirect): `83D36RPMUM.com.grepawk.moviefone` (matches `ios/project.yml`), paths `/s/*`, `/u/*`, `/feed*`, `/t/*`, plus legacy `appID`/`paths`. Smart App Banner blocked: no numeric App Store id in the repo.
+
 ### iOS native Hum: bridge contract for GBK Social (web)
 - iOS injects `window.gbkNative = { platform: "ios", version: 1, capabilities: ["hum"] }` before page scripts run.
 - When `gbkNative?.capabilities?.includes("hum")`, render the mic button in the always-visible composer prompt bar (instead of the web Hum flow), and on tap call `webkit.messageHandlers.hum.postMessage({ type: "toggle" })`. The first tap starts, the second stops.

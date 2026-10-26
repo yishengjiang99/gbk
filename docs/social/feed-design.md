@@ -15,6 +15,10 @@ Constants also live in `docs/social-api.md` → "Client behavior".
 - The switch happens on scroll settle. At most one voice fades at a time. The next and previous songs are preloaded. Playback pauses when the tab or app is hidden.
 
 ## Design rule: sign-in only when an action needs it (web + iOS)
+- **Compact phone studio ("hide the complexities")**: when the viewport is under 500px wide or `window.gbkNative` exists, the default
+  view is only the piano roll, Play/Stop + time, and the prompt box with Hum. Everything else (Explore, New project, Rewind,
+  Keys/MIDI, follow/loop, zoom, undo/redo, exports, Agent Tools, Player/Library, and the Tracks/Agent/Sound/Files panels) lives
+  behind the single `…` menu. The scrubber and automation row appear only once a track exists; the empty roll keeps one `+ Track`.
 - **No standalone Sign in button anywhere**: not in the header, the feed, the studio, or the composer. Guests browse, play, read comments, open songs in the studio, and type in the composer freely.
 - **Gated actions open the sign-in sheet.** These are: rate, comment, follow, DM, report, publish/save, Send in the composer, and the Inbox tab. **Profile is not gated**: a signed-out or guest user can open their own Profile tab. It shows the guest name (web: "Guest"; iOS: the two-word guest name) and offers the sign-in sheet from there. Only Inbox opens the sheet when its tab is tapped.
   - On phones the sheet is a bottom sheet; on desktop it is a centred modal.
@@ -47,5 +51,5 @@ Constants also live in `docs/social-api.md` → "Client behavior".
   | `--viz-wave` | `--so-wave` |
   | `--viz-dim` | `--so-muted-border` |
 
-- `color-scheme: dark` is scoped to `.so-app` and `.si-sheet`, so the studio keeps its bright theme.
+- The studio follows `prefers-color-scheme` too: bright by default (light palette in `workstation.css`, canvas palettes in `PianoRollEditor`/`AutomationLane`), dark only when the device is dark.
 - iOS has matching asset colour sets.

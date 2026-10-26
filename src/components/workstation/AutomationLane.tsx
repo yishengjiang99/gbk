@@ -46,10 +46,10 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const c = cv.current; if (!c) return;
     const dpr = window.devicePixelRatio || 1; c.width = width * dpr; c.height = H * dpr;
     const g = c.getContext("2d")!; g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = "#0f1115"; g.fillRect(0, 0, width, H);
+    const dk = matchMedia("(prefers-color-scheme: dark)").matches; g.fillStyle = dk ? "#0f1115" : "#ffffff"; g.fillRect(0, 0, width, H);
     const sel = project.selection;
     if (sel.endTick > sel.startTick) { g.fillStyle = "rgba(120,170,255,0.12)"; g.fillRect(x(sel.startTick), 0, (sel.endTick - sel.startTick) * view.pxPerTick, H); }
-    g.strokeStyle = "#2a2e38"; g.beginPath(); g.moveTo(KEY_W, yv(max / 2)); g.lineTo(width, yv(max / 2)); g.stroke();
+    g.strokeStyle = dk ? "#2a2e38" : "#dde3ec"; g.beginPath(); g.moveTo(KEY_W, yv(max / 2)); g.lineTo(width, yv(max / 2)); g.stroke();
     const endTick = view.scrollTick + (width - KEY_W) / view.pxPerTick;
     const curve = (list: { tick: number; value: number }[], color: string, dashed: boolean) => {
       if (!list.length) return;
@@ -69,8 +69,8 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     curve(visiblePoints(pts, view.scrollTick - margin, endTick + margin), track?.color ?? "#4fc3f7", false);
     if (candPts) curve(visiblePoints(candPts, view.scrollTick - margin, endTick + margin), "#7cffb2", true);
     if (drawPts.current) curve(drawPts.current, "#fff", true);
-    g.fillStyle = "#1b1e25"; g.fillRect(0, 0, KEY_W, H);
-    g.fillStyle = "#aaa"; g.font = "9px sans-serif"; g.fillText(String(max), 2, 10); g.fillText("0", 2, H - 3);
+    g.fillStyle = dk ? "#1b1e25" : "#eef2f8"; g.fillRect(0, 0, KEY_W, H);
+    g.fillStyle = dk ? "#aaa" : "#5b6677"; g.font = "9px sans-serif"; g.fillText(String(max), 2, 10); g.fillText("0", 2, H - 3);
     const pos = workstation.getState().transport.positionTick; g.fillStyle = "#ff4081"; g.fillRect(x(pos), 0, 2, H);
   }, [pts, candPts, view, width, project.selection, live]);
 

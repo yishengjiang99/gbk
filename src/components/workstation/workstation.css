@@ -231,3 +231,45 @@ html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-
 .ws-midi-imp{position:fixed;left:50%;transform:translateX(-50%);top:calc(56px + env(safe-area-inset-top));z-index:60;max-width:min(92vw,460px);background:#fff;border:1px solid #c9dbe8;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:14px;box-sizing:border-box}
 .ws-midi-imp .ws-row{flex-wrap:wrap;gap:6px}
 .ws-midi-imp b{word-break:break-all}
+
+/* ---- Compact phone studio (<500px or iOS app; WorkstationView data-compact): roll + play/stop + prompt only. ---- */
+.ws[data-compact="1"] .ws-compact-head { flex-wrap: nowrap; overflow: visible; gap: 6px; padding: 4px 8px; }
+.ws[data-compact="1"] .ws-cname { flex: 1 1 auto; min-width: 0; max-width: none; font-weight: 600; font-size: 14px; }
+.ws[data-compact="1"] .ws-more { flex: none; min-width: 44px; min-height: 36px; font-size: 20px; line-height: 1; border-radius: 10px; }
+.ws-menu { position: absolute; right: 8px; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  width: min(300px, calc(100vw - 16px)); max-height: 70vh; overflow-y: auto; padding: 8px; border-radius: 12px; background: #1f2531; border: 1px solid #465063; box-shadow: 0 10px 30px #0006; white-space: normal; }
+.ws-menu > button, .ws-menu > label { min-height: 40px; font-size: 15px; text-align: left; padding: 6px 12px; border-radius: 8px; }
+.ws[data-compact="1"] .ws-side { flex: 0 0 auto; max-height: 55%; }
+.ws[data-compact="1"] .ws-side:has(.ws-tabs:not([hidden])) { flex: 0 0 45%; }
+.ws[data-compact="1"].ws-composer-full .ws-side { flex: 1 1 0 !important; max-height: none; }
+.ws-sheet-toggle { flex: 0 0 auto; margin: 2px 6px 0; min-height: 32px; }
+.ws[data-compact="1"] .ws-cmp-dock { border-top: 0; }
+
+/* ---- Bright default: the studio follows prefers-color-scheme (dark palette above only for dark mode). ---- */
+@media (prefers-color-scheme: light) {
+  html:has(.ws), html:has(.ws) body, .ws, .xp, html:has(.xp), html:has(.xp) body { background: #f6f8fb; color: #1a2230; }
+  .ws, .xp { color-scheme: light; }
+  .ws button, .xp button { background: #ffffff; color: #1a2230; border-color: #c9d2e0; }
+  .ws-header, .ws-transport-row, .ws-scrub, .ws-float, .ws-menu, .xp-card { background: #ffffff; border-color: #dde3ec; }
+  .ws-float-bar { background: #eef2f8; }
+  .ws-title, .cmp-head h3, .ws-float-title, .xp-hero h1, .xp a, .xp-rankno { color: #2f6fd6; }
+  .ws-link { color: #2f6fd6 !important; }
+  .ws-dim, .cmp-conn, .cmp-settings summary, .ws-log, .xp-hero p { color: #5b6677; }
+  .ws-track, .ws-adsr, .cmp-bubble { background: #ffffff; border-color: #dde3ec; }
+  .cmp-msg.user .cmp-bubble { background: #e8f0fe; border-color: #b8cdf5; }
+  .ws-tracks, .ws-side, .ws-lanes, .ws-tabs, .ws-cmp-dock, .cmp, .ws-sound, .ws-agent, .xp-hero { border-color: #dde3ec; }
+  .ws-pill { border-color: #c9d2e0; } .ws-pill.off { background: #eef2f8; } .ws-pill.on { background: #e3f6ea; color: #1d6b3d; }
+  .ws select, .ws input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), .ws select option, .ws-lane-head select, .ws-lane-head input,
+  .cmp-input textarea, .cmp-settings select, .cmp-login input { background: #ffffff; color: #1a2230; border-color: #c9d2e0; }
+  .cmp-input { background: #ffffff !important; border-color: #c9d2e0 !important; }
+  .cmp-input textarea { background: transparent; }
+  .cmp-run, .cmp-spinner { color: #9a6400; border-color: #c98a00; border-right-color: transparent; }
+  .ws-tabs button.on, .ws .ws-transport-row .ws-playbtn, .cmp-input button[type=submit], .xp .xp-cta { background: #2f6fd6; border-color: #2f6fd6; color: #fff; }
+  .ws-approval, .cmp-readonly { background: #fff6dd; border-color: #e0b84a; }
+  .cmp-error { background: #fdecec; border-color: #e9a3a3; color: #8a1f1f; }
+  .ws-proposals li { border-color: #dde3ec; }
+  .xp-roll { background: #eef2f8; border-color: #dde3ec; }
+  .pub-card { background: #fff; border-color: #dde3ec; }
+}
+.ws [hidden] { display: none !important; }
+.ws-composer-full .ws-sheet-toggle { display: none; }

@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 import { test, expect, type Page } from "@playwright/test";
 import { emptyProject } from "../../src/workstation/model.ts";
 import { serializeSmf } from "../../src/workstation/smf.ts";
@@ -24,7 +25,7 @@ async function cursorInView(p: Page) {
 test("follow-scroll keeps the cursor in view on a dense song with low frame time; manual scroll pauses follow", async ({ page }) => {
   test.setTimeout(180_000); page.setDefaultTimeout(30_000);
   await page.goto(BASE);
-  await page.getByTestId("open-player").click();
+  await (await studioReveal(page, "open-player")).click();
   await page.locator('input[type=file][accept=".mid,.midi"]').first().setInputFiles({ name: "dense.mid", mimeType: "audio/midi", buffer: denseMidi() });
   await page.getByTestId("close-player").dispatchEvent("click");
   await expect(page.locator(".ws-name")).toContainText("dense");
@@ -46,6 +47,6 @@ test("follow-scroll keeps the cursor in view on a dense song with low frame time
   await page.mouse.wheel(0, 0); await page.keyboard.down("Shift"); await page.mouse.wheel(0, -4000); await page.keyboard.up("Shift");
   await expect(page.getByTestId("follow-toggle")).not.toBeChecked();
   // Re-enable follow -> cursor back in view
-  await page.getByTestId("follow-toggle").check();
+  await (await studioReveal(page, "follow-toggle")).check();
   await expect.poll(async () => (await cursorInView(page)).ok, { timeout: 5000 }).toBe(true);
 });

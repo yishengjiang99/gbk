@@ -63,7 +63,10 @@ test("native: google exchange, bearer, refresh rotation + reuse detection, web-c
     assert.deepEqual(sent.map((x) => [x.token, x.payload.kind]), [[tok, "comment"], [tok, "fork"]]);
     // AASA
     const aasa = await (await fetch(`${s.base}/.well-known/apple-app-site-association`)).json();
-    assert.deepEqual(aasa.applinks.details[0].components.map((c: Record<string, string>) => c["/"]), ["/s/*", "/u/*", "/t/*", "/feed", "/explore"]);
+    assert.deepEqual(aasa.applinks.details[0].components.map((c: Record<string, string>) => c["/"]), ["/s/*", "/u/*", "/t/*", "/feed", "/feed*", "/explore"]);
+    assert.deepEqual(aasa.applinks.details[1].paths, ["/s/*", "/u/*", "/t/*", "/feed", "/feed*", "/explore"]); assert.ok(aasa.applinks.details[1].appID);
+    const root = await fetch(`${s.base}/apple-app-site-association`, { redirect: "manual" }); assert.equal(root.status, 200);
+    assert.match(root.headers.get("content-type") ?? "", /^application\/json/); assert.deepEqual(await root.json(), aasa);
     // delete account: songs gone, tokens dead
     assert.equal((await fetch(`${s.base}/api/me`, { method: "DELETE", headers: A2 })).status, 200);
     assert.equal((await fetch(`${s.base}/api/songs/${song.slug}`)).status, 404);

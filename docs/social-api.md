@@ -20,7 +20,7 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
 - **Cursor format.** `next_cursor` is an opaque base64url string; never parse or build it. Same filters must be resent with it.
 - **Backward compatibility.** `GET /api/shares` (offset pagination, camelCase `ShareView`) stays unchanged; new social fields live only on the new endpoints.
 - **Deep links.** `https://compose.grepawk.com/s/<slug>` (song), `/u/<handle>` (profile), `/t/<tag>` (tag), `/inbox/<handle>` (DM thread).
-  `GET /.well-known/apple-app-site-association` (live; app id `83D36RPMUM.com.grepawk.moviefone` by default, override with `IOS_APP_IDS`, set it empty to disable) lists paths `/s/*`, `/u/*`, `/t/*` for the app id.
+  `GET /.well-known/apple-app-site-association` (live; app id `83D36RPMUM.com.grepawk.moviefone` by default, override with `IOS_APP_IDS`, set it empty to disable) (also at `/apple-app-site-association`, JSON, no redirect) lists paths `/s/*`, `/u/*`, `/feed*`, `/t/*` for the app id, plus legacy `appID`/`paths` entries for older iOS. Smart App Banner (`apple-itunes-app`) is not emitted until a numeric App Store id exists.
 - **Text.** All user text is plain text; clients must render it as text (no HTML/markdown).
 
 ### Objects

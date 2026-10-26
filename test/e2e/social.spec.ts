@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 // gbk Social e2e (Pixel, WebKit iPhone, desktop Chrome): feed cards, rating, flat comments (escaped), tag filter,
 // report, profile; no horizontal overflow and 16px inputs. Seeds one public song via the API and deletes it after.
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
@@ -55,7 +56,7 @@ test("social feed: rate, comment, tag filter, report, profile (mobile + desktop)
     await expect(page.getByTestId("profile-view")).toBeVisible();
     await expect(page.getByTestId("profile-song").filter({ hasText: title })).toBeVisible();
     expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= innerWidth)).toBe(true);
-    await page.getByTestId("tab-profile").click(); await expect(page.getByTestId("profile-settings")).toBeVisible();
+    await (await studioReveal(page, "tab-profile")).click(); await expect(page.getByTestId("profile-settings")).toBeVisible();
     expect(await page.getByTestId("settings-name").evaluate((e) => getComputedStyle(e).fontSize)).toBe("16px");
   } finally {
     await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close();
@@ -170,7 +171,7 @@ test("first paint on / is the Feed shell, never the studio; /studio still loads 
   await page.unroute("**/api/config");
   await page.goto("/studio");
   await expect(page.getByTestId("social-app")).toHaveCount(0);
-  await expect(page.getByTestId("composer-input").or(page.getByTestId("tab-composer")).first()).toBeVisible();
+  await expect(page.getByTestId("composer-input")).toBeVisible();
 });
 
 test("social studio: composer input always visible + in viewport on every tab, keyboard open/close, during playback (mobile + desktop)", async ({ page, baseURL }, info) => {
@@ -190,7 +191,7 @@ test("social studio: composer input always visible + in viewport on every tab, k
   };
   const tabs = ["tracks", "composer", "agent", "sound", "files"];
   for (const t of tabs) {
-    const tab = page.getByTestId(`tab-${t}`); if (!(await tab.count())) continue;
+    const tab = await studioReveal(page, `tab-${t}`); if (!(await tab.count())) continue;
     await tab.click(); await check(`tab ${t}`);
     await input.focus(); await check(`tab ${t} focused`);
     const vp = page.viewportSize()!; await page.setViewportSize({ width: vp.width, height: Math.round(vp.height * 0.55) }); await check(`tab ${t} keyboard open (short viewport)`);
@@ -198,7 +199,7 @@ test("social studio: composer input always visible + in viewport on every tab, k
     if (t === "tracks") await page.screenshot({ path: info.outputPath("studio-tracks.png") });
   }
   if (!info.project.name.startsWith("mobile")) expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(0);
-  if (await page.getByTestId("tab-tracks").count()) await page.getByTestId("tab-tracks").click(); else await page.getByTestId("tab-agent").click();
+  if (await page.getByTestId("tab-tracks").count()) await (await studioReveal(page, "tab-tracks")).click(); else await (await studioReveal(page, "tab-agent")).click();
   const play = page.getByTestId("ws-play");
   if (await play.isVisible()) { await play.click(); await page.waitForTimeout(800); await check("during playback"); await play.click().catch(() => undefined); }
 });
@@ -251,23 +252,23 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
     // signed in: rating resumes too (new context-less check through API state)
     const r = await page.request.get(`/api/songs/${sh.slug}`); expect((await r.json()).comment_count).toBeGreaterThanOrEqual(1);
     // Sign out lives in Profile
-    await page.getByTestId("tab-profile").click(); await page.getByTestId("signout").click();
+    await (await studioReveal(page, "tab-profile")).click(); await page.getByTestId("signout").click();
     await expect(page.getByTestId("social-app")).toBeVisible(); await expect(page.getByTestId("me-handle")).toHaveCount(0);
     // profile tab signed out -> sheet; rating resumes after sign-in
-    await page.getByTestId("tab-profile").click(); await expect(page.getByTestId("profile-guest")).toBeVisible(); await expect(page.getByTestId("signin-sheet")).toBeHidden();
+    await (await studioReveal(page, "tab-profile")).click(); await expect(page.getByTestId("profile-guest")).toBeVisible(); await expect(page.getByTestId("signin-sheet")).toBeHidden();
     await page.getByTestId("profile-signin").click(); await expect(page.getByTestId("signin-sheet")).toBeVisible(); await page.getByTestId("signin-close").click();
-    await page.getByTestId("tab-inbox").click(); await expect(page.getByTestId("signin-sheet")).toBeVisible(); await page.getByTestId("signin-close").click();
+    await (await studioReveal(page, "tab-inbox")).click(); await expect(page.getByTestId("signin-sheet")).toBeVisible(); await page.getByTestId("signin-close").click();
     await page.goto("/feed?sort=new"); const c2 = page.getByTestId("feed-card").filter({ hasText: title }).first(); await expect(c2).toBeVisible();
     await c2.getByTestId("star-5").click(); await signInViaSheet();
     await expect(page.getByTestId("feed-card").filter({ hasText: title }).first().getByTestId("star-5")).toHaveClass(/on/);
     // studio: composer text survives sign-in and is sent
     await page.request.post("/api/logout", { headers: { origin: base, "x-gbk-csrf": (await (await page.request.get("/api/session")).json()).csrf }, data: {} });
-    await page.goto("/studio"); const tab = page.getByTestId("tab-composer"); if (await tab.isVisible()) await tab.click();
+    await page.goto("/studio"); await (await studioReveal(page, "tab-composer")).click();
     await noSignInButton();
     await page.getByTestId("composer-input").fill("Gate resume prompt"); await page.getByTestId("composer-send").click();
     await signInViaSheet();
     await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
-    const ct = page.getByTestId("tab-composer"); if (await ct.isVisible()) await ct.click();
+    await (await studioReveal(page, "tab-composer")).click();
     await expect(page.getByText("Gate resume prompt").first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("composer-input")).toHaveValue("");
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
@@ -288,7 +289,7 @@ test("dark mode: palette follows prefers-color-scheme, --viz-* derive from it, n
 
 test("MIDI upload: Settings import accepts .mid, choose new project or add to current; bad file shows an error; composer input stays visible", async ({ page, baseURL }) => {
   const base = new URL(baseURL!).origin; await apiLogin(page.request, base, "e2e-code-2");
-  await page.goto("/studio"); const tab = page.getByTestId("tab-composer"); if (await tab.isVisible()) await tab.click();
+  await page.goto("/studio"); await (await studioReveal(page, "tab-composer")).click();
   await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
   const input = page.getByTestId("import-input");
   expect(await input.getAttribute("accept")).toContain(".mid");
@@ -312,7 +313,7 @@ test("hardware MIDI keyboard: button next to Keys/Hum, mocked Web MIDI plays + r
   const P = test.info().project.name;
   if (P === "mobile-webkit") {
     await page.goto("/studio");
-    const b = page.getByTestId("midi-toggle"); await expect(b).toBeDisabled();
+    const b = await studioReveal(page, "midi-toggle"); await expect(b).toBeDisabled();
     await expect(b).toHaveAttribute("title", "MIDI keyboards need Chrome/Edge or the iOS app");
     await expect(page.getByTestId("composer-input")).toBeInViewport();
     return;
@@ -327,7 +328,7 @@ test("hardware MIDI keyboard: button next to Keys/Hum, mocked Web MIDI plays + r
   });
   await page.goto("/studio");
   await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; c.edit([{ op: "addTrack", name: "Keys In", channel: 0 }], { label: "t" }); c.setSelection({ trackIds: [c.project.tracks[c.project.tracks.length - 1].id] }); });
-  await page.getByTestId("midi-toggle").click();
+  await (await studioReveal(page, "midi-toggle")).click();
   await expect(page.getByTestId("midi-status")).toHaveAttribute("data-kind", "ready");
   await expect(page.getByTestId("midi-device")).toContainText("Mock Keys 49");
   await page.evaluate(() => (window as any).__midiMock.plug("k2", "Mock Pad"));
@@ -379,4 +380,40 @@ test("social feed play button is accessible: aria-label Play/Pause + aria-presse
   await expect(b).toHaveAttribute("aria-pressed", was === "true" ? "false" : "true");
   await expect(b).toHaveAttribute("aria-label", was === "true" ? "Play" : "Pause");
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});
+
+test("compact phone studio: only roll, play/stop and prompt+Hum by default; the rest behind …; follows color scheme", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"), "phone layout");
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/studio"); const ws = page.getByTestId("workstation"); await expect(ws).toHaveAttribute("data-compact", "1");
+    await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (c.project.tracks.length) c.edit(c.project.tracks.map((t: { id: string }) => ({ op: "removeTrack", trackId: t.id })), { label: "clear" }); });
+    await expect(page.getByTestId("roll-add-track")).toBeVisible();
+    for (const id of ["new-project", "nav-explore", "keys-toggle", "midi-toggle", "scrubber", "tab-tracks", "tab-agent", "export-midi", "studio-menu"]) expect(await page.getByTestId(id).first().isVisible(), id).toBe(false);
+    expect(await page.locator("[data-testid=workstation] button:visible", { hasText: "Track" }).count(), "one + Track (empty state)").toBe(1);
+    await expect(page.getByRole("button", { name: "Rewind" })).toBeHidden(); await expect(page.getByText("Automation for")).toBeHidden();
+    await expect(page.getByTestId("ws-play").or(page.getByTestId("ws-play-wait"))).toBeVisible(); await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+    await expect(page.getByTestId("roll-add-track")).toBeVisible(); await expect(page.getByTestId("composer-input")).toBeVisible();
+    await expect(page.getByTestId("composer-panel").getByTestId("hum-btn")).toBeVisible();
+    const m = await page.evaluate(() => ({ ox: document.documentElement.scrollWidth - innerWidth, fs: getComputedStyle(document.querySelector("[data-testid=composer-input]")!).fontSize, bg: getComputedStyle(document.querySelector(".ws")!).backgroundColor }));
+    expect(m.ox).toBeLessThanOrEqual(0); expect(m.fs).toBe("16px"); expect(m.bg).toBe(scheme === "light" ? "rgb(246, 248, 251)" : "rgb(22, 27, 36)");
+    await page.screenshot({ path: `test-results/studio-compact-${scheme}-${info.project.name}.png` });
+    // overflow menu holds the rest; panels open from it; input stays visible
+    await page.getByTestId("studio-overflow").click(); await expect(page.getByTestId("studio-menu")).toBeVisible();
+    for (const id of ["new-project", "nav-explore", "keys-toggle", "midi-toggle", "export-midi", "panels-more"]) await expect(page.getByTestId(id)).toBeVisible();
+    await page.screenshot({ path: `test-results/studio-compact-menu-${scheme}-${info.project.name}.png` });
+    await page.getByTestId("panels-more").click(); await expect(page.getByTestId("tab-agent")).toBeVisible(); await expect(page.getByTestId("composer-input")).toBeVisible();
+    await page.getByTestId("panels-close").click(); await expect(page.getByTestId("tab-agent")).toBeHidden();
+    // once a track exists, the scrubber appears
+    await page.evaluate(() => (globalThis as any).__gbkWorkstation.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_cmp", program: 0 }], { label: "seed" }));
+    await expect(page.getByTestId("scrubber")).toBeVisible(); await expect(page.getByTestId("composer-input")).toBeVisible();
+  }
+});
+
+test("compact studio: Bluetooth MIDI item appears in the … menu when gbkMidiNative.bluetooth is set", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("mobile"), "phone layout");
+  await page.addInitScript(() => { (window as any).__btOpened = 0; (window as any).gbkMidiNative = { bluetooth: true, openBluetoothPairing: () => { (window as any).__btOpened++; } }; });
+  await page.goto("/studio"); await page.getByTestId("studio-overflow").click();
+  await page.getByTestId("bt-midi").click(); expect(await page.evaluate(() => (window as any).__btOpened)).toBe(1);
+  await expect(page.getByTestId("composer-input")).toBeVisible();
 });

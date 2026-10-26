@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 import { test, expect } from "@playwright/test";
 // Phone layout: transport on its own row (Play visible without horizontal scroll), studio never scrolls vertically.
 // Also exercises the in-browser "Export video" (WebCodecs/MediaRecorder) end to end on a short project.
@@ -44,7 +45,7 @@ test("export video produces a playable file", async ({ page }) => {
   // Short 2-track project (6 s) so the export is quick.
   expect(await page.evaluate(`(${SEED})()`)).toBe(20);
   const dl = page.waitForEvent("download", { timeout: 170_000 });
-  await page.getByTestId("tab-files").click();
+  await (await studioReveal(page, "tab-files")).click();
   await page.locator(".ws-tabbody [data-testid=export-video]").click();
   const d = await Promise.race([dl, page.waitForEvent("dialog").then(() => { throw new Error(`export failed: ${dialogs.join(" | ")}`); })]);
   const path = `${SHOTS}/export-e2e.${d.suggestedFilename().split(".").pop()}`;

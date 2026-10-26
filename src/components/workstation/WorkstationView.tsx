@@ -72,6 +72,10 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [keysOn, setKeysOn] = useState(false); const [, setMidiTick] = useState(0);
   const narrow = useMedia("(max-width: 900px)");
   const phone = useMedia("(max-width: 600px)");
+  // Compact phone studio (<500px or inside the iOS app): title + one overflow menu, play/stop/time only, panels behind "More".
+  const compact = useMedia("(max-width: 499px)") || typeof (window as { gbkNative?: unknown }).gbkNative === "object";
+  const [menuOpen, setMenuOpen] = useState(false); const [sheetOpen, setSheetOpen] = useState(false);
+  const hasTracks = p.tracks.length > 0;
   // iOS keyboard: size the studio to the visual viewport and undo Safari's pan, so the docked composer input sits
   // right above the keyboard instead of the page shifting up.
   useEffect(() => {
@@ -87,7 +91,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   // Phones open on the roll (Tracks); the Composer tab takes the full screen height when chosen.
   const want = tab ?? (phone ? "Tracks" : composer ? "Composer" : "Agent");
   const activeTab = tabs.includes(want) ? want : tabs[0];
-  useEffect(() => { const on = () => setTab("Agent"); addEventListener("gbk-approval-request", on); return () => removeEventListener("gbk-approval-request", on); }, []);
+  useEffect(() => { const on = () => { setTab("Agent"); setSheetOpen(true); }; addEventListener("gbk-approval-request", on); return () => removeEventListener("gbk-approval-request", on); }, []);
   const pendingCount = state.proposals.filter((x) => x.status === "pending").length;
   const lastPending = useRef(pendingCount);
   useEffect(() => { if (pendingCount > lastPending.current && !composer) setTab("Agent"); lastPending.current = pendingCount; }, [pendingCount]);
@@ -137,8 +141,9 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
     await workstation.createProject({ name: "Untitled", owner: "user", replaceCurrent: !workstation.host.checkpoint });
   });
 
+  const rewindBtn = <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>;
   const transportCore = (<>
-    <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>
+    {!compact && rewindBtn}
     {!state.transport.audioReady && !state.transport.playing
       ? <button className="ws-playbtn ws-play-wait" disabled aria-busy="true" data-testid="ws-play-wait" aria-label={`Loading SoundFont${state.transport.sf2Progress != null ? ` ${Math.round(state.transport.sf2Progress * 100)}%` : ""}`} title="Play unlocks once the SoundFont has downloaded">{state.transport.sf2Progress != null ? `${Math.round(state.transport.sf2Progress * 100)}%` : "⏳"}</button>
       : state.transport.starting && !state.transport.playing ? <button className="ws-playbtn" onClick={() => run(() => workstation.play())} aria-label="Loading sound…" aria-busy="true" data-testid="ws-play-loading">⏳</button>
@@ -148,10 +153,12 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   </>);
   const transportExtras = (<>
           <button onClick={() => setKeysOn(!keysOn)} aria-pressed={keysOn} data-testid="keys-toggle" title="Piano keyboard (on-screen, computer keys A-K, Web MIDI)">🎹 Keys</button>
-          <HumButton />
+          {!compact && <HumButton />}
           {(() => { const r = liveRig(workstation); const ok = r.midi.supported; const on = r.midi.status.kind === "ready";
             return <button data-testid="midi-toggle" disabled={!ok} aria-pressed={on} title={ok ? "Play and record with a MIDI keyboard (Web MIDI)" : MIDI_UNSUPPORTED_MESSAGE}
               onClick={() => { setKeysOn(true); void r.sink.prepare().catch(() => undefined); if (!on) void r.midi.enable().then(() => setMidiTick((x) => x + 1)); }}>🎛 MIDI</button>; })()}
+          {(() => { const bt = (window as { gbkMidiNative?: { bluetooth?: unknown; openBluetoothPairing?: () => void } }).gbkMidiNative;
+            return bt?.bluetooth && typeof bt.openBluetoothPairing === "function" ? <button data-close data-testid="bt-midi" title="Pair a Bluetooth MIDI keyboard (iOS)" onClick={() => bt.openBluetoothPairing!()}>ᛒ Bluetooth MIDI</button> : null; })()}
           <label className="ws-dim"><input type="checkbox" data-testid="follow-toggle" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
           <label className="ws-dim"><input type="checkbox" checked={p.loop.enabled} onChange={(e) => workstation.setLoop(p.selection.endTick > p.selection.startTick ? { enabled: e.target.checked, startTick: p.selection.startTick, endTick: p.selection.endTick } : { enabled: e.target.checked })} /> loop sel</label>
   </>);
@@ -176,9 +183,31 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [roHint, setRoHint] = useState<string | null>(null);
   useEffect(() => { let t: ReturnType<typeof setTimeout> | undefined; const f = () => { setRoHint("Read-only shared song — press Fork to edit your own copy."); clearTimeout(t); t = setTimeout(() => setRoHint(null), 2500); }; workstation.readOnlyHintListeners.add(f); return () => { workstation.readOnlyHintListeners.delete(f); clearTimeout(t); }; }, []);
   return (
-    <div className={`ws${phone && composer && activeTab === "Composer" ? " ws-composer-full" : ""}`} data-testid="workstation">
+    <div className={`ws${phone && composer && activeTab === "Composer" && (!compact || sheetOpen) ? " ws-composer-full" : ""}`} data-testid="workstation" data-compact={compact ? "1" : "0"}>
       {roHint && <div role="status" aria-live="polite" data-testid="readonly-hint" style={{ position: "fixed", left: "50%", bottom: 80, transform: "translateX(-50%)", zIndex: 1000, pointerEvents: "none", background: "rgba(20,20,28,.92)", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 14 }}>{roHint}</div>}
-      <header className="ws-header">
+      {compact ? <header className="ws-header ws-compact-head" data-testid="compact-head">
+        <span className="ws-name ws-cname" title={p.name}>{p.name}</span>
+        {workstation.readOnlyReason && <span className="ws-pill off" data-testid="readonly-pill" title={workstation.readOnlyReason}>read-only · <button className="ws-link" onClick={() => workstation.fork()}>Fork</button></span>}
+        <button className="ws-more" aria-label="More actions" aria-expanded={menuOpen} aria-haspopup="menu" data-testid="studio-overflow" onClick={() => setMenuOpen(!menuOpen)}>…</button>
+        {menuOpen && <div className="ws-menu" role="menu" data-testid="studio-menu" onClick={(e) => { if ((e.target as HTMLElement).closest("button[data-close]")) setMenuOpen(false); }}>
+          {composer && onExplore && <button data-close onClick={onExplore} data-testid="nav-explore">Explore</button>}
+          <button data-close className="ws-new" onClick={newProject} data-testid="new-project">＋ New project</button>
+          <button data-close aria-expanded={sheetOpen} data-testid="panels-more" onClick={() => setSheetOpen(!sheetOpen)}>{sheetOpen ? "Hide panels" : "Panels: Tracks · Agent · Sound · Files"}{pendingCount ? ` (${pendingCount})` : ""}</button>
+          <button data-close onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮ Rewind</button>
+          {transportExtras}
+          <span className="ws-dim">{p.ppq} PPQ · {Math.round(60e6 / (p.tempos[0]?.microPerQuarter ?? 500000))} bpm · {p.timeSigs[0]?.numerator}/{p.timeSigs[0]?.denominator}</span>
+          <button onClick={() => setView({ ...view, pxPerTick: view.pxPerTick * 1.25 })} aria-label="Zoom in">＋ Zoom in</button>
+          <button onClick={() => setView({ ...view, pxPerTick: view.pxPerTick / 1.25 })} aria-label="Zoom out">－ Zoom out</button>
+          <button disabled={!state.canUndo} onClick={() => workstation.undo()}>Undo</button>
+          <button disabled={!state.canRedo} onClick={() => workstation.redo()}>Redo</button>
+          <button data-close onClick={exportMidi} data-testid="export-midi">Export MIDI</button>
+          <button data-close onClick={exportWav} data-testid="export-wav">Export WAV</button>
+          <VideoExportButton />
+          <label className={`ws-pill ${agent.on && agent.available ? "on" : "off"}`} data-testid="agent-mode" data-mode={agent.mode}>
+            <input type="checkbox" data-testid="agent-toggle" checked={agent.on} disabled={!agent.available} onChange={(e) => agent.setOn(e.target.checked)} /> Agent Tools</label>
+          <button data-close className="ws-player-btn" onClick={onOpenPlayer} data-testid="open-player">Player / Library</button>
+        </div>}
+      </header> : <header className="ws-header">
         <strong className="ws-title">{composer ? "GBK Composer" : "GBK Workstation"}</strong>
         {composer && onExplore && <button onClick={onExplore} data-testid="nav-explore">Explore</button>}
         <button className="ws-new" onClick={newProject} data-testid="new-project" title="Start a new, empty project">＋ New project</button>
@@ -201,9 +230,9 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           <input type="checkbox" data-testid="agent-toggle" checked={agent.on} disabled={!agent.available} onChange={(e) => agent.setOn(e.target.checked)} /> Enable Agent Tools {agent.mode === "shim" ? "(shim)" : ""}
         </label>
         <button className="ws-player-btn" onClick={onOpenPlayer} data-testid="open-player">Player / Library</button>
-      </header>
+      </header>}
       {phone && <div className="ws-transport ws-transport-row" role="toolbar" aria-label="Transport" data-testid="transport-row">{transportCore}</div>}
-      {scrubber}
+      {(!compact || hasTracks) && scrubber}
       {keysOn && <FloatingWindow title="🎹 Keys" storageKey="gbk.keysWindowPos" testId="keys-window" onClose={() => setKeysOn(false)}>
         {() => <LiveKeyboard workstation={workstation} />}
       </FloatingWindow>}
@@ -239,7 +268,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
             {p.tracks.length === 0 && <div className="ws-roll-empty" data-testid="roll-empty"><span className="ws-dim">No tracks yet.</span><AddTrackButton cta testId="roll-add-track" /></div>}
             <PianoRollEditor project={p} proposal={focus} view={view} setView={setView} height={Math.max(ROLL_MIN, Math.floor(rollBox.h))} onManualScroll={() => setFollow(false)} onWidth={(px) => { rollPx.current = px; }} />
           </div>
-          <div className="ws-lanes">
+          <div className="ws-lanes" hidden={(compact && !hasTracks) || undefined}>
             {(() => {
               const pages = Math.max(1, Math.ceil(lanes.length / laneFit)); const pg = Math.min(lanePage, pages - 1);
               return (<>
@@ -260,12 +289,13 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           </div>
         </main>
         <div className="ws-side">
-          <div className="ws-tabs" role="tablist" aria-label="Panels">
+          {compact && sheetOpen && <button className="ws-sheet-toggle" aria-expanded="true" data-testid="panels-close" onClick={() => setSheetOpen(false)}>Hide panels ▾</button>}
+          <div className="ws-tabs" role="tablist" aria-label="Panels" hidden={(compact && !sheetOpen) || undefined}>
             {tabs.map((t) => <button key={t} role="tab" aria-selected={t === activeTab} className={t === activeTab ? "on" : ""} data-testid={`tab-${t.toLowerCase()}`} onClick={() => setTab(t)}>{t}{t === "Agent" && pendingCount ? ` (${pendingCount})` : ""}</button>)}
           </div>
-          <div className="ws-tabbody ws-flow" role="tabpanel" aria-label={activeTab} hidden={(composer && activeTab === "Composer") || undefined}>
+          <div className="ws-tabbody ws-flow" role="tabpanel" aria-label={activeTab} hidden={(composer && activeTab === "Composer") || (compact && !sheetOpen) || undefined}>
             {activeTab === "Tracks" && <nav className="ws-tracks" aria-label="Tracks">
-          <div className="ws-row ws-tracks-head"><AddTrackButton testId={TRACK_BTN} /></div>
+          {(!compact || hasTracks) && <div className="ws-row ws-tracks-head"><AddTrackButton testId={TRACK_BTN} /></div>}
           {p.tracks.length === 0 && <p className="ws-dim">Add a track to write notes, or open the Player / Library to load a MIDI file, or generate a Bach fugue there. Agents can also create a new composition with gbk_create_project.</p>}
           {p.meta?.key && <div className="ws-dim" data-testid="ws-key">Key: {p.meta.key}{p.meta.sections?.length ? ` · ${p.meta.sections.length} sections` : ""}</div>}
           {p.tracks.map((t) => {
@@ -297,7 +327,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
           </div>
           {/* One Composer instance (keeps draft + connection): full panel on the Composer tab, otherwise its input stays docked
               under the other tabs so the text box is always visible (standing rule, docs/social/feed-design.md). */}
-          {composer && <div className={activeTab === "Composer" ? "ws-tabbody ws-tab-composer" : "ws-cmp-dock"} data-testid="composer-dock" data-docked={activeTab === "Composer" ? "0" : "1"}><div className="ws-tabfill"><ComposerPanel project={p} readOnly={workstation.readOnlyReason} dock={activeTab !== "Composer"} /></div></div>}
+          {composer && <div className={activeTab === "Composer" && (!compact || sheetOpen) ? "ws-tabbody ws-tab-composer" : "ws-cmp-dock"} data-testid="composer-dock" data-docked={activeTab === "Composer" && (!compact || sheetOpen) ? "0" : "1"}><div className="ws-tabfill"><ComposerPanel project={p} readOnly={workstation.readOnlyReason} dock={activeTab !== "Composer" || (compact && !sheetOpen)} /></div></div>}
         </div>
       </div>
     </div>

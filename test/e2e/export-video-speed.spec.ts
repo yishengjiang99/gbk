@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 import { test, expect } from "@playwright/test";
 // Export video must render faster than real time: ~38 s song -> OfflineAudioContext mix + WebCodecs frames, no wall-clock pacing.
 const BASE = process.env.GBK_URL ?? "/gbk/";
@@ -22,7 +23,7 @@ test("export video of a ~38 s song finishes much faster than real time", async (
   await page.goto(BASE);
   await page.waitForFunction(() => !!(globalThis as { __gbkWorkstation?: unknown }).__gbkWorkstation);
   await page.evaluate(`(${SEED})()`);
-  await page.getByTestId("tab-files").click();
+  await (await studioReveal(page, "tab-files")).click();
   const dl = page.waitForEvent("download", { timeout: 170_000 });
   const t0 = Date.now();
   await page.locator(".ws-tabbody [data-testid=export-video]").click();
@@ -43,7 +44,7 @@ test("Safari-like browser without AudioEncoder still exports fast (H.264 + PCM .
   await page.goto(BASE);
   await page.waitForFunction(() => !!(globalThis as { __gbkWorkstation?: unknown }).__gbkWorkstation);
   await page.evaluate(`(${SEED})()`);
-  await page.getByTestId("tab-files").click();
+  await (await studioReveal(page, "tab-files")).click();
   const dl = page.waitForEvent("download", { timeout: 170_000 });
   const t0 = Date.now();
   await page.locator(".ws-tabbody [data-testid=export-video]").click();

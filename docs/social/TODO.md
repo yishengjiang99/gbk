@@ -25,6 +25,7 @@
 - App Store playbook `make_screenshots.py` uses `Image.Lanczos` (breaks on current Pillow); use `Image.LANCZOS`.
 
 ### Needs Yisheng
+- Numeric App Store app id (for the `apple-itunes-app` Smart App Banner on `/s/<slug>`).
 - [ ] #108 real-iPhone check, native app (TestFlight build): open Feed, play a song, scroll to the next card. Only the playing card's piano roll moves; the old song fades out fast (~58 ms, no click), the new one starts at full volume right away.
 - [ ] #108 real-iPhone check, Safari: open https://compose.grepawk.com/feed, tap play once, then swipe up. The next song should play without another tap, the page shouldn't scroll sideways, and the playing card should animate smoothly (Settings > Developer > Show FPS, or just look for stutter). Check both light and dark mode.
 - [ ] Native Hum on device: Create > open a song > Hum, allow the mic, hum ~5 s, Stop. A track appears (needs GBK Social's `window.gbkHum` bridge).

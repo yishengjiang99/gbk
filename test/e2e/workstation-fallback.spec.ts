@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 import { test, expect } from "@playwright/test";
 // Bundled Playwright Chromium has no WebMCP: the workstation must work and fall back to the in-page shim.
 test("no-WebMCP fallback: workstation renders, shim tools on by default, manual editing works", async ({ page }) => {
@@ -9,12 +10,12 @@ test("no-WebMCP fallback: workstation renders, shim tools on by default, manual 
   await expect(page.getByTestId("agent-toggle")).toBeChecked();
   await expect(page.getByTestId("agent-mode")).toHaveAttribute("data-mode", "shim");
   await expect(page.getByTestId("webmcp-status")).toHaveText(/shim.*on/);
-  await page.getByTestId("agent-toggle").uncheck();
+  await (await studioReveal(page, "agent-toggle")).uncheck();
   await expect(page.getByTestId("webmcp-status")).toHaveText(/shim.*off/);
   expect(await page.evaluate(async () => (await (window as any).gbkTools.list()).length)).toBe(0);
-  await page.getByTestId("agent-toggle").check();
+  await (await studioReveal(page, "agent-toggle")).check();
   await expect(page.getByTestId("webmcp-status")).toHaveText(/shim.*on/);
-  await page.getByTestId("open-player").click();
+  await (await studioReveal(page, "open-player")).click();
   await expect(page.getByTestId("player-modal")).toHaveClass(/open/);
   await page.getByText(/habanera/i).first().click();
   await page.getByTestId("close-player").click();

@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
@@ -40,11 +41,11 @@ test("agent sound design: longer release + more reverb, A/B, accept, audible dif
   page.setDefaultTimeout(30_000);
   page.on("pageerror", (e) => console.log("pageerror", e.message));
   await page.goto("/gbk/");
-  await page.getByTestId("open-player").click();
+  await (await studioReveal(page, "open-player")).click();
   await page.getByText(/habanera/i).first().click();
   await page.getByTestId("close-player").click();
   await expect(page.locator(".ws-name")).toContainText(/habanera/i, { timeout: 20_000 });
-  await page.getByTestId("agent-toggle").check();
+  await (await studioReveal(page, "agent-toggle")).check();
   await expect(page.getByTestId("webmcp-status")).toHaveText(/WebMCP on/);
   const names: string[] = await page.evaluate(async () => (await (document as any).modelContext.getTools()).map((t: any) => t.name));
   expect(names).toEqual(expect.arrayContaining(["gbk_get_voice_settings", "gbk_propose_voice_patch", "gbk_set_effects"]));
@@ -70,7 +71,7 @@ test("agent sound design: longer release + more reverb, A/B, accept, audible dif
   expect(bad.ok).toBe(false); expect(bad.error!.code).toBe("INVALID_ARGUMENT");
   const pr = await tool(page, "gbk_propose_voice_patch", { trackId: target.id, summary: "longer release, wetter", edits: [{ param: "volEnvRelease", mode: "set", value: Math.max(2.5, rel0 * 3) }, { param: "reverbSend", mode: "set", value: 80 }] });
   expect(pr.ok, JSON.stringify(pr.error)).toBe(true);
-  await page.getByTestId("tab-sound").click(); // a new proposal focuses the Agent tab; the A/B diff lives on Sound
+  await (await studioReveal(page, "tab-sound")).click(); // a new proposal focuses the Agent tab; the A/B diff lives on Sound
   await expect(page.getByTestId("sound-diff")).toContainText("volEnvRelease");
   await expect(page.getByTestId("adsr-graph-b")).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/gbk-voice-02-proposal-diff.png` });

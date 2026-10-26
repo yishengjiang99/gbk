@@ -27,7 +27,7 @@ type Phase = "idle" | "recording" | "transcribing";
 export function HumButton() {
   return nativeHum() ? null : <WebHumButton />; // iOS: the native button lives in the composer prompt bar
 }
-function WebHumButton() {
+export function WebHumButton() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState(0);

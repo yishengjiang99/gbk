@@ -8,6 +8,8 @@ import { workstation } from "./useWorkstation.ts";
 
 export interface View { scrollTick: number; pxPerTick: number; lowPitch: number; highPitch: number }
 const KEY_W = 36;
+// Bright default; dark palette under prefers-color-scheme: dark.
+const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
 
 interface Props { project: Project; proposal: Proposal | null; view: View; setView: (v: View) => void; height: number; onManualScroll?: () => void; onWidth?: (px: number) => void }
 
@@ -51,8 +53,8 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     let raf = 0;
     const endTick = view.scrollTick + (width - KEY_W) / view.pxPerTick;
     const draw = () => {
-      g.fillStyle = "#14161b"; g.fillRect(0, 0, width, height);
-      for (let p = view.lowPitch; p <= view.highPitch; p++) if ([1, 3, 6, 8, 10].includes(p % 12)) { g.fillStyle = "#101216"; g.fillRect(KEY_W, y(p), width, rowH); }
+      const dk = dark(); g.fillStyle = dk ? "#14161b" : "#ffffff"; g.fillRect(0, 0, width, height);
+      for (let p = view.lowPitch; p <= view.highPitch; p++) if ([1, 3, 6, 8, 10].includes(p % 12)) { g.fillStyle = dk ? "#101216" : "#f1f4f9"; g.fillRect(KEY_W, y(p), width, rowH); }
       // selection
       if (sel.endTick > sel.startTick) { g.fillStyle = "rgba(120,170,255,0.12)"; g.fillRect(x(sel.startTick), 0, (sel.endTick - sel.startTick) * view.pxPerTick, height); }
       if (project.loop.enabled) { g.strokeStyle = "#ffb74d"; g.strokeRect(x(project.loop.startTick), 1, (project.loop.endTick - project.loop.startTick) * view.pxPerTick, height - 2); }
@@ -60,9 +62,9 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
       g.font = "10px sans-serif";
       for (const b of barsMemo) {
         if (b.tick + b.length < view.scrollTick) continue; if (b.tick > endTick) break;
-        g.fillStyle = "#3a3f4b"; g.fillRect(x(b.tick), 0, 1, height);
-        if (b.ticksPerBeat * view.pxPerTick > 8) { g.fillStyle = "#23262e"; for (let k = 1; k < b.numerator; k++) g.fillRect(x(b.tick + k * b.ticksPerBeat), 0, 1, height); }
-        if (b.length * view.pxPerTick > 24 || b.index % 4 === 1) { g.fillStyle = "#8a90a0"; g.fillText(String(b.index), x(b.tick) + 3, 10); }
+        g.fillStyle = dk ? "#3a3f4b" : "#c3cbd8"; g.fillRect(x(b.tick), 0, 1, height);
+        if (b.ticksPerBeat * view.pxPerTick > 8) { g.fillStyle = dk ? "#23262e" : "#e3e8f0"; for (let k = 1; k < b.numerator; k++) g.fillRect(x(b.tick + k * b.ticksPerBeat), 0, 1, height); }
+        if (b.length * view.pxPerTick > 24 || b.index % 4 === 1) { g.fillStyle = dk ? "#8a90a0" : "#5b6677"; g.fillText(String(b.index), x(b.tick) + 3, 10); }
       }
       // notes (culled)
       const removed = new Set(diff?.removed.map((n) => n.id) ?? []);
@@ -98,7 +100,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
         if (t1 < view.scrollTick || t0 > endTick) return;
         g.fillStyle = SEC_COLORS[i % SEC_COLORS.length]; g.fillRect(x(t0), 12, (t1 - t0) * view.pxPerTick, height - 12);
         g.fillStyle = "#e0c080"; g.fillRect(x(t0), 0, 2, height);
-        g.fillStyle = "#ffd180"; g.fillText(`§ ${sec.name}${sec.energy !== undefined ? ` (${Math.round(sec.energy * 100)}%)` : ""}`, x(t0) + 4, 22);
+        g.fillStyle = dk ? "#ffd180" : "#9a6400"; g.fillText(`§ ${sec.name}${sec.energy !== undefined ? ` (${Math.round(sec.energy * 100)}%)` : ""}`, x(t0) + 4, 22);
       });
       g.fillStyle = "#80d8ff";
       for (const t of project.tempos) if (t.tick > 0 && t.tick >= view.scrollTick && t.tick <= endTick) { g.fillRect(x(t.tick), height - 14, 1, 14); g.fillText(`♩=${Math.round(60e6 / t.microPerQuarter)}`, x(t.tick) + 3, height - 4); }

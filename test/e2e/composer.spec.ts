@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 // End-to-end: ordinary browser (no WebMCP) -> AI Composer panel -> real server agent loop (fake OpenAI-compatible
 // model returning real tool_calls) -> authenticated WebSocket bridge -> real gbk_* tools in the real workstation.
 import { test, expect, type Page } from "@playwright/test";
@@ -31,7 +32,7 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await page.goto("/");
   expect(await page.evaluate(() => [!!(document as any).modelContext, !!(navigator as any).modelContext])).toEqual([false, false]);
   await expect(page.getByTestId("social-app")).toBeVisible();
-  await page.getByTestId("tab-create").click();
+  await (await studioReveal(page, "tab-create")).click();
   await expect(page).toHaveURL(/\/studio$/);
   await expect(page.getByTestId("workstation")).toBeVisible();
   await signIn(page);
@@ -131,7 +132,7 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
 test("mobile viewport: explore + composer panel usable", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("social-app")).toBeVisible();
-  await page.getByTestId("tab-create").click();
+  await (await studioReveal(page, "tab-create")).click();
   await signIn(page, "e2e-code-2");
   await expect(page.getByTestId("composer-input")).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/composer-e2e-mobile.png` });
@@ -209,15 +210,15 @@ test("share link always opens the shared song (startup default/restore must not 
   }
 });
 
-test("theme: landing background is uniform full height; Keys track picker is dark", async ({ page }) => {
+test("theme: landing background is uniform full height; Keys track picker follows the bright theme", async ({ page }) => {
   await page.goto("/"); await expect(page.getByTestId("social-app")).toBeVisible();
   expect(await page.evaluate(() => getComputedStyle(document.querySelector(".so-app")!).backgroundColor)).toBe("rgb(238, 243, 247)");
   await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
   // The track picker only renders when the project has a track (a fresh phone session can start empty).
   await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_keys", program: 0 }], { label: "seed" }); });
-  await page.getByTestId("keys-toggle").click();
+  await (await studioReveal(page, "keys-toggle")).click();
   const sel = page.getByTestId("live-track"); await expect(sel).toBeVisible({ timeout: 60_000 });
-  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(26, 32, 41)");
+  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 255, 255)");
   await page.getByTestId("live-keyboard").screenshot({ path: `${SHOTS}/keys-track-picker.png` });
 });
 
@@ -225,9 +226,9 @@ test("studio fits the viewport: no vertical scrolling of the page or any panel",
   for (const [w, h] of [[1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
     await page.setViewportSize({ width: w, height: h });
     await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
-    await page.getByTestId("keys-toggle").click(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
+    await (await studioReveal(page, "keys-toggle")).click(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
     for (const t of ["tracks", "composer", "agent", "sound", "files"]) {
-      const tab = page.getByTestId(`tab-${t}`); if (await tab.count()) await tab.dispatchEvent("click"); // the floating Keys window may sit over the tabs
+      const tab = await studioReveal(page, `tab-${t}`); if (await tab.count()) await tab.dispatchEvent("click"); // the floating Keys window may sit over the tabs
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))); // roll re-measures after the full-height Composer view hid it
       const r = await page.evaluate(() => {
         const bad: string[] = [];
@@ -263,7 +264,7 @@ test("Keys is a floating draggable window: default closed, opens, drags, closes"
   await expect(page.getByTestId("workstation")).toBeVisible();
   await expect(page.getByTestId("keys-window")).toHaveCount(0);
   const rollBefore = (await page.getByTestId("piano-roll").boundingBox())!.height;
-  await page.getByTestId("keys-toggle").click();
+  await (await studioReveal(page, "keys-toggle")).click();
   const win = page.getByTestId("keys-window"); await expect(win).toBeVisible(); await expect(page.getByTestId("live-keyboard")).toBeVisible();
   expect((await page.getByTestId("piano-roll").boundingBox())!.height).toBe(rollBefore); // floats: no layout space
   expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
@@ -277,7 +278,7 @@ test("Keys is a floating draggable window: default closed, opens, drags, closes"
   const b2 = (await win.boundingBox())!; expect(b2.x).toBeGreaterThanOrEqual(0); expect(b2.y).toBeGreaterThanOrEqual(0);
   // position remembered
   await page.getByTestId("keys-window-close").click(); await expect(win).toHaveCount(0);
-  await page.getByTestId("keys-toggle").click(); const b3 = (await win.boundingBox())!;
+  await (await studioReveal(page, "keys-toggle")).click(); const b3 = (await win.boundingBox())!;
   expect(Math.abs(b3.x - b2.x)).toBeLessThan(2); expect(Math.abs(b3.y - b2.y)).toBeLessThan(2);
   await page.getByTestId("keys-window-min").click(); await expect(page.getByTestId("live-keyboard")).toHaveCount(0);
   await page.getByTestId("keys-window-close").click(); await expect(win).toHaveCount(0);
@@ -288,7 +289,7 @@ test("guest: New project -> + Track -> click piano roll adds a note -> Play play
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
   page.on("dialog", (d) => d.accept());
-  await page.getByTestId("new-project").click();
+  await (await studioReveal(page, "new-project")).click();
   await expect.poll(async () => (await ws(page)).tracks.length).toBe(0);
   await expect(page.getByTestId("roll-empty")).toBeVisible();
   await page.getByTestId("roll-add-track").click();
@@ -319,13 +320,13 @@ test("mobile composer view fits the viewport width (no horizontal scroll)", asyn
     await expect(page.getByTestId("workstation")).toBeVisible();
     await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Strings", channel: 0, id: "t_str", program: 48 }], { label: "seed" }); });
     // Lanes live on the roll (Tracks tab); the Composer tab then takes the full height (roll hidden).
-    await page.getByTestId("tab-tracks").click();
+    await (await studioReveal(page, "tab-tracks")).click();
     for (let i = 0; i < 4; i++) await page.getByRole("button", { name: "+ lane" }).click();
     await expect(page.locator(".ws-lane").first()).toBeVisible();
-    await page.getByTestId("tab-composer").click();
+    await (await studioReveal(page, "tab-composer")).click();
     await expect(page.getByTestId("composer-panel")).toBeVisible();
     await expect(page.getByTestId("composer-input")).toBeVisible();
-    for (const t of ["tracks", "composer", "agent", "sound", "files"]) { const b = (await page.getByTestId(`tab-${t}`).boundingBox())!; expect(b.x).toBeGreaterThanOrEqual(0); expect(b.x + b.width).toBeLessThanOrEqual(w + 0.5); }
+    for (const t of ["tracks", "composer", "agent", "sound", "files"]) { const b = (await (await studioReveal(page, `tab-${t}`)).boundingBox())!; expect(b.x).toBeGreaterThanOrEqual(0); expect(b.x + b.width).toBeLessThanOrEqual(w + 0.5); }
     const m = await page.evaluate(() => {
       const W = innerWidth;
       // an element "escapes" if it extends past the viewport and no ancestor (inside the viewport) clips it
@@ -349,7 +350,7 @@ test("mobile composer view fills the screen height; other tabs restore the roll"
   await page.goto("/studio");
   await expect(page.getByTestId("workstation")).toBeVisible();
   await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Strings", channel: 0, id: "t_str", program: 48 }], { label: "seed" }); });
-  await page.getByTestId("tab-composer").click();
+  await (await studioReveal(page, "tab-composer")).click();
   const panel = page.getByTestId("composer-panel"); await expect(panel).toBeVisible();
   await expect(page.locator(".ws-main")).toBeHidden();
   const H = page.viewportSize()!.height, W = page.viewportSize()!.width;
@@ -363,7 +364,7 @@ test("mobile composer view fills the screen height; other tabs restore the roll"
   const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, fs: parseFloat(getComputedStyle(document.querySelector("[data-testid=composer-input] textarea, textarea[data-testid=composer-input]") as Element).fontSize), ov: getComputedStyle(document.querySelector(".cmp-messages")!).overflowY }));
   expect(m.sw).toBeLessThanOrEqual(W); expect(m.sh).toBeLessThanOrEqual(H + 0.5); expect(m.fs).toBeGreaterThanOrEqual(16); expect(m.ov).toBe("auto");
   if (test.info().project.name === "mobile-webkit") await page.screenshot({ path: `${SHOTS}/composer-fullheight.png` });
-  await page.getByTestId("tab-tracks").click();
+  await (await studioReveal(page, "tab-tracks")).click();
   await expect(page.locator(".ws-main")).toBeVisible();
   await expect(page.locator(".ws-roll-slot")).toBeVisible();
 });

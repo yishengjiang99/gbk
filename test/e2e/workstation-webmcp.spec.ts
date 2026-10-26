@@ -1,3 +1,4 @@
+import { studioReveal } from "./app-menu";
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { parseSmf } from "../../src/workstation/smf.ts";
@@ -30,14 +31,14 @@ test("acceptance: real WebMCP tools drive the GBK workstation end to end", async
   await page.goto("/gbk/");
   await expect(page.getByTestId("workstation")).toBeVisible();
   // Load a bundled multi-track MIDI through the player modal (Habanera: strings + winds).
-  await page.getByTestId("open-player").click();
+  await (await studioReveal(page, "open-player")).click();
   await expect(page.getByTestId("player-modal")).toHaveClass(/open/);
   await page.getByText(/habanera/i).first().click();
   await page.getByTestId("close-player").click();
   await expect(page.locator(".ws-name")).toContainText(/habanera/i, { timeout: 20_000 });
 
   // Enable agent tools + discover
-  await page.getByTestId("agent-toggle").check();
+  await (await studioReveal(page, "agent-toggle")).check();
   await expect(page.getByTestId("webmcp-status")).toHaveText(/WebMCP on/);
   const names: string[] = await page.evaluate(async () => (await (document as any).modelContext.getTools()).map((t: any) => t.name));
   expect(names).toEqual(expect.arrayContaining(["gbk_get_capabilities", "gbk_generate_cc_curve", "gbk_commit_proposal", "gbk_generate_counterpoint"]));

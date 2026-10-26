@@ -156,10 +156,14 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
     return { ok: true, removed: native.unregisterPush(id.toLowerCase(), s.user) };
   });
 
-  app.get("/.well-known/apple-app-site-association", async (_req, reply) => {
+  // Universal Links (+ legacy appID/paths for iOS < 13). Served at both AASA locations, JSON, no redirect.
+  const PATHS = ["/s/*", "/u/*", "/t/*", "/feed", "/feed*", "/explore"];
+  const aasa = async (_req: unknown, reply: import("fastify").FastifyReply) => {
     if (!cfg.native.iosAppIds.length) return reply.code(404).send({ code: "NOT_FOUND", message: "no iOS app configured" });
     reply.header("content-type", "application/json").header("cache-control", "public, max-age=3600");
-    return { applinks: { details: [{ appIDs: cfg.native.iosAppIds, components: [{ "/": "/s/*" }, { "/": "/u/*" }, { "/": "/t/*" }, { "/": "/feed" }, { "/": "/explore" }] }] }, webcredentials: { apps: cfg.native.iosAppIds } };
-  });
+    return { applinks: { apps: [], details: [{ appIDs: cfg.native.iosAppIds, components: PATHS.map((x) => ({ "/": x })) }, ...cfg.native.iosAppIds.map((id) => ({ appID: id, paths: PATHS }))] }, webcredentials: { apps: cfg.native.iosAppIds } };
+  };
+  app.get("/.well-known/apple-app-site-association", aasa);
+  app.get("/apple-app-site-association", aasa);
   return { pair };
 }
