@@ -47,7 +47,11 @@ final class DeepLinkTests: XCTestCase {
     }
 
     @MainActor func testFocusFetchesMissingSongAndPutsItFirst() async throws {
-        let song = try APIClient.makeDecoder().decode(Song.self, from: Data(APIClientTests.docSong.utf8))
+        // The native feed plays MIDI live through SF2, so a focusable song needs `media.midi`.
+        let json = APIClientTests.docSong.replacingOccurrences(
+            of: "\"midi\": null", with: "\"midi\": \"https://compose.grepawk.com/api/shares/minuet-in-g-a1b2c3/media/midi\"")
+        let song = try APIClient.makeDecoder().decode(Song.self, from: Data(json.utf8))
+        XCTAssertNotNil(song.midiURL)
         let model = FeedViewModel()
         var fetched: [String] = []
         let ok = await model.focus(slug: song.slug) { fetched.append($0); return song }

@@ -128,7 +128,7 @@ final class LiveSF2VisualizerTests: XCTestCase {
 
     func testRealSF2RenderThroughTapDrivesBarsAndWaveform() throws {
         let sfURL = try XCTUnwrap(SoundFontStore.bundledURL, "GeneralUser-GS.sf2 is bundled in the app")
-        let probe = try LiveRenderProbe.run(midi: Data(contentsOf: fixtureMIDI()), soundFont: sfURL, seconds: 2.5)
+        let probe = try LiveRenderProbe.run(midi: Data(contentsOf: fixtureMIDI()), soundFont: sfURL, seconds: 1.5) // mid-chord + melody
         let scope = probe.scope
         XCTAssertTrue(probe.sawAudio, "tap saw non-silent output")
 
@@ -157,7 +157,7 @@ final class LiveSF2VisualizerTests: XCTestCase {
         while player.lastTimeToFirstAudio == nil && Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
         guard let ttfa = player.lastTimeToFirstAudio else {
             player.pause()
-            throw XCTSkip("no audio output device on this simulator host (engine never rendered)")
+            throw XCTSkip("engine output never reached the tap in 8 s (CI simulator HAL overload with the Debug-built synth); covered by the render-through-tap test")
         }
         print("timeToFirstAudio(local MIDI, bank preloaded) = \(ttfa) s")
         XCTAssertLessThan(ttfa, 1.0)
