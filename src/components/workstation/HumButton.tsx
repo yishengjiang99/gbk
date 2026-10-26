@@ -27,7 +27,8 @@ type Phase = "idle" | "recording" | "transcribing";
 export function HumButton() {
   return nativeHum() ? null : <WebHumButton />; // iOS: the native button lives in the composer prompt bar
 }
-export function WebHumButton() {
+/** Web Hum flow (record -> transcribe in a worker -> one undoable "Hummed melody" track). `onError` gets plain text. */
+export function useWebHum(onError: (msg: string) => void = (m) => alert(m)) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -64,9 +65,9 @@ export function WebHumButton() {
       const err = e as Error;
       reportError(err, { where: "hum.start" });
       if (err.name === "NotAllowedError" || err.name === "SecurityError") {
-        alert("Microphone access was denied. Allow microphone permission for this site in the browser, then tap Hum again.");
+        onError("Microphone access was denied. Allow microphone permission for this site in the browser, then tap Hum again.");
       } else {
-        alert(`Could not start recording: ${err.message}`);
+        onError("Could not start recording. Check that a microphone is available and try again.");
       }
     }
   };
@@ -80,13 +81,13 @@ export function WebHumButton() {
       const { samples, seconds } = await rec.stop();
       if (!mountedRef.current) return;
       if (seconds < 0.3 || samples.length === 0) {
-        alert("That take was too short to transcribe — hum a few notes, then tap Stop.");
+        onError("That take was too short to transcribe — hum a few notes, then tap Stop.");
         return;
       }
       const notes = await transcribe(samples, (f) => { if (mountedRef.current) setProgress(f); });
       if (!mountedRef.current) return;
       if (!notes.length) {
-        alert("No melody detected in that take — try humming a clear, single tune closer to the microphone.");
+        onError("No melody detected in that take — try humming a clear, single tune closer to the microphone.");
         return;
       }
       const trackId = newId("trk");
@@ -96,12 +97,18 @@ export function WebHumButton() {
     } catch (e) {
       const err = e as Error;
       reportError(err, { where: "hum.transcribe" });
-      alert(`Transcription failed: ${err.message}`);
+      onError("Couldn't turn that take into notes. Please try again.");
     } finally {
       if (mountedRef.current) setPhase("idle");
     }
   };
 
+  const cancel = () => { recorderRef.current?.cancel(); setPhase("idle"); };
+  return { phase, elapsed, progress, start, stop: stopAndTranscribe, cancel };
+}
+
+export function WebHumButton() {
+  const { phase, elapsed, progress, start, stop: stopAndTranscribe } = useWebHum();
   if (phase === "recording") {
     const s = Math.floor(elapsed);
     return (

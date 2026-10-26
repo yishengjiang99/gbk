@@ -10,6 +10,17 @@ import { appUrl } from "../../agent/routes.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
 import { markAction } from "../social/impressions.ts";
 
+/** Save the current song privately (auto-saved or this explicit click) so the Publish dialog can open on it. */
+export async function saveForPublish(): Promise<SavedSong> {
+  let song = await songAutosaver.flush(true);
+  if (!song) { // a song the auto-saver does not track (e.g. the user's own import): save it privately on this explicit click
+    song = await autosaveProject(workstation.project); songAutosaver.adopt(workstation.project.id, song, workstation.project.revision);
+    const arts = (await artifactStore().list().catch(() => [])).filter((a) => a.projectId === workstation.project.id);
+    for (const kind of ["wav", "midi"] as const) { const a = arts.find((x) => x.kind === kind); if (a) await uploadMedia(song.slug, kind, await artifactStore().blob(a.id), kind === "wav" && a.wav ? { durationSeconds: a.wav.durationSeconds } : undefined).catch((e) => reportError(e, { where: "share.uploadMedia", kind })); }
+  }
+  return song;
+}
+
 /** Share / Fork controls + the owner's shared songs (unshare / delete). */
 /** Share = save privately + the Publish dialog (nothing goes public without its confirm). Also Fork and My songs. */
 export function SharePanel({ project, readOnly, authenticated, publishRequest = 0 }: { project: Project; readOnly: string | null; authenticated: boolean; publishRequest?: number }) {
@@ -18,15 +29,7 @@ export function SharePanel({ project, readOnly, authenticated, publishRequest = 
   const from = project.meta?.sharedFrom; const forkOf = project.meta?.forkOf;
   const openPublish = async () => {
     setBusy(true); setErr("");
-    try {
-      let song = await songAutosaver.flush(true);
-      if (!song) { // a song the auto-saver does not track (e.g. the user's own import): save it privately on this explicit click
-        song = await autosaveProject(workstation.project); songAutosaver.adopt(workstation.project.id, song, workstation.project.revision);
-        const arts = (await artifactStore().list().catch(() => [])).filter((a) => a.projectId === workstation.project.id);
-        for (const kind of ["wav", "midi"] as const) { const a = arts.find((x) => x.kind === kind); if (a) await uploadMedia(song.slug, kind, await artifactStore().blob(a.id), kind === "wav" && a.wav ? { durationSeconds: a.wav.durationSeconds } : undefined).catch((e) => reportError(e, { where: "share.uploadMedia", kind })); }
-      }
-      setDialog(song);
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    try { setDialog(await saveForPublish()); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
   // The Composer asks for the Publish dialog when an agent run finishes on a saved song.
   useEffect(() => { if (publishRequest && authenticated && !readOnly && project.tracks.length) void openPublish(); }, [publishRequest]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -1,5 +1,5 @@
 // Headless WorkstationController: the single source of truth shared by React UI and WebMCP.
-import { cloneProject, emptyProject, type Project, type Selection, type Loop, type TrackMix } from "./model.ts";
+import { cloneProject, computeEndTick, emptyProject, type Project, type Selection, type Loop, type TrackMix } from "./model.ts";
 import { applyOps, summarizeOps, validateOps, WorkstationError, type Op } from "./ops.ts";
 import { serializeSmf } from "./smf.ts";
 import { secToTick, tickToSec } from "./timing.ts";
@@ -210,6 +210,20 @@ export class WorkstationController {
     catch (e) { if (e instanceof WorkstationError && e.code === "READ_ONLY") { for (const f of this.readOnlyHintListeners) f(e.message); return null; } throw e; }
   }
 
+  /** Restore an earlier snapshot of THIS project (a version card's "Restore"): one undoable edit; id and name stay. */
+  restoreSnapshot(snapshot: Project, label = "restore version"): boolean {
+    if (this.readOnlyReason) { for (const f of this.readOnlyHintListeners) f(this.readOnlyReason); return false; }
+    const cur = this.project;
+    this.commitProject({ ...cloneProject(snapshot), id: cur.id, name: cur.name, selection: cur.selection, loop: cur.loop }, label);
+    this.log("user", label, true); return true;
+  }
+  /** Rename the current project (undoable). */
+  rename(name: string): boolean {
+    const n = name.trim().slice(0, 120); if (!n || n === this.project.name) return false;
+    if (this.readOnlyReason) { for (const f of this.readOnlyHintListeners) f(this.readOnlyReason); return false; }
+    this.commitProject({ ...this.project, name: n }, "rename"); return true;
+  }
+
   undo(): boolean {
     const e = this.undoStack.pop(); if (!e) return false;
     const restored = { ...e.before, revision: this.project.revision + 1 };
@@ -341,6 +355,16 @@ export class WorkstationController {
     try { await d.preview(variant === "A" ? p.original : p.candidate, p.range.startTick, p.range.endTick, signal); }
     finally { this.set({ previewing: null }); }
     if (signal?.aborted) throw new WorkstationError("OPERATION_CANCELLED", "preview cancelled");
+  }
+
+  /** Audition any project (e.g. an older version) without changing the committed one. Resolves when done or aborted. */
+  async previewProject(project: Project, signal?: AbortSignal) {
+    const d = await this.readyDriver();
+    if (!d.preview) throw new WorkstationError("UNSUPPORTED", "preview not supported by this driver");
+    if (this.state.transport.playing) this.pause();
+    this.set({ previewing: `project:${project.revision}` });
+    try { await d.preview(project, 0, Math.max(1, project.endTick, computeEndTick(project)), signal); }
+    finally { this.set({ previewing: null }); }
   }
 
   // ---- mixer: defaults (undoable project mix) vs temporary overrides -------

@@ -34,6 +34,7 @@ import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { VideoExportButton } from "./VideoExport.tsx";
 import { ComposerPanel } from "../composer/ComposerPanel.tsx";
+import { MobileStudio } from "../studio/MobileStudio.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
 import { funnelBeacon } from "../../telemetry/funnel.ts";
 import { tickToBarBeat, tickToSec, barBeatToTick } from "../../workstation/timing.ts";
@@ -123,23 +124,26 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const run = (f: () => unknown) => { try { const r = f(); if (r instanceof Promise) r.catch((e: Error) => alert(e.message)); } catch (e) { alert((e as Error).message); } };
   const exportMidi = () => { const { bytes, filename } = workstation.prepareMidiExport(); workstation.host.download?.(bytes, filename); };
   // Same headless renderer as gbk_render_wav: progress + artifact appear in the artifact panel; errors are shown, never swallowed.
-  const exportWav = () => run(async () => {
+  const renderWav = async () => {
     const j = renderJobs().submit(workstation.project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, { saveArtifact: true });
     const done = await renderJobs().wait(j.id);
     if (done.status !== "completed") throw new Error(`WAV export ${done.status}: ${done.error?.message ?? ""}`);
     const r = renderJobs().result(j.id);
     funnelBeacon("browser_render_completed", "studio");
     if (r) workstation.host.download?.(r.blob, safeFilename(done.projectName, "wav"));
-  });
+  };
+  const exportWav = () => run(renderWav);
 
   // New project: always a blank, user-owned project. Unsaved edits (revision > 0) need a confirm first;
   // the previous project stays checkpointed locally when the host supports it.
-  const newProject = () => run(async () => {
+  const createNew = async () => {
     const cur = workstation.project;
     const hasContent = cur.tracks.length > 0 || cur.notes.length > 0;
-    if (hasContent && cur.revision > 0 && !workstation.readOnlyReason && !confirm("Start a new project? Unsaved changes to the current project may be lost.")) return;
+    if (hasContent && cur.revision > 0 && !workstation.readOnlyReason && !confirm("Start a new song? Unsaved changes to the current one may be lost.")) return false;
     await workstation.createProject({ name: "Untitled", owner: "user", replaceCurrent: !workstation.host.checkpoint });
-  });
+    return true;
+  };
+  const newProject = () => run(createNew);
 
   const rewindBtn = <button onClick={() => run(() => workstation.seek(0))} aria-label="Rewind">⏮</button>;
   const transportCore = (<>
@@ -182,6 +186,11 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
     </div>);
   const [roHint, setRoHint] = useState<string | null>(null);
   useEffect(() => { let t: ReturnType<typeof setTimeout> | undefined; const f = () => { setRoHint("Read-only shared song — press Fork to edit your own copy."); clearTimeout(t); t = setTimeout(() => setRoHint(null), 2500); }; workstation.readOnlyHintListeners.add(f); return () => { workstation.readOnlyHintListeners.delete(f); clearTimeout(t); }; }, []);
+  // Phones (and the iOS app): the chat-first studio. Desktop keeps the full workstation below.
+  const roToast = roHint && <div role="status" aria-live="polite" data-testid="readonly-hint" style={{ position: "fixed", left: "50%", bottom: 80, transform: "translateX(-50%)", zIndex: 1000, pointerEvents: "none", background: "rgba(20,20,28,.92)", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 14 }}>{roHint}</div>;
+  if (compact && composer) return <>{roToast}<MobileStudio view={view} setView={setView} onRollWidth={(px) => { rollPx.current = px; }} onManualScroll={() => setFollow(false)}
+    focus={focus} setFocus={setFocus} lanes={lanes} setLanes={setLanes} laneTrackId={trackForLanes?.id} onExplore={onExplore}
+    newProject={() => createNew().catch((e: Error) => { alert(e.message); return false; })} exportMidi={exportMidi} exportWav={renderWav} /></>;
   return (
     <div className={`ws${phone && composer && activeTab === "Composer" && (!compact || sheetOpen) ? " ws-composer-full" : ""}`} data-testid="workstation" data-compact={compact ? "1" : "0"}>
       {roHint && <div role="status" aria-live="polite" data-testid="readonly-hint" style={{ position: "fixed", left: "50%", bottom: 80, transform: "translateX(-50%)", zIndex: 1000, pointerEvents: "none", background: "rgba(20,20,28,.92)", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 14 }}>{roHint}</div>}

@@ -1,4 +1,4 @@
-import { studioReveal } from "./app-menu";
+import { composerConn, studioReveal } from "./app-menu";
 // End-to-end: ordinary browser (no WebMCP) -> AI Composer panel -> real server agent loop (fake OpenAI-compatible
 // model returning real tool_calls) -> authenticated WebSocket bridge -> real gbk_* tools in the real workstation.
 import { test, expect, type Page } from "@playwright/test";
@@ -21,7 +21,7 @@ async function signIn(page: Page, code = "e2e-code") {
   // Phones open on the Tracks tab after the reload; the composer lives behind its tab there.
   await expect(page.getByTestId("workstation").or(page.getByTestId("social-app")).first()).toBeVisible();
   const tab = page.getByTestId("tab-composer"); if (await tab.isVisible() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
-  await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
+  await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
 }
 
 test("compose a fugue through the server agent, render a valid WAV, follow-up edit, share + fork", async ({ page, browser }) => {
@@ -166,6 +166,7 @@ test("read-only share: piano-roll tap does not throw or report an error; Play wo
   await p.goto(`/s/${slug}`);
   await expect.poll(async () => (await ws(p)).readOnly, { timeout: 20_000 }).toBeTruthy();
   const before = await ws(p);
+  if (await p.getByTestId("plus-btn").count()) await p.getByTestId("version-open-editor").last().click(); // phone studio: the roll is in the editor sheet
   const roll = p.getByTestId("piano-roll"); await expect(roll).toBeVisible();
   const b = (await roll.boundingBox())!;
   await roll.tap({ position: { x: b.width / 2, y: b.height / 2 } });
@@ -175,7 +176,7 @@ test("read-only share: piano-roll tap does not throw or report an error; Play wo
   await expect(p.getByTestId("readonly-hint")).toBeVisible();
   const after = await ws(p);
   expect(after.notes).toBe(before.notes); expect(after.revision).toBe(before.revision);
-  await p.getByTestId("ws-play").first().click();
+  await p.getByTestId("ws-play").or(p.getByTestId("play-pill")).first().click({ timeout: 60_000 });
   await expect.poll(() => p.evaluate(() => (globalThis as any).__gbkWorkstation.state.transport.playing), { timeout: 10_000 }).toBe(true);
   await p.waitForTimeout(500);
   expect(errors).toEqual([]); expect(reports).toEqual([]);
@@ -218,7 +219,8 @@ test("theme: landing background is uniform full height; Keys track picker follow
   await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_keys", program: 0 }], { label: "seed" }); });
   await (await studioReveal(page, "keys-toggle")).click();
   const sel = page.getByTestId("live-track"); await expect(sel).toBeVisible({ timeout: 60_000 });
-  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 255, 255)");
+  // bright: white on desktop, the light card colour in the phone studio's MIDI keyboard sheet
+  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toMatch(/^rgb\((255, 255, 255|244, 245, 247)\)$/);
   await page.getByTestId("live-keyboard").screenshot({ path: `${SHOTS}/keys-track-picker.png` });
 });
 
@@ -285,7 +287,7 @@ test("Keys is a floating draggable window: default closed, opens, drags, closes"
 });
 
 test("guest: New project -> + Track -> click piano roll adds a note -> Play plays", async ({ page }) => {
-  test.skip(test.info().project.name !== "chrome-no-webmcp" && test.info().project.name !== "mobile", "desktop Chrome + mobile");
+  test.skip(test.info().project.name !== "chrome-no-webmcp", "desktop Chrome (the phone studio has its own test below)");
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/studio"); await expect(page.getByTestId("workstation")).toBeVisible();
   page.on("dialog", (d) => d.accept());
@@ -311,60 +313,111 @@ test("guest: New project -> + Track -> click piano roll adds a note -> Play play
   expect(errors).toEqual([]);
 });
 
-test("mobile composer view fits the viewport width (no horizontal scroll)", async ({ page }) => {
+// ---- Chat-first phone studio (MobileStudio) ------------------------------------------------------------------------
+const seedSong = (page: Page) => page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (c.project.tracks.length) return;
+  c.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_pno", program: 0 }, { op: "addNotes", notes: [60, 64, 67, 72, 67, 64, 60, 55].map((p, i) => ({ trackId: "t_pno", channel: 0, tick: i * 480, duration: 440, pitch: p, velocity: 96 })) }], { label: "seed" }); });
+/** The input is on screen (inside the visual viewport), not covered by anything, 16px, and nothing overflows sideways. */
+async function inputOk(page: Page, label: string) {
+  const input = page.getByTestId("composer-input"); await expect(input, label).toBeVisible();
+  await expect.poll(() => input.evaluate((e) => { const b = e.getBoundingClientRect(); const vv = window.visualViewport; const h = vv ? vv.height + vv.offsetTop : innerHeight;
+    const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return [b.top >= 0, b.bottom <= h + 1, b.left >= 0, b.right <= innerWidth + 1, !!hit && (hit === e || e.contains(hit)), getComputedStyle(e).fontSize, document.documentElement.scrollWidth <= innerWidth].join(","); }), { message: label, timeout: 5000 })
+    .toBe("true,true,true,true,true,16px,true");
+}
+/** No element pokes past the right edge unless an ancestor inside the viewport clips it. */
+const escapes = (page: Page) => page.evaluate(() => { const W = innerWidth;
+  return [...document.querySelectorAll("[data-testid=workstation] *")].filter((e) => { const r = e.getBoundingClientRect(); if (!r.width || r.right <= W + 0.5 || e.closest("[hidden]")) return false;
+    for (let a = e.parentElement; a && a !== document.body; a = a.parentElement) { const o = getComputedStyle(a).overflowX; if (o !== "visible" && a.getBoundingClientRect().right <= W + 0.5) return false; } return true; }).map((e) => `${e.tagName}.${e.className}`); });
+
+test("mobile composer view: chat studio has no tab bar/rewind/scrubber, fits 375-430px in light + dark, input always visible (sheets, editor, keyboard, playback)", async ({ page }) => {
   test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
-  await page.goto("/studio"); await signIn(page);
-  for (const [w, h] of [[390, 844], [375, 667], [430, 932]]) {
-    await page.setViewportSize({ width: w, height: h });
-    await page.goto("/studio");
-    await expect(page.getByTestId("workstation")).toBeVisible();
-    await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Strings", channel: 0, id: "t_str", program: 48 }], { label: "seed" }); });
-    // Lanes live on the roll (Tracks tab); the Composer tab then takes the full height (roll hidden).
-    await (await studioReveal(page, "tab-tracks")).click();
-    for (let i = 0; i < 4; i++) await page.getByRole("button", { name: "+ lane" }).click();
-    await expect(page.locator(".ws-lane").first()).toBeVisible();
-    await (await studioReveal(page, "tab-composer")).click();
-    await expect(page.getByTestId("composer-panel")).toBeVisible();
-    await expect(page.getByTestId("composer-input")).toBeVisible();
-    for (const t of ["tracks", "composer", "agent", "sound", "files"]) { const b = (await (await studioReveal(page, `tab-${t}`)).boundingBox())!; expect(b.x).toBeGreaterThanOrEqual(0); expect(b.x + b.width).toBeLessThanOrEqual(w + 0.5); }
-    const m = await page.evaluate(() => {
-      const W = innerWidth;
-      // an element "escapes" if it extends past the viewport and no ancestor (inside the viewport) clips it
-      const bad = [...document.querySelectorAll(".ws *")].filter((e) => { const r = e.getBoundingClientRect(); if (!r.width || r.right <= W + 0.5) return false;
-        for (let a = e.parentElement; a && a !== document.body; a = a.parentElement) { const o = getComputedStyle(a).overflowX; if (o !== "visible" && a.getBoundingClientRect().right <= W + 0.5) return false; } return true; })
-        .map((e) => `${e.tagName}.${e.className}`);
-      // iOS Safari auto-zooms (and stays zoomed, overflowing the width) when a focused control's font is < 16px
-      const small = [...document.querySelectorAll(".ws input, .ws select, .ws textarea")].filter((e) => (e as HTMLElement).offsetParent && parseFloat(getComputedStyle(e).fontSize) < 16).map((e) => e.getAttribute("aria-label") ?? e.tagName);
-      return { sw: document.documentElement.scrollWidth, W, bad, small };
-    });
-    if (w === 390) await page.screenshot({ path: `${SHOTS}/composer-mobile-${test.info().project.name}.png` });
-    expect(m.bad, `${w}x${h}`).toEqual([]);
-    expect(m.small, `${w}x${h} controls under 16px`).toEqual([]);
-    expect(m.sw).toBeLessThanOrEqual(m.W);
+  test.setTimeout(240_000);
+  const P = test.info().project.name; const shot = async (name: string, scheme: string) => { if (P === "mobile-webkit" && page.viewportSize()!.width === 390) await page.screenshot({ path: `${SHOTS}/studio-redesign-${name}-${scheme}.png` }); };
+  for (const scheme of ["light", "dark"] as const) for (const [w, h] of [[390, 844], [375, 667], [430, 932]]) {
+    await page.emulateMedia({ colorScheme: scheme }); await page.setViewportSize({ width: w, height: h });
+    await page.goto("/studio"); const ws = page.getByTestId("workstation"); await expect(ws).toHaveAttribute("data-compact", "1");
+    page.removeAllListeners("dialog"); page.on("dialog", (d) => d.accept());
+    if (await page.evaluate(() => (globalThis as any).__gbkWorkstation.project.tracks.length)) { await page.getByTestId("studio-overflow").click(); await page.getByTestId("new-project").click(); }
+    const lbl = `${scheme} ${w}x${h}`;
+    // header: title, play pill, ⋯ only; none of the old desktop chrome
+    const head = page.getByTestId("compact-head"); await expect(head.locator("button")).toHaveCount(2);
+    for (const id of ["tab-tracks", "tab-composer", "tab-agent", "tab-sound", "tab-files", "scrubber", "ws-play", "keys-toggle"]) await expect(page.getByTestId(id), `${lbl} ${id}`).toBeHidden();
+    await expect(page.getByRole("button", { name: /^(Rewind|Stop)$/ })).toHaveCount(0); await expect(page.getByText("Automation for")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /sign in/i })).toHaveCount(0);
+    const bg = await ws.evaluate((e) => getComputedStyle(e).backgroundColor); expect(bg, lbl).toBe(scheme === "light" ? "rgb(255, 255, 255)" : "rgb(13, 15, 20)");
+    await expect(page.getByTestId("studio-empty")).toBeVisible(); await inputOk(page, `${lbl} empty`); expect(await escapes(page), lbl).toEqual([]);
+    await shot("empty", scheme);
+    // + : exactly three options
+    await page.getByTestId("plus-btn").click(); const plus = page.getByTestId("sheet-plus");
+    await expect(plus.locator(".ms-row")).toHaveText([/Import sheet music/, /Import MIDI file/, /Connect MIDI keyboard/]); await inputOk(page, `${lbl} + sheet`); await shot("plus", scheme);
+    await page.getByTestId("plus-midi-keyboard").click();
+    if (P === "mobile-webkit") await expect(page.getByTestId("midi-unsupported")).toHaveText("MIDI keyboards need Chrome/Edge or the iOS app.");
+    await inputOk(page, `${lbl} midi sheet`); await page.getByTestId("sheet-scrim").click({ position: { x: 10, y: 120 } });
+    // ⋯ : the seven actions (model/tokens/account only in Settings)
+    await page.getByTestId("studio-overflow").click();
+    await expect(page.getByTestId("sheet-more").locator(".ms-row")).toHaveText([/Publish & share/, /Export/, /My songs/, /Explore/, /Rename/, /New song/, /Settings/]);
+    await inputOk(page, `${lbl} ⋯ sheet`); await shot("more", scheme);
+    await page.getByTestId("more-rename").click(); await expect(page.getByTestId("rename-input")).toHaveCSS("font-size", "16px");
+    await page.getByTestId("rename-input").fill("Night Drive"); await page.getByTestId("rename-save").click(); await expect(page.getByTestId("studio-title")).toHaveText("Night Drive");
+    // a song: card -> editor sheet (Tracks / Mixer / Sound / Automation) -> full-screen roll
+    await seedSong(page); const card = page.getByTestId("version-card").last(); await expect(card).toBeVisible(); await inputOk(page, `${lbl} song`);
+    await shot("song", scheme);
+    await card.getByTestId("version-open-editor").click(); await expect(page.getByTestId("sheet-editor")).toBeVisible();
+    for (const t of ["tracks", "mixer", "sound", "automation"]) { await page.getByTestId(`tab-${t}`).click(); await inputOk(page, `${lbl} editor ${t}`); expect(await escapes(page), `${lbl} editor ${t}`).toEqual([]); if (t === "tracks") await shot("editor", scheme); }
+    await page.getByTestId("full-roll").click(); await expect(page.getByTestId("piano-roll")).toBeVisible(); await inputOk(page, `${lbl} full roll`); await shot("fullroll", scheme);
+    await page.getByTestId("editor-close").click(); await expect(page.getByTestId("sheet-editor")).toBeHidden();
+    // keyboard open (short visual viewport) and closed
+    await page.getByTestId("composer-input").focus(); await page.setViewportSize({ width: w, height: Math.round(h * 0.55) }); await inputOk(page, `${lbl} keyboard open`);
+    await page.setViewportSize({ width: w, height: h }); await page.getByTestId("composer-input").blur(); await inputOk(page, `${lbl} keyboard closed`);
+    // playback: header pill shows pause + time; input stays
+    const pill = page.getByTestId("play-pill"); await expect(pill).toBeEnabled({ timeout: 120_000 }); await pill.click();
+    await expect(pill).toHaveAttribute("aria-label", "Pause", { timeout: 30_000 }); await expect(page.getByTestId("play-time")).toHaveText(/^\d+:\d\d$/);
+    await inputOk(page, `${lbl} playing`); await shot("playing", scheme);
+    await page.getByTestId("composer-input").focus(); await inputOk(page, `${lbl} playing + focused`); await page.getByTestId("composer-input").blur();
+    await pill.click(); await expect(pill).toHaveAttribute("aria-label", "Play");
   }
 });
 
-test("mobile composer view fills the screen height; other tabs restore the roll", async ({ page }) => {
+test("mobile composer view: each reply is a version card; older versions play and restore (undoable); steps + Stop while composing", async ({ page }) => {
   test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
-  await page.goto("/studio"); await signIn(page);
-  await page.goto("/studio");
-  await expect(page.getByTestId("workstation")).toBeVisible();
-  await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Strings", channel: 0, id: "t_str", program: 48 }], { label: "seed" }); });
-  await (await studioReveal(page, "tab-composer")).click();
-  const panel = page.getByTestId("composer-panel"); await expect(panel).toBeVisible();
-  await expect(page.locator(".ws-main")).toBeHidden();
-  const H = page.viewportSize()!.height, W = page.viewportSize()!.width;
-  const tr = (await page.getByTestId("transport-row").boundingBox())!;
-  const pb = (await panel.boundingBox())!; const ib = (await page.getByTestId("composer-input").boundingBox())!;
-  expect(pb.y).toBeGreaterThanOrEqual(tr.y + tr.height - 1);
-  expect(pb.y + pb.height).toBeGreaterThan(H - 2);   // panel reaches the bottom of the screen
-  expect(pb.height).toBeGreaterThan(H * 0.55);       // most of the screen, not a 32% strip
-  expect(ib.y + ib.height).toBeGreaterThan(H - 70);  // input pill pinned at the bottom
-  expect(ib.y + ib.height).toBeLessThanOrEqual(H + 0.5);
-  const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, fs: parseFloat(getComputedStyle(document.querySelector("[data-testid=composer-input] textarea, textarea[data-testid=composer-input]") as Element).fontSize), ov: getComputedStyle(document.querySelector(".cmp-messages")!).overflowY }));
-  expect(m.sw).toBeLessThanOrEqual(W); expect(m.sh).toBeLessThanOrEqual(H + 0.5); expect(m.fs).toBeGreaterThanOrEqual(16); expect(m.ov).toBe("auto");
-  if (test.info().project.name === "mobile-webkit") await page.screenshot({ path: `${SHOTS}/composer-fullheight.png` });
-  await (await studioReveal(page, "tab-tracks")).click();
-  await expect(page.locator(".ws-main")).toBeVisible();
-  await expect(page.locator(".ws-roll-slot")).toBeVisible();
+  test.setTimeout(600_000);
+  const P = test.info().project.name;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio"); await signIn(page, "e2e-code-2");
+  page.on("dialog", (d) => d.accept());
+  await page.getByTestId("composer-input").fill(PROMPT); await page.getByTestId("composer-send").click();
+  const steps = page.getByTestId("composer-steps"); await expect(steps).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("composer-stop")).toBeVisible(); await inputOk(page, "composing");
+  await expect(steps).not.toContainText(/gbk_|_/);
+  if (P === "mobile-webkit") { await page.screenshot({ path: `${SHOTS}/studio-redesign-composing-light.png` }); await page.emulateMedia({ colorScheme: "dark" }); await page.screenshot({ path: `${SHOTS}/studio-redesign-composing-dark.png` }); await page.emulateMedia({ colorScheme: "light" }); }
+  await expect(page.locator("[data-testid=version-card][data-version='1']")).toBeVisible({ timeout: 480_000 });
+  await expect(page.getByTestId("composer-stop")).toHaveCount(0);
+  await page.getByTestId("composer-input").fill("Make the cello darker"); await page.getByTestId("composer-send").click();
+  const v2 = page.locator("[data-testid=version-card][data-version='2']"); await expect(v2).toBeVisible({ timeout: 240_000 });
+  await expect(v2).toHaveAttribute("data-current", "1");
+  const v1 = page.locator("[data-testid=version-card][data-version='1']"); await expect(v1).toHaveAttribute("data-current", "0");
+  const rev = await page.evaluate(() => (globalThis as any).__gbkWorkstation.project.revision);
+  await v1.getByTestId("version-restore").click(); await expect(page.getByTestId("studio-toast")).toContainText("Restored v1");
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__gbkWorkstation.project.revision)).toBeGreaterThan(rev);
+  await page.getByTestId("toast-undo").click();
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__gbkWorkstation.project.revision)).toBeGreaterThan(rev + 1);
+  await expect(v2).toHaveAttribute("data-current", "0"); // undo is a new revision, shown as "latest edits"
+  await inputOk(page, "after restore + undo");
+  if (P === "mobile-webkit") for (const scheme of ["light", "dark"] as const) { await page.emulateMedia({ colorScheme: scheme }); await page.screenshot({ path: `${SHOTS}/studio-redesign-versions-${scheme}.png` }); }
+});
+
+test("mobile composer view: Bluetooth MIDI pairing offered when gbkMidiNative.bluetooth is set; MIDI file + sheet image pickers", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
+  await page.addInitScript(() => { (window as any).__btOpened = 0; (window as any).gbkMidiNative = { bluetooth: true, openBluetoothPairing: () => { (window as any).__btOpened++; } }; });
+  await page.goto("/studio"); await page.getByTestId("plus-btn").click(); await page.getByTestId("plus-midi-keyboard").click();
+  await page.getByTestId("bt-midi").click(); expect(await page.evaluate(() => (window as any).__btOpened)).toBe(1);
+  await inputOk(page, "bt");
+  expect(await page.getByTestId("midi-file-input").getAttribute("accept")).toContain(".mid");
+  await page.getByTestId("midi-file-input").setInputFiles(new URL("../fixtures/import-test.mid", import.meta.url).pathname);
+  await expect(page.getByTestId("midi-import")).toBeVisible(); await page.getByTestId("midi-import-new").click();
+  await expect(page.getByTestId("version-card")).toBeVisible();
+  expect(await page.getByTestId("sheet-image-input").getAttribute("accept")).toBe("image/jpeg,image/png");
+  await page.getByTestId("sheet-image-input").setInputFiles({ name: "x.png", mimeType: "image/png", buffer: Buffer.from("not an image") });
+  await expect(page.getByTestId("studio-toast")).toContainText(/photo/i, { timeout: 60_000 });
+  await expect(page.getByTestId("studio-toast")).not.toContainText(/[A-Z]{3,}_|Error:/);
 });

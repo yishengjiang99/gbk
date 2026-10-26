@@ -1,4 +1,4 @@
-import { studioReveal } from "./app-menu";
+import { composerConn, studioReveal } from "./app-menu";
 // gbk Social e2e (Pixel, WebKit iPhone, desktop Chrome): feed cards, rating, flat comments (escaped), tag filter,
 // report, profile; no horizontal overflow and 16px inputs. Seeds one public song via the API and deletes it after.
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
@@ -199,7 +199,7 @@ test("social studio: composer input always visible + in viewport on every tab, k
     if (t === "tracks") await page.screenshot({ path: info.outputPath("studio-tracks.png") });
   }
   if (!info.project.name.startsWith("mobile")) expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(0);
-  if (await page.getByTestId("tab-tracks").count()) await (await studioReveal(page, "tab-tracks")).click(); else await (await studioReveal(page, "tab-agent")).click();
+  for (const id of ["tab-tracks", "tab-agent"]) { const x = await studioReveal(page, id); if (await x.count() && await x.isVisible()) { await x.click(); break; } } // phone studio (no song yet): no editor tabs
   const play = page.getByTestId("ws-play");
   if (await play.isVisible()) { await play.click(); await page.waitForTimeout(800); await check("during playback"); await play.click().catch(() => undefined); }
 });
@@ -267,7 +267,7 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
     await noSignInButton();
     await page.getByTestId("composer-input").fill("Gate resume prompt"); await page.getByTestId("composer-send").click();
     await signInViaSheet();
-    await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
+    await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
     await (await studioReveal(page, "tab-composer")).click();
     await expect(page.getByText("Gate resume prompt").first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("composer-input")).toHaveValue("");
@@ -290,8 +290,8 @@ test("dark mode: palette follows prefers-color-scheme, --viz-* derive from it, n
 test("MIDI upload: Settings import accepts .mid, choose new project or add to current; bad file shows an error; composer input stays visible", async ({ page, baseURL }) => {
   const base = new URL(baseURL!).origin; await apiLogin(page.request, base, "e2e-code-2");
   await page.goto("/studio"); await (await studioReveal(page, "tab-composer")).click();
-  await expect(page.getByTestId("composer-conn")).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
-  const input = page.getByTestId("import-input");
+  await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
+  const input = await studioReveal(page, "import-input");
   expect(await input.getAttribute("accept")).toContain(".mid");
   const fixture = new URL("../fixtures/import-test.mid", import.meta.url).pathname;
   await input.setInputFiles(fixture);
@@ -313,8 +313,9 @@ test("hardware MIDI keyboard: button next to Keys/Hum, mocked Web MIDI plays + r
   const P = test.info().project.name;
   if (P === "mobile-webkit") {
     await page.goto("/studio");
-    const b = await studioReveal(page, "midi-toggle"); await expect(b).toBeDisabled();
-    await expect(b).toHaveAttribute("title", "MIDI keyboards need Chrome/Edge or the iOS app");
+    const b = await studioReveal(page, "midi-toggle");
+    if (await page.getByTestId("plus-btn").count()) await expect(b).toHaveText("MIDI keyboards need Chrome/Edge or the iOS app."); // phone studio: + -> MIDI keyboard
+    else { await expect(b).toBeDisabled(); await expect(b).toHaveAttribute("title", "MIDI keyboards need Chrome/Edge or the iOS app"); }
     await expect(page.getByTestId("composer-input")).toBeInViewport();
     return;
   }
@@ -350,9 +351,10 @@ test("social studio iOS hum bridge: gbkNative hum shows the prompt-bar button, g
   await page.addInitScript(() => { (window as unknown as { gbkNative: unknown }).gbkNative = { platform: "ios", version: 1, capabilities: ["hum"] }; (window as unknown as { __humMsgs: unknown[] }).__humMsgs = [];
     (window as unknown as { webkit: unknown }).webkit = { messageHandlers: { hum: { postMessage: (m: unknown) => (window as unknown as { __humMsgs: unknown[] }).__humMsgs.push(m) } } }; });
   await page.goto("/studio");
-  const btn = page.getByTestId("composer-panel").getByTestId("hum-btn"); await expect(btn).toBeVisible({ timeout: 30_000 }); await expect(page.getByTestId("hum-btn")).toHaveCount(1);
+  // gbkNative => the phone studio: the mic in the input bar drives the native recorder.
+  const btn = page.getByTestId("composer-bar").getByTestId("hum-btn"); await expect(btn).toBeVisible({ timeout: 30_000 }); await expect(page.getByTestId("hum-btn")).toHaveCount(1);
   await btn.click(); expect(await page.evaluate(() => (window as unknown as { __humMsgs: unknown[] }).__humMsgs)).toEqual([{ type: "toggle" }]);
-  await page.evaluate(() => (window as unknown as { gbkHum: { onState: (s: object) => void } }).gbkHum.onState({ phase: "recording", elapsed: 12, progress: 0 })); await expect(btn).toHaveText("⏺ 0:12 Stop");
+  await page.evaluate(() => (window as unknown as { gbkHum: { onState: (s: object) => void } }).gbkHum.onState({ phase: "recording", elapsed: 12, progress: 0 })); await expect(page.getByTestId("hum-strip")).toContainText("0:12"); await expect(btn).toHaveAttribute("aria-label", "Done humming");
   const ctx = await page.evaluate(() => (window as unknown as { gbkHum: { context: () => { ppq: number; tracks: { channel: number }[] } } }).gbkHum.context());
   const ch = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10].find((c) => !ctx.tracks.some((t) => t.channel === c))!;
   const ops = [{ op: "addTrack", id: "hume2e", name: "Hummed melody", channel: ch, program: 0, bankMsb: 0, bankLsb: 0, role: "melody" },
@@ -380,40 +382,4 @@ test("social feed play button is accessible: aria-label Play/Pause + aria-presse
   await expect(b).toHaveAttribute("aria-pressed", was === "true" ? "false" : "true");
   await expect(b).toHaveAttribute("aria-label", was === "true" ? "Play" : "Pause");
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
-});
-
-test("compact phone studio: only roll, play/stop and prompt+Hum by default; the rest behind …; follows color scheme", async ({ page }, info) => {
-  test.skip(!info.project.name.startsWith("mobile"), "phone layout");
-  for (const scheme of ["light", "dark"] as const) {
-    await page.emulateMedia({ colorScheme: scheme });
-    await page.goto("/studio"); const ws = page.getByTestId("workstation"); await expect(ws).toHaveAttribute("data-compact", "1");
-    await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (c.project.tracks.length) c.edit(c.project.tracks.map((t: { id: string }) => ({ op: "removeTrack", trackId: t.id })), { label: "clear" }); });
-    await expect(page.getByTestId("roll-add-track")).toBeVisible();
-    for (const id of ["new-project", "nav-explore", "keys-toggle", "midi-toggle", "scrubber", "tab-tracks", "tab-agent", "export-midi", "studio-menu"]) expect(await page.getByTestId(id).first().isVisible(), id).toBe(false);
-    expect(await page.locator("[data-testid=workstation] button:visible", { hasText: "Track" }).count(), "one + Track (empty state)").toBe(1);
-    await expect(page.getByRole("button", { name: "Rewind" })).toBeHidden(); await expect(page.getByText("Automation for")).toBeHidden();
-    await expect(page.getByTestId("ws-play").or(page.getByTestId("ws-play-wait"))).toBeVisible(); await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
-    await expect(page.getByTestId("roll-add-track")).toBeVisible(); await expect(page.getByTestId("composer-input")).toBeVisible();
-    await expect(page.getByTestId("composer-panel").getByTestId("hum-btn")).toBeVisible();
-    const m = await page.evaluate(() => ({ ox: document.documentElement.scrollWidth - innerWidth, fs: getComputedStyle(document.querySelector("[data-testid=composer-input]")!).fontSize, bg: getComputedStyle(document.querySelector(".ws")!).backgroundColor }));
-    expect(m.ox).toBeLessThanOrEqual(0); expect(m.fs).toBe("16px"); expect(m.bg).toBe(scheme === "light" ? "rgb(246, 248, 251)" : "rgb(22, 27, 36)");
-    await page.screenshot({ path: `test-results/studio-compact-${scheme}-${info.project.name}.png` });
-    // overflow menu holds the rest; panels open from it; input stays visible
-    await page.getByTestId("studio-overflow").click(); await expect(page.getByTestId("studio-menu")).toBeVisible();
-    for (const id of ["new-project", "nav-explore", "keys-toggle", "midi-toggle", "export-midi", "panels-more"]) await expect(page.getByTestId(id)).toBeVisible();
-    await page.screenshot({ path: `test-results/studio-compact-menu-${scheme}-${info.project.name}.png` });
-    await page.getByTestId("panels-more").click(); await expect(page.getByTestId("tab-agent")).toBeVisible(); await expect(page.getByTestId("composer-input")).toBeVisible();
-    await page.getByTestId("panels-close").click(); await expect(page.getByTestId("tab-agent")).toBeHidden();
-    // once a track exists, the scrubber appears
-    await page.evaluate(() => (globalThis as any).__gbkWorkstation.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_cmp", program: 0 }], { label: "seed" }));
-    await expect(page.getByTestId("scrubber")).toBeVisible(); await expect(page.getByTestId("composer-input")).toBeVisible();
-  }
-});
-
-test("compact studio: Bluetooth MIDI item appears in the … menu when gbkMidiNative.bluetooth is set", async ({ page }, info) => {
-  test.skip(!info.project.name.startsWith("mobile"), "phone layout");
-  await page.addInitScript(() => { (window as any).__btOpened = 0; (window as any).gbkMidiNative = { bluetooth: true, openBluetoothPairing: () => { (window as any).__btOpened++; } }; });
-  await page.goto("/studio"); await page.getByTestId("studio-overflow").click();
-  await page.getByTestId("bt-midi").click(); expect(await page.evaluate(() => (window as any).__btOpened)).toBe(1);
-  await expect(page.getByTestId("composer-input")).toBeVisible();
 });

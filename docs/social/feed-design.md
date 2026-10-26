@@ -15,10 +15,18 @@ Constants also live in `docs/social-api.md` → "Client behavior".
 - The switch happens on scroll settle. At most one voice fades at a time. The next and previous songs are preloaded. Playback pauses when the tab or app is hidden.
 
 ## Design rule: sign-in only when an action needs it (web + iOS)
-- **Compact phone studio ("hide the complexities")**: when the viewport is under 500px wide or `window.gbkNative` exists, the default
-  view is only the piano roll, Play/Stop + time, and the prompt box with Hum. Everything else (Explore, New project, Rewind,
-  Keys/MIDI, follow/loop, zoom, undo/redo, exports, Agent Tools, Player/Library, and the Tracks/Agent/Sound/Files panels) lives
-  behind the single `…` menu. The scrubber and automation row appear only once a track exists; the empty roll keeps one `+ Track`.
+- **Phone studio = one chat with the composer** (`src/components/studio/MobileStudio.tsx`; viewport under 500px or `window.gbkNative`).
+  - Header: song title, a play/pause pill with the time, and `⋯`. Nothing else (no tab bar, rewind, stop, scrubber, lanes or helper text).
+  - Input bar (always visible, 16px): `+`, the text box, and the mic (Hum). While composing the mic becomes Stop; with text typed it becomes Send.
+  - `+` sheet, exactly three rows: Import sheet music (photo -> in-browser OMR -> the MIDI import chooser; native `scan` handler if the app ever
+    advertises one), Import MIDI file (.mid/.midi, same chooser), Connect MIDI keyboard (Web MIDI + on-screen keys; Safari shows
+    "MIDI keyboards need Chrome/Edge or the iOS app"; Bluetooth pairing row when `gbkMidiNative.bluetooth`).
+  - Every composer reply that changes the song is a version card (v1, v2, ...): Play, Open editor, Publish. Older versions play (audition,
+    no state change) and "Restore this version" is one undoable edit (toast with Undo). Edits after the last reply show a "latest edits" card.
+  - Composing shows plain-language steps in the chat (repeats collapsed) and a Stop button; errors are one plain sentence, no codes/IDs.
+  - `⋯` sheet: Publish & share, Export (MIDI/WAV/video), My songs, Explore, Rename, New song, Settings (model, usage, account).
+  - Editor sheet (from a card): small piano roll + full-screen option, then Tracks / Mixer / Sound / Automation (+ Agent when a change waits for approval).
+  - Sheets open above the input bar, never over it. Desktop `/studio` is unchanged.
 - **No standalone Sign in button anywhere**: not in the header, the feed, the studio, or the composer. Guests browse, play, read comments, open songs in the studio, and type in the composer freely.
 - **Gated actions open the sign-in sheet.** These are: rate, comment, follow, DM, report, publish/save, Send in the composer, and the Inbox tab. **Profile is not gated**: a signed-out or guest user can open their own Profile tab. It shows the guest name (web: "Guest"; iOS: the two-word guest name) and offers the sign-in sheet from there. Only Inbox opens the sheet when its tab is tapped.
   - On phones the sheet is a bottom sheet; on desktop it is a centred modal.
