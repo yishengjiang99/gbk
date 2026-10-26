@@ -16,6 +16,7 @@ test("deploy/nginx.conf keeps HTTPS: 443 ssl, cert paths, port-80 redirect; no k
     assert.ok(conf.includes(s), s);
   assert.ok(!/BEGIN [A-Z ]*PRIVATE KEY/.test(conf));
   assert.ok(conf.includes("chatgpt(/install|/gallery"), "install + gallery paths proxied");
+  assert.ok(/\|pricing\(\/thanks\)\?\|plans\|/.test(conf) && conf.includes("privacy/payments-and-ads"), "pricing, plans and payments privacy proxied to the app");
 });
 
 test("install-nginx.sh refuses a config without TLS and leaves the live file untouched", () => {
