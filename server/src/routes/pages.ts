@@ -48,6 +48,7 @@ function page(cfg: Config, path: string, title: string, description: string, bod
 <meta property="og:description" content="${esc(description)}"><meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(img)}">
 <meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(description)}"><meta name="twitter:image" content="${esc(img)}">
 ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>` : ""}
+<script src="/attribution.js"></script>
 <style>${PAGE_CSS}</style></head><body><header><a href="/"><img src="/icon.png" alt="" width="40" height="40">GBK Composer</a></header>
 <main>${body}</main><footer><nav>${footerLinks()}</nav><p>GBK Composer by Yisheng Jiang · <a href="https://github.com/yishengjiang99/gbk">Source on GitHub</a></p></footer></body></html>`;
 }

@@ -77,6 +77,7 @@ function shell(cfg: Config, path: string, title: string, description: string, bo
 <meta property="og:description" content="${esc(description)}"><meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(img)}"><meta property="og:image:width" content="1920"><meta property="og:image:height" content="1080">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(description)}"><meta name="twitter:image" content="${esc(img)}">
 ${(opts.jsonLd ?? []).map(ld).join("\n")}${opts.head ?? ""}
+<script src="/attribution.js"></script>
 <style>${PAGE_CSS}${PRICING_CSS}</style></head><body><header><a href="/"><img src="/icon.png" alt="" width="40" height="40">GBK Composer</a></header>
 <main>${body}</main><footer><nav>${footerLinks()}<a href="/pricing">Pricing</a></nav><p>GBK Composer by Yisheng Jiang · <a href="https://github.com/yishengjiang99/gbk">Source on GitHub</a> · <a href="/privacy/payments-and-ads">Payments and ads privacy</a></p></footer></body></html>`;
 }
@@ -90,15 +91,8 @@ ${p.redditPixelId ? `!function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEven
 })();</script>`;
 }
 
-// Keeps UTM + click ids from the ad landing URL for this tab, and fills each Buy form right before submit.
-const ATTRIBUTION_JS = `<script>(function(){var K=["utm_source","utm_medium","utm_campaign","utm_content","utm_term","twclid","rdt_cid"],q=new URLSearchParams(location.search),s=sessionStorage;
-K.forEach(function(k){var v=q.get(k);if(v)s.setItem("gbk_"+k,v.slice(0,200))});if(!s.getItem("gbk_landing"))s.setItem("gbk_landing",location.href.slice(0,300));
-var optOut=navigator.globalPrivacyControl||navigator.doNotTrack==="1";
-document.querySelectorAll("form[data-checkout]").forEach(function(f){f.addEventListener("submit",function(){
-var id="gc-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
-var put=function(k,v){if(!v)return;var i=f.querySelector('input[name="'+k+'"]')||f.appendChild(Object.assign(document.createElement("input"),{type:"hidden",name:k}));i.value=v};
-put("event_id",id);K.forEach(function(k){put(k,s.getItem("gbk_"+k))});put("landing",s.getItem("gbk_landing"));if(optOut||f.dataset.ads==="0")put("ads_opt_out","1");
-try{localStorage.setItem("gbk_checkout",JSON.stringify({id:id,plan:f.querySelector('input[name="plan"]').value,at:Date.now()}))}catch(e){}})})})();</script>`;
+// UTM + click-id capture and the Buy-form fill live in the shared site-wide snippet (public/attribution.js,
+// included by shell() above): first-touch cookies from any landing page, not just /pricing (#131).
 
 function pricingBody(cfg: Config, p: PricingConfig, email: string | null, notice: string): string {
   const sr = cfg.serverRender;
@@ -113,8 +107,8 @@ function pricingBody(cfg: Config, p: PricingConfig, email: string | null, notice
   const waitlist = `<h2 id="waitlist">Get notified when Pro opens</h2><p>Pro is not on sale yet. Leave your email and we will send one message when it is.</p>
 <form class="wl" method="post" action="/api/pricing/waitlist"><input type="email" name="email" required placeholder="you@example.com" aria-label="Email"><input class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"><button type="submit">Notify me</button></form>`;
   // Sticky CTA defaults to the yearly trial; while checkout is off it points at the waitlist instead.
-  // It sits before ATTRIBUTION_JS in the markup so its checkout form gets the same submit-time
-  // attribution fields as the card forms.
+  // Its checkout form is a plain form[data-checkout], so the shared attribution snippet
+  // (public/attribution.js, #131) fills it at submit time exactly like the card forms.
   const sticky = `<div class="sticky-cta"><p>Pro yearly: $4/month billed yearly, with a 7-day free trial.</p>${p.checkoutEnabled ? buy("pro_yearly") : `<a class="cta" href="#waitlist">Get notified</a>`}</div>`;
   return `<h1>GBK Composer pricing</h1><p class="lead">Get 10× the AI composer budget and longer renders, up to 10 minutes each, with Pro. Every plan starts with a 7-day free trial. Free stays free: compose real, editable MIDI by describing it in a chat.</p>${notice}
 <div class="plans">${cards}${freeCard}</div>
@@ -125,8 +119,7 @@ ${p.checkoutEnabled ? `<p>Checkout is handled by Stripe on grepawk.com. ${email 
 <tr><td>Server renders (no browser, e.g. Codex)</td><td>${sr.guestPerHour}/hour without an account, ${sr.accountPerHour}/hour signed in, up to ${sr.accountMaxSeconds} s</td><td>120/hour, up to 600 s</td></tr>
 <tr><td>Composer agent inside GBK Studio</td><td>Daily AI budget</td><td>10× daily AI budget</td></tr></table>
 <h2>FAQ</h2>${FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join("")}
-${sticky}
-${ATTRIBUTION_JS}`;
+${sticky}`;
 }
 
 function jsonLd(cfg: Config) {
@@ -212,7 +205,14 @@ export function pricingRoutes(app: FastifyInstance, cfg: Config, sessions: Sessi
     if (typeof b.website === "string" && b.website) return back("ok");
     const email = String(b.email ?? "").trim().toLowerCase();
     if (!EMAIL_RE.test(email)) return back("invalid");
-    waitlist.add(email, typeof b.utm_source === "string" ? b.utm_source.slice(0, 60) : null);
+    // Signup source: an explicit field wins; otherwise the first-touch attribution cookie (#131), so a
+    // waitlist signup is credited to the ad the visitor originally landed on, not just a /pricing visit.
+    let utmSource = typeof b.utm_source === "string" ? b.utm_source.slice(0, 60) : null;
+    if (!utmSource) {
+      const c = parseCookies(req.headers.cookie)["gbk_utm_source"];
+      if (c) { try { utmSource = decodeURIComponent(c).slice(0, 60) || null; } catch { utmSource = c.slice(0, 60); } }
+    }
+    waitlist.add(email, utmSource);
     return back("ok");
   });
 }
