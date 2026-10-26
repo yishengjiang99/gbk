@@ -38,6 +38,11 @@ struct RootTabView: View {
                 .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                 .tag(AppTab.profile)
         }
-        .sheet(isPresented: $store.showPaywall) { PaywallView(store: store) }
+        .sheet(isPresented: $store.showPaywall, onDismiss: { PaywallTriggerWatcher.shared.sheetDismissed() }) { PaywallView(store: store) }
+        .onChange(of: router.selectedTab) { _, tab in
+            // Studio open is a paywall watch point (#123): composing/exporting happened in the web
+            // Studio since the last snapshot, so refresh `/api/me` and let the watcher evaluate.
+            if tab == .create { Task { await auth.loadMe() } }
+        }
     }
 }

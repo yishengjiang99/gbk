@@ -57,6 +57,11 @@ enum Endpoints {
 
     // MARK: Profiles (P1, live)
     static let me = Endpoint(path: "/api/me")
+    /// Paywall engagement report (#115): `event` is `paywall_view`, `paywall_dismiss` or `export`;
+    /// the reply carries the fresh `{ usage, paywall }`.
+    static func meEngagement(event: String) -> Endpoint {
+        Endpoint(path: "/api/me/engagement", method: .post, body: ["event": event])
+    }
     static func user(_ handle: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/users/\(handle)", query: q("cursor", cursor)) }
 
     // MARK: Reports (P1, live) / blocks (P4, not live)

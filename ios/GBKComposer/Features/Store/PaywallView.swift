@@ -1,10 +1,13 @@
 import SwiftUI
+import StoreKit
 
-/// GBK Pro paywall sheet. Opened from Profile, the Create tab, and any Studio link to /pricing or checkout.
+/// GBK Pro paywall sheet. Opened from Profile, the Create tab, any Studio link to /pricing or
+/// checkout, and by the paywall triggers (#123: 2nd composition / export, AI or render limit).
 struct PaywallView: View {
     @ObservedObject var store: PurchaseStore
     @Environment(\.dismiss) private var dismiss
     @State private var selected = StoreCatalog.proYearly.id
+    @State private var isUSStorefront = false
 
     var body: some View {
         NavigationStack {
@@ -27,6 +30,7 @@ struct PaywallView: View {
             .background(Theme.background.ignoresSafeArea())
             .onAppear { BillingEventLogger.shared.paywallView(reason: store.paywallReason) }
             .onDisappear { BillingEventLogger.shared.paywallDismiss() }
+            .task { isUSStorefront = await Storefront.current?.countryCode == "USA" }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) { Button("Restore") { Task { await store.restore() } } }
@@ -87,6 +91,10 @@ struct PaywallView: View {
                 Link("Privacy", destination: URL(string: "https://compose.grepawk.com/privacy")!)
             }
             Link("Billing help: yisheng.jiang@gmail.com", destination: URL(string: "mailto:yisheng.jiang@gmail.com")!)
+            // Guideline 3.1.1(a) US-storefront exception: Pro can also be bought on the web.
+            if isUSStorefront {
+                Link("Buy on the web", destination: URL(string: "https://compose.grepawk.com/pricing")!)
+            }
         }
         .font(.caption2).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
     }

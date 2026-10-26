@@ -36,6 +36,8 @@ struct Me: Codable, Hashable {
     var proExpiresAt: Int64? = nil
     /// `"Production" | "Sandbox" | nil`
     var proEnvironment: String? = nil
+    /// Paywall eligibility from the server's engagement counters (#115); the client trigger is #123.
+    var paywall: MePaywall? = nil
 
     /// Server says Pro and it hasn't expired.
     func hasActivePro(now: Date = Date()) -> Bool {
@@ -47,6 +49,23 @@ struct Me: Codable, Hashable {
     var asUser: User {
         User(handle: handle, displayName: displayName, avatarUrl: avatarUrl, songCount: songCount, ratingAvg: ratingAvg, createdAt: createdAt)
     }
+}
+
+/// The `paywall` object in `GET /api/me` (#115): whether the server wants the native paywall shown,
+/// and why. Soft reasons are the engagement triggers (`second_composition`: the 2nd composition
+/// completed; `export_after_2`: a WAV/MIDI export after that paywall was seen). Hard reasons mean the
+/// account is at a real limit right now (`ai_limit`: daily AI budget, TOKEN_BUDGET_EXHAUSTED;
+/// `render_limit`). `eligible` already excludes Pro users and the server-side 24 h post-dismiss
+/// cooldown, but `reason` stays populated while `eligible` is false, so the client can still
+/// hard-present at a live limit (#123).
+struct MePaywall: Codable, Hashable {
+    let eligible: Bool
+    let reason: String?
+    /// Unix ms when the server cooldown ends; nil when not cooling down.
+    let cooldownUntil: Int64?
+
+    static let softReasons: Set<String> = ["second_composition", "export_after_2"]
+    static let hardReasons: Set<String> = ["ai_limit", "render_limit"]
 }
 
 struct SongMedia: Codable, Hashable {

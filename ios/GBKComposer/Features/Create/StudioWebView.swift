@@ -33,7 +33,9 @@ struct StudioWebView: View {
             GeometryReader { g in
                 Group {
                     if let url {
-                        WebView(url: url, scan: scan, onPublish: { publishRequest = $0 })
+                        // A publish request follows finished work in the Studio: refresh `/api/me`
+                        // so the paywall watcher (#123) sees any eligibility flip promptly.
+                        WebView(url: url, scan: scan, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } })
                             .accessibilityIdentifier("studio-webview")
                     } else { ProgressView().tint(Theme.accent) }
                 }

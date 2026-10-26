@@ -20,13 +20,16 @@ struct GBKComposerApp: App {
                 .task { if !Self.isUnitTestHost { await auth.ensureAnonymousSession() } }
                 .onOpenURL { router.handle($0) }
                 .task { PurchaseStore.shared.start() }
+                .task { if !Self.isUnitTestHost { PaywallTriggerWatcher.shared.start() } }
                 .onAppear { router.handleLaunchArguments() }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL { router.handle(url) }
                 }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await PushManager.shared.refresh() } }
+            // Foreground is a paywall watch point (#123): work in the web Studio (another app, a
+            // browser) may have flipped eligibility, so refresh `/api/me` for the watcher.
+            if phase == .active { Task { await PushManager.shared.refresh(); await auth.loadMe() } }
             if phase == .background { BillingEventLogger.shared.suspend() }
         }
     }
