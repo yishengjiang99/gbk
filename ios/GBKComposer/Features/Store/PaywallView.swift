@@ -82,6 +82,7 @@ struct PaywallView: View {
                 Link("Terms", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
                 Link("Privacy", destination: URL(string: "https://compose.grepawk.com/privacy")!)
             }
+            Link("Billing help: yisheng.jiang@gmail.com", destination: URL(string: "mailto:yisheng.jiang@gmail.com")!)
         }
         .font(.caption2).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
     }

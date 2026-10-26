@@ -12,6 +12,7 @@ export const STARTER_PROMPTS = [
   "Compose a 16-bar ambient piano piece, then add a CC11 crescendo in bars 9–16 and show me the piano roll.",
 ];
 export const SUPPORT_URL = "https://github.com/yishengjiang99/gbk/issues";
+export const SUPPORT_EMAIL = "yisheng.jiang@gmail.com";
 export const PAGE_PATHS = ["/chatgpt", "/privacy", "/terms", "/support"] as const;
 const UPDATED = "October 24, 2026";
 
@@ -134,6 +135,9 @@ function terms(cfg: Config): string {
 function support(cfg: Config): string {
   return page(cfg, "/support", "Support · GBK Composer", "Get help with GBK Composer, report a bug, or request account deletion.", `<h1>Support</h1>
 <p>GBK Composer is supported through GitHub issues.</p><p><a class="cta" href="${SUPPORT_URL}" rel="noopener">Open a GitHub issue</a></p>
+<h2>Billing and Pro support (private)</h2>
+<div class="note"><p>Paying customers: for billing, refunds, receipts or subscription help, email us instead of opening a public issue: <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>. We aim to reply within two business days.</p>
+<p>Never send card details by email. Payments are handled by Stripe and Apple, and we will never ask for your card number, security code or bank details.</p></div>
 <h2>Before you file</h2><ul>
 <li><strong>Render did nothing</strong>: there are two ways to render. Ask GBK to render the piece and it renders the WAV and MIDI on our server (no browser tab needed; long pieces and busy periods hit limits, and the reply says which). Or ask GBK to show the player and press Render there, which renders in your browser (the first render downloads a ~32 MB SoundFont). You can also open the private Studio link the plugin gave you and export WAV there.</li><li><strong>Lost access key (no account)</strong>: compositions created without signing in can only be opened with their key. We cannot recover a lost key.</li>
 <li><strong>Daily limit reached</strong>: AI and render limits reset daily.</li>
