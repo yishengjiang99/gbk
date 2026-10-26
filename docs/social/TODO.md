@@ -1,11 +1,13 @@
 # gbk Social TODO
 
 ## iOS
+- iOS: the app is locked to Light (Info.plist `UIUserInterfaceStyle`), so the studio web view never gets `prefers-color-scheme: dark` in the app even though MobileStudio has dark tokens. Decide whether to unlock dark mode app-wide.
+- Web (GBK Social): in the app, a guest who taps Publish sees both the native sign-in sheet and the web SignInSheet (both listen to `gbk:need-signin`). Skip the web sheet when `window.gbkNative` exists and the pending kind is `publish`.
+- iOS: on a real iPhone, check Hum cancel restores full-volume playback and the Bluetooth pairing sheet opens from the studio + › Connect MIDI keyboard.
 
 - iOS: on a real iPhone, confirm feed songs play live through SF2 (no MP3), bars + waveform move, level matches web live playback (fixed 0.8 gain), and check `timeToFirstAudio` in the FeedPlayer log (Console, subsystem com.grepawk.moviefone) when swiping.
 - iOS feed: apply project-JSON effect settings (if the server exposes them) to SF2Engine `setEffectParams`; today only the MIDI's CC91/CC93 and engine defaults drive reverb/chorus. Songs without `media.midi` are hidden in the native feed.
 - iOS: on a real iPhone, confirm feed + studio playback is full loudness at max volume (silent switch on and off) and stays loud after a Hum take (AudioSessionController).
-- Web (GBK Social): in the Keys/MIDI UI, when `window.gbkMidiNative?.bluetooth`, show a "Bluetooth MIDI" button calling `window.gbkMidiNative.openBluetoothPairing()` (iOS app pairing sheet; today only in Profile ⚙︎). Contract: docs/ios/midi.md.
 - iOS MIDI: test with a real USB keyboard, a BLE MIDI device and a network session on device; measure end-to-end (key → sound) latency on device.
 - iOS: manually verify the studio import picker lists .mid/.midi from Files and the import lands (CI can't drive the Files sheet).
 

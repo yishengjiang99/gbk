@@ -7,15 +7,19 @@ final class StudioSignInUITests: XCTestCase {
     func testPublishAsGuestOpensNativeSignIn() throws {
         let app = XCUIApplication()
         app.launch()
-        app.tabBars.buttons["Create"].tap()
+        let create = app.tabBars.buttons["Create"]
+        XCTAssertTrue(create.waitForExistence(timeout: 90), "tab bar (cold simulator launch can be slow)")
+        create.tap()
         let web = app.webViews.firstMatch
         guard web.textViews["Describe a song or a change"].waitForExistence(timeout: 60) else {
             throw XCTSkip("studio did not load from compose.grepawk.com (network)")
         }
-        web.buttons["More"].tap()
-        let publish = web.buttons.matching(NSPredicate(format: "label CONTAINS 'Publish'")).firstMatch
+        web.descendants(matching: .any)["More"].firstMatch.tap()
+        // more-publish row ("Publish & share"); version cards also carry a "Publish" button.
+        let publish = web.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Publish & share' OR label BEGINSWITH '📤'")).firstMatch
         XCTAssertTrue(publish.waitForExistence(timeout: 5))
-        publish.tap()
+        sleep(1) // sheet animation
+        publish.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let google = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Continue with Google'")).firstMatch
         XCTAssertTrue(google.waitForExistence(timeout: 10), "native sign-in sheet for pending publish")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "studio-publish-signin"; shot.lifetime = .keepAlways; add(shot)

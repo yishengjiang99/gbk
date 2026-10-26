@@ -17,7 +17,9 @@ final class CreateTabKeyboardUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestStudioMIDI"] + (dark ? ["-uiTestDark"] : [])
         app.launch()
-        app.tabBars.buttons["Create"].tap()
+        let create = app.tabBars.buttons["Create"]
+        XCTAssertTrue(create.waitForExistence(timeout: 90), "tab bar (cold simulator launch can be slow)")
+        create.tap()
 
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30), "studio web view")
@@ -28,8 +30,9 @@ final class CreateTabKeyboardUITests: XCTestCase {
         }
         let window = app.windows.firstMatch.frame
         let tabBar = app.tabBars.firstMatch.frame
-        let plus = web.buttons["Add"], hum = web.buttons["Hum a melody"], more = web.buttons["More"]
+        let plus = web.buttons["Add"], hum = web.buttons["Hum a melody"], more = web.descendants(matching: .any)["More"] // studio-overflow; aria-haspopup, so not a plain button
         let pill = web.buttons["Play"]
+        _ = more.waitForExistence(timeout: 10)
         XCTAssertTrue(plus.exists && hum.exists && more.exists && pill.exists, "plus-btn, hum-btn, studio-overflow, play-pill")
 
         // Header: native Scan bar, then the web compact-head, no overlap or doubled top bar; safe areas respected.
@@ -47,10 +50,10 @@ final class CreateTabKeyboardUITests: XCTestCase {
 
         // + sheet: no web photo Scan inside the app (Scan is native-only); Bluetooth pairing via gbkMidiNative.
         plus.tap()
-        XCTAssertTrue(web.buttons.matching(NSPredicate(format: "label CONTAINS 'Import MIDI file'")).firstMatch.waitForExistence(timeout: 5), "plus sheet opened")
-        XCTAssertFalse(web.buttons.matching(NSPredicate(format: "label CONTAINS 'Import sheet music'")).firstMatch.exists, "web photo Scan hidden in the app")
-        web.buttons.matching(NSPredicate(format: "label CONTAINS 'Connect MIDI keyboard'")).firstMatch.tap()
-        XCTAssertTrue(web.buttons.matching(NSPredicate(format: "label CONTAINS 'Pair a Bluetooth keyboard'")).firstMatch.waitForExistence(timeout: 5),
+        XCTAssertTrue(web.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Import MIDI file'")).firstMatch.waitForExistence(timeout: 5), "plus sheet opened")
+        XCTAssertFalse(web.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Import sheet music'")).firstMatch.exists, "web photo Scan hidden in the app")
+        web.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Connect MIDI keyboard'")).firstMatch.tap()
+        XCTAssertTrue(web.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Pair a Bluetooth keyboard'")).firstMatch.waitForExistence(timeout: 5),
                       "gbkMidiNative.bluetooth + openBluetoothPairing() detected by the web")
         attach(app, "create-midi-sheet-\(mode)")
         assertVisible(input, above: tabBar.minY, window, "with the MIDI sheet open")
