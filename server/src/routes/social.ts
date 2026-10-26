@@ -18,7 +18,7 @@ const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const lim = (v: unknown, d = 20, max = 50) => Math.min(max, Math.max(1, Number(v) || d));
 
 export const OWNER_HANDLE = "yishengjiang";
-export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker, iap?: import("../persistence/iap.ts").IapStore, limits?: import("../agent/limits.ts").AccountLimits) {
+export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker, iap?: import("../persistence/iap.ts").IapStore, limits?: import("../agent/limits.ts").AccountLimits, engagement?: { usage: import("../persistence/usage.ts").UsageStore; aiLimit: (u: string) => boolean; renderLimit: (u: string) => boolean }) {
   const origin = cfg.publicOrigin;
   const L = { comment: new RateLimiter(10), rating: new RateLimiter(60), report: new RateLimiter(10, 3_600_000), play: new RateLimiter(120) };
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
@@ -26,7 +26,13 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   const prof = (u: string) => social.ensureProfile(u, nameOf(u));
   const user = (u: string) => { const p = prof(u); return { handle: p.handle, display_name: p.display_name, bio: p.bio ?? null, badge: p.badge ?? null, avatar_url: null, ...social.userStats(u), created_at: p.created_at }; };
   const guestComments = new RateLimiter(20, 86_400_000);
-  const me = (u: string) => { const p = prof(u); const a = accounts.get(u); return { ...user(u), id: u, provider: a?.provider ?? null, is_guest: a?.provider === "guest", ...(() => { const e = iap?.pro(u); const src = e?.pro ? "apple" : limits?.proSource(u) ?? null; return { pro: !!src, pro_source: src, pro_expires_at: src === "apple" ? e?.expires_at ?? null : null, pro_environment: src === "apple" ? e?.environment ?? null : null }; })(), dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u) }; };
+  const me = (u: string) => { const p = prof(u); const a = accounts.get(u); return { ...user(u), id: u, provider: a?.provider ?? null, is_guest: a?.provider === "guest", ...(() => { const e = iap?.pro(u); const src = e?.pro ? "apple" : limits?.proSource(u) ?? null; return { pro: !!src, pro_source: src, pro_expires_at: src === "apple" ? e?.expires_at ?? null : null, pro_environment: src === "apple" ? e?.environment ?? null : null }; })(), dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u), ...engage(u) }; };
+  /** #115: lifetime counters + paywall eligibility (no UI here). Pro (Apple/Stripe) or admin is never eligible. */
+  function engage(u: string) {
+    if (!engagement) return {};
+    const pro = !!limits?.for(u).pro || !!iap?.pro(u).pro;
+    return { usage: engagement.usage.usage(u), paywall: engagement.usage.paywall(u, { pro, aiLimit: !pro && engagement.aiLimit(u), renderLimit: !pro && engagement.renderLimit(u) }) };
+  }
   /** Signed-in, non-guest account required for social writes. */
   const auth = (req: FastifyRequest, reply: FastifyReply, write = true) => {
     const s = currentSession(req, sessions);
@@ -49,6 +55,17 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
 
   // ---- me / profiles ----
   app.get("/api/me", async (req, reply) => { const s = auth(req, reply, false); if (!s) return; await limits?.refresh(s.user); return me(s.user); });
+  // #115: the app reports paywall impressions/dismissals and client-side (Studio) WAV/MIDI exports. Counts only.
+  app.post("/api/me/engagement", async (req, reply) => {
+    const s = auth(req, reply); if (!s) return; if (!engagement) return reply.code(404).send({ code: "NOT_FOUND", message: "not enabled" });
+    const ev = ((req.body ?? {}) as { event?: unknown }).event;
+    if (ev === "paywall_view") engagement.usage.bump(s.user, "paywall_views");
+    else if (ev === "paywall_dismiss") engagement.usage.dismiss(s.user);
+    else if (ev === "export") engagement.usage.bump(s.user, "exports");
+    else return reply.code(422).send({ code: "INVALID_ARGUMENT", message: "event is paywall_view, paywall_dismiss or export" });
+    const e = engage(s.user) as { usage: unknown; paywall: unknown };
+    return { usage: e.usage, paywall: e.paywall };
+  });
   app.patch("/api/me/settings", async (req, reply) => {
     const s = auth(req, reply); if (!s) return; prof(s.user);
     const b = (req.body ?? {}) as { display_name?: unknown; handle?: unknown; dm_policy?: unknown };

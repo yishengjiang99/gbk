@@ -256,6 +256,10 @@ Mapping to an account uses `originalTransactionId`, then `appAccountToken`. Inva
 
 `Me` gains `pro: boolean`, `pro_source: "stripe" | "apple" | null`, `pro_expires_at: <unix ms> | null` and `pro_environment: "Production" | "Sandbox" | null`. This applies to guests too.
 
+`pro_source: "stripe"` comes from an active Stripe subscription on grepawk.com (looked up by verified account email, cached 10 min; see `server/src/billing/stripe-pro.ts`). Stripe Pro carries no `pro_expires_at`/`pro_environment`.
+
+`Me` also has (#115) `usage: { compositions, ai_runs, renders, exports, shares, paywall_views, last_paywall_at }` (lifetime counts) and `paywall: { eligible, reason: "second_composition" | "export_after_2" | "ai_limit" | "render_limit" | null, cooldown_until: <unix ms> | null }`. Pro is never eligible; a dismiss starts a 24 h cooldown. `POST /api/me/engagement {event: "paywall_view" | "paywall_dismiss" | "export"}` (CSRF like other writes) records an impression, a dismissal or a client-side WAV/MIDI export and returns `{usage, paywall}`. None of this is exposed through MCP/ChatGPT.
+
 Pro from either source lifts the agent token budget and render limits.
 
 Guest → Apple/Google upgrade or merge carries Apple entitlements over: purchases move to the surviving account.

@@ -25,6 +25,7 @@ test("share -> open link (public, no login) -> fork lineage -> unshare -> delete
     assert.equal((await fetch(`${s.base}/api/shares`, { method: "POST", headers: { "content-type": "application/json", origin: "http://composer.test" }, body: JSON.stringify({ project: c.project }) })).status, 401);
     const r = await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: "Alice's fugue", project: c.project, public: true }) });
     assert.equal(r.status, 200); const sh = await r.json();
+    { const who = (await (await fetch(`${s.base}/api/session`, { headers: { cookie: alice.cookie } })).json()).user as string; await new Promise((ok) => setTimeout(ok, 20)); assert.equal(s.usage.usage(who).shares, 1, "#115 shares counter"); }
     assert.match(sh.url, /^http:\/\/composer\.test\/s\/alice-s-fugue-[a-z0-9]{8}$/);
     const wav = new Uint8Array(100); wav.set([..."RIFF"].map((x) => x.charCodeAt(0)), 0); wav.set([..."WAVE"].map((x) => x.charCodeAt(0)), 8);
     assert.equal((await fetch(`${s.base}/api/shares/${sh.slug}/media/wav`, { method: "PUT", headers: { ...H(alice), "content-type": "audio/wav", "x-gbk-wav-meta": JSON.stringify({ durationSeconds: 12.5 }) }, body: wav })).status, 200);

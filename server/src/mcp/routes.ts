@@ -34,7 +34,7 @@ import { RateLimiter } from "../security/rate-limit.ts";
 import { resolveSoundFontPath, resolveWidgetAsset } from "./browser-render.ts";
 
 export interface McpDeps {
-  store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; funnel?: FunnelStore;
+  store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; funnel?: FunnelStore; usage?: (user: string, c: "compositions" | "exports") => void;
   log: (o: object) => void;
 }
 
@@ -134,7 +134,7 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
         onsessioninitialized: (id) => { transports.set(id, { transport, user: principal?.user ?? null, auth, lastSeen: Date.now() }); },
       });
       transport.onclose = () => { if (transport.sessionId) transports.delete(transport.sessionId); };
-      const server = createGbkMcpServer({ cfg, store: deps.store, service: deps.service, renders: deps.renders, auth, signal: ac.signal, metrics: deps.metrics, funnel: deps.funnel, log: deps.log });
+      const server = createGbkMcpServer({ cfg, store: deps.store, service: deps.service, renders: deps.renders, auth, signal: ac.signal, metrics: deps.metrics, funnel: deps.funnel, usage: deps.usage, log: deps.log });
       await server.connect(transport);
       await transport.handleRequest(req.raw, raw, body);
       return;
@@ -183,7 +183,7 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
       .header("x-content-type-options", "nosniff").header("cache-control", "private, no-store");
     if (req.method === "HEAD") { reply.header("content-length", String(size)); return reply.code(200).send(); }
     // One download per full fetch or first range (players issue many range requests per listen).
-    if (!range || /^bytes=0-/.test(range)) deps.funnel?.bump(row.kind === "wav" ? "wav_download" : "midi_download", row.owner.startsWith("guest:") ? "guest" : "account");
+    if (!range || /^bytes=0-/.test(range)) { deps.funnel?.bump(row.kind === "wav" ? "wav_download" : "midi_download", row.owner.startsWith("guest:") ? "guest" : "account"); deps.usage?.(row.owner, "exports"); }
     const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
     if (m) {
       const start = m[1] ? Number(m[1]) : 0; const end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;

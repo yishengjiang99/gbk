@@ -39,7 +39,7 @@ export interface McpMetrics { calls: number; errors: number; authFailures: numbe
 export interface SessionAuth { current: Principal | null; client?: string }
 export interface McpContext {
   cfg: Config; store: McpStore; service: CompositionService; renders: RenderService;
-  auth: SessionAuth; signal: AbortSignal; metrics: McpMetrics; funnel?: FunnelStore;
+  auth: SessionAuth; signal: AbortSignal; metrics: McpMetrics; funnel?: FunnelStore; usage?: (user: string, c: "compositions") => void;
   log: (o: object) => void;
 }
 
@@ -108,6 +108,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     if (!firstCounted) { firstCounted = true; ctx.funnel?.bump("first_tool_call", p?.via === "guest" ? "guest" : p ? "account" : ""); }
     const ev = TOOL_EVENTS[tool]; if (!ev || out.status === "studio_required") return;
     ctx.funnel?.bump(ev, p?.via === "guest" ? "guest" : "account");
+    if (ev === "create" && p) ctx.usage?.(p.user, "compositions");
   }
   async function run<T extends Record<string, unknown>>(tool: string, scope: Scope | null, args: Record<string, unknown>, fn: (p: Principal | null) => Promise<T>): Promise<ReturnType<typeof ok> | ReturnType<typeof fail>> {
     metrics.calls++; metrics.byTool[tool] = (metrics.byTool[tool] ?? 0) + 1;

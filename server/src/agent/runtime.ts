@@ -52,6 +52,8 @@ function artifactOf(tool: string, r: ToolResultEnvelope): ArtifactRef | undefine
 }
 
 export class AgentRuntime {
+  /** Per-user engagement counters (#115); set by app.ts. */
+  onUsage: (user: string, c: "ai_runs" | "compositions") => void = () => {};
   constructor(private cfg: Config, private model: ModelClient, private catalog: ToolCatalog, private ledger: UsageLedger) {}
 
   async run(o: RunOptions): Promise<RunResult> {
@@ -74,6 +76,7 @@ export class AgentRuntime {
     if (!tools.length) return fail("NO_TOOLS", "the browser registered no vetted GBK tools; reload the page");
     await this.ledger.prepare(o.user);
     try { this.ledger.check(o.user); } catch (e) { if (e instanceof BudgetError) return fail(e.code, e.message); throw e; }
+    this.onUsage(o.user, "ai_runs");
     closeDanglingTurns(conv.messages);
 
     let switchedNote = "";
@@ -109,6 +112,7 @@ export class AgentRuntime {
         emit({ type: "assistant_message", runId: o.runId, text });
         conv.history.push({ role: "assistant", text, at: Date.now(), ...(artifacts.length ? { artifacts } : {}) });
         emit({ type: "run_completed", runId: o.runId, text, artifacts, steps });
+        if (steps > 0) this.onUsage(o.user, "compositions");
         return { status: "completed", text, steps, artifacts };
       }
       steps++;

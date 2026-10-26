@@ -26,6 +26,7 @@ import { shareRoutes } from "./routes/shares.ts";
 import { clientErrorRoutes } from "./routes/client-errors.ts";
 import { ClientErrorStore } from "./persistence/client-errors.ts";
 import { StripePro } from "./billing/stripe-pro.ts";
+import { UsageStore } from "./persistence/usage.ts";
 import { FunnelStore } from "./persistence/funnel.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
 import { galleryRoutes } from "./routes/gallery.ts";
@@ -55,7 +56,7 @@ export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
 
 export interface AppDeps { iapRoots?: import("node:crypto").X509Certificate[]; model?: ModelClient; persist?: boolean; logger?: boolean | object; fetch?: typeof fetch; now?: () => number; apns?: ApnsSender }
 export interface McpHandle { store: McpStore; service: CompositionService; renders: RenderService; metrics: McpMetrics; close: () => Promise<void> }
-export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; limits: AccountLimits; shares: ShareStore; mcp: McpHandle; accounts: AccountStore; clientErrors: ClientErrorStore }> {
+export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: FastifyInstance; hub: AgentHub; sessions: SessionStore; ledger: UsageLedger; limits: AccountLimits; shares: ShareStore; mcp: McpHandle; accounts: AccountStore; clientErrors: ClientErrorStore; usage: UsageStore }> {
   const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers[\"x-gbk-project-token\"]", "req.headers[\"x-gbk-csrf\"]"] }, bodyLimit: 64 * 1024, trustProxy: "127.0.0.1", disableRequestLogging: false });
   const sessions = new SessionStore(cfg, deps.now, deps.persist !== false ? join(cfg.dataDir, "sessions.sqlite") : ":memory:");
   const catalog = new ToolCatalog();
@@ -113,8 +114,12 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   limits.proSource = (u) => (iap.pro(u).pro ? "apple" : stripePro.pro(u) ? "stripe" : null);
   limits.pro = (u) => limits.proSource(u) !== null;
   limits.refresh = (u) => stripePro.ensure(u);
+  const usage = new UsageStore(shares.database, deps.now);
+  runtime.onUsage = (u, c) => usage.bump(u, c);
+  app.addHook("onResponse", async (req, reply) => { if (req.method === "POST" && req.routeOptions.url === "/api/shares" && reply.statusCode < 300) { const s = currentSession(req, sessions); if (s) usage.bump(s.user, "shares"); } });
   iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now });
-  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits);
+  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits,
+    { usage, aiLimit: (u) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens, renderLimit: (u) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders });
   eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers);
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
@@ -126,7 +131,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   });
   // Unknown /api routes: Fastify's {message,error,statusCode} plus our `code` so clients can rely on one shape.
   app.all("/api/*", async (req, reply) => reply.code(404).send({ code: "NOT_FOUND", message: `Route ${req.method}:${req.url.split("?")[0]} not found`, error: "Not Found", statusCode: 404 }));
-  const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, iap, me: socialApi.me, fetch: deps.fetch });
+  const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, iap, usage, me: socialApi.me, fetch: deps.fetch });
   authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
   // Nightly (03:30 server time) retrain of the ranking model in a worker thread; one run per day (lastTrain guard).
   let lastTrain = ""; let training = false;
@@ -140,7 +145,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless
   // clients) they run on the server in worker threads (SERVER_RENDER=0 turns that off).
   const serverPool = new ServerRenderPool(cfg, () => resolveSoundFontPath(cfg), (o) => app.log.info(o));
-  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { const e = o as { evt?: string; executor?: string }; if (e.evt === "mcp_render_completed") { if (e.executor === "server") funnel.bump("server_render_completed", "server"); else funnel.bump("browser_render_completed", e.executor === "widget" ? "widget" : "studio-tab"); } if (e.evt === "mcp_render_failed") funnel.bump("render_failed"); app.log.info(o); }, (u) => limits.for(u).dailyRenders, serverPool);
+  const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { const e = o as { evt?: string; executor?: string }; if (e.evt === "mcp_render_completed") { const ru = (o as { user?: string }).user; if (ru) usage.bump(ru, "renders");  if (e.executor === "server") funnel.bump("server_render_completed", "server"); else funnel.bump("browser_render_completed", e.executor === "widget" ? "widget" : "studio-tab"); } if (e.evt === "mcp_render_failed") funnel.bump("render_failed"); app.log.info(o); }, (u) => limits.for(u).dailyRenders, serverPool);
   mcpRenders.isPro = (u) => !isGuest(u) && limits.pro(u); mcpRenders.refreshPro = (u) => limits.refresh(u);
   // Migration from invite-code login: every access-code user and every existing song/composition owner becomes an
   // established account with the same id, so their songs, compositions and OAuth grants keep working unchanged.
@@ -157,7 +162,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     app.log.info({ evt: "mcp_guest_pruned", artifacts: a.count, compositions: c.count, freedBytes: a.bytes + c.bytes, guestBytes: mcpStore.guestStorageBytes() }); } catch (e) { app.log.warn({ evt: "mcp_guest_prune_failed", message: (e as Error).message }); } };
   prune(); pruneGuests(); const pruneTimer = setInterval(prune, 3_600_000); pruneTimer.unref(); const guestTimer = setInterval(pruneGuests, 86_400_000); guestTimer.unref();
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
-  const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
+  const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, usage: (u, c) => usage.bump(u, c), log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
     close: async () => { clearInterval(pruneTimer); clearInterval(guestTimer); clearInterval(rescoreTimer); native.close(); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
@@ -168,5 +173,5 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const sweepSessions = () => { try { sessions.sweep(); } catch (e) { app.log.warn({ evt: "session_sweep_failed", message: (e as Error).message }); } };
   sweepSessions(); const sweep = setInterval(sweepSessions, 3_600_000); sweep.unref?.();
   app.addHook("preClose", async () => { clearInterval(sweep); for (const c of hub.wss.clients) c.terminate(); });
-  return { app, hub, sessions, ledger, limits, shares, mcp, accounts, clientErrors };
+  return { app, hub, sessions, ledger, limits, shares, mcp, accounts, clientErrors, usage };
 }

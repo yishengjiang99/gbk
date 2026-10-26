@@ -23,7 +23,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 export const GUEST_NAME = /^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$/, GUEST_DEVICE = /^[A-Za-z0-9_-]{16,128}$/;
 const bearer = (req: FastifyRequest) => { const a = req.headers.authorization; return typeof a === "string" && /^Bearer\s+\S+$/i.test(a) ? a.replace(/^Bearer\s+/i, "").trim() : null; };
 
-export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: SessionStore; accounts: AccountStore; native: NativeStore; shares: ShareStore; social: SocialStore; iap?: import("../persistence/iap.ts").IapStore; me: (user: string) => object; fetch?: typeof fetch }) {
+export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: SessionStore; accounts: AccountStore; native: NativeStore; shares: ShareStore; social: SocialStore; iap?: import("../persistence/iap.ts").IapStore; usage?: import("../persistence/usage.ts").UsageStore; me: (user: string) => object; fetch?: typeof fetch }) {
   const { sessions, accounts, native } = d;
   const authLimiter = new RateLimiter(cfg.security.loginPerMinute), codeLimiter = new RateLimiter(20), pushLimiter = new RateLimiter(30);
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
@@ -42,7 +42,7 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
     if (guest) {
       const existing = accounts.byProvider(provider, who.sub);
       if (!existing) { accounts.link(guest, provider, who.sub, who.name, who.email); native.revokeUser(guest); req.log.info({ evt: "login", via: `${provider}-native`, user: guest, upgraded: "linked" }); return { ...pair(guest), upgraded: "linked" }; }
-      d.shares.moveOwner(guest, existing.id); d.social.mergeUser(guest, existing.id); native.movePush(guest, existing.id); d.iap?.moveUser(guest, existing.id); native.purgeUser(guest); sessions.destroyUser(guest); accounts.delete(guest);
+      d.shares.moveOwner(guest, existing.id); d.social.mergeUser(guest, existing.id); native.movePush(guest, existing.id); d.iap?.moveUser(guest, existing.id); d.usage?.moveUser(guest, existing.id); native.purgeUser(guest); sessions.destroyUser(guest); accounts.delete(guest);
       accounts.upsertOAuth(provider, who.sub, who.name, who.email);
       req.log.info({ evt: "login", via: `${provider}-native`, user: existing.id, upgraded: "merged" }); return { ...pair(existing.id), upgraded: "merged" };
     }
