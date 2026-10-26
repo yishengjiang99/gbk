@@ -1,5 +1,6 @@
 // Stripe Pro entitlement (web purchases on grepawk.com). Looks up GET {origin}/api/compose/entitlement?email=
-// with Bearer COMPOSE_ENTITLEMENT_TOKEN. Results are cached in SQLite: fresh for 10 min; on lookup error we fail
+// with Bearer COMPOSE_ENTITLEMENT_TOKEN. Results are cached in SQLite: a Pro answer is fresh for 10 min, a not-Pro answer
+// for only 60 s (so a new purchase shows up quickly), and /pricing/thanks forces a recheck; on lookup error we fail
 // closed to Free, except a previously confirmed `pro: true` is kept for up to 24 h. Only accounts whose email came
 // from a verified identity provider (Google, Apple, GitHub) can be Stripe-Pro; guests/phone/legacy never are.
 // The token and the email are never logged or put in URLs other than the lookup's own query string.
@@ -7,6 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AccountStore } from "../persistence/accounts.ts";
 
 export const STRIPE_FRESH_MS = 10 * 60_000;
+export const STRIPE_FALSE_FRESH_MS = 60_000;
 export const STRIPE_KEEP_TRUE_MS = 24 * 3_600_000;
 const VERIFIED_EMAIL_PROVIDERS = new Set(["google", "apple", "github"]);
 
@@ -25,12 +27,13 @@ export class StripePro {
     if (!a || !a.email || !VERIFIED_EMAIL_PROVIDERS.has(a.provider)) return null;
     return a.email.trim().toLowerCase();
   }
+  private fresh(r: Row | undefined, email: string) { return !!r && r.email === email && this.now() - r.checked_at < (r.pro ? STRIPE_FRESH_MS : STRIPE_FALSE_FRESH_MS); }
   private row(user: string) { return this.db.prepare("SELECT * FROM stripe_entitlements WHERE user = ?").get(user) as unknown as Row | undefined; }
   /** Synchronous view from the cache (used by AccountLimits). Kicks off a background refresh when stale. */
   pro(user: string): boolean {
     const email = this.email(user); if (!email || !this.enabled) return false;
     const r = this.row(user); const now = this.now();
-    if (!r || r.email !== email || now - r.checked_at >= STRIPE_FRESH_MS) void this.refresh(user).catch(() => {});
+    if (!this.fresh(r, email)) void this.refresh(user).catch(() => {});
     return this.fromRow(r, email, now);
   }
   private fromRow(r: Row | undefined, email: string, now: number) {
@@ -42,7 +45,12 @@ export class StripePro {
   async ensure(user: string): Promise<boolean> {
     const email = this.email(user); if (!email || !this.enabled) return false;
     const r = this.row(user);
-    if (r && r.email === email && this.now() - r.checked_at < STRIPE_FRESH_MS) return this.fromRow(r, email, this.now());
+    if (this.fresh(r, email)) return this.fromRow(r, email, this.now());
+    try { return await this.refresh(user); } catch { return this.fromRow(this.row(user), email, this.now()); }
+  }
+  /** Ignore the cache and look up now (after a purchase, on /pricing/thanks). Never throws. */
+  async recheck(user: string): Promise<boolean> {
+    const email = this.email(user); if (!email || !this.enabled) return false;
     try { return await this.refresh(user); } catch { return this.fromRow(this.row(user), email, this.now()); }
   }
   private refresh(user: string): Promise<boolean> {

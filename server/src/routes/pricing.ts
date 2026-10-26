@@ -173,7 +173,7 @@ export class WaitlistStore {
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 
-export function pricingRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, accounts: AccountStore, waitlist: WaitlistStore, p: PricingConfig = pricingConfig()) {
+export function pricingRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, accounts: AccountStore, waitlist: WaitlistStore, p: PricingConfig = pricingConfig(), recheckPro?: (user: string) => Promise<unknown>) {
   if (!app.hasContentTypeParser("application/x-www-form-urlencoded")) app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => {
     try { done(null, Object.fromEntries(new URLSearchParams(body as string))); } catch (e) { done(e as Error); }
   });
@@ -196,7 +196,12 @@ export function pricingRoutes(app: FastifyInstance, cfg: Config, sessions: Sessi
       "GBK Composer is free: describe music in ChatGPT or GBK Studio and get editable MIDI and WAV. Pro adds 10× the AI composer budget and longer renders, from $4/month billed yearly with a 7-day free trial, or $99 once.",
       pricingBody(cfg, p, email, notice), { jsonLd: jsonLd(cfg), head: pixelHead(p) }), email || notice ? "private, no-store" : undefined);
   });
-  app.get("/pricing/thanks", async (_req, reply) => send(reply, shell(cfg, "/pricing/thanks", "Thanks for going Pro · GBK Composer", "Your GBK Composer Pro purchase.", thanksBody(p), { noindex: true, head: pixelHead(p) }), "no-store"));
+  app.get("/pricing/thanks", async (req, reply) => {
+    // Just bought: drop the cached entitlement for a signed-in user and look it up again before rendering.
+    const s = recheckPro ? sessions.fromCookie(parseCookies(req.headers.cookie)[COOKIE]) : null;
+    if (s && recheckPro) { try { await recheckPro(s.user); } catch { /* fail closed: cached/Free */ } }
+    return send(reply, shell(cfg, "/pricing/thanks", "Thanks for going Pro · GBK Composer", "Your GBK Composer Pro purchase.", thanksBody(p), { noindex: true, head: pixelHead(p) }), "no-store");
+  });
   app.get("/plans", async (_req, reply) => send(reply, shell(cfg, "/plans", "GBK Composer plans", "What the free and Pro plans of GBK Composer include.", plansBody(cfg))));
   app.get("/privacy/payments-and-ads", async (_req, reply) => send(reply, shell(cfg, "/privacy/payments-and-ads", "Payments and advertising privacy · GBK Composer", "How GBK Composer Pro handles payments, the waitlist and ad measurement.", adsPrivacyBody())));
   app.post("/api/pricing/waitlist", async (req, reply) => {

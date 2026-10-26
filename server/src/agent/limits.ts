@@ -11,6 +11,8 @@ export class AccountLimits {
   proSource: (user: string) => "apple" | "stripe" | null = (u) => (this.pro(u) ? "apple" : null);
   /** Refresh async entitlement sources (Stripe lookup) before a limit decision; never throws. */
   refresh: (user: string) => Promise<unknown> = async () => {};
+  /** Force a fresh entitlement lookup, bypassing the cache (post-purchase). */
+  recheck: (user: string) => Promise<unknown> = async () => {};
   static PRO_TOKEN_MULTIPLIER = 10;
   constructor(private cfg: Config, private accounts: AccountStore | null, private now: () => number = Date.now) {}
   /** Owner/admin accounts (COMPOSER_ADMIN_USERS) are never "new" and get at least the Pro budget. */

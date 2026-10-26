@@ -70,3 +70,32 @@ test("Stripe Pro: no token configured -> Apple only, never calls out", async () 
   try { state.pro.add("a@example.com"); const a = user("google", "g-a", "a@example.com"); assert.equal((await me(a.H)).pro, false); assert.equal(state.calls.length, 0); }
   finally { await b.app.close(); }
 });
+
+test("Stripe Pro: a cached not-Pro answer lasts only ~60 s", async () => {
+  const { b, state, user, me, advance } = await stripeApp();
+  try {
+    const u = user("google", "g-late", "late@example.com");
+    assert.equal((await me(u.H)).pro, false);
+    state.pro.add("late@example.com");
+    advance(30_000); assert.equal((await me(u.H)).pro, false, "not-Pro still cached at 30 s");
+    advance(31_000); const m = await me(u.H);
+    assert.equal(m.pro, true); assert.equal(m.pro_source, "stripe");
+  } finally { await b.app.close(); }
+});
+
+test("Stripe Pro: /pricing/thanks forces a fresh lookup, so /api/me shows Pro right after purchase", async () => {
+  const { b, state, user, me } = await stripeApp();
+  try {
+    const u = user("google", "g-buyer", "buyer@example.com");
+    assert.equal((await me(u.H)).pro, false, "not-Pro cached before purchase");
+    state.pro.add("buyer@example.com");
+    const n = state.calls.length;
+    const t = await b.app.inject({ method: "GET", url: "/pricing/thanks", headers: u.H });
+    assert.equal(t.statusCode, 200); assert.equal(state.calls.length, n + 1, "thanks page rechecked");
+    const m = await me(u.H); assert.equal(m.pro, true); assert.equal(m.pro_source, "stripe");
+    // anonymous visit: page still renders, no lookup
+    const k = state.calls.length;
+    assert.equal((await b.app.inject({ method: "GET", url: "/pricing/thanks" })).statusCode, 200);
+    assert.equal(state.calls.length, k);
+  } finally { await b.app.close(); }
+});

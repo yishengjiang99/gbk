@@ -84,7 +84,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const funnel = new FunnelStore(persist ? join(cfg.dataDir, "analytics.sqlite") : ":memory:");
   pageRoutes(app, cfg, funnel);
   const proWaitlist = new WaitlistStore(persist ? join(cfg.dataDir, "pro-waitlist.sqlite") : ":memory:");
-  pricingRoutes(app, cfg, sessions, accounts, proWaitlist);
+  pricingRoutes(app, cfg, sessions, accounts, proWaitlist, undefined, (u) => limits.recheck(u));
   funnelRoutes(app, cfg, sessions, funnel);
   galleryRoutes(app, cfg, funnel);
   openaiChallengeRoute(app, cfg.openaiAppsChallenge);
@@ -114,6 +114,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   limits.proSource = (u) => (iap.pro(u).pro ? "apple" : stripePro.pro(u) ? "stripe" : null);
   limits.pro = (u) => limits.proSource(u) !== null;
   limits.refresh = (u) => stripePro.ensure(u);
+  limits.recheck = (u) => stripePro.recheck(u);
   const usage = new UsageStore(shares.database, deps.now);
   runtime.onUsage = (u, c) => usage.bump(u, c);
   app.addHook("onResponse", async (req, reply) => { if (req.method === "POST" && req.routeOptions.url === "/api/shares" && reply.statusCode < 300) { const s = currentSession(req, sessions); if (s) usage.bump(s.user, "shares"); } });
