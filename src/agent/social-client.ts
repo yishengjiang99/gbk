@@ -4,7 +4,11 @@ import type { PianoRollPreview } from "./piano-roll-preview.ts";
 
 export const LABELS = ["ambient", "lofi", "classical", "jazz", "rnb", "electronic", "cinematic", "game", "pop", "experimental", "wip"] as const;
 export interface SUser { handle: string; display_name: string; bio?: string | null; badge?: string | null; pro?: boolean; avatar_url: string | null; song_count: number; rating_avg: number | null; created_at: number }
-export interface Me extends SUser { id: string; dm_policy: "all" | "off"; handle_changed: boolean; is_admin: boolean }
+/** #115: lifetime engagement counters + paywall eligibility, as returned by GET /api/me. */
+export type PaywallReason = "second_composition" | "export_after_2" | "ai_limit" | "render_limit";
+export interface MeUsage { compositions: number; ai_runs: number; renders: number; exports: number; shares: number; paywall_views: number; last_paywall_at: number | null }
+export interface MePaywall { eligible: boolean; reason: PaywallReason | null; cooldown_until: number | null }
+export interface Me extends SUser { id: string; dm_policy: "all" | "off"; handle_changed: boolean; is_admin: boolean; pro_source?: "apple" | "stripe" | null; usage?: MeUsage; paywall?: MePaywall }
 export interface Song { slug: string; title: string; url: string; author: SUser; created_at: number; published_at: number | null; labels: string[]; tags: string[]; rating_avg: number | null; rating_count: number; comment_count: number; play_count: number; fork_count: number; my_rating: number | null; media: { mp3: string | null; wav: string | null; midi: string | null }; preview: PianoRollPreview | null; prompt_shared: boolean; prompt_text: string | null; parent_slug: string | null; is_mine: boolean }
 export interface SComment { id: string; author: SUser; body: string; created_at: number; can_delete: boolean }
 export interface Page<T> { items: T[]; next_cursor: string | null }
@@ -32,6 +36,11 @@ export const social = {
   play: (slug: string) => call<{ play_count: number }>("POST", `/shares/${encodeURIComponent(slug)}/play`).catch(() => null),
   user: (handle: string, cursor?: string | null) => call<{ user: SUser; songs: Song[]; next_cursor: string | null }>("GET", `/users/${encodeURIComponent(handle)}${qs({ cursor })}`),
   settings: (o: { display_name?: string; handle?: string; dm_policy?: string }) => call<Me>("PATCH", "/me/settings", o),
+  /** #115/#116/#118: report a paywall/engagement event; the server counts it and returns the fresh {usage, paywall}.
+   *  Billing-taxonomy fields (surface/reason/platform/plan) ride along for #118's funnel; unknown events or a
+   *  not-yet-upgraded server answer null instead of throwing — reporting must never break the Studio. */
+  engagement: (event: "paywall_view" | "paywall_dismiss" | "export" | "plan_select", extra?: Record<string, unknown>) =>
+    call<{ usage: MeUsage; paywall: MePaywall }>("POST", "/me/engagement", { event, ...extra }).catch(() => null),
   report: (kind: "comment" | "song" | "user" | "message", target: string, reason: string) => call<{ ok: true; id: string; deleted?: boolean; message?: string }>("POST", "/reports", { kind, target, reason }),
   adminReports: (status = "open") => call<{ items: { id: string; kind: string; target: string; reason: string; reporter: string; status: string; created_at: number; preview: { text: string; by: string; song: string | null; hidden: boolean } | null }[]; next_cursor: string | null }>("GET", `/admin/reports${qs({ status })}`),
   resolve: (id: string, action: "hide" | "dismiss") => call<{ ok: true }>("POST", `/admin/reports/${encodeURIComponent(id)}`, { action }),

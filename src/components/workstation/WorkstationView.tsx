@@ -34,6 +34,7 @@ import { SoundPanel } from "./SoundPanel.tsx";
 import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { VideoExportButton } from "./VideoExport.tsx";
 import { ComposerPanel } from "../composer/ComposerPanel.tsx";
+import { PaywallHost } from "../composer/PaywallModal.tsx";
 import { MobileStudio } from "../studio/MobileStudio.tsx";
 import { DesktopStudio } from "../studio/DesktopStudio.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
@@ -123,7 +124,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const pos = state.transport.positionTick;
   const bb = useMemo(() => tickToBarBeat(p, pos), [p, pos]);
   const run = (f: () => unknown) => { try { const r = f(); if (r instanceof Promise) r.catch((e: Error) => alert(e.message)); } catch (e) { alert((e as Error).message); } };
-  const exportMidi = () => { const { bytes, filename } = workstation.prepareMidiExport(); workstation.host.download?.(bytes, filename); };
+  const exportMidi = () => { const { bytes, filename } = workstation.prepareMidiExport(); workstation.host.download?.(bytes, filename); window.dispatchEvent(new Event("gbk:exported")); };
   // Same headless renderer as gbk_render_wav: progress + artifact appear in the artifact panel; errors are shown, never swallowed.
   const renderWav = async () => {
     const j = renderJobs().submit(workstation.project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, { saveArtifact: true });
@@ -131,7 +132,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
     if (done.status !== "completed") throw new Error(`WAV export ${done.status}: ${done.error?.message ?? ""}`);
     const r = renderJobs().result(j.id);
     funnelBeacon("browser_render_completed", "studio");
-    if (r) workstation.host.download?.(r.blob, safeFilename(done.projectName, "wav"));
+    if (r) { workstation.host.download?.(r.blob, safeFilename(done.projectName, "wav")); window.dispatchEvent(new Event("gbk:exported")); }
   };
   const exportWav = () => run(renderWav);
 
@@ -189,11 +190,11 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   useEffect(() => { let t: ReturnType<typeof setTimeout> | undefined; const f = () => { setRoHint("Read-only shared song — press Fork to edit your own copy."); clearTimeout(t); t = setTimeout(() => setRoHint(null), 2500); }; workstation.readOnlyHintListeners.add(f); return () => { workstation.readOnlyHintListeners.delete(f); clearTimeout(t); }; }, []);
   // Phones (and the iOS app): the chat-first studio. Desktop keeps the full workstation below.
   const roToast = roHint && <div role="status" aria-live="polite" data-testid="readonly-hint" style={{ position: "fixed", left: "50%", bottom: 80, transform: "translateX(-50%)", zIndex: 1000, pointerEvents: "none", background: "rgba(20,20,28,.92)", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 14 }}>{roHint}</div>;
-  if (compact && composer) return <>{roToast}<MobileStudio view={view} setView={setView} onRollWidth={(px) => { rollPx.current = px; }} onManualScroll={() => setFollow(false)}
+  if (compact && composer) return <>{roToast}<PaywallHost /><MobileStudio view={view} setView={setView} onRollWidth={(px) => { rollPx.current = px; }} onManualScroll={() => setFollow(false)}
     focus={focus} setFocus={setFocus} lanes={lanes} setLanes={setLanes} laneTrackId={trackForLanes?.id} onExplore={onExplore}
     newProject={() => createNew().catch((e: Error) => { alert(e.message); return false; })} exportMidi={exportMidi} exportWav={renderWav} /></>;
   // Desktop (>=500px, not the iOS app): the studio grid (header / tracks + patches / piano roll / composer + automation).
-  if (composer) return <>{roToast}<DesktopStudio view={view} setView={setView} rollWidth={() => rollPx.current} onRollWidth={(px) => { rollPx.current = px; }} onManualScroll={() => setFollow(false)}
+  if (composer) return <>{roToast}<PaywallHost /><DesktopStudio view={view} setView={setView} rollWidth={() => rollPx.current} onRollWidth={(px) => { rollPx.current = px; }} onManualScroll={() => setFollow(false)}
     focus={focus} setFocus={setFocus} lanes={lanes} laneTrackId={trackForLanes?.id} onExplore={onExplore} onOpenPlayer={onOpenPlayer} agentTools={agent}
     newProject={() => createNew().catch((e: Error) => { alert(e.message); return false; })} exportMidi={exportMidi} exportWav={renderWav} /></>;
   return (
@@ -247,6 +248,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
       </header>}
       {phone && <div className="ws-transport ws-transport-row" role="toolbar" aria-label="Transport" data-testid="transport-row">{transportCore}</div>}
       {(!compact || hasTracks) && scrubber}
+      <PaywallHost />
       {keysOn && <FloatingWindow title="🎹 Keys" storageKey="gbk.keysWindowPos" testId="keys-window" onClose={() => setKeysOn(false)}>
         {() => <LiveKeyboard workstation={workstation} />}
       </FloatingWindow>}

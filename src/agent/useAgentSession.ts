@@ -56,8 +56,8 @@ export function useAgentSession() {
       case "tool_completed": patchLastAssistant(m.runId, (x) => ({ ...x, steps: (x.steps ?? []).map((s) => s.callId === m.callId ? { ...s, status: m.ok ? "done" : "failed", summary: m.summary, error: m.error ? friendlyError(m.error.code, m.error.message) : undefined } : s), artifacts: m.artifact ? [...(x.artifacts ?? []), m.artifact] : x.artifacts })); break;
       case "progress": setRun((r) => r && { ...r, step: m.step, maxSteps: m.maxSteps, task: m.task }); break;
       case "usage": setUsage(m.usage); break;
-      case "run_completed": setRun(null); patchLastAssistant(m.runId, (x) => ({ ...x, text: m.text || x.text, artifacts: m.artifacts.length ? dedupe([...(x.artifacts ?? []), ...m.artifacts]) : x.artifacts })); break;
-      case "run_failed": setRun(null); setItems((xs) => [...xs, { id: `e_${m.runId}_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message), runId: m.runId, retryText: m.retryable ? lastUser(xs) : undefined }]); break;
+      case "run_completed": setRun(null); patchLastAssistant(m.runId, (x) => ({ ...x, text: m.text || x.text, artifacts: m.artifacts.length ? dedupe([...(x.artifacts ?? []), ...m.artifacts]) : x.artifacts })); window.dispatchEvent(new CustomEvent("gbk:run-completed", { detail: { runId: m.runId, steps: m.steps } })); break;
+      case "run_failed": setRun(null); setItems((xs) => [...xs, { id: `e_${m.runId}_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message), runId: m.runId, retryText: m.retryable ? lastUser(xs) : undefined }]); window.dispatchEvent(new CustomEvent("gbk:run-failed", { detail: { runId: m.runId, code: m.code, message: m.message } })); break;
       case "error": setItems((xs) => [...xs, { id: `e_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message) }]); break;
       case "session_reconnected": if (!m.resumed && m.runId) setRun(null); break;
     }
