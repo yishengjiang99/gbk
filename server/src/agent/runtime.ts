@@ -72,6 +72,7 @@ export class AgentRuntime {
 
     const tools = this.catalog.schemasFor(link.allowedTools);
     if (!tools.length) return fail("NO_TOOLS", "the browser registered no vetted GBK tools; reload the page");
+    await this.ledger.prepare(o.user);
     try { this.ledger.check(o.user); } catch (e) { if (e instanceof BudgetError) return fail(e.code, e.message); throw e; }
     closeDanglingTurns(conv.messages);
 

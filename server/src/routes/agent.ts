@@ -33,10 +33,11 @@ export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     reply.header("set-cookie", cookies);
     reply.header("cache-control", "no-store");
     const acct = s && accounts ? accounts.get(s.user) : null;
+    if (s && limits) await limits.refresh(s.user);
     const lim = s && limits ? limits.for(s.user) : null;
     return { authenticated: !!s, user: s?.user ?? null, name: acct?.name ?? s?.user ?? null, provider: acct?.provider ?? null, csrf, enabled: cfg.enabled,
       providers: authProviders(cfg), loginAvailable: cfg.security.accessCodes.length > 0, reviewerLogin: reviewerLoginEnabled(cfg), apple: !!cfg.signin2?.appleServicesId, sms: !!(cfg.signin2?.twilio && cfg.signin2?.turnstileSecret),
-      limits: lim ? { newAccount: lim.newAccount, dailyTokens: lim.dailyTokens, dailyRenders: lim.dailyRenders, usedTokensToday: ledger?.snapshot(s!.user).dayTokens ?? null } : null };
+      limits: lim ? { pro: lim.pro, newAccount: lim.newAccount, dailyTokens: lim.dailyTokens, dailyRenders: lim.dailyRenders, usedTokensToday: ledger?.snapshot(s!.user).dayTokens ?? null } : null };
   });
   app.post("/api/login", async (req, reply) => {
     if (!guardWrite(cfg, req, reply)) return;

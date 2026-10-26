@@ -72,5 +72,5 @@ Open items (owner in brackets):
 - [ ] Submit X Ads API application
 - [ ] Approve the launch email
 
-- [ ] GBK Launch: wire Pro limits. `/etc/gbk-composer.env` now has `COMPOSE_ENTITLEMENT_TOKEN` (same value as grepawk.com's); gbk has no consumer yet. Call `GET https://grepawk.com/api/compose/entitlement?email=…` with `Authorization: Bearer $COMPOSE_ENTITLEMENT_TOKEN` and raise limits when `pro: true`. See docs/stripe.md.
+- [x] GBK Launch: wire Pro limits (#113: server/src/billing/stripe-pro.ts). `/etc/gbk-composer.env` now has `COMPOSE_ENTITLEMENT_TOKEN` (same value as grepawk.com's); gbk has no consumer yet. Call `GET https://grepawk.com/api/compose/entitlement?email=…` with `Authorization: Bearer $COMPOSE_ENTITLEMENT_TOKEN` and raise limits when `pro: true`. See docs/stripe.md.
 - ASC listing pushed 2026-10-25 (metadata + 10 screenshots); IAPs created (3, READY_TO_SUBMIT). Still by hand: enter App Privacy answers (docs/asc/app-review.md) and the `openai-reviewer` password and review contact by hand; check the icon once the TestFlight build processes.

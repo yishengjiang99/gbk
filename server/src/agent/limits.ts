@@ -5,8 +5,12 @@ import type { AccountStore } from "../persistence/accounts.ts";
 
 /** Per-account daily limits. Accounts younger than auth.newAccountDays get the smaller "new account" limits. */
 export class AccountLimits {
-  /** Pro entitlement (Apple IAP): 10x the daily agent token budget. Set by app.ts once the IAP store exists. */
+  /** Pro entitlement (Apple IAP OR Stripe): 10x the daily agent token budget. Set by app.ts once the IAP store exists. */
   pro: (user: string) => boolean = () => false;
+  /** Where Pro comes from (Apple IAP or an active Stripe subscription); set by app.ts. */
+  proSource: (user: string) => "apple" | "stripe" | null = (u) => (this.pro(u) ? "apple" : null);
+  /** Refresh async entitlement sources (Stripe lookup) before a limit decision; never throws. */
+  refresh: (user: string) => Promise<unknown> = async () => {};
   static PRO_TOKEN_MULTIPLIER = 10;
   constructor(private cfg: Config, private accounts: AccountStore | null, private now: () => number = Date.now) {}
   /** Owner/admin accounts (COMPOSER_ADMIN_USERS) are never "new" and get at least the Pro budget. */
@@ -47,6 +51,8 @@ export class UsageLedger {
     if (this.global.day !== d) this.global = { day: d, cost: 0, tokens: 0 };
     return r;
   }
+  /** Refresh async Pro sources (Stripe) before a start-of-run check. */
+  async prepare(user: string) { try { await this.limits.refresh(user); } catch { /* fail closed: cached/Free */ } }
   cost(u: ModelUsage) { return (u.promptTokens * this.cfg.llm.priceInPerMTok + u.completionTokens * this.cfg.llm.priceOutPerMTok) / 1e6; }
   /** Throws BudgetError before a model call when the user or the whole server is out of budget. */
   /** inFlight: a later step of a run that passed the start-of-run check; it may overrun the per-user limits by IN_FLIGHT_OVERRUN. */

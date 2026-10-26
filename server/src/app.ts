@@ -25,6 +25,7 @@ import { agentRoutes } from "./routes/agent.ts";
 import { shareRoutes } from "./routes/shares.ts";
 import { clientErrorRoutes } from "./routes/client-errors.ts";
 import { ClientErrorStore } from "./persistence/client-errors.ts";
+import { StripePro } from "./billing/stripe-pro.ts";
 import { FunnelStore } from "./persistence/funnel.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
 import { galleryRoutes } from "./routes/gallery.ts";
@@ -108,9 +109,12 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const events = new EventStore(shares.database, deps.now);
   const ranker = new Ranker(shares.database, deps.now);
   const iap = new IapStore(shares.database, deps.now);
-  limits.pro = (u) => iap.pro(u).pro;
+  const stripePro = new StripePro(shares.database, accounts, { origin: cfg.stripe.entitlementOrigin, token: cfg.stripe.entitlementToken, fetch: deps.fetch, now: deps.now, log: (o) => app.log.warn(o) });
+  limits.proSource = (u) => (iap.pro(u).pro ? "apple" : stripePro.pro(u) ? "stripe" : null);
+  limits.pro = (u) => limits.proSource(u) !== null;
+  limits.refresh = (u) => stripePro.ensure(u);
   iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now });
-  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap);
+  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits);
   eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers);
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
