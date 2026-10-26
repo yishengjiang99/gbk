@@ -30,8 +30,11 @@ export const songSeconds = (p: Project) => tickToSec(p, Math.max(p.endTick, comp
 
 /** Server/tool errors arrive as "CODE: detail". Users get one plain sentence, never codes or IDs. */
 export function friendlyError(raw: string): string {
+  const limit = /You've hit today's AI limit\.[^\n]*/.exec(raw)?.[0];
+  if (limit) return limit; // server-written plain message (reset time + Pro pointer), shown verbatim
   const code = /^([A-Z][A-Z0-9_]{2,}):/.exec(raw.trim())?.[1] ?? "";
-  if (/BUDGET|QUOTA|LIMIT/.test(code)) return "You've reached today's composing limit. Try again tomorrow.";
+  if (/BUDGET/.test(code)) return "You've hit today's AI limit. It resets at 5 PM PT.";
+  if (/QUOTA|LIMIT/.test(code)) return "You've reached today's composing limit. Try again tomorrow.";
   if (/RATE_LIMIT/.test(code)) return "Lots of requests right now. Wait a moment and try again.";
   if (/CANCELLED/.test(code)) return "Stopped.";
   if (/DISCONNECT|TIMEOUT|UNREACHABLE|OFFLINE/.test(code) || /network|disconnect/i.test(raw)) return "Lost the connection to the composer. Check your internet and try again.";

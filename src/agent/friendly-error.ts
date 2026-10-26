@@ -18,6 +18,7 @@ const PLAIN: Record<string, string> = {
 const ID = /\b(prj|shr|run|call|art|usr|sess)_[a-z0-9]{6,}\b/gi;
 export function friendlyError(code: string | undefined, message: string | undefined): string {
   if (code && PLAIN[code]) return PLAIN[code];
+  if (code && /BUDGET_EXHAUSTED$/.test(code)) return /You've hit today's AI limit/.test(message ?? "") ? message!.trim() : "You've hit today's AI limit. It resets at 5 PM PT.";
   const m = (message ?? "").replace(/^\(?[A-Z][A-Z0-9_]{3,}\)?:?\s*/, "").replace(/\s*\((expected|was|now)[^)]*\)/gi, "").replace(ID, "this song").trim();
   if (!m) return "Something went wrong. Try again.";
   return m[0].toUpperCase() + m.slice(1);

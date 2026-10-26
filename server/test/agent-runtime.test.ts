@@ -80,7 +80,7 @@ test("cancelled run stops before the next model call", async () => {
 });
 
 test("budget exhaustion blocks further model calls; model list enforced; input size enforced", async () => {
-  const s = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("x")], { AGENT_DAILY_TOKEN_BUDGET: "100" });
+  const s = setup([() => calls(tc("a", "gbk_list_tracks")), () => calls(tc("b", "gbk_list_tracks")), () => reply("x")], { AGENT_DAILY_TOKEN_BUDGET: "100" });
   const r = await s.go(); assert.equal(r.code, "TOKEN_BUDGET_EXHAUSTED");
   const s2 = setup([() => reply("x")]);
   assert.equal((await s2.rt.run({ runId: "r", user: "alice", text: "hi", model: "gpt-attacker", conv: s2.conv, link: s2.link, signal: new AbortController().signal })).code, "MODEL_NOT_ALLOWED");

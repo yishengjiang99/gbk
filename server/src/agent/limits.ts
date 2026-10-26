@@ -9,16 +9,30 @@ export class AccountLimits {
   pro: (user: string) => boolean = () => false;
   static PRO_TOKEN_MULTIPLIER = 10;
   constructor(private cfg: Config, private accounts: AccountStore | null, private now: () => number = Date.now) {}
-  isNew(user: string) { const a = this.accounts?.get(user); return !!a && this.now() - a.created_at < this.cfg.auth.newAccountDays * 86_400_000; }
+  /** Owner/admin accounts (COMPOSER_ADMIN_USERS) are never "new" and get at least the Pro budget. */
+  isAdmin(user: string) { return this.cfg.adminUsers.includes(user); }
+  isNew(user: string) { if (this.isAdmin(user)) return false; const a = this.accounts?.get(user); return !!a && this.now() - a.created_at < this.cfg.auth.newAccountDays * 86_400_000; }
   for(user: string) {
     const fresh = this.isNew(user);
-    if (this.pro(user)) return { newAccount: false, dailyTokens: this.cfg.agent.dailyTokenBudget * AccountLimits.PRO_TOKEN_MULTIPLIER, dailyRenders: this.cfg.mcp.maxRendersPerDay };
-    return { newAccount: fresh, dailyTokens: fresh ? Math.min(this.cfg.agent.newAccountDailyTokenBudget, this.cfg.agent.dailyTokenBudget) : this.cfg.agent.dailyTokenBudget,
+    if (this.pro(user) || this.isAdmin(user)) return { newAccount: false, pro: true, dailyTokens: this.cfg.agent.dailyTokenBudget * AccountLimits.PRO_TOKEN_MULTIPLIER, dailyRenders: this.cfg.mcp.maxRendersPerDay };
+    return { newAccount: fresh, pro: false, dailyTokens: fresh ? Math.min(this.cfg.agent.newAccountDailyTokenBudget, this.cfg.agent.dailyTokenBudget) : this.cfg.agent.dailyTokenBudget,
       dailyRenders: fresh ? Math.min(this.cfg.mcp.newAccountRendersPerDay, this.cfg.mcp.maxRendersPerDay) : this.cfg.mcp.maxRendersPerDay };
   }
 }
 
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+
+/** Budgets reset at 00:00 UTC; say when that is in Pacific time (5 PM PDT / 4 PM PST). */
+export function resetTimePT(now: number = Date.now()): string {
+  const next = Math.floor(now / 86_400_000) * 86_400_000 + 86_400_000;
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric" }).format(next).replace(/\s+/g, " ") + " PT";
+}
+/** The plain chat message for a hit daily limit (shown verbatim in mobile and desktop studio). */
+export function limitMessage(pro: boolean, now: number = Date.now()): string {
+  return `You've hit today's AI limit. It resets at ${resetTimePT(now)}.${pro ? "" : " Go Pro for a 10× daily AI budget."}`;
+}
+/** A run that started under budget may finish with this much overrun (fraction of the daily limit) instead of stopping mid-composition. */
+export const IN_FLIGHT_OVERRUN = 0.25;
 
 export class BudgetError extends Error { constructor(public code: "TOKEN_BUDGET_EXHAUSTED" | "COST_BUDGET_EXHAUSTED" | "GLOBAL_BUDGET_EXHAUSTED", message: string) { super(message); } }
 
@@ -35,11 +49,14 @@ export class UsageLedger {
   }
   cost(u: ModelUsage) { return (u.promptTokens * this.cfg.llm.priceInPerMTok + u.completionTokens * this.cfg.llm.priceOutPerMTok) / 1e6; }
   /** Throws BudgetError before a model call when the user or the whole server is out of budget. */
-  check(user: string) {
+  /** inFlight: a later step of a run that passed the start-of-run check; it may overrun the per-user limits by IN_FLIGHT_OVERRUN. */
+  check(user: string, opts: { inFlight?: boolean } = {}) {
     const r = this.u(user);
     const lim = this.limits.for(user);
-    if (r.tokens >= lim.dailyTokens) throw new BudgetError("TOKEN_BUDGET_EXHAUSTED", `daily token limit (${lim.dailyTokens}${lim.newAccount ? ", new account" : ""}) used up; resets at 00:00 UTC`);
-    if (r.cost >= this.cfg.agent.dailyCostBudgetUsd) throw new BudgetError("COST_BUDGET_EXHAUSTED", `daily cost budget ($${this.cfg.agent.dailyCostBudgetUsd}) used up; resets at 00:00 UTC`);
+    const k = opts.inFlight ? 1 + IN_FLIGHT_OVERRUN : 1;
+    const msg = limitMessage(lim.pro, this.now());
+    if (r.tokens >= lim.dailyTokens * k) throw new BudgetError("TOKEN_BUDGET_EXHAUSTED", msg);
+    if (r.cost >= this.cfg.agent.dailyCostBudgetUsd * k) throw new BudgetError("COST_BUDGET_EXHAUSTED", msg);
     if (this.global.cost >= this.cfg.agent.globalDailyCostBudgetUsd) throw new BudgetError("GLOBAL_BUDGET_EXHAUSTED", "the Composer's daily server budget is used up; try again tomorrow");
   }
   record(user: string, u: ModelUsage) {

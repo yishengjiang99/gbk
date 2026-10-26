@@ -73,8 +73,8 @@ test("limits: new accounts get the smaller daily token + render limits; establis
   const accts = new AccountStore(":memory:", () => now);
   accts.upsertOAuth("github", "1", "newbie", null); accts.ensureLegacy("alice");
   const lim = new AccountLimits(cfg, accts, () => now);
-  assert.deepEqual(lim.for("gh-1"), { newAccount: true, dailyTokens: 100, dailyRenders: 3 });
-  assert.deepEqual(lim.for("alice"), { newAccount: false, dailyTokens: 1000, dailyRenders: 50 });
+  assert.deepEqual(lim.for("gh-1"), { newAccount: true, pro: false, dailyTokens: 100, dailyRenders: 3 });
+  assert.deepEqual(lim.for("alice"), { newAccount: false, pro: false, dailyTokens: 1000, dailyRenders: 50 });
   const ledger = new UsageLedger(cfg, () => now, accts, lim);
   ledger.record("gh-1", { promptTokens: 90, completionTokens: 20 });
   assert.throws(() => ledger.check("gh-1"), (e) => e instanceof BudgetError && e.code === "TOKEN_BUDGET_EXHAUSTED");
