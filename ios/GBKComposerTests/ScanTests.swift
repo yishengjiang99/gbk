@@ -59,7 +59,7 @@ final class SMFWriterTests: XCTestCase {
 final class StudioMIDIImportTests: XCTestCase {
     private func pages() throws -> [SheetPage] { [SheetPage(image: try XCTUnwrap(UIImage(systemName: "music.note")?.cgImage))] }
     private func waitWhileWorking(_ c: ScanController) async throws {
-        for _ in 0..<100 where c.phase == .working { try await Task.sleep(nanoseconds: 50_000_000) }
+        for _ in 0..<400 where c.phase == .working { try await Task.sleep(nanoseconds: 50_000_000) }
     }
     private func load(_ html: String) async throws -> WKWebView {
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))

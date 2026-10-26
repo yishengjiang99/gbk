@@ -26,7 +26,8 @@ struct StudioWebView: View {
         // web toolbar or the bottom composer input.
         VStack(spacing: 0) {
             StudioNativeBar(onScan: { scan.start() }, onTestMIDI: { scan.loadTestMIDI() },
-                            onTestFocus: { scan.webView?.evaluateJavaScript("window.dispatchEvent(new Event('gbk:focus-composer'))") })
+                            onTestFocus: { scan.webView?.evaluateJavaScript("window.dispatchEvent(new Event('gbk:focus-composer'))") },
+                            onTestSignIn: { scan.webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('gbk:need-signin', {detail: {why: 'Sign in to publish and share your song.', pending: {kind: 'publish'}}}))") })
             Group {
                 if let url {
                     WebView(url: url, scan: scan, onNeedSignIn: { why, kind in
@@ -56,12 +57,14 @@ struct StudioNativeBar: View {
     var onScan: () -> Void
     var onTestMIDI: () -> Void = {}
     var onTestFocus: () -> Void = {}
+    var onTestSignIn: () -> Void = {}
     static let testMIDIEnabled = ProcessInfo.processInfo.arguments.contains("-uiTestStudioMIDI")
     var body: some View {
         HStack {
             if Self.testMIDIEnabled {
                 Button("Load test MIDI", action: onTestMIDI).font(.caption).accessibilityIdentifier("load-test-midi")
                 Button("Focus", action: onTestFocus).font(.caption).accessibilityIdentifier("test-focus-composer")
+                Button("Need sign-in", action: onTestSignIn).font(.caption).accessibilityIdentifier("test-need-signin")
             }
             Spacer()
             Button(action: onScan) {
