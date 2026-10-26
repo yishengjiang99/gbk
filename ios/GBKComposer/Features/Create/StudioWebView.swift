@@ -46,7 +46,7 @@ struct StudioWebView: View {
         .sheet(isPresented: $scan.isPresented) { ScanSheetView(controller: scan) }
         .sheet(item: $publishRequest) { r in
             NativePublishSheet(draft: PublishDraft(title: r.title, labels: Array(r.labels.prefix(PublishDraft.maxLabels)), tags: Array(r.tags.prefix(PublishDraft.maxTags))),
-                               projectId: r.projectId, service: GuestPublishServices.make(webView: scan.webView),
+                               projectId: r.projectId, slug: r.slug, service: GuestPublishServices.make(webView: scan.webView),
                                onClose: { publishRequest = nil })
         }
         .task(id: auth.accessToken) {

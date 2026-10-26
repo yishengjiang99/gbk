@@ -2,7 +2,7 @@
 
 ## iOS
 - iOS: the app is locked to Light (Info.plist `UIUserInterfaceStyle`), so the studio web view never gets `prefers-color-scheme: dark` in the app even though MobileStudio has dark tokens. Decide whether to unlock dark mode app-wide.
-- GBK Social: the native publish message has only `projectId`; iOS finds the private save via `GET /api/shares?mine=1` (retries 10 s). Add `slug` to the message (web runs `saveForPublish()` first) so a never-saved project can publish. Live guest publish from the app not exercised in CI (UI test uses `-uiTestPublishMock`); verify on device.
+- iOS: Live guest publish from the app not exercised in CI (UI test uses `-uiTestPublishMock`); verify on device.
 - iOS: on a real iPhone, check Hum cancel restores full-volume playback and the Bluetooth pairing sheet opens from the studio + › Connect MIDI keyboard.
 
 - iOS: on a real iPhone, confirm feed songs play live through SF2 (no MP3), bars + waveform move, level matches web live playback (fixed 0.8 gain), and check `timeToFirstAudio` in the FeedPlayer log (Console, subsystem com.grepawk.moviefone) when swiping.

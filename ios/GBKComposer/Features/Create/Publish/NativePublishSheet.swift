@@ -5,6 +5,7 @@ import SwiftUI
 struct NativePublishSheet: View {
     @State var draft: PublishDraft
     var projectId: String
+    var slug: String? = nil
     var username: String = AnonymousIdentity.username
     var service: GuestPublishing
     var onClose: () -> Void
@@ -23,6 +24,10 @@ struct NativePublishSheet: View {
                 .padding(20)
             }
             .background(Color.white)
+            .scrollDismissesKeyboard(.interactively)
+            // Opaque bar: content never shows through/under it.
+            .toolbarBackground(Color.white, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle("Publish")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(result == nil ? "Cancel" : "Done", action: onClose).accessibilityIdentifier("publish-cancel") } }
@@ -103,7 +108,7 @@ struct NativePublishSheet: View {
     private func publish() async {
         busy = true; error = nil
         defer { busy = false }
-        do { result = try await service.publish(draft, projectId: projectId, as: username) }
+        do { result = try await service.publish(draft, projectId: projectId, slug: slug, as: username) }
         catch let e as PublishError { self.error = e.message }
         catch { self.error = PublishError.failed("").message }
     }

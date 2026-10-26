@@ -22,6 +22,8 @@ final class PublishDraftTests: XCTestCase {
         XCTAssertEqual(PublishBridge.request(from: ["projectId": "p1", "title": " My Song ", "labels": ["jazz"], "tags": []]),
                        PublishBridge.Request(projectId: "p1", title: "My Song", labels: ["jazz"], tags: []))
         XCTAssertEqual(PublishBridge.request(from: ["projectId": "p1", "title": "New song"])?.title, "")
+        XCTAssertEqual(PublishBridge.request(from: ["projectId": "p1", "slug": "abc123", "title": "x"])?.slug, "abc123")
+        XCTAssertNil(PublishBridge.request(from: ["projectId": "p1", "slug": "", "title": "x"])?.slug)
         XCTAssertNil(PublishBridge.request(from: ["title": "x"]))
     }
 
@@ -48,7 +50,7 @@ final class PublishDraftTests: XCTestCase {
     }
 
     func testMockGuestPublishUsesUsername() async throws {
-        let r = try await MockGuestPublishService().publish(PublishDraft(title: "Gentle Piano"), projectId: "p1", as: "MellowFox")
+        let r = try await MockGuestPublishService().publish(PublishDraft(title: "Gentle Piano"), projectId: "p1", slug: "abc", as: "MellowFox")
         XCTAssertEqual(r.author, "mellowfox")
         XCTAssertTrue(r.url.absoluteString.hasPrefix("https://compose.grepawk.com/s/"))
     }

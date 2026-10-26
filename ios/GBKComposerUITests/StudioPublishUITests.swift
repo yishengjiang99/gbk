@@ -50,6 +50,8 @@ final class StudioPublishUITests: XCTestCase {
         app.buttons["publish-tag-add"].tap()
         XCTAssertTrue(app.buttons["publish-tag-piano"].waitForExistence(timeout: 3))
         app.switches["publish-share-prompt"].firstMatch.tap()
+        app.navigationBars["Publish"].staticTexts["Publish"].tap() // dismiss the keyboard
+        sleep(1)
         attach(app, "studio-native-publish-\(mode)")
         let submit = app.buttons["publish-submit"]
         XCTAssertTrue(submit.waitForExistence(timeout: 3))

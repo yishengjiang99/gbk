@@ -53,7 +53,7 @@ enum PublishError: Error, Equatable {
 }
 
 protocol GuestPublishing {
-    func publish(_ draft: PublishDraft, projectId: String, as username: String) async throws -> PublishResult
+    func publish(_ draft: PublishDraft, projectId: String, slug: String?, as username: String) async throws -> PublishResult
 }
 
 enum GuestPublishServices {
@@ -65,7 +65,7 @@ enum GuestPublishServices {
 
 /// Publishes from inside the studio page (same origin, its cookie session), per docs/social-api.md "Guest publish":
 /// `POST /api/auth/guest/web` (X-GBK-Device, X-GBK-Guest-Name) when there's no session → find the private save of
-/// `projectId` (`GET /api/shares?mine=1`) → `PATCH /api/shares/:slug { public: true, title }` →
+/// `projectId` (the slug from the web message; `GET /api/shares?mine=1` lookup only when it's missing) → `PATCH /api/shares/:slug { public: true, title }` →
 /// `PATCH /api/songs/:slug/meta { labels, tags, prompt_shared }`. The device id never leaves the page request.
 struct WebViewGuestPublishService: GuestPublishing {
     weak var webView: WKWebView?
@@ -82,7 +82,8 @@ struct WebViewGuestPublishService: GuestPublishing {
       if (!g.ok) return await fail(g);
       handle = (await g.json()).me.handle;
     }
-    let slug = null;
+    // The web saves privately first and sends the slug (41ba60a); the projectId lookup is only a fallback.
+    let slug = knownSlug || null;
     for (let i = 0; i < 10 && !slug; i++) {
       const l = await fetch("/api/shares?mine=1&limit=100", { credentials: "same-origin" });
       if (l.ok) { const s = ((await l.json()).shares || []).find((x) => x.projectId === projectId); if (s) slug = s.slug; }
@@ -96,9 +97,9 @@ struct WebViewGuestPublishService: GuestPublishing {
     return { ok: true, slug, handle: handle || "" };
     """#
 
-    @MainActor func publish(_ draft: PublishDraft, projectId: String, as username: String) async throws -> PublishResult {
+    @MainActor func publish(_ draft: PublishDraft, projectId: String, slug: String?, as username: String) async throws -> PublishResult {
         guard let webView else { throw PublishError.failed("The studio isn't ready yet.") }
-        let args: [String: Any] = ["deviceId": AnonymousIdentity.deviceID, "guestName": username, "projectId": projectId,
+        let args: [String: Any] = ["deviceId": AnonymousIdentity.deviceID, "guestName": username, "projectId": projectId, "knownSlug": slug ?? "",
                                    "title": draft.title.trimmingCharacters(in: .whitespaces), "labels": draft.labels,
                                    "tags": draft.tags, "sharePrompt": draft.sharePrompt]
         let raw: Any?
@@ -124,7 +125,7 @@ struct WebViewGuestPublishService: GuestPublishing {
 }
 
 struct MockGuestPublishService: GuestPublishing {
-    func publish(_ draft: PublishDraft, projectId: String, as username: String) async throws -> PublishResult {
+    func publish(_ draft: PublishDraft, projectId: String, slug: String?, as username: String) async throws -> PublishResult {
         try? await Task.sleep(nanoseconds: 400_000_000)
         let slug = "mock-" + String(projectId.prefix(8))
         return PublishResult(slug: slug, url: URL(string: "https://compose.grepawk.com/s/\(slug)")!, author: username.lowercased())
