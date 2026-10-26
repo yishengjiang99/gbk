@@ -127,7 +127,33 @@ test("server render limits by plan: Stripe Pro gets 120/h + 600 s, free account 
     const cf = new McpClient(s2.base, { "x-gbk-test-user": free }); await cf.initialize();
     const lp = await cp.call<{ compositionId: string }>("gbk_create_composition", { title: "Mid", style: "classical", bars: 8, tempo: 60, seed: 1 });
     const lf = await cf.call<{ compositionId: string }>("gbk_create_composition", { title: "Mid", style: "classical", bars: 8, tempo: 60, seed: 1 });
-    await assert.rejects(cf.call("gbk_render_composition", { compositionId: lf.compositionId }), (e: unknown) => /limited to 20 s/.test(JSON.stringify(e) + String((e as Error)?.message)), "free duration cap");
-    await assert.rejects(cp.call("gbk_render_composition", { compositionId: lp.compositionId }), (e: unknown) => !/limited to 60 s/.test(JSON.stringify(e) + String((e as Error)?.message)), "pro passes the duration cap (then hits its hourly limit)");
+    await assert.rejects(cf.call("gbk_render_composition", { compositionId: lf.compositionId }), (e: unknown) => /free plan.s limit \(20 s per server render\)/.test(JSON.stringify(e) + String((e as Error)?.message)), "free duration cap");
+    await assert.rejects(cp.call("gbk_render_composition", { compositionId: lp.compositionId }), (e: unknown) => !/s per server render/.test(JSON.stringify(e) + String((e as Error)?.message)), "pro passes the duration cap (then hits its hourly limit)");
   } finally { await s2.app.close(); }
+});
+
+const SELLING = [/\/pricing/i, /checkout/i, /upgrade/i, /go pro/i, /\$\s?\d/, /\d+(\.\d+)?\s?(usd|€|£)/i, /per month|\/mo\b|\/month/i];
+const assertNotSelling = (text: string, what: string) => { for (const re of SELLING) assert.ok(!re.test(text), `${what} must not contain ${re}: ${text.slice(0, 300)}`); };
+
+test("MCP limit messages are informational only: plan + /plans link, never pricing, checkout, upgrade or a price (#122)", { timeout: 120_000 }, async () => {
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1", SERVER_RENDER_ACCOUNT_PER_HOUR: "1", SERVER_RENDER_ACCOUNT_MAX_SECONDS: "20", SERVER_RENDER_GUEST_PER_HOUR: "1" });
+  try {
+    const raw: string[] = [];
+    const c = new McpClient(s.base, { "x-gbk-test-user": "carol" }); await c.initialize();
+    raw.push(JSON.stringify((await c.send("tools/list", {})).rpc));
+    const long = await c.call<{ compositionId: string }>("gbk_create_composition", { title: "Long", style: "classical", bars: 16, tempo: 60, seed: 1 });
+    const dur = await c.callRaw("gbk_render_composition", { compositionId: long.compositionId }); raw.push(JSON.stringify(dur.rpc));
+    assert.match(JSON.stringify(dur.rpc), /This is over the free plan's limit \(20 s per server render\)\. Plans: http:\/\/composer\.test\/plans/);
+    const g = await c.call<{ compositionId: string }>("gbk_create_composition", { title: "Short", style: "pop", bars: 2, tempo: 120, seed: 2 });
+    const ok = await c.callRaw("gbk_render_composition", { compositionId: g.compositionId, waitSeconds: 110 }); raw.push(JSON.stringify(ok.rpc));
+    const hour = await c.callRaw("gbk_render_composition", { compositionId: g.compositionId }); raw.push(JSON.stringify(hour.rpc));
+    assert.match(JSON.stringify(hour.rpc), /This is over the free plan's limit \(1 per hour\)\. Plans: http:\/\/composer\.test\/plans/);
+    // guest path too
+    const gc = new McpClient(s.base); await gc.initialize();
+    const gg = await gc.call<{ compositionId: string; accessToken: string }>("gbk_create_composition", { title: "G", style: "pop", bars: 2, tempo: 120, seed: 4 });
+    raw.push(JSON.stringify((await gc.callRaw("gbk_render_composition", { compositionId: gg.compositionId, accessToken: gg.accessToken, waitSeconds: 110 })).rpc));
+    const gh = await gc.callRaw("gbk_render_composition", { compositionId: gg.compositionId, accessToken: gg.accessToken }); raw.push(JSON.stringify(gh.rpc));
+    assert.match(JSON.stringify(gh.rpc), /over the free plan's limit \(1 per hour\)\. Plans: http:\/\/composer\.test\/plans/);
+    raw.forEach((t, i) => assertNotSelling(t, `MCP output #${i}`));
+  } finally { await s.app.close(); }
 });
