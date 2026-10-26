@@ -12,9 +12,9 @@ struct CardPlayback {
 private let blackKeys: Set<Int> = [1, 3, 6, 8, 10]
 
 /// Feed now-playing viz, a port of web `LiveRoll` (src/components/social/LiveRoll.tsx, gbk #108, db68404).
-/// One canvas: row 1 (top 62%) windowed piano roll, row 2 (bottom 38%) 48 spectrum bars with the 256-point waveform
-/// drawn over them, 1 px grid line between. Only the playing card animates; others draw the roll at t = 0 with
-/// flat dimmed bars and waveform.
+/// Playing: row 1 (top 62%) windowed piano roll, row 2 (bottom 38%) 48 spectrum bars with the 256-point waveform
+/// drawn over them, 1 px grid line between. Not playing: the whole song as a static overview filling the canvas
+/// (no 4 s window, no playhead, no empty spectrum band).
 struct NowPlayingVizView: View {
     let preview: SongPreview?
     let playback: CardPlayback?
@@ -33,10 +33,15 @@ struct NowPlayingVizView: View {
 
     private func draw(_ ctx: inout GraphicsContext, size: CGSize, now: Double, live: Bool) {
         let W = size.width, H = size.height
+        guard live else {
+            // Overview: preview start/len are 0...1000 of the song, so a 1 s "song" in a 1 s window shows all of it.
+            drawRoll(&ctx, W: W, H: H, t: 0, dur: 1, window: 1, playhead: 0)
+            return
+        }
         let rH = (H * FeedVisuals.rollFraction).rounded(), sH = H - rH
-        let dur = (live ? playback?.duration() : nil).flatMap { $0 > 0 && $0.isFinite ? $0 : nil } ?? FeedVisuals.fallbackDuration
-        let t = live ? (playback?.time() ?? 0) : 0
-        drawRoll(&ctx, W: W, H: rH, t: t, dur: dur)
+        let dur = playback?.duration().flatMap { $0 > 0 && $0.isFinite ? $0 : nil } ?? FeedVisuals.fallbackDuration
+        let t = playback?.time() ?? 0
+        drawRoll(&ctx, W: W, H: rH, t: t, dur: dur, window: FeedVisuals.windowSeconds, playhead: FeedVisuals.playheadFraction)
 
         ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: sH)), with: .color(Theme.vizBg))
         ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: 1)), with: .color(Theme.vizGrid))
@@ -62,17 +67,20 @@ struct NowPlayingVizView: View {
         ctx.stroke(wave, with: .color(analyzer != nil ? Theme.vizWave : Theme.vizDim), lineWidth: max(1, H / 200))
     }
 
-    private func drawRoll(_ ctx: inout GraphicsContext, W: CGFloat, H: CGFloat, t: Double, dur: Double) {
+    private func drawRoll(_ ctx: inout GraphicsContext, W: CGFloat, H: CGFloat, t: Double, dur: Double,
+                          window: Double, playhead: Double) {
         ctx.fill(Path(CGRect(x: 0, y: 0, width: W, height: H)), with: .color(Theme.vizBg))
-        let (lo, hi) = PianoRollMath.pitchRange(lo: preview?.lo ?? 60, hi: preview?.hi ?? 72)
+        let notes = PianoRollMath.notes(from: preview, durationSeconds: dur)
+        let span = PianoRollMath.noteSpan(notes, fallbackLo: preview?.lo ?? 60, fallbackHi: preview?.hi ?? 72)
+        let (lo, hi) = PianoRollMath.pitchRange(lo: span.lo, hi: span.hi)
         let rows = hi - lo + 1, rh = H / rows
         for q in Int(lo)...Int(hi) where blackKeys.contains(((q % 12) + 12) % 12) {
             ctx.fill(Path(CGRect(x: 0, y: H - (Double(q) - lo + 1) * rh, width: W, height: rh)), with: .color(Theme.vizRow))
         }
         let tracks = preview?.tracks ?? []
-        let notes = PianoRollMath.notes(from: preview, durationSeconds: dur)
         let gap = FeedVisuals.noteGap, minS = FeedVisuals.minNoteSize
-        for n in PianoRollMath.window(notes: notes, time: t, lo: preview?.lo ?? 60, hi: preview?.hi ?? 72) {
+        for n in PianoRollMath.window(notes: notes, time: t, lo: span.lo, hi: span.hi,
+                                            windowSeconds: window, playhead: playhead) {
             let hex = n.note.track >= 0 && n.note.track < tracks.count ? tracks[n.note.track] : nil
             let x0 = n.x0 * W, x1 = n.x1 * W
             let rect = CGRect(x: x0, y: CGFloat(n.row) * rh + gap / 2, width: max(minS, x1 - x0 - gap), height: max(minS, rh - gap))
@@ -84,7 +92,8 @@ struct NowPlayingVizView: View {
             case .upcoming: ctx.fill(Path(rect), with: .color(Theme.track(hex).opacity(FeedVisuals.upcomingAlpha)))
             }
         }
-        let hx = (W * FeedVisuals.playheadFraction).rounded()
+        guard playhead > 0 else { return }
+        let hx = (W * playhead).rounded()
         ctx.fill(Path(CGRect(x: hx - 1, y: 0, width: 2, height: H)), with: .color(Theme.vizHead))
     }
 }

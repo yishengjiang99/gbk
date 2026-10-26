@@ -32,11 +32,13 @@ const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(p % 12);
 
 export interface VizSource { el: HTMLAudioElement | null; analyser: AnalyserNode | null }
 
-export function drawRoll(ctx: CanvasRenderingContext2D, p: PianoRollPreview, t: number, dur: number, W: number, H: number, pal: Pal) {
+// win/ph default to the playing window; the paused overview passes dur = win = 1, ph = 0 (whole song, no playhead).
+export function drawRoll(ctx: CanvasRenderingContext2D, p: PianoRollPreview, t: number, dur: number, W: number, H: number, pal: Pal, win: number = VIZ.windowSec, ph: number = VIZ.playheadFrac) {
   ctx.fillStyle = pal.bg; ctx.fillRect(0, 0, W, H);
-  const lo = p.lo - VIZ.pitchPad, hi = Math.max(p.hi + VIZ.pitchPad, lo + VIZ.minPitchSpan - 1), rows = hi - lo + 1, rh = H / rows;
+  const ps = p.notes.map((n) => n[3]), pLo = ps.length ? Math.min(...ps) : p.lo, pHi = ps.length ? Math.max(...ps) : p.hi;
+  const lo = pLo - VIZ.pitchPad, hi = Math.max(pHi + VIZ.pitchPad, lo + VIZ.minPitchSpan - 1), rows = hi - lo + 1, rh = H / rows;
   for (let q = lo; q <= hi; q++) if (isBlack(q)) { ctx.fillStyle = pal.row; ctx.fillRect(0, H - (q - lo + 1) * rh, W, rh); }
-  const pps = W / VIZ.windowSec, hx = W * VIZ.playheadFrac, u = dur / 1000; // preview units -> seconds
+  const pps = W / win, hx = W * ph, u = dur / 1000; // preview units -> seconds
   for (const [tr, s, l, pitch] of p.notes) {
     const t0 = s * u, t1 = (s + l) * u, x0 = hx + (t0 - t) * pps, x1 = hx + (t1 - t) * pps;
     if (x1 < 0 || x0 > W) continue;
@@ -46,7 +48,7 @@ export function drawRoll(ctx: CanvasRenderingContext2D, p: PianoRollPreview, t: 
     ctx.fillStyle = on ? lighten(col, VIZ.activeLighten) : col; ctx.fillRect(x0, y, w, h);
     if (on) { ctx.strokeStyle = pal.head; ctx.lineWidth = 1; ctx.strokeRect(x0 + 0.5, y + 0.5, w - 1, h - 1); }
   }
-  ctx.globalAlpha = 1; ctx.fillStyle = pal.head; ctx.fillRect(Math.round(hx) - 1, 0, 2, H);
+  ctx.globalAlpha = 1; if (ph > 0) { ctx.fillStyle = pal.head; ctx.fillRect(Math.round(hx) - 1, 0, 2, H); }
 }
 
 export function LiveRoll({ p, playing, source }: { p: PianoRollPreview; playing: boolean; source: () => VizSource }) {
@@ -56,7 +58,9 @@ export function LiveRoll({ p, playing, source }: { p: PianoRollPreview; playing:
     const levels = new Float32Array(VIZ.bars); let freq: Uint8Array<ArrayBuffer> | null = null; let wave: Float32Array<ArrayBuffer> | null = null;
     const size = () => { const r = c.getBoundingClientRect(), d = Math.min(3, devicePixelRatio || 1); const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d)); if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } return { W: w, H: h }; };
     const frame = (now: number) => {
-      const { W, H } = size(); const pal = palette(c); const rH = Math.round(H * VIZ.rollFrac), sH = H - rH;
+      const { W, H } = size(); const pal = palette(c);
+      if (!playing) { ctx.save(); drawRoll(ctx, p, 0, 1, W, H, pal, 1, 0); ctx.restore(); raf = 0; return; } // paused: whole-song overview, full height
+      const rH = Math.round(H * VIZ.rollFrac), sH = H - rH;
       const { el, analyser } = playing ? source() : { el: null, analyser: null };
       const dur = el && isFinite(el.duration) && el.duration > 0 ? el.duration : 30; const t = el ? el.currentTime : 0;
       ctx.save(); drawRoll(ctx, p, t, dur, W, rH, pal); ctx.restore();
