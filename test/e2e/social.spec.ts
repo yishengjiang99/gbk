@@ -11,12 +11,19 @@ async function apiLogin(req: APIRequestContext, base: string, code: string) {
   return { origin: base, "x-gbk-csrf": (await r.json()).csrf as string };
 }
 const origin = (p: Page) => new URL(p.url() === "about:blank" ? test.info().project.use.baseURL! : p.url()).origin;
+// Seed a public share and FAIL HERE when creation is rejected (e.g. 429 RATE_LIMITED): reading .slug off an
+// error body used to surface as a 404 on the media PUT / a missing prompt_shared downstream (#128).
+async function createShare(req: APIRequestContext, headers: Record<string, string>, data: Record<string, unknown>) {
+  const r = await req.post("/api/shares", { headers, data });
+  expect(r.ok(), `POST /api/shares -> ${r.status()}: ${await r.text()}`).toBeTruthy();
+  return (await r.json()) as { slug: string };
+}
 
 test("social feed: rate, comment, tag filter, report, profile (mobile + desktop)", async ({ page, browser, baseURL }) => {
   const base = new URL(baseURL!).origin; void origin;
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const title = `Social E2E ${test.info().project.name} ${Date.now() % 100000}`;
-  const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title, project, public: true } })).json();
+  const sh = await createShare(owner.request, oh, { title, project, public: true });
   const tag = `e2e-${test.info().project.name.replace(/[^a-z0-9]/g, "").slice(0, 10)}`;
   expect((await owner.request.patch(`/api/songs/${sh.slug}/meta`, { headers: oh, data: { labels: ["classical"], tags: [tag] } })).ok()).toBeTruthy();
   try {
@@ -73,7 +80,7 @@ test("social feed autoplay: tap unlocks audio, active card plays, snapping to th
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const slugs: string[] = [];
   for (const t of ["Autoplay Two", "Autoplay One"]) {
-    const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json();
+    const sh = await createShare(owner.request, oh, { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true });
     expect((await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: silentWav() })).ok()).toBeTruthy();
     slugs.push(sh.slug);
   }
@@ -101,7 +108,7 @@ test("social prompt sharing: off by default, owner opts in, feed shows prompt, R
   const base = new URL(baseURL!).origin;
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const title = `Prompt Share ${test.info().project.name} ${Date.now() % 100000}`;
-  const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title, project, public: true } })).json();
+  const sh = await createShare(owner.request, oh, { title, project, public: true });
   try {
     const before = await (await owner.request.get(`/api/songs/${sh.slug}`)).json(); expect(before.prompt_shared).toBe(false); expect(before.prompt_text).toBeNull();
     await owner.request.patch(`/api/songs/${sh.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: "a stormy sea shanty in A minor" } });
@@ -121,7 +128,7 @@ test("social feed switch: next starts at once, old fades out 58ms on settle, one
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const slugs: string[] = [];
   for (const t of ["XF Four", "XF Three", "XF Two", "XF One"]) {
-    const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json();
+    const sh = await createShare(owner.request, oh, { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true });
     expect((await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: silentWav() })).ok()).toBeTruthy();
     slugs.unshift(sh.slug);
   }
@@ -211,7 +218,7 @@ test("feed impressions: settling on cards logs dwell/skip events with model_vers
   const base = new URL(baseURL!).origin;
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const slugs: string[] = [];
-  for (const t of ["Imp Two", "Imp One"]) { const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true } })).json(); slugs.unshift(sh.slug); }
+  for (const t of ["Imp Two", "Imp One"]) { const sh = await createShare(owner.request, oh, { title: `${t} ${test.info().project.name} ${Date.now() % 100000}`, project, public: true }); slugs.unshift(sh.slug); }
   try {
     await page.goto("/feed?sort=new");
     await expect(page.getByTestId("feed-card").first()).toHaveAttribute("data-slug", slugs[0]);
@@ -231,7 +238,7 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
   const base = new URL(baseURL!).origin; const P = test.info().project.name;
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const title = `Gate E2E ${P} ${Date.now() % 100000}`;
-  const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title, project, public: true } })).json();
+  const sh = await createShare(owner.request, oh, { title, project, public: true });
   const noSignInButton = async () => { await expect(page.getByRole("button", { name: /sign in/i })).toHaveCount(0); await expect(page.getByRole("link", { name: /sign in/i })).toHaveCount(0); };
   const signInViaSheet = async () => { const s = page.getByTestId("signin-sheet"); await expect(s).toBeVisible(); await s.getByTestId("signin-code").fill("e2e-code-2"); await s.getByTestId("signin-code-submit").click(); await expect(page.getByTestId("signin-sheet")).toBeHidden({ timeout: 15_000 }); await page.waitForLoadState("load"); await expect(page.getByTestId("me-handle").or(page.getByTestId("composer-input")).first()).toBeVisible({ timeout: 15_000 }); };
   const shots = process.env.GBK_SHOTS ?? "/workspace/shots";
@@ -374,7 +381,7 @@ test("social studio iOS hum bridge: gbkNative hum shows the prompt-bar button, g
 
 test("social feed play button is accessible: aria-label Play/Pause + aria-pressed", async ({ page, browser, baseURL }) => {
   const base = new URL(baseURL!).origin; const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
-  const title = `A11y ${test.info().project.name} ${Date.now() % 100000}`; const sh = await (await owner.request.post("/api/shares", { headers: oh, data: { title, project, public: true } })).json();
+  const title = `A11y ${test.info().project.name} ${Date.now() % 100000}`; const sh = await createShare(owner.request, oh, { title, project, public: true });
   expect((await owner.request.put(`/api/shares/${sh.slug}/media/wav`, { headers: { ...oh, "content-type": "audio/wav" }, data: silentWav() })).ok()).toBeTruthy();
   try {
   await page.goto("/feed?sort=new");
