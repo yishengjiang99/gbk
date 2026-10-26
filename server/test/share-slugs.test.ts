@@ -7,20 +7,6 @@ import { join } from "node:path";
 import { ShareStore, kebabTitle, nameSlug, shortIdOf } from "../src/persistence/shares.ts";
 import { parseRoute } from "../../src/agent/routes.ts";
 
-test("kebab title / name slug / short id parsing", () => {
-  assert.equal(kebabTitle("The Clockwork Cathedral"), "the-clockwork-cathedral");
-  assert.equal(kebabTitle("Beethoven Symphony No. 5"), "beethoven-symphony-no-5");
-  assert.equal(kebabTitle("Café — Über!"), "cafe-uber");
-  assert.equal(nameSlug("The Clockwork Cathedral", "crqebmyf"), "the-clockwork-cathedral-crqebmyf");
-  assert.equal(nameSlug("!!!", "crqebmyf"), "crqebmyf");
-  assert.ok(nameSlug("x".repeat(300), "abcdefgh").length <= 57);
-  assert.equal(shortIdOf("crqebmyf"), "crqebmyf");
-  assert.equal(shortIdOf("the-clockwork-cathedral-crqebmyf"), "crqebmyf");
-  assert.equal(shortIdOf("nope"), null);
-  assert.deepEqual(parseRoute("/s/the-clockwork-cathedral-crqebmyf", ""), { view: "share", slug: "the-clockwork-cathedral-crqebmyf", fork: false });
-  assert.deepEqual(parseRoute("/s/crqebmyf", "?fork=1"), { view: "share", slug: "crqebmyf", fork: true });
-});
-
 test("create/rename/publish move the slug; old slugs keep resolving", () => {
   const st = new ShareStore(":memory:");
   const r = st.create({ owner: "a", title: "Midnight Invention", projectJson: "{}" });

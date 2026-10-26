@@ -4,6 +4,7 @@
 
 Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.yml` (macOS, simulator build + unit tests, unsigned).
 CI trigger: `ios.yml` push/PR runs only on changes to `ios/**`, `ios.yml`, `ios-release.yml`, `src/native/**` (plus manual workflow_dispatch).
+Server tests (GBK Social area): `server/test` pruned of brittle/redundant cases, 152 → 98 tests, ~49 s → ~21 s locally (2026-10-25).
 
 | Area | State |
 |---|---|

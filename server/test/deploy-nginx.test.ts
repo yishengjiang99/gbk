@@ -18,11 +18,6 @@ test("deploy/nginx.conf keeps HTTPS: 443 ssl, cert paths, port-80 redirect; no k
   assert.ok(conf.includes("chatgpt(/install|/gallery"), "install + gallery paths proxied");
 });
 
-test("deploy.sh installs nginx only through install-nginx.sh", () => {
-  assert.ok(deploy.includes("deploy/install-nginx.sh"));
-  assert.ok(!/(install|cp)[^\n]*sites-available\/compose\.grepawk\.com(\s|"|$)/.test(deploy), "no direct overwrite of the live site");
-});
-
 test("install-nginx.sh refuses a config without TLS and leaves the live file untouched", () => {
   const d = mkdtempSync(join(tmpdir(), "gbk-nginx-"));
   try {

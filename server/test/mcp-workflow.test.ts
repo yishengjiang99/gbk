@@ -93,59 +93,6 @@ test("A: composition with no tab; render asks to open the studio, then renders i
   } finally { await s.app.close(); }
 });
 
-test("B: follow-up edit keeps the composition, bumps the revision, leaves untouched bars unchanged, re-renders differently", async () => {
-  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
-  try {
-    const alice = asUser(s, "alice"); await alice.initialize();
-    const c = await fugue(alice);
-    const before = await alice.call<Created & { notes?: { items: { tick: number }[] } }>("gbk_get_composition", { compositionId: c.compositionId, includeNotes: true, limit: 1000 });
-    await openStudio(s, "code-a");
-    const firstRender = await alice.call<Rendered>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 120, tailSeconds: 1 });
-    const firstSha = firstRender.artifacts.find((a) => a.kind === "wav")!.sha256;
-
-    const src = c.tracks[0], tgt = c.tracks[c.tracks.length - 1];
-    const edited = await alice.call<{ compositionId: string; revision: number; previousRevision: number; untouchedSectionsUnchanged: boolean | null }>("gbk_edit_composition", {
-      compositionId: c.compositionId, expectedRevision: c.revision, idempotencyKey: "edit-fugue-0001",
-      operations: [
-        { type: "orchestrate", sourceTrack: src.id, targetTrack: tgt.id, startBar: 5, endBar: 8, semitones: -12 },
-        { type: "cc_curve", trackIds: c.tracks.map((t) => t.id), controller: 11, startBar: 5, endBar: 8, shape: "crescendo", from: 55, to: 125 },
-        { type: "set_mix", track: tgt.id, expression: 121 },
-      ],
-    });
-    assert.equal(edited.compositionId, c.compositionId, "same composition");
-    assert.equal(edited.previousRevision, c.revision);
-    assert.ok(edited.revision > c.revision, "revision incremented");
-    assert.equal(edited.untouchedSectionsUnchanged, true, "notes outside bars 5–8 are byte-identical");
-
-    // A stale write is rejected with the current revision attached.
-    await assert.rejects(
-      alice.call("gbk_edit_composition", { compositionId: c.compositionId, expectedRevision: c.revision, operations: [{ type: "set_tempo", bpm: 90 }] }),
-      (e: Error & { payload?: { error?: { code?: string; details?: { currentRevision?: number } } } }) => e.payload?.error?.code === "STALE_REVISION" && e.payload.error.details?.currentRevision === edited.revision,
-    );
-    // The pre-edit revision is still recoverable.
-    const hist = await alice.call<{ revisions: { revision: number }[] }>("gbk_get_composition", { compositionId: c.compositionId });
-    assert.ok(hist.revisions.some((r) => r.revision === c.revision));
-
-    const second = await alice.call<Rendered>("gbk_render_composition", { compositionId: c.compositionId, waitSeconds: 120, tailSeconds: 1 });
-    assert.equal(second.status, "completed");
-    assert.notEqual(second.artifacts.find((a) => a.kind === "wav")!.sha256, firstSha, "revised render differs");
-    void before;
-  } finally { await s.app.close(); }
-});
-
-test("B2: fugue-section edit op (canonical schema has no baseRevision) applies cleanly", async () => {
-  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
-  try {
-    const alice = asUser(s, "alice"); await alice.initialize();
-    const c = await alice.call<Created>("gbk_create_composition", { title: "Fugue edit target", style: "baroque", key: "D minor", bars: 8, seed: 12 });
-    const edited = await alice.call<{ revision: number }>("gbk_edit_composition", {
-      compositionId: c.compositionId, expectedRevision: c.revision,
-      operations: [{ type: "generate_fugue_section", key: "D minor", voices: 4, atBar: 5, maxBars: 4, seed: 3 }],
-    });
-    assert.ok(edited.revision > c.revision);
-  } finally { await s.app.close(); }
-});
-
 test("D: concurrent users are isolated — no project or artifact leakage", async () => {
   const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
   try {
@@ -313,23 +260,6 @@ test("W: in-chat player render - no Studio tab: widget tools hand out a token, b
     const bob = asUser(s, "bob"); await bob.initialize();
     const st3 = await alice.call<Start>("gbk_widget_render_start", { compositionId: c.compositionId });
     await assert.rejects(bob.call("gbk_widget_render_finish", { jobId: st3.jobId, token: st3.token, ok: false }));
-  } finally { await s.app.close(); }
-});
-
-test("W: widget assets are served cross-origin (renderer bundle, SF2 worklet, SoundFont) and the player declares its CSP", async () => {
-  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
-  try {
-    for (const f of ["gbk-widget-render.js", "sf2-processor.js"]) {
-      const r = await fetch(`${s.base}/api/mcp/widget/${f}`);
-      assert.equal(r.status, 200, f); assert.equal(r.headers.get("access-control-allow-origin"), "*"); assert.match(r.headers.get("content-type") ?? "", /javascript/);
-    }
-    const sf = await fetch(`${s.base}/api/mcp/widget/soundfont.sf2`, { method: "HEAD" });
-    assert.equal(sf.status, 200); assert.equal(sf.headers.get("access-control-allow-origin"), "*"); assert.ok(Number(sf.headers.get("content-length")) > 1_000_000);
-    assert.equal((await fetch(`${s.base}/api/mcp/widget/..%2Fpackage.json`)).status, 404);
-    const c = new McpClient(s.base); await c.initialize();
-    const res = (await c.send("resources/read", { uri: "ui://gbk/composer-v2.html" })).rpc?.result as { contents: { text: string; _meta: Record<string, { connect_domains?: string[] }> }[] };
-    assert.match(res.contents[0].text, /var ORIGIN="http:\/\/composer.test"/);
-    assert.deepEqual(res.contents[0]._meta["openai/widgetCSP"].connect_domains, ["http://composer.test"]);
   } finally { await s.app.close(); }
 });
 

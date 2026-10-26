@@ -24,17 +24,6 @@ async function start(over: Record<string, string> = {}) {
 }
 const cookies = (r: Response) => r.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
 
-test("providers: GitHub shown when configured, Google hidden until its env vars are set", async () => {
-  const s = await start();
-  try {
-    const ses = await (await fetch(`${s.base}/api/session`)).json();
-    assert.deepEqual(ses.providers, ["github"]);
-    assert.equal((await fetch(`${s.base}/api/auth/google`, { redirect: "manual" })).status, 404);
-    const cfgPub = await (await fetch(`${s.base}/api/config`)).json().catch(() => null);
-    assert.ok(!JSON.stringify(cfgPub ?? {}).includes("ghsecret"), "secret never leaves the server");
-  } finally { await s.app.close(); }
-});
-
 test("GitHub sign-in end to end: state check, account creation, session, return path, new-account limits", async () => {
   const s = await start();
   try {

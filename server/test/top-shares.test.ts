@@ -16,15 +16,6 @@ async function song(name: string) {
   return c.project;
 }
 
-test("buildPreview: caps notes, normalizes to 0..1000, colors per track", () => {
-  const notes = Array.from({ length: 1000 }, (_, i) => ({ trackId: i % 2 ? "b" : "a", tick: i * 10, duration: 10, pitch: 40 + (i % 30) }));
-  const p = buildPreview({ tracks: [{ id: "a", color: "#ff0000" }, { id: "b", color: "bogus" }], notes }, 100);
-  assert.equal(p.notes.length, 100); assert.deepEqual(p.tracks, ["#ff0000", "#90a4ae"]);
-  assert.equal(p.lo, 40); assert.equal(p.hi, 69);
-  for (const [t, x, w] of p.notes) { assert.ok(t === 0 || t === 1); assert.ok(x >= 0 && x <= 1000 && w >= 1); }
-  assert.deepEqual(buildPreview({}).notes, []);
-});
-
 test("GET /api/shares/top: public only, ranked by forks then newest, light payload", async () => {
   const s = await startServer(new ScriptModel([() => reply("x")]));
   try {

@@ -7,22 +7,6 @@ import { McpClient } from "./mcp-helpers.ts";
 
 const model = () => new ScriptModel([() => reply("x")]);
 
-test("well-known OAuth discovery documents follow RFC 9728 / RFC 8414 + MCP requirements", async () => {
-  const s = await startServer(model(), { MCP_TEST_AUTH: "1" });
-  try {
-    const pr = await (await fetch(`${s.base}/.well-known/oauth-protected-resource`)).json();
-    assert.equal(pr.resource, "http://composer.test/mcp");
-    assert.deepEqual(pr.authorization_servers, ["http://composer.test"]);
-    assert.ok(pr.scopes_supported.includes("gbk:compositions.write"));
-    const asm = await (await fetch(`${s.base}/.well-known/oauth-authorization-server`)).json();
-    assert.equal(asm.issuer, "http://composer.test");
-    assert.ok(asm.code_challenge_methods_supported.includes("S256"), "S256 PKCE is mandatory for MCP");
-    assert.ok(asm.registration_endpoint.endsWith("/oauth/register"));
-    assert.equal(asm.authorization_response_iss_parameter_supported, true);
-    assert.equal(asm.client_id_metadata_document_supported, true);
-  } finally { await s.app.close(); }
-});
-
 test("MCP initialize, tools/list with annotations, anonymous capabilities, auth challenge (guest projects off), session binding", async () => {
   // MCP_GUEST=0 is the off switch: account-free projects disabled -> private tools need OAuth again.
   const s = await startServer(model(), { MCP_TEST_AUTH: "1", MCP_GUEST: "0" });

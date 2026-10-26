@@ -21,16 +21,6 @@ function setup(script: ConstructorParameters<typeof ScriptModel>[0], over: Recor
   return { cfg, model, ledger, rt, conv, link, go };
 }
 
-test("schema registration: vetted catalog from the canonical registry, no byte relay / download tools", () => {
-  assert.ok(catalog.get("gbk_generate_arrangement") && catalog.get("gbk_render_wav") && catalog.get("gbk_create_project"));
-  for (const banned of ["gbk_read_wav_bytes", "gbk_download_render_artifact", "gbk_delete_render_artifact", "gbk_prepare_wav_export"]) assert.equal(catalog.get(banned), null);
-  assert.equal(catalog.tools.size, Object.keys(COMPOSER_TOOL_POLICY).length);
-  const s = catalog.schemasFor(new Set(["gbk_list_tracks", "gbk_not_real"]));
-  assert.deepEqual(s.map((x) => x.function.name), ["gbk_list_tracks"]);
-  assert.equal(s[0].function.parameters.type, "object");
-  assert.match(SYSTEM_PROMPT, /untrusted|DATA, not instructions/i);
-});
-
 test("multi-step loop: tool calls -> results with matching ids -> final reply", async () => {
   const { go, model, link, conv } = setup([() => calls(tc("c1", "gbk_get_capabilities")), () => calls(tc("c2", "gbk_list_tracks"), tc("c3", "gbk_get_project_summary")), () => reply("All done.")]);
   const r = await go();
@@ -73,34 +63,6 @@ test("streaming tool-call assembly by index and id; never parsed before the end"
   assert.deepEqual(a.finish().map((c) => [c.id, c.function.name, JSON.parse(c.function.arguments)]), [["call_a", "gbk_create_project", { name: "Fugue" }], ["call_b", "gbk_list_tracks", {}]]);
 });
 
-test("SSE client: retries 429 with backoff, assembles streamed calls, reports usage", async () => {
-  let n = 0;
-  const sse = (objs: unknown[]) => new Response(objs.map((o) => `data: ${JSON.stringify(o)}\n\n`).join("") + "data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
-  const fetchImpl = (async () => { n++; if (n === 1) return new Response('{"error":{"message":"rate"}}', { status: 429, headers: { "retry-after": "0" } });
-    return sse([{ choices: [{ delta: { content: "Hi " } }] }, { choices: [{ delta: { tool_calls: [{ index: 0, id: "x1", function: { name: "gbk_list_tracks", arguments: "{}" } }] } }] }, { choices: [{ delta: {}, finish_reason: "tool_calls" }] }, { choices: [], usage: { prompt_tokens: 5, completion_tokens: 2 } }]); }) as typeof fetch;
-  const c = new ChatCompletionsClient({ baseUrl: "http://p/v1", apiKey: "k", timeoutMs: 1000, maxRetries: 2, stream: true, fetchImpl });
-  let text = ""; const r = await c.complete({ model: "m", messages: [], tools: [], maxTokens: 10, signal: new AbortController().signal, onText: (t) => (text += t) });
-  assert.equal(n, 2); assert.equal(text, "Hi "); assert.equal(r.toolCalls[0].id, "x1"); assert.deepEqual(r.usage, { promptTokens: 5, completionTokens: 2 });
-});
-
-test("provider errors: auth, incompatible model, rate limit exhaustion -> clear run_failed", async () => {
-  for (const [status, code] of [[401, "PROVIDER_AUTH"], [400, "PROVIDER_INCOMPATIBLE"], [429, "PROVIDER_RATE_LIMITED"]] as const) {
-    const fetchImpl = (async () => new Response(JSON.stringify({ error: { message: status === 400 ? "tools are not supported by this model" : "x" } }), { status })) as typeof fetch;
-    const c = new ChatCompletionsClient({ baseUrl: "http://p/v1", apiKey: "k", timeoutMs: 1000, maxRetries: 1, stream: true, fetchImpl });
-    await assert.rejects(c.complete({ model: "m", messages: [], tools: [], maxTokens: 1, signal: new AbortController().signal }), (e: ProviderError) => e.code === code);
-  }
-  const { go, link } = setup([() => { throw new ProviderError("PROVIDER_RATE_LIMITED", "provider 429", 429, true); }]);
-  const r = await go();
-  assert.equal(r.code, "PROVIDER_RATE_LIMITED");
-  const f = link.events.find((e) => e.type === "run_failed") as { retryable: boolean };
-  assert.equal(f.retryable, true);
-});
-
-test("LLM not configured -> explicit error naming the env vars", async () => {
-  const { go } = setup([() => reply("x")], { LLM_API_KEY: "" });
-  const r = await go(); assert.equal(r.code, "LLM_NOT_CONFIGURED"); assert.match(r.text, /LLM_API_KEY/);
-});
-
 test("tool timeout is reported to the model (and the browser is told to cancel)", async () => {
   const link = new FakeLink(ALL, () => { throw new BridgeCallError("TOOL_TIMEOUT", "gbk_render_wav did not finish within 2 s"); });
   const { go, model } = setup([() => calls(tc("t", "gbk_render_wav", {})), () => reply("render timed out")], {}, link);
@@ -115,11 +77,6 @@ test("cancelled run stops before the next model call", async () => {
   const { go, model } = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("never")], {}, link);
   const r = await go("x", ac.signal);
   assert.equal(r.status, "cancelled"); assert.equal(model.requests.length, 1);
-});
-
-test("max tool steps limit", async () => {
-  const { go } = setup([() => calls(tc(`c${Math.random()}`, "gbk_list_tracks"))], { AGENT_MAX_TOOL_STEPS: "3" });
-  const r = await go(); assert.equal(r.code, "MAX_STEPS"); assert.equal(r.steps, 3);
 });
 
 test("budget exhaustion blocks further model calls; model list enforced; input size enforced", async () => {

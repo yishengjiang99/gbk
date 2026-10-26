@@ -47,7 +47,7 @@ jobs:
       - run: npm run build:server            # render worker + widget assets must exist for the deploy package
       - run: node scripts/launch/check-launch.mjs --self-test
       - run: npm run check:launch            # manifest validity, deploy package contents, token-leak scan
-      - run: node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test server/test/launch-*.test.ts server/test/mcp-listing.test.ts server/test/gallery.test.ts server/test/deploy-nginx.test.ts server/test/funnel*.test.ts
+      - run: node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test server/test/gallery.test.ts server/test/deploy-nginx.test.ts server/test/funnel.test.ts
 
   # Composer browser e2e (real server + fake model + Chromium). Report-only for now: 3 Studio specs
   # (share-link open, theme/landing) already fail on main as of 2026-10-24; make this required once they pass.

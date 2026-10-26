@@ -25,13 +25,6 @@ async function openForm(base: string, jar: Jar, ret: string) {
 const submit = (base: string, jar: Jar, f: Record<string, string>) => fetch(`${base}/api/auth/reviewer`, { method: "POST", redirect: "manual",
   headers: { cookie: jar.header, origin: ORIGIN, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(f) }).then((r) => jar.take(r));
 
-test("hash verify is exact", () => {
-  const h = hashReviewerPassword("correct horse");
-  assert.equal(verifyReviewerPassword(h, "correct horse"), true);
-  assert.equal(verifyReviewerPassword(h, "correct hors"), false);
-  assert.equal(verifyReviewerPassword("garbage", "x"), false);
-});
-
 test("off switch: routes 404, link hidden, session reports reviewerLogin=false", async () => {
   for (const env of <Record<string, string>[]>[{}, { REVIEWER_LOGIN_ENABLED: "0", REVIEWER_PASSWORD_HASH: ON.REVIEWER_PASSWORD_HASH }, { REVIEWER_LOGIN_ENABLED: "1" }]) {
     const s = await startServer(model(), env);

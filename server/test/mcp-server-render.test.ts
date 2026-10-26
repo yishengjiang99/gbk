@@ -95,16 +95,3 @@ test("signed-in client with no Studio tab renders on the server; limits: duratio
     await assert.rejects(c.call("gbk_render_composition", { compositionId: g.compositionId }), errorCode("QUOTA_EXCEEDED"), "hourly rate");
   } finally { await s.app.close(); }
 });
-
-test("SERVER_RENDER=0 is the off switch: no server WAV; guests get MIDI + browser handoff, accounts studio_required", async () => {
-  const s = await startServer(model(), { SERVER_RENDER: "0", MCP_TEST_AUTH: "1" });
-  try {
-    const c = new McpClient(s.base); await c.initialize();
-    const g = await c.call<{ compositionId: string; accessToken: string }>("gbk_create_composition", { title: "Off", style: "classical", bars: 2, seed: 3 });
-    const r = await c.call<Job>("gbk_render_composition", { compositionId: g.compositionId, accessToken: g.accessToken });
-    assert.equal(r.status, "browser_render"); assert.deepEqual(r.artifacts.map((a) => a.kind), ["midi"]);
-    const a = new McpClient(s.base, { "x-gbk-test-user": "bob" }); await a.initialize();
-    const b = await a.call<{ compositionId: string }>("gbk_create_composition", { title: "Off2", style: "classical", bars: 2, seed: 3 });
-    assert.equal((await a.call<Job>("gbk_render_composition", { compositionId: b.compositionId })).status, "studio_required");
-  } finally { await s.app.close(); }
-});

@@ -1,6 +1,6 @@
 // MCP acceptance harness (#72 Phase 2): runs scenarios A (first use), B (revision continuity),
 // C (capability/session recovery) and E (failures) against any GBK MCP base URL, with the
-// same assertions locally (server/test/launch-acceptance.test.ts) and in production
+// same assertions locally (formerly server/test/launch-acceptance.test.ts) and in production
 // (scripts/acceptance/prod-smoke.ts). Every composition it creates is private and is deleted at
 // the end with its own edit key. It never prints access tokens: it records ids, revisions, sizes,
 // and hashes only.

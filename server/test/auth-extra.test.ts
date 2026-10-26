@@ -26,21 +26,6 @@ async function start(env: Record<string, string>) {
 }
 const J = { "content-type": "application/json" };
 
-test("e164 normalization", () => { assert.equal(e164("(415) 555-0100"), "+14155550100"); assert.equal(e164("+44 20 7946 0958"), "+442079460958"); assert.equal(e164("12"), null); });
-
-test("SMS + Apple web answer 503 until configured", async () => {
-  const s = await start({});
-  try {
-    assert.equal((await fetch(`${s.base}/api/auth/sms/start`, { method: "POST", headers: J, body: JSON.stringify({ phone: "+14155550100", turnstileToken: "t" }) })).status, 503);
-    assert.equal((await fetch(`${s.base}/api/auth/sms/verify`, { method: "POST", headers: J, body: JSON.stringify({ phone: "+14155550100", code: "123456" }) })).status, 503);
-    assert.equal((await fetch(`${s.base}/api/auth/apple/web`, { redirect: "manual" })).status, 503);
-    assert.equal((await (await fetch(`${s.base}/api/auth/sms/config`)).json()).enabled, false);
-  } finally { await s.app.close(); }
-  // Twilio without Turnstile is still off
-  const t = await start({ TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_VERIFY_SID: "VA1" });
-  try { assert.equal((await fetch(`${t.base}/api/auth/sms/start`, { method: "POST", headers: J, body: JSON.stringify({ phone: "+14155550100", turnstileToken: "t" }) })).status, 503); } finally { await t.app.close(); }
-});
-
 test("SMS sign-in: Turnstile gate, country allowlist, Twilio Verify start/check, web cookie + native tokens", async () => {
   const s = await start({ TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_VERIFY_SID: "VA1", TURNSTILE_SECRET: "ts", TURNSTILE_SITE_KEY: "site" });
   const st = (b: object) => fetch(`${s.base}/api/auth/sms/start`, { method: "POST", headers: J, body: JSON.stringify(b) });

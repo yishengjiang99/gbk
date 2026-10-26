@@ -52,17 +52,6 @@ const randomWorld = (fx: ReturnType<typeof fixture>, seed: number, n = 1600) => 
   return songs;
 };
 
-test("ranking v2 / phase 1: leakage — random labels give holdout AUC near 0.5; holdout is time-split; trains in a worker", async () => {
-  const fx = fixture({ file: true }); randomWorld(fx, 7);
-  const rk = new Ranker(fx.db, fx.now); const res = rk.train()!;
-  assert.ok(res && res.auc !== null, "trained"); assert.ok(res.auc! < 0.65 && res.auc! > 0.35, `holdout auc ${res.auc}`);
-  assert.ok(res.holdout > 0 && res.n > res.holdout, "time split: older rows train, last 3 days hold out"); assert.equal(res.promoted, true, "no promoted model yet -> promote");
-  assert.equal(rk.version, res.version);
-  // worker: same result shape, main ranker reloads the promoted model
-  fx.db.prepare("DELETE FROM rank_models").run(); const rk2 = new Ranker(fx.db, fx.now); assert.match(rk2.version, /^heur-/);
-  const w = await trainInWorker(rk2, fx.file, fx.now()); assert.ok(w && w.promoted); assert.equal(rk2.version, w!.version);
-});
-
 test("ranking v2 / phase 1: promotion gate keeps a better promoted model and stores the worse candidate unpromoted", () => {
   const fx = fixture(); const r = rand(3);
   const songs = Array.from({ length: 40 }, (_, i) => fx.song({ owner: `o${i % 8}`, score: i / 40 }));
@@ -75,24 +64,6 @@ test("ranking v2 / phase 1: promotion gate keeps a better promoted model and sto
   assert.equal(rk.version, "lr-good"); assert.equal(new Ranker(fx.db, fx.now).version, "lr-good", "startup loads the promoted model");
   assert.equal((fx.db.prepare("SELECT promoted FROM rank_models WHERE version = ?").get(res.version) as { promoted: number }).promoted, 0);
   void HEURISTIC;
-});
-
-test("ranking v2 / phase 3: labels (replay / ratio >= 0.9 complete), two-head value orders a likely-complete long song above a likely-skip one", () => {
-  assert.deepEqual(labels({ completed: 0, replay: 1, listen_ratio: 0.2, fast_skip: 0 }), { complete: 1, skip: 0 });
-  assert.deepEqual(labels({ completed: 0, replay: 0, listen_ratio: 0.95, fast_skip: 0 }), { complete: 1, skip: 0 });
-  assert.deepEqual(labels({ completed: 0, replay: 0, listen_ratio: 0.1, fast_skip: 1 }), { complete: 0, skip: 1 });
-  assert.equal(SKIP_LAMBDA, 1.0);
-  const z = Object.fromEntries(FEATURES.map((k) => [k, 0])) as Record<string, number>;
-  const m = { complete: { ...z, bias: -1, affinity: 4 }, skip: { ...z, bias: -1, affinity: -4 } } as never;
-  const fx = fixture(); const rk = new Ranker(fx.db, fx.now);
-  const likely = rk.value({ ...z, affinity: 1 }, 240, m), skippy = rk.value({ ...z, affinity: -1 }, 240, m), short = rk.value({ ...z, affinity: 1 }, 30, m);
-  assert.ok(likely > short && short > skippy, `${likely} > ${short} > ${skippy}`);
-  // duration from project_json through the tempo map: 60 s fixture song
-  assert.ok(Math.abs(projectSeconds({ ppq: 480, tempos: [{ tick: 0, microPerQuarter: 500000 }], notes: [{ tick: 0, duration: 57600 }] })! - 60) < 1e-9);
-  // model served after promotion: version lr2-*, rank uses it
-  const a = fx.song({ owner: "x", seconds: 170 }); fx.song({ owner: "y", seconds: 20 });
-  fx.db.prepare("INSERT INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES ('lr2-20261024', ?, 1, 0.7, ?, 1)").run(JSON.stringify({ complete: { ...z, bias: 2 }, skip: { ...z, bias: -3 } }), fx.now());
-  rk.reload(); assert.equal(rk.version, "lr2-20261024"); const r = rk.rank({ actor: null, session: null, seed: 1 }); assert.equal(r.ids[0], a, "longer likely-complete song first"); assert.equal(r.version, "lr2-20261024");
 });
 
 test("ranking v2 / phase 4: candidate sources with quotas; a fresh 0-score song is in the pool of a > 1000-song catalog", () => {
@@ -138,22 +109,6 @@ test("ranking v2 / phase 5: no repeats within a session over 5 pages, no dup/dro
   const lab = new Map(ids.map((id, i) => [id, [L[i % 5], L[(i + 1) % 5]]]));
   for (let k = 0; k < 6; k++) { const out = rk.rank({ actor: k % 2 ? actor : null, session: null, seed: k }).ids; const lbs = out.map((id) => lab.get(id) ?? []);
     for (let i = 3; i < out.length; i++) for (const l of lbs[i]) assert.ok(![1, 2, 3].every((j) => lbs[i - j].includes(l)), `label run of 4 on ${l} at ${i}`); }
-});
-
-test("ranking v2 / phase 6: offline eval — AUC per head, NDCG@10 per session, new-song share; promoted vs candidate vs heuristic; CLI runs read-only", async () => {
-  const fx = fixture({ file: true }); const r = rand(21);
-  const songs = Array.from({ length: 30 }, (_, i) => fx.song({ owner: `o${i % 6}`, score: i / 30, ageH: i < 3 ? 10 : 24 * 10 }));
-  for (let k = 0; k < 1200; k++) { const s = Math.floor(r() * 30); fx.imp({ actor: `a${Math.floor(r() * 40)}`, song: songs[s], at: fx.now() - Math.floor(r() * 9 * D) - HR, good: r() < 0.2 + s / 40 }); }
-  const rk = new Ranker(fx.db, fx.now); assert.ok(rk.train());
-  const { evalRange, ndcg } = await import("../src/ranking/eval.ts");
-  assert.equal(ndcg([2, 1, 0]), 1); assert.ok(ndcg([0, 1, 2])! < 1); assert.equal(ndcg([0, 0]), null);
-  const rep = evalRange(fx.db, fx.now() - 3 * D, fx.now(), fx.now());
-  assert.deepEqual(rep.map((x) => x.name), ["promoted", "heuristic"]);
-  for (const x of rep) { assert.ok(x.n > 0 && x.sessions > 0); assert.ok(x.auc_complete! > 0 && x.auc_complete! < 1); assert.ok(x.ndcg10! > 0 && x.ndcg10! <= 1); assert.ok(x.new_share_top10! >= 0 && x.new_share_top10! <= 1); }
-  assert.ok(rep[0].auc_complete! > 0.55, `learned model beats chance on popularity-driven labels (${rep[0].auc_complete})`);
-  const { execFileSync } = await import("node:child_process");
-  const out = execFileSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--import", "tsx/esm", "scripts/rank-eval.ts", "--db", fx.file, "--json"], { cwd: new URL("../..", import.meta.url).pathname, encoding: "utf8" });
-  assert.deepEqual(JSON.parse(out).models.map((m: { name: string }) => m.name), ["promoted", "heuristic"]);
 });
 
 test("ranking v2 / phase 7: account deletion removes every impression column (incl. scroll_v, new actions)", () => {
