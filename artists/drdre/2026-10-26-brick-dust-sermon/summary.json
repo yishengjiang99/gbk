@@ -1,0 +1,25 @@
+{
+ "name": "Brick Dust Sermon",
+ "ppq": 480,
+ "revision": 17,
+ "endTick": 107548,
+ "durationSec": 152.767,
+ "bars": 57,
+ "tempos": [
+  {
+   "tick": 0,
+   "microPerQuarter": 681818
+  }
+ ],
+ "timeSigs": [
+  {
+   "tick": 0,
+   "numerator": 4,
+   "denominator": 4
+  }
+ ],
+ "trackCount": 5,
+ "noteCount": 1879,
+ "ccCount": 0,
+ "pendingProposals": []
+}
