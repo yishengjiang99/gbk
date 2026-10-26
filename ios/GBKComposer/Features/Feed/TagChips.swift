@@ -44,7 +44,9 @@ struct ChipFlowLayout: Layout {
     var spacing: CGFloat = 4
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        // Ideal-size queries (nil width) get the widest single chip, so a parent never grows to fit one long row.
+        let widest = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let rows = arrange(width: proposal.width ?? widest, subviews: subviews)
         let w = rows.map { $0.width }.max() ?? 0
         let h = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0))
         return CGSize(width: proposal.width ?? w, height: h)

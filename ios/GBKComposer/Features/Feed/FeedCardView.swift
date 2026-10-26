@@ -58,6 +58,7 @@ struct FeedCardView: View {
             }
             .font(.subheadline)
             .foregroundStyle(Theme.accent)
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge) // one fixed row; past xxL it pushed the card off a 320 pt screen
         }
         .padding(20)
         .background(

@@ -9,7 +9,7 @@ import AVFoundation
 /// (docs/social/screenshots/web-feed-*.png).
 @MainActor
 final class FeedCardVizSnapshotTests: XCTestCase {
-    static let longTags = ["cinematic", "e-flat-major", "epic", "film-score", "heroic", "horns", "orchestral", "timpani",
+    nonisolated static let longTags = ["cinematic", "e-flat-major", "epic", "film-score", "heroic", "horns", "orchestral", "timpani",
                            "a-very-long-tag-that-is-wider-than-the-card"]
 
     static func song(tags: [String] = longTags, labels: [String] = ["classical", "cinematic"]) -> Song {
@@ -118,7 +118,9 @@ final class FeedCardVizSnapshotTests: XCTestCase {
         // The card never grows past the 320 pt screen, even with a tag wider than the card at AX3.
         let card320 = UIHostingController(rootView: FeedCardView(song: Self.song(), playback: nil)
             .environmentObject(AuthStore.shared).dynamicTypeSize(.accessibility3))
-        XCTAssertLessThanOrEqual(card320.sizeThatFits(in: CGSize(width: 320, height: 2000)).width, 320.5)
+        XCTAssertLessThanOrEqual(card320.sizeThatFits(in: CGSize(width: 320, height: 2000)).width, 320.5, "card")
+        let chips320 = UIHostingController(rootView: TagChips(labels: ["classical"], tags: Self.longTags).dynamicTypeSize(.accessibility3))
+        XCTAssertLessThanOrEqual(chips320.sizeThatFits(in: CGSize(width: 248, height: 4000)).width, 248.5, "chips")
         let flow = UIHostingController(rootView: TagChips(labels: ["classical"], tags: Self.longTags).frame(width: 280))
         XCTAssertGreaterThan(flow.sizeThatFits(in: CGSize(width: 280, height: 2000)).height,
                              UIHostingController(rootView: TagChip(text: "#x", isLabel: false)).sizeThatFits(in: CGSize(width: 280, height: 100)).height * 2,
