@@ -92,10 +92,8 @@ struct Song: Codable, Hashable, Identifiable {
 
     var id: String { slug }
     var mp3URL: URL? { media?.mp3.flatMap(URL.init(string:)) }
-    var wavURL: URL? { media?.wav.flatMap(URL.init(string:)) }
-    /// What the feed plays: lossless WAV (PCM) when the server has one; MP3 only for songs without a WAV
-    /// (older shares, e.g. `media.wav == null`), decoded to the same PCM path.
-    var audioURL: URL? { wavURL ?? mp3URL }
+    /// What the feed plays: the song's MIDI, sequenced live through SF2Engine (no MP3/WAV playback).
+    var midiURL: URL? { media?.midi.flatMap(URL.init(string:)) }
 }
 
 /// Generic cursor page: `{ items: [...], next_cursor }`.

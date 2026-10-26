@@ -1,3 +1,4 @@
+import QuartzCore
 import XCTest
 @testable import GBKComposer
 
@@ -117,42 +118,53 @@ final class SpectrumTests: XCTestCase {
     }
 }
 
-/// Real audio, no mocks: decode a bundled WAV / mp3 (220 Hz + 1 kHz, 2 s) through the same DecodedPCM path the
-/// feed uses, then read bars + waveform at a playhead exactly like the card's Canvas does each frame.
-final class RealAudioVisualizerTests: XCTestCase {
-    func testDecodedWavDrivesBarsAndWaveform() throws { try check(ext: "wav") }
-    /// MP3 is only the fallback for songs without `media.wav`.
-    func testDecodedMp3FallbackDrivesBarsAndWaveform() throws { try check(ext: "mp3") }
+/// Real audio, no mocks: a real MIDI file sequenced through the real SF2Engine + GeneralUser GS bank, pushed
+/// through the exact tap block the feed installs on the engine output, then read like the card's Canvas does.
+final class LiveSF2VisualizerTests: XCTestCase {
+    private func fixtureMIDI() throws -> URL {
+        try XCTUnwrap(Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mid", subdirectory: "Fixtures")
+                      ?? Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mid"))
+    }
 
-    private func check(ext: String) throws {
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: ext, subdirectory: "Fixtures")
-                                ?? Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: ext))
-        let pcm = try DecodedPCM.decode(fileURL: url)
-        let buffer = try XCTUnwrap(pcm.buffer, "playback buffer is the same PCM the analyzer reads")
-        XCTAssertEqual(Int(buffer.frameLength), pcm.samples.count)
-        XCTAssertGreaterThan(pcm.samples.count, Int(pcm.sampleRate * 1.5), "decoded ~2 s of audio")
+    func testRealSF2RenderThroughTapDrivesBarsAndWaveform() throws {
+        let sfURL = try XCTUnwrap(SoundFontStore.bundledURL, "GeneralUser-GS.sf2 is bundled in the app")
+        let probe = try LiveRenderProbe.run(midi: Data(contentsOf: fixtureMIDI()), soundFont: sfURL, seconds: 2.5)
+        let scope = probe.scope
+        XCTAssertTrue(probe.sawAudio, "tap saw non-silent output")
 
         let analyzer = SpectrumAnalyzer()
-        var t = 1.0
-        analyzer.source = pcm
-        analyzer.clock = { t }
+        analyzer.source = scope
         let bars = analyzer.bars(now: 0)
         XCTAssertEqual(bars.count, FeedVisuals.barCount)
         XCTAssertGreaterThan(bars.max() ?? 0, 0.5, "spectrum not flat while playing")
-        let bands = SpectrumMath.logBands(fftSize: FeedVisuals.fftSize, sampleRate: pcm.sampleRate)
-        for f in [220.0, 1000.0] {
-            let bin = Int(f / pcm.sampleRate * Double(FeedVisuals.fftSize))
-            let b = try XCTUnwrap(bands.firstIndex { $0.contains(bin) })
-            XCTAssertGreaterThan(bars[b], 0.5, "\(f) Hz bar lit")
-        }
+        XCTAssertGreaterThan(bars.filter { $0 > 0.2 }.count, 4, "several bars lit by the chord + melody")
         let wave = analyzer.waveform()
         XCTAssertEqual(wave.count, FeedVisuals.waveformPoints)
-        XCTAssertGreaterThan(wave.map(abs).max() ?? 0, 0.2, "waveform has amplitude")
+        XCTAssertGreaterThan(wave.map(abs).max() ?? 0, 0.05, "waveform has amplitude")
 
-        // Before decode (no source) and past the end: silence, as on a non-playing card.
-        t = 10
-        XCTAssertEqual(analyzer.waveform().map(abs).max(), 0)
         analyzer.source = nil
         XCTAssertNil(analyzer.latestSamples())
+    }
+
+    /// Whole live chain on the simulator: FeedPlayer → SF2MIDIPlayer (AVAudioEngine) → output tap → analyzer.
+    @MainActor
+    func testFeedPlayerStartsLiveAudioAndBars() async throws {
+        SoundFontStore.shared.preload()
+        _ = await SoundFontStore.shared.load().value
+        let player = FeedPlayer()
+        player.play(slug: "fixture", url: try fixtureMIDI(), next: nil)
+        let deadline = Date().addingTimeInterval(8)
+        while player.lastTimeToFirstAudio == nil && Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        guard let ttfa = player.lastTimeToFirstAudio else {
+            player.pause()
+            throw XCTSkip("no audio output device on this simulator host (engine never rendered)")
+        }
+        print("timeToFirstAudio(local MIDI, bank preloaded) = \(ttfa) s")
+        XCTAssertLessThan(ttfa, 1.0)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertGreaterThan(player.analyzer.bars(now: CACurrentMediaTime()).max() ?? 0, 0.3)
+        XCTAssertGreaterThan(player.analyzer.waveform().map(abs).max() ?? 0, 0.02)
+        XCTAssertGreaterThan(player.currentSeconds(for: "fixture") ?? 0, 0)
+        player.pause()
     }
 }

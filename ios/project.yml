@@ -19,14 +19,15 @@ packages:
   SF2Player:
     url: https://github.com/yishengjiang99/sf2player-swift.git
     revision: 6ce4941247d1dcd178da5c71b9279a9cf91fc007
+  # SMF reader + sequencer + real-time AVAudioEngine player, vendored from earsheet (Packages/SF2Player/VENDORED.md).
+  SF2PlayerLocal:
+    path: Packages/SF2Player
   HearSheetCore:
     path: Packages/HearSheetCore
   # Sheet-music recognition (AGPL-3.0, port of liebharc/homr). Vendored copy of omr-sheet-cam's
   # Packages/omr-homr-ios (see Packages/omr-homr-ios/VENDORED.md for the pinned SHA and update steps).
   OMRHomrIOS:
     path: Packages/omr-homr-ios
-# TODO: playback is not built on SF2Engine yet. Copy the sequencer and MIDI parsing from
-#       earsheet's Packages/SF2Player when wiring SF2 playback.
 targets:
   GBKComposer:
     type: application
@@ -48,9 +49,14 @@ targets:
       - path: HumModel
         type: folder
         optional: true
+      # GeneralUser GS 2.0.2 (32 MB, sha256 c278464b… = sf2player-swift soundfont.lock), the feed's live synth bank.
+      - path: ../public/static/GeneralUser-GS.sf2
+        buildPhase: resources
     dependencies:
       - package: SF2Player
         product: SF2Engine
+      - package: SF2PlayerLocal
+        product: SF2Player
       - package: HearSheetCore
       - package: OMRHomrIOS
         product: OMRHomrIOS

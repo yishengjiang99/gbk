@@ -1,66 +1,63 @@
 import Accelerate
 import AVFoundation
+import QuartzCore
 
-/// One song as PCM in memory: `buffer` is what AVAudioPlayerNode plays, `samples` is its mono mixdown that the
-/// spectrum + waveform read at the node's clock. Same audio, same timeline, no tap needed.
-final class DecodedPCM: @unchecked Sendable {
-    let samples: [Float]
-    let sampleRate: Double
-    let buffer: AVAudioPCMBuffer?
+/// Mono ring of the engine's live output, filled by an `installTap` on the feed player's main mixer.
+/// Tap buffers arrive in blocks (~10-100 ms); `latest` slides through the newest block by wall clock so the
+/// waveform and bars move every frame instead of jumping per block.
+final class OutputScope: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ring: [Float]
+    private var written = 0          // total frames ever written
+    private var lastBlock = 0        // frames in the newest block
+    private var lastBlockAt: CFTimeInterval = 0
+    private(set) var sampleRate: Double = 44_100
 
-    init(samples: [Float], sampleRate: Double, buffer: AVAudioPCMBuffer? = nil) {
-        self.samples = samples
-        self.sampleRate = sampleRate > 0 ? sampleRate : 44_100
-        self.buffer = buffer
+    init(capacity: Int = 16_384) { ring = [Float](repeating: 0, count: capacity) }
+
+    /// Tap thread: push one block of non-interleaved float audio (channels averaged).
+    func push(_ buffer: AVAudioPCMBuffer, at now: CFTimeInterval = CACurrentMediaTime()) {
+        guard let ch = buffer.floatChannelData else { return }
+        let n = Int(buffer.frameLength), c = Int(buffer.format.channelCount)
+        guard n > 0, c > 0 else { return }
+        var mono = [Float](repeating: 0, count: n)
+        mono.withUnsafeMutableBufferPointer { m in
+            let mp = m.baseAddress!
+            for k in 0..<c { vDSP_vadd(mp, 1, ch[k], 1, mp, 1, vDSP_Length(n)) }
+            var s = 1 / Float(c)
+            vDSP_vsmul(mp, 1, &s, mp, 1, vDSP_Length(n))
+        }
+        push(mono, sampleRate: buffer.format.sampleRate, at: now)
     }
 
-    var duration: Double { Double(samples.count) / sampleRate }
+    func push(_ mono: [Float], sampleRate rate: Double, at now: CFTimeInterval = CACurrentMediaTime()) {
+        lock.lock(); defer { lock.unlock() }
+        sampleRate = rate > 0 ? rate : 44_100
+        let cap = ring.count
+        for v in mono { ring[written % cap] = v; written += 1 }
+        lastBlock = mono.count
+        lastBlockAt = now
+    }
 
-    /// `count` samples ending at `seconds` (zero-padded outside the song), oldest first.
-    func window(endingAt seconds: Double, count: Int) -> [Float] {
-        var out = [Float](repeating: 0, count: count)
-        guard seconds.isFinite, !samples.isEmpty else { return out }
-        let end = Int((seconds * sampleRate).rounded(.down))
-        let start = end - count
-        let lo = max(start, 0), hi = min(end, samples.count)
-        guard lo < hi else { return out }
-        for i in lo..<hi { out[i - start] = samples[i] }
+    /// `count` samples ending at the interpolated "now" inside the newest block, oldest first.
+    func latest(_ count: Int, now: CFTimeInterval = CACurrentMediaTime()) -> [Float] {
+        lock.lock(); defer { lock.unlock() }
+        let cap = ring.count, n = min(count, cap)
+        var out = [Float](repeating: 0, count: n)
+        guard written > 0 else { return out }
+        let into = min(Double(lastBlock), max(0, (now - lastBlockAt) * sampleRate))
+        let end = written - lastBlock + Int(into)
+        for i in 0..<n {
+            let idx = end - n + i
+            if idx >= 0 && idx > written - cap { out[i] = ring[idx % cap] }
+        }
         return out
     }
 
-    /// Read a WAV (or, as fallback, MP3/M4A) file into one float PCM buffer plus its mono mixdown.
-    static func decode(fileURL: URL) throws -> DecodedPCM {
-        let file = try AVAudioFile(forReading: fileURL, commonFormat: .pcmFormatFloat32, interleaved: false)
-        let format = file.processingFormat
-        let frames = AVAudioFrameCount(max(file.length, 0))
-        guard frames > 0, let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
-            return DecodedPCM(samples: [], sampleRate: format.sampleRate)
-        }
-        try file.read(into: buf)
-        let n = Int(buf.frameLength), channels = Int(format.channelCount)
-        var mono = [Float](repeating: 0, count: n)
-        if let ch = buf.floatChannelData, channels > 0 {
-            let scale = 1 / Float(channels)
-            mono.withUnsafeMutableBufferPointer { m in
-                guard let mp = m.baseAddress else { return }
-                for c in 0..<channels { vDSP_vadd(mp, 1, ch[c], 1, mp, 1, vDSP_Length(n)) }
-                var k = scale
-                vDSP_vsmul(mp, 1, &k, mp, 1, vDSP_Length(n))
-            }
-        }
-        return DecodedPCM(samples: mono, sampleRate: format.sampleRate, buffer: buf)
-    }
-
-    /// Download `url` (or read it if it's a file URL) and decode it off the main thread.
-    static func load(url: URL) async throws -> DecodedPCM {
-        if url.isFileURL { return try await Task.detached(priority: .userInitiated) { try decode(fileURL: url) }.value }
-        let (tmp, _) = try await URLSession.shared.download(from: url)
-        let ext = url.lastPathComponent == "wav" || url.pathExtension == "wav" ? "wav"
-            : (url.lastPathComponent == "mp3" ? "mp3" : (url.pathExtension.isEmpty ? "wav" : url.pathExtension))
-        let local = FileManager.default.temporaryDirectory.appendingPathComponent("feed-\(UUID().uuidString).\(ext)")
-        try FileManager.default.moveItem(at: tmp, to: local)
-        defer { try? FileManager.default.removeItem(at: local) }
-        return try await Task.detached(priority: .userInitiated) { try decode(fileURL: local) }.value
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        for i in ring.indices { ring[i] = 0 }
+        written = 0; lastBlock = 0
     }
 }
 
@@ -75,9 +72,8 @@ final class SpectrumAnalyzer {
     private var bands: [Range<Int>] = []
     private var bandsRate: Double = 0
     private var lastTime: Double?
-    /// Decoded audio of the playing item and the player's clock (seconds); both nil → silence.
-    var source: DecodedPCM?
-    var clock: (() -> Double?)?
+    /// Live output of the playing engine (tap); nil → silence.
+    var source: OutputScope?
 
     init(fftSize: Int = FeedVisuals.fftSize) {
         n = fftSize
@@ -95,7 +91,7 @@ final class SpectrumAnalyzer {
     func bars(now: Double) -> [Float] {
         let dt = lastTime.map { now - $0 } ?? 0
         lastTime = now
-        guard let source, let samples = latestSamples() else {
+        guard let source, let samples = latestSamples(now: now) else {
             levels = SpectrumMath.smooth(previous: levels, target: levels.map { _ in 0 }, dt: dt); return levels
         }
         if source.sampleRate != bandsRate {
@@ -107,10 +103,10 @@ final class SpectrumAnalyzer {
         return levels
     }
 
-    /// The `fftSize` samples leading up to the playhead (what web's AnalyserNode sees), or nil before decode.
-    func latestSamples() -> [Float]? {
-        guard let source, let t = clock?() else { return nil }
-        return source.window(endingAt: t, count: n)
+    /// The newest `fftSize` output samples (what web's AnalyserNode sees), or nil before decode.
+    func latestSamples(now: Double? = nil) -> [Float]? {
+        guard let source else { return nil }
+        return source.latest(n)
     }
 
     /// 256-point waveform at the playhead (web getFloatTimeDomainData), flat before decode.

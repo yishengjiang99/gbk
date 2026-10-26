@@ -1,35 +1,39 @@
+import Accelerate
 import AVFoundation
 import Foundation
+import os
+import QuartzCore
+import SF2Player
 
-/// Plays the visible feed item as lossless PCM through AVAudioEngine and preloads the next one.
-/// Source is the song's WAV (`media.wav`); MP3 only when a song has no WAV, decoded to the same PCM path.
+/// Feed playback: every song is its MIDI (`media.midi`) sequenced live through SF2Engine (sf2player-swift 6ce4941,
+/// GeneralUser GS 2.0.2) on AVAudioEngine, with the engine's reverb/chorus (CC91/93), compressor and brickwall
+/// limiter applied in real time. Nothing is prerendered and no MP3/WAV is played. A live loudness AGC
+/// (`SF2LoudnessAGC`, BS.1770 over 2 s blocks) steers the master-bus gain toward -16 LUFS.
 /// Song switch (Yisheng, 2026-10-25): the next song starts immediately at full volume; only the outgoing song
 /// fades out, over exactly 58 ms with gain cos(t·π/2). Started on scroll settle.
-/// The spectrum + waveform read the very buffer the AVAudioPlayerNode plays, at the node's sample clock.
+/// The spectrum + waveform read a tap on the playing engine's main mixer output.
 @MainActor
 final class FeedPlayer: ObservableObject {
     static let crossfadeDuration: TimeInterval = 0.058
     private static let fadeStep: TimeInterval = 1.0 / 240.0
+    nonisolated private static let log = Logger(subsystem: "com.grepawk.moviefone", category: "FeedPlayer")
 
     @Published private(set) var currentSlug: String?
     @Published private(set) var isPlaying = false
+    /// Seconds from `play(slug:)` to the first non-silent tap block of that song (see `timeToFirstAudio` log).
+    @Published private(set) var lastTimeToFirstAudio: Double?
 
-    private let engine = AVAudioEngine()
-    /// Two nodes so the outgoing item can fade out while the incoming one plays.
-    private var active = AVAudioPlayerNode()
-    private var standby = AVAudioPlayerNode()
-    private var activePCM: DecodedPCM?
-    private var cache: [String: DecodedPCM] = [:]
-    private var loads: [String: Task<DecodedPCM?, Never>] = [:]
+    /// Two live players (A/B) so the outgoing song can fade while the incoming one starts.
+    private var active: SF2MIDIPlayer?
+    private var standby: SF2MIDIPlayer?
+    private var midiCache: [String: Data] = [:]
+    private var midiLoads: [String: Task<Data?, Never>] = [:]
     private var fadeTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
-    private var configObserver: NSObjectProtocol?
-    /// Called once per new item started (used to count plays).
     var onStart: ((String) -> Void)?
-    /// Spectrum for the active item; cards pull from it per frame.
     let analyzer = SpectrumAnalyzer()
+    private var scope = OutputScope()
 
-    /// Session ownership lives in AudioSessionController (single owner; `.playback` unless something records).
     @MainActor static func configureAudioSession() { AudioSessionController.shared.start() }
 
     nonisolated static func fadeOutGain(_ t: Double) -> Float {
@@ -37,162 +41,191 @@ final class FeedPlayer: ObservableObject {
     }
     nonisolated static let incomingGain: Float = 1
 
-    init() {
-        engine.attach(active)
-        engine.attach(standby)
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.recoverAfterConfigChange() }
-            }
+    init() {}
+
+    private func makePlayer(_ sf: SF2SoundFont) -> SF2MIDIPlayer {
+        let p = SF2MIDIPlayer(soundFont: sf)
+        p.managesAudioSession = false // AudioSessionController owns the session (.playback, loudspeaker)
+        p.fidelity = .spec
+        p.onFinished = { [weak p] in p?.seek(to: 0); p?.play() } // loop like the old feed
+        return p
     }
 
-    private func ensureRunning() {
-        AudioSessionController.shared.start()
-        guard !engine.isRunning else { return }
-        engine.prepare()
-        try? engine.start()
-    }
-
-    private func pcm(slug: String, url: URL) -> Task<DecodedPCM?, Never> {
-        if let c = cache[slug] { return Task { c } }
-        if let t = loads[slug] { return t }
-        let t = Task<DecodedPCM?, Never> { try? await DecodedPCM.load(url: url) }
-        loads[slug] = t
+    private func midi(slug: String, url: URL) -> Task<Data?, Never> {
+        if let d = midiCache[slug] { return Task { d } }
+        if let t = midiLoads[slug] { return t }
+        let t = Task<Data?, Never> {
+            if url.isFileURL { return try? Data(contentsOf: url) }
+            guard let (d, r) = try? await URLSession.shared.data(from: url),
+                  (r as? HTTPURLResponse)?.statusCode ?? 200 == 200 else { return nil }
+            return d
+        }
+        midiLoads[slug] = t
         return t
     }
 
-    /// Call when the feed's scroll position settles on `slug`.
+    /// Call when the feed's scroll position settles on `slug`. `url` is the song's MIDI.
     func play(slug: String, url: URL, next: (slug: String, url: URL)?) {
         if currentSlug != slug {
             startTask?.cancel()
-            let hadPrevious = currentSlug != nil && isPlaying
+            let requested = CACurrentMediaTime()
             let outgoing = active
             currentSlug = slug
-            activePCM = nil
-            analyzer.source = nil
-            analyzer.reset()
             onStart?(slug)
-            // Outgoing keeps playing until the new PCM is ready, then fades.
-            let load = pcm(slug: slug, url: url)
+            let midiTask = midi(slug: slug, url: url)
+            let sfTask = SoundFontStore.shared.load()
             startTask = Task { @MainActor [weak self] in
-                guard let pcm = await load.value, !Task.isCancelled, let self, self.currentSlug == slug else { return }
-                self.loads[slug] = nil
-                self.cache[slug] = pcm
-                self.start(pcm, fadingOut: hadPrevious ? outgoing : nil)
+                guard let sf = await sfTask.value, let data = await midiTask.value,
+                      !Task.isCancelled, let self, self.currentSlug == slug else { return }
+                self.midiLoads[slug] = nil
+                self.midiCache[slug] = data
+                self.start(data: data, soundFont: sf, slug: slug, requested: requested, outgoing: outgoing)
             }
-            if !hadPrevious { outgoing.stop() }
         } else if !isPlaying {
-            ensureRunning()
-            active.play()
+            AudioSessionController.shared.start()
+            active?.play()
         }
         isPlaying = true
         if let next { preload(slug: next.slug, url: next.url) }
     }
 
-    private func start(_ pcm: DecodedPCM, fadingOut outgoing: AVAudioPlayerNode?) {
-        guard let buffer = pcm.buffer else { return }
-        fadeTask?.cancel()
-        let incoming = (outgoing === active) ? standby : active
-        engine.disconnectNodeOutput(incoming)
-        engine.connect(incoming, to: engine.mainMixerNode, format: buffer.format)
-        ensureRunning()
-        incoming.stop()
-        incoming.volume = Self.incomingGain
-        incoming.scheduleBuffer(buffer, at: nil, options: .loops)
+    private func start(data: Data, soundFont sf: SF2SoundFont, slug: String, requested: CFTimeInterval, outgoing: SF2MIDIPlayer?) {
+        let incoming = (standby.flatMap { $0 === outgoing ? nil : $0 }) ?? makePlayer(sf)
+        removeTap(incoming)
+        do { try incoming.load(midi: data) } catch {
+            Self.log.error("MIDI load failed for \(slug, privacy: .public): \(String(describing: error), privacy: .public)")
+            return
+        }
+        incoming.fadeGain = Self.incomingGain
+        let mixRate = incoming.engine.mainMixerNode.outputFormat(forBus: 0).sampleRate
+        let agc = SF2LoudnessAGC(sampleRate: mixRate > 0 ? mixRate : 48_000)
+        incoming.setMasterGainDb(agc.gainDb)
+        let scope = OutputScope()
+        self.scope = scope
+        analyzer.reset()
+        analyzer.source = scope
+        installTap(on: incoming, scope: scope, agc: agc, slug: slug, requested: requested)
+        AudioSessionController.shared.start()
         if isPlaying { incoming.play() }
-        if incoming !== active { standby = active; active = incoming }
-        activePCM = pcm
-        analyzer.source = pcm
-        let slug = currentSlug
-        analyzer.clock = { [weak self] in MainActor.assumeIsolated { slug.flatMap { self?.currentSeconds(for: $0) } } }
-        if let outgoing, outgoing !== incoming { fadeOut(outgoing) } else { standby.stop() }
+        fadeTask?.cancel()
+        if let outgoing, outgoing !== incoming { fadeOut(outgoing) }
+        standby = outgoing
+        active = incoming
     }
 
-    private func fadeOut(_ outgoing: AVAudioPlayerNode) {
+    /// Tap on the engine's output: feeds the spectrum/waveform scope, the loudness AGC and the first-audio timer.
+    private func installTap(on p: SF2MIDIPlayer, scope: OutputScope, agc: SF2LoudnessAGC, slug: String, requested: CFTimeInterval) {
+        let block = Self.makeTapBlock(scope: scope, agc: agc,
+            onGain: { [weak p] g in Task { @MainActor in p?.setMasterGainDb(g) } },
+            onFirstAudio: { [weak self] in
+                let dt = CACurrentMediaTime() - requested
+                Task { @MainActor in
+                    Self.log.info("timeToFirstAudio \(slug, privacy: .public) \(dt, format: .fixed(precision: 3))s")
+                    if self?.currentSlug == slug { self?.lastTimeToFirstAudio = dt }
+                }
+            })
+        p.engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil, block: block)
+    }
+
+    /// Built outside the main actor: the block runs on the audio tap thread.
+    nonisolated static func makeTapBlock(scope: OutputScope, agc: SF2LoudnessAGC,
+                                         onGain: @escaping (Double) -> Void,
+                                         onFirstAudio: @escaping () -> Void) -> AVAudioNodeTapBlock {
+        var reported = false
+        return { buffer, _ in
+            scope.push(buffer)
+            guard let ch = buffer.floatChannelData, buffer.format.channelCount >= 1 else { return }
+            let n = Int(buffer.frameLength)
+            guard n > 0 else { return }
+            let r = buffer.format.channelCount > 1 ? ch[1] : ch[0]
+            if let g = agc.push(ch[0], r, n) { onGain(g) }
+            if !reported {
+                var peak: Float = 0
+                vDSP_maxmgv(ch[0], 1, &peak, vDSP_Length(n))
+                if peak > 1e-4 { reported = true; onFirstAudio() }
+            }
+        }
+    }
+
+    private func removeTap(_ p: SF2MIDIPlayer) { p.engine.mainMixerNode.removeTap(onBus: 0) }
+
+    private func fadeOut(_ outgoing: SF2MIDIPlayer) {
+        removeTap(outgoing)
         fadeTask = Task { @MainActor in
             let start = Date()
             while !Task.isCancelled {
                 let t = Date().timeIntervalSince(start) / Self.crossfadeDuration
-                outgoing.volume = Self.fadeOutGain(t)
+                outgoing.fadeGain = Self.fadeOutGain(t)
                 if t >= 1 { break }
                 try? await Task.sleep(nanoseconds: UInt64(Self.fadeStep * 1_000_000_000))
             }
             outgoing.stop()
-            outgoing.volume = 0
+            outgoing.fadeGain = 0
         }
     }
 
-    /// Engine stopped by a route/config change (e.g. WebKit rewrote the session): restart and resume.
-    private func recoverAfterConfigChange() {
-        guard let pcm = activePCM, let buffer = pcm.buffer else { return }
-        let resume = currentSlug.flatMap { currentSeconds(for: $0) } ?? 0
-        engine.disconnectNodeOutput(active)
-        engine.connect(active, to: engine.mainMixerNode, format: buffer.format)
-        ensureRunning()
-        active.stop()
-        let startFrame = AVAudioFramePosition(resume * pcm.sampleRate)
-        if startFrame > 0, startFrame < AVAudioFramePosition(buffer.frameLength),
-           let tail = Self.slice(buffer, from: AVAudioFrameCount(startFrame)) {
-            seekOffset = resume
-            active.scheduleBuffer(tail) { [weak self] in Task { @MainActor in self?.restartLoop(buffer) } }
-        } else {
-            seekOffset = 0
-            active.scheduleBuffer(buffer, at: nil, options: .loops)
-        }
-        if isPlaying { active.play() }
-    }
-
-    private var seekOffset: Double = 0
-    private func restartLoop(_ buffer: AVAudioPCMBuffer) {
-        guard activePCM?.buffer === buffer, engine.isRunning else { return }
-        active.stop(); seekOffset = 0
-        active.scheduleBuffer(buffer, at: nil, options: .loops)
-        if isPlaying { active.play() }
-    }
-
-    private static func slice(_ b: AVAudioPCMBuffer, from start: AVAudioFrameCount) -> AVAudioPCMBuffer? {
-        let n = b.frameLength - start
-        guard let out = AVAudioPCMBuffer(pcmFormat: b.format, frameCapacity: n), let src = b.floatChannelData,
-              let dst = out.floatChannelData else { return nil }
-        for c in 0..<Int(b.format.channelCount) { dst[c].update(from: src[c] + Int(start), count: Int(n)) }
-        out.frameLength = n
-        return out
-    }
-
-    /// Seconds into the active item from the player node's sample clock (looping). nil when `slug` isn't active.
+    /// Song seconds of the active item from the real-time core's clock. nil when `slug` isn't active.
     func currentSeconds(for slug: String) -> Double? {
-        guard slug == currentSlug, let pcm = activePCM, pcm.duration > 0,
-              let nodeTime = active.lastRenderTime, let t = active.playerTime(forNodeTime: nodeTime) else { return nil }
-        let s = Double(t.sampleTime) / t.sampleRate + seekOffset
-        guard s.isFinite, s >= 0 else { return nil }
-        return s.truncatingRemainder(dividingBy: pcm.duration)
+        guard slug == currentSlug, let p = active else { return nil }
+        p.refreshPosition()
+        return p.position.seconds
     }
 
     func durationSeconds(for slug: String) -> Double? {
-        guard slug == currentSlug, let d = activePCM?.duration, d > 0 else { return nil }
+        guard slug == currentSlug, let d = active?.duration, d > 0 else { return nil }
         return d
     }
 
     func preload(slug: String, url: URL) {
-        guard cache[slug] == nil, loads[slug] == nil, slug != currentSlug else { return }
-        // Keep memory bounded: the active song plus one preloaded.
-        cache = cache.filter { $0.key == currentSlug }
-        let t = pcm(slug: slug, url: url)
+        guard midiCache[slug] == nil, midiLoads[slug] == nil, slug != currentSlug else { return }
+        midiCache = midiCache.filter { $0.key == currentSlug }
+        let t = midi(slug: slug, url: url)
         Task { @MainActor [weak self] in
-            if let p = await t.value { self?.cache[slug] = p }
-            self?.loads[slug] = nil
+            if let d = await t.value { self?.midiCache[slug] = d }
+            self?.midiLoads[slug] = nil
         }
     }
 
     func toggle() {
-        if isPlaying { active.pause() } else { ensureRunning(); active.play() }
+        if isPlaying { active?.pause() } else { AudioSessionController.shared.start(); active?.play() }
         isPlaying.toggle()
     }
 
     func pause() {
         fadeTask?.cancel()
-        active.pause()
-        standby.stop()
+        active?.pause()
+        standby?.stop()
         isPlaying = false
+    }
+}
+
+
+/// Drives the real SF2 core block-by-block (like the audio thread) through the same tap block the feed installs,
+/// for tests and diagnostics. Not a prerender for playback: output goes only to the scope / AGC.
+enum LiveRenderProbe {
+    struct Result { let scope: OutputScope; let gains: [Double]; let sawAudio: Bool }
+
+    static func run(midi: Data, soundFont url: URL, seconds: Double, sampleRate rate: Double = 48_000, block: Int = 1024) throws -> Result {
+        let sf = try SF2SoundFont(data: Data(contentsOf: url, options: .mappedIfSafe), options: .lenient)
+        let song = try SMFSong(data: midi)
+        let plan = try SF2SequenceBuilder.plan(song: song, soundFont: sf, sampleRate: rate, fidelity: .spec)
+        let core = SF2RealtimeCore(sampleRate: rate)
+        core.setSequence(SF2CompiledSequence(plan: plan))
+        let agc = SF2LoudnessAGC(sampleRate: rate)
+        core.setMasterGainDb(agc.gainDb)
+        core.play()
+        let scope = OutputScope()
+        var gains: [Double] = [], saw = false
+        let tap = FeedPlayer.makeTapBlock(scope: scope, agc: agc, onGain: { gains.append($0); core.setMasterGainDb($0) },
+                                          onFirstAudio: { saw = true })
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2) else { return Result(scope: scope, gains: [], sawAudio: false) }
+        for i in 0..<Int(rate * seconds) / block {
+            guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(block)),
+                  let ch = buf.floatChannelData else { break }
+            buf.frameLength = AVAudioFrameCount(block)
+            core.render(ch[0], ch[1], block)
+            tap(buf, AVAudioTime(sampleTime: AVAudioFramePosition(i * block), atRate: rate))
+        }
+        return Result(scope: scope, gains: gains, sawAudio: saw)
     }
 }

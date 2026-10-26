@@ -1,0 +1,24 @@
+SF2Player — SMF reader, sequencer and AVAudioEngine player for AI Camera - Music Reader
+(the SoundFont 2 synth is the shared SF2Engine package, github.com/yishengjiang99/sf2player-swift, same license)
+Copyright (C) 2026 Yisheng Jiang
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Affero General Public License for more details.
+
+The full license text is in the repository root LICENSE
+(https://github.com/yishengjiang99/omr-sheet-cam/blob/main/LICENSE, also
+https://www.gnu.org/licenses/agpl-3.0.txt). Third-party credits are in the root NOTICE.
+
+SF2Player is a Swift port of yishengjiang99/gbk (commit b43f004a7e95321d2decde2e604350b014dcd105:
+sf2-parser.ts, src/sf2-renderer.ts, src/midi-timer.worker.ts, midireader.tsx export path) by the
+same author.
+
+The GeneralUser GS SoundFont (models/GeneralUser-GS.sf2, fetched by scripts/fetch-models, not in
+git) is by S. Christian Collins under the GeneralUser GS License v2.0; see the root NOTICE.
