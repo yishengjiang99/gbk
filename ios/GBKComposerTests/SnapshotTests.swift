@@ -65,6 +65,19 @@ final class SnapshotTests: XCTestCase {
         XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, "dark appearance should be clearly darker")
     }
 
+    /// Live bars: the card's analyzer reads a scope filled by the real SF2 render of the MIDI fixture through the feed's tap block.
+    func testFeedCardLiveBarsFromRealSF2Audio() throws {
+        let midi = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mid", subdirectory: "Fixtures")
+                                 ?? Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mid"))
+        let probe = try LiveRenderProbe.run(midi: Data(contentsOf: midi), soundFont: XCTUnwrap(SoundFontStore.bundledURL), seconds: 1.5)
+        let analyzer = SpectrumAnalyzer()
+        analyzer.source = probe.scope
+        let playback = CardPlayback(time: { 1.5 }, duration: { 20 }, analyzer: analyzer, isPlaying: true)
+        let card = ZStack { Theme.background.ignoresSafeArea(); FeedCardView(song: PreviewFixtures.song, playback: playback) }
+        _ = try render(card, name: "feed-card-live-bars-light", style: .light)
+        XCTAssertGreaterThan(analyzer.bars(now: CACurrentMediaTime()).max() ?? 0, 0.3)
+    }
+
     func testSignInLightAndDark() throws {
         let view = ZStack { Theme.background.ignoresSafeArea(); SignInView(reason: "Sign in to rate songs.") }
         let light = try render(view, name: "sign-in-light", style: .light)
