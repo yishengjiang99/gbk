@@ -118,7 +118,7 @@ final class SpectrumTests: XCTestCase {
     }
 }
 
-/// Real audio, no mocks: a real MIDI file sequenced through the real SF2Engine + GeneralUser GS bank, pushed
+/// Real audio, no mocks: a real 20 s MIDI file sequenced through the real SF2Engine + GeneralUser GS bank, pushed
 /// through the exact tap block the feed installs on the engine output, then read like the card's Canvas does.
 final class LiveSF2VisualizerTests: XCTestCase {
     private func fixtureMIDI() throws -> URL {
@@ -141,7 +141,7 @@ final class LiveSF2VisualizerTests: XCTestCase {
         XCTAssertGreaterThan(bars.filter { $0 > 0.2 }.count, 4, "several bars lit by the chord + melody")
         let wave = analyzer.waveform()
         XCTAssertEqual(wave.count, FeedVisuals.waveformPoints)
-        XCTAssertGreaterThan(wave.map(abs).max() ?? 0, 0.05, "waveform has amplitude")
+        XCTAssertGreaterThan(wave.map(abs).max() ?? 0, 0.02, "waveform has amplitude (0.8 headroom, no limiter boost)")
 
         analyzer.source = nil
         XCTAssertNil(analyzer.latestSamples())
