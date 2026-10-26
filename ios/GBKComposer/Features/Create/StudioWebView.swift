@@ -221,7 +221,7 @@ struct WebView: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if Self.isPurchaseLink(action.request.url) {
                 decisionHandler(.cancel)
-                Task { @MainActor in PurchaseStore.shared.showPaywall = true }
+                Task { @MainActor in PurchaseStore.shared.presentPaywall(reason: "studio_link") }
             } else {
                 decisionHandler(.allow)
             }

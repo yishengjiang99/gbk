@@ -25,6 +25,8 @@ struct PaywallView: View {
                 .padding(24)
             }
             .background(Theme.background.ignoresSafeArea())
+            .onAppear { BillingEventLogger.shared.paywallView(reason: store.paywallReason) }
+            .onDisappear { BillingEventLogger.shared.paywallDismiss() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) { Button("Restore") { Task { await store.restore() } } }
@@ -42,7 +44,9 @@ struct PaywallView: View {
 
     private func option(_ item: StoreCatalog.Item) -> some View {
         let isOn = selected == item.id
-        return Button { selected = item.id } label: {
+        return Button {
+            if selected != item.id { selected = item.id; BillingEventLogger.shared.planSelect(plan: item.id) }
+        } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title).font(.headline).foregroundStyle(Theme.text)
@@ -92,7 +96,7 @@ struct PaywallView: View {
 struct ProButton: View {
     @ObservedObject var store = PurchaseStore.shared
     var body: some View {
-        Button { store.showPaywall = true } label: { Label(store.isPro ? "Pro" : "Get Pro", systemImage: "crown.fill") }
+        Button { store.presentPaywall(reason: "profile") } label: { Label(store.isPro ? "Pro" : "Get Pro", systemImage: "crown.fill") }
             .accessibilityIdentifier("getPro")
     }
 }

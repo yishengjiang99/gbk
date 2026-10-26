@@ -14,21 +14,29 @@ final class PurchaseStore: ObservableObject {
     @Published var message: String?
     /// Drives the app-wide paywall sheet (RootTabView).
     @Published var showPaywall = false
+    /// Why the paywall was opened (the `paywall_view` event's `reason`, #119); set by presentPaywall.
+    private(set) var paywallReason = "manual"
 
     private var updates: Task<Void, Never>?
     private let verifier: IAPVerifying
     private let accountId: @MainActor () -> String?
     private let serverPro: @MainActor () -> Bool
+    private let billing: BillingEventLogger
     private var localPro = false
     private var meSub: AnyCancellable?
 
     init(verifier: IAPVerifying = IAPVerificationServices.current,
          accountId: @escaping @MainActor () -> String? = { AuthStore.shared.me?.id },
-         serverPro: @escaping @MainActor () -> Bool = { AuthStore.shared.me?.hasActivePro() ?? false }) {
+         serverPro: @escaping @MainActor () -> Bool = { AuthStore.shared.me?.hasActivePro() ?? false },
+         billing: BillingEventLogger = .shared) {
         self.verifier = verifier
         self.accountId = accountId
         self.serverPro = serverPro
+        self.billing = billing
     }
+
+    /// Open the paywall sheet, remembering why so the view event can carry the reason (#119).
+    func presentPaywall(reason: String) { paywallReason = reason; showPaywall = true }
 
     /// Pro = StoreKit entitlement on this device OR server `/api/me` `pro` (Stripe or Apple, any device).
     func recompute() { isPro = localPro || serverPro() }
@@ -59,19 +67,32 @@ final class PurchaseStore: ObservableObject {
         guard let product = products[item.id] else { message = "This item isn't available right now."; return }
         purchasing = item.id
         defer { purchasing = nil }
+        billing.purchaseStart(plan: item.id)
         do {
             switch try await product.purchase(options: [.appAccountToken(appAccountToken)]) {
-            case .success(let result): await handle(result)
-            case .pending: message = "Purchase pending approval."
-            case .userCancelled: break
+            case .success(let result):
+                billing.purchaseResult(plan: item.id, .success)
+                await handle(result)
+            case .pending:
+                billing.purchaseResult(plan: item.id, .pending)
+                message = "Purchase pending approval."
+            case .userCancelled:
+                billing.purchaseResult(plan: item.id, .cancelled)
             @unknown default: break
             }
-        } catch { message = "Purchase failed. Please try again." }
+        } catch {
+            billing.purchaseResult(plan: item.id, .failed)
+            message = "Purchase failed. Please try again."
+        }
     }
 
     func restore() async {
-        do { try await AppStore.sync() } catch { message = "Couldn't reach the App Store."; return }
+        do { try await AppStore.sync() } catch {
+            billing.restore(.failed)
+            message = "Couldn't reach the App Store."; return
+        }
         await refreshEntitlements(resubmit: true)
+        billing.restore(isPro ? .success : .none)
         message = isPro ? "Purchases restored." : "No purchases to restore."
     }
 

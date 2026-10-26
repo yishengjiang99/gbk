@@ -27,6 +27,7 @@ struct GBKComposerApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await PushManager.shared.refresh() } }
+            if phase == .background { BillingEventLogger.shared.suspend() }
         }
     }
 }
