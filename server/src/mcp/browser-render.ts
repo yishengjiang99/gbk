@@ -11,7 +11,7 @@
 import { execSync } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, writeFileSync, renameSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Config } from "../config.ts";
 import type { Project } from "../../../src/workstation/model.ts";
@@ -47,8 +47,13 @@ export function resolveSoundFontPath(cfg: Config): string {
 
 /** A built in-chat player asset (scripts/build-widget.mjs -> server/dist/widget/), next to the bundle or in the checkout. */
 export function resolveWidgetAsset(file: string): string {
+  const safe = basename(file);
+  if (safe !== file || safe.includes("..") || !/^[A-Za-z0-9._-]+$/.test(safe)) {
+    throw new McpError("NOT_FOUND", `invalid widget asset name: ${file}`);
+  }
+
   const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [join(here, "widget", file), join(process.cwd(), "server", "dist", "widget", file), join(here, "..", "..", "dist", "widget", file)];
+  const candidates = [join(here, "widget", safe), join(process.cwd(), "server", "dist", "widget", safe), join(here, "..", "..", "dist", "widget", safe)];
   for (const c of candidates) if (existsSync(c)) return c;
 
   try {
@@ -59,7 +64,7 @@ export function resolveWidgetAsset(file: string): string {
     // fall through to the typed not-found below so the route reports a clean 404 instead of a server crash.
   }
 
-  throw new McpError("NOT_FOUND", `widget asset ${file} not built (run node scripts/build-widget.mjs)`);
+  throw new McpError("NOT_FOUND", `widget asset ${safe} not built (run node scripts/build-widget.mjs)`);
 }
 
 /** What the render service needs from the browser bridge: the account's live Studio tab, if any. */
