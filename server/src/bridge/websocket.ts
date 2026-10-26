@@ -122,8 +122,16 @@ export class AgentHub {
     if (!this.slots.acquire(conn.user)) {
       // A run whose tab closed is only waiting out the reconnect grace. A new message from a live tab supersedes it
       // (the user can't see or stop it), so abort it and take the slot instead of answering RUN_ACTIVE for minutes.
-      const orphans = [...this.runs.values()].filter((r) => r.user === conn.user && r.conn && r.conn !== conn && !r.conn.alive);
-      if (orphans.length) { for (const r of orphans) r.abort.abort(); await Promise.race([Promise.all(orphans.map((r) => r.done)), new Promise((ok) => setTimeout(ok, 5000))]); this.log({ evt: "run_superseded", user: conn.user, n: orphans.length }); }
+      const orphanIds = [...this.runs].filter(([, r]) => r.user === conn.user && r.conn && r.conn !== conn && !r.conn.alive).map(([id]) => id);
+      const orphans = orphanIds.map((id) => this.runs.get(id)!);
+      // An orphan may already have been adopted by this (or another live) tab after the disconnect and be waiting on a
+      // tool call there: aborting alone leaves that call pending until its timeout. Cancel its calls on every live link.
+      if (orphans.length) { for (const r of orphans) r.abort.abort();
+        for (const l of new Set([conn, this.registry.get(conn.user)].filter((x): x is BrowserConnection => !!x))) for (const id of orphanIds) {
+          for (const callId of l.pending.idsFor(id)) l.emit({ type: "cancel_call", runId: id, callId });
+          l.pending.rejectAll("OPERATION_CANCELLED", "superseded by a new message", id);
+        }
+        await Promise.race([Promise.all(orphans.map((r) => r.done)), new Promise((ok) => setTimeout(ok, 5000))]); this.log({ evt: "run_superseded", user: conn.user, n: orphans.length }); }
       if (!this.slots.acquire(conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "a run is already in progress; stop it or wait" });
     }
     const model = typeof m.model === "string" && m.model ? m.model : this.cfg.llm.model;

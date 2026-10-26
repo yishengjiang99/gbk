@@ -89,6 +89,7 @@ html:has(.ds), html:has(.ds) body { background: #ffffff; overflow: hidden; }
 .ds-roll .ws-tooltip { background: rgba(17,17,17,.85); color: #fff; font-size: 12px; }
 .ds-empty { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; pointer-events: none; }
 .ds-empty > * { pointer-events: auto; }
+.ds-ruler { height: 18px; flex: none; position: relative; border-bottom: 1px solid var(--line); user-select: none; }
 .ds-vel { height: 64px; flex: none; position: relative; border-top: 1px solid var(--line); }
 .ds-vlabel { position: absolute; left: 40px; top: 3px; z-index: 2; pointer-events: none; }
 

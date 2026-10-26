@@ -281,6 +281,9 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
     await (await studioReveal(page, "tab-composer")).click();
     await expect(page.getByText("Gate resume prompt").first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("composer-input")).toHaveValue("");
+    // Stop the resumed run: it must not outlive this test and be adopted by the next tab of the same account.
+    const stop = page.getByTestId("composer-stop"); if (await stop.isVisible()) await stop.click();
+    await expect(stop).toHaveCount(0, { timeout: 30_000 });
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
 

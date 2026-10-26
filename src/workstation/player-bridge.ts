@@ -64,7 +64,7 @@ class PlayerBridge {
     } catch (e) { reportError(e, { where: "player-bridge.parseSmf", name: nm }); /* unsupported file: leave project unchanged */ }
   }
   onSongLoaded() { const w = this.songWaiters; this.songWaiters = []; w.forEach((f) => f()); }
-  onTime(sec: number) { const c = this.ctrl; if (!c) return; c.updateTransport({ positionTick: secToTick(c.project, sec) }); }
+  onTime(sec: number) { const c = this.ctrl; if (!c || (this.loadedProjectId !== null && this.loadedProjectId !== c.project.id)) return; c.updateTransport({ positionTick: secToTick(c.project, sec) }); }
   playerPlaying = false;
   private playingWaiters: (() => void)[] = [];
   onPlaying(playing: boolean) {
@@ -87,7 +87,11 @@ class PlayerBridge {
   waitSong(): Promise<void> { return new Promise((r) => this.songWaiters.push(r)); }
   loadProject(p: Project, autoplay: boolean, startSec: number): Promise<void> {
     const h = this.handle!;
-    const bytes = serializeSmf(p);
+    const off = new Set(this.ctrl?.getState().automationOff ?? []);
+    const bytes = serializeSmf(p, off.size ? { skipCC: (t, cc) => off.has(`${t}:${cc}`) } : {});
+    // Diagnostic (tests): CC lanes actually sent to the engine by the last load, "trackId:cc" -> event count.
+    const lanes: Record<string, number> = {}; for (const c of p.ccs) { const k = `${c.trackId}:${c.controller}`; if (!off.has(k)) lanes[k] = (lanes[k] ?? 0) + 1; }
+    (globalThis as { __gbkPlayerLoad?: unknown }).__gbkPlayerLoad = { projectId: p.id, revision: p.revision, startSec, ccLanes: lanes, at: Date.now() };
     const wait = this.waitSong();
     this.suppressNextImport = true;
     h.loadBuffer(bytes.buffer.slice(0) as ArrayBuffer, `${p.name}.mid`, { autoplay, restoreSec: startSec });
@@ -133,7 +137,9 @@ export function driverFor(c: WorkstationController): TransportDriver {
     },
     pause: () => b.handle?.pause(),
     stop: () => { b.handle?.pause(); b.handle?.seek(0); },
-    seek: (tick) => b.handle?.seek(tickToSec(c.project, tick)),
+    // Only seek the player when it holds this project: another song there would clamp the time to its own length and
+    // report that back as the playhead. Play always (re)loads from the controller's position anyway.
+    seek: (tick) => { if (b.loadedProjectId === c.project.id) b.handle?.seek(tickToSec(c.project, tick)); },
     async preview(project, startTick, endTick, signal) {
       const h = b.handle!; await h.unlockAudio();
       const startSec = tickToSec(project, startTick);
@@ -153,6 +159,16 @@ export function bindController(c: WorkstationController) {
     const key = JSON.stringify([s.project.tracks.map((t) => t.mix), s.overrides, s.project.sound ?? null]);
     if (key === lastMixKey) return; lastMixKey = key;
     if (playerBridge.loadedProjectId === s.project.id) playerBridge.applyMix();
+  });
+  // Automation Read toggled while playing: re-send the song without (or with) that lane from the playhead.
+  let lastOff = "";
+  c.subscribe((s) => {
+    const key = s.automationOff.join(","); if (key === lastOff) return; lastOff = key;
+    if (!s.transport.playing || !playerBridge.handle || playerBridge.loadedProjectId !== s.project.id) return;
+    c.updateTransport({ starting: true }); // the reload's transient "not playing" must not flip the transport
+    playerBridge.loadProject(s.project, true, tickToSec(s.project, s.transport.positionTick)).then(() => playerBridge.waitPlaying(30_000))
+      .then(() => c.updateTransport({ starting: false, playing: true }))
+      .catch((e) => { reportError(e, { where: "automation.read" }); c.updateTransport({ starting: false, playing: playerBridge.playerPlaying }); });
   });
   c.attachDriver(driverFor(c));
   // Headless: no player, no AudioContext, no unlock. Same renderer as the player's Export WAV and gbk_render_wav.

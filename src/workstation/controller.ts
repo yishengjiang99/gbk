@@ -30,6 +30,9 @@ export interface WorkstationState {
   overrides: Record<string, Partial<TrackMix>>;
   canUndo: boolean; canRedo: boolean; session?: AutonomousSession | null; activity: ActivityEntry[]; agentToolsEnabled: boolean;
   previewing: string | null;
+  /** Automation lanes switched off for playback ("trackId:controller"). Read off = the lane's CCs are not sent to the
+   * engine. Not persisted, not part of the song (export/render keep every authored CC). */
+  automationOff: string[];
 }
 /** App-provided capabilities (SoundFont presets, offline render, downloads). All optional. */
 export interface WorkstationHost {
@@ -68,7 +71,7 @@ export class WorkstationController {
   maxHistory = 200;
 
   constructor(project: Project = emptyProject()) {
-    this.state = { project, proposals: [], transport: { playing: false, positionTick: 0, audioReady: false }, overrides: {}, canUndo: false, canRedo: false, activity: [], agentToolsEnabled: false, previewing: null };
+    this.state = { project, proposals: [], transport: { playing: false, positionTick: 0, audioReady: false }, overrides: {}, canUndo: false, canRedo: false, activity: [], agentToolsEnabled: false, previewing: null, automationOff: [] };
   }
 
   // ---- subscriptions -------------------------------------------------------
@@ -377,6 +380,14 @@ export class WorkstationController {
     this.set({ overrides: o });
   }
   clearOverrides() { this.set({ overrides: {} }); }
+
+  // ---- automation playback (per lane Read) ---------------------------------
+  automationRead(trackId: string, controller: number): boolean { return !this.state.automationOff.includes(`${trackId}:${controller}`); }
+  setAutomationRead(trackId: string, controller: number, on: boolean) {
+    const k = `${trackId}:${controller}`, has = this.state.automationOff.includes(k);
+    if (on === !has) return;
+    this.set({ automationOff: on ? this.state.automationOff.filter((x) => x !== k) : [...this.state.automationOff, k] });
+  }
 
   // ---- export --------------------------------------------------------------
   prepareMidiExport(): { bytes: Uint8Array; filename: string } {

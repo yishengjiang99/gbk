@@ -28,7 +28,7 @@ import { MySongs } from "../songs/MySongs.tsx";
 import { ensureGuestSession, inNativeApp, nativePublish } from "../../agent/native-guest.ts";
 import { MIDI_UNSUPPORTED_MESSAGE } from "../../workstation/midi-input.ts";
 import { isMidiFile } from "../../workstation/midi-import.ts";
-import { tickToBarBeat, tickToSec } from "../../workstation/timing.ts";
+import { bars as barList, tickToBarBeat, tickToSec } from "../../workstation/timing.ts";
 import { lowerBound } from "../../workstation/visible.ts";
 import { selectedTrackId } from "../../workstation/live-input.ts";
 import type { Note, Project } from "../../workstation/model.ts";
@@ -161,6 +161,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
   const toggleRec = () => { const on = !armed; rig.session.setArmed(on); void rig.sink.prepare().catch(() => undefined); if (on) { setKeysOn(true); say("Recording armed: play the on-screen keys, your computer keyboard or a MIDI keyboard while the song plays."); } };
   const toggleLoop = () => { const has = p.selection.endTick > p.selection.startTick; workstation.setLoop(p.loop.enabled ? { enabled: false } : { enabled: true, startTick: has ? p.selection.startTick : 0, endTick: has ? p.selection.endTick : songEnd }); };
   const metro = useMemo(() => new Metronome(workstation), []);
+  useEffect(() => { (window as { __gbkMetronome?: Metronome }).__gbkMetronome = metro; }, [metro]);
   useEffect(() => () => metro.setOn(false), [metro]);
   const [metroOn, setMetroOn] = useState(false);
 
@@ -263,8 +264,13 @@ export function DesktopStudio(props: DesktopStudioProps) {
   // ---- automation lane (follows the roll's view) -------------------------------------------------------------------------
   const autoLane = LANES.some((l) => l.k === props.lanes[0]) ? (props.lanes[0] as number) : 7;
   const [lane, setLane] = useState<number>(autoLane); useEffect(() => setLane(autoLane), [autoLane, p.id]);
-  const [laneShow, setLaneShow] = useState(true); const [laneRead, setLaneRead] = useState(true); const [laneWrite, setLaneWrite] = useState(false);
+  const [laneShow, setLaneShow] = useState(true); const [laneWrite, setLaneWrite] = useState(false);
   const laneTrack = focusTrack ?? selTrack;
+  // Read is per (track, lane) in the controller: off = playback leaves this lane's CCs out of the engine stream.
+  const laneRead = laneTrack ? workstation.automationRead(laneTrack.id, lane) : true;
+  const setLaneRead = (on: boolean) => { if (laneTrack) workstation.setAutomationRead(laneTrack.id, lane, on); };
+  // Live audition of a Write take for the mixer lanes (volume fader / pan / expression); every lane is recorded.
+  const MIX_OF: Record<number, "volume" | "pan" | "expression"> = { 7: "volume", 10: "pan", 11: "expression" };
   const lanePts = useMemo(() => (laneTrack ? p.ccs.filter((c) => c.trackId === laneTrack.id && c.controller === lane).sort((a, b) => a.tick - b.tick) : []), [p.ccs, laneTrack?.id, lane]);
   const defaultVal = lane === 7 ? laneTrack?.mix.volume ?? 100 : lane === 10 ? laneTrack?.mix.pan ?? 64 : lane === 11 ? laneTrack?.mix.expression ?? 127 : 0;
   const valueAt = (tick: number) => lanePts[lowerBound(lanePts, tick + 1) - 1]?.value ?? defaultVal;
@@ -272,13 +278,15 @@ export function DesktopStudio(props: DesktopStudioProps) {
   const writeBuf = useRef<{ tick: number; value: number }[]>([]);
   const commitWrite = useCallback(() => {
     const b = writeBuf.current; writeBuf.current = []; const tr = laneTrack; if (!b.length || !tr) return;
+    if (MIX_OF[lane]) workstation.setOverride(tr.id, null);
     workstation.userEdit([{ op: "setCC", trackId: tr.id, channel: tr.channel, controller: lane, startTick: b[0].tick, endTick: b[b.length - 1].tick, mode: b.length > 1 ? "replace" : "merge", points: b }], { label: `write CC${lane}` });
   }, [laneTrack, lane]);
   useEffect(() => { if (!t.playing) commitWrite(); }, [t.playing, commitWrite]);
   useEffect(() => { if (!laneRead || laneWrite) return; setLaneVal(valueAt(pos)); }); // eslint-disable-line react-hooks/exhaustive-deps
   const onLaneSlider = (v: number) => {
     setLaneVal(v); if (!laneWrite || !laneTrack) return;
-    const tk = workstation.getState().transport.positionTick; const b = writeBuf.current;
+    const st = workstation.getState().transport, tk = st.positionTick; const b = writeBuf.current;
+    if (st.playing && MIX_OF[lane]) workstation.setOverride(laneTrack.id, { [MIX_OF[lane]]: v });
     if (b.length && tk <= b[b.length - 1].tick) b[b.length - 1] = { tick: b[b.length - 1].tick, value: v }; else b.push({ tick: tk, value: v });
   };
   const [laneRef, laneBox] = useBox<HTMLDivElement>();
@@ -434,6 +442,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
             : ro ? <span data-testid="readonly-banner">{ro} <button className="ds-btn" data-testid="fork-btn" onClick={() => workstation.fork()}>Fork</button></span>
             : <span className="ds-small" data-testid="forked-from">forked from <a href={appUrl(`s/${forkOf}`)}>{forkOf}</a> · your fork is private until you publish it</span>}
         </div>}
+        <Ruler project={p} view={view} snapTicks={snapTicks} />
         <div className="ds-roll" ref={rollRef}>
           {!p.tracks.length && <div className="ds-empty" data-testid="roll-empty"><span className="ds-small">No tracks yet.</span><AddTrackButton cta testId="roll-add-track" /></div>}
           {rollBox.h > 0 && <PianoRollEditor project={p} proposal={props.focus} view={view} setView={setView} height={Math.max(60, rollBox.h)} onManualScroll={props.onManualScroll} onWidth={props.onRollWidth}
@@ -539,6 +548,51 @@ function LogItem({ m, onRetry }: { m: ChatItem; onRetry: (t: string) => void }) 
     <ComposerProgress steps={m.steps ?? []} />
     {m.text && <div data-testid="assistant-text">Composer: {m.text}</div>}
     <ComposerArtifacts artifacts={m.artifacts ?? []} />
+  </div>;
+}
+
+/** Bar ruler on the roll's time axis (same zoom + scroll). Click or drag to move the playhead (snaps to the grid;
+ * Shift = free). Works while playing: the player seeks there. */
+function Ruler({ project, view, snapTicks }: { project: Project; view: View; snapTicks: number }) {
+  const cv = useRef<HTMLCanvasElement>(null); const [ref, box] = useBox<HTMLDivElement>(); const drag = useRef(false);
+  const W = box.w, H = box.h;
+  const x = (tick: number) => ROLL_KEY_W + (tick - view.scrollTick) * view.pxPerTick;
+  const endTick = view.scrollTick + Math.max(0, W - ROLL_KEY_W) / view.pxPerTick;
+  const barsMemo = useMemo(() => barList(project, Math.max(project.endTick, endTick) + project.ppq * 4), [project.timeSigs, project.ppq, project.endTick, endTick]);
+  useEffect(() => {
+    const c = cv.current; if (!c || !W || !H) return; const dpr = devicePixelRatio || 1; c.width = W * dpr; c.height = H * dpr;
+    const g = c.getContext("2d")!; let raf = 0;
+    const draw = () => {
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); const dk = rollDark(true);
+      g.fillStyle = dk ? "#1a1d25" : "#f4f5f7"; g.fillRect(0, 0, W, H);
+      const lp = project.loop; if (lp.enabled && lp.endTick > lp.startTick) { g.fillStyle = "rgba(91,91,246,0.22)"; g.fillRect(x(lp.startTick), 0, (lp.endTick - lp.startTick) * view.pxPerTick, H); }
+      g.font = "10px system-ui, sans-serif"; g.textBaseline = "middle";
+      const minLabelPx = 28; let lastLabel = -1e9;
+      for (const b of barsMemo) {
+        if (b.tick > endTick) break; const bx = x(b.tick); if (bx < ROLL_KEY_W - 1) continue;
+        g.fillStyle = dk ? "#3a3f4b" : "#c9ccd3"; g.fillRect(bx, H * 0.35, 1, H * 0.65);
+        if (b.ticksPerBeat * view.pxPerTick > 8) for (let k = 1; k * b.ticksPerBeat < b.length; k++) g.fillRect(x(b.tick + k * b.ticksPerBeat), H * 0.7, 1, H * 0.3);
+        if (bx - lastLabel >= minLabelPx) { g.fillStyle = dk ? "#aab0bd" : "#5a5f6b"; g.fillText(String(b.index), bx + 3, H * 0.4); lastLabel = bx; }
+      }
+      g.fillStyle = dk ? "#12151c" : "#e6e8ec"; g.fillRect(0, 0, ROLL_KEY_W, H);
+      const pos = workstation.getState().transport.positionTick, px = x(pos);
+      if (px >= ROLL_KEY_W - 1 && px <= W) { g.fillStyle = "#ff4081"; g.beginPath(); g.moveTo(px - 5, 0); g.lineTo(px + 5, 0); g.lineTo(px, 7); g.fill(); g.fillRect(px, 0, 2, H); }
+    };
+    const loop = () => { draw(); raf = workstation.getState().transport.playing ? requestAnimationFrame(loop) : 0; };
+    loop();
+    const unsub = workstation.subscribe((st) => { if (st.transport.playing) { if (!raf) raf = requestAnimationFrame(loop); } else { cancelAnimationFrame(raf); raf = 0; draw(); } });
+    return () => { cancelAnimationFrame(raf); unsub(); };
+  }, [project, view, W, H, barsMemo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const seekAt = (e: React.PointerEvent) => {
+    const r = cv.current!.getBoundingClientRect(); const px = Math.max(ROLL_KEY_W, e.clientX - r.left);
+    let tk = view.scrollTick + (px - ROLL_KEY_W) / view.pxPerTick; if (snapTicks > 0 && !e.shiftKey) tk = Math.round(tk / snapTicks) * snapTicks;
+    workstation.seek(Math.max(0, Math.round(tk)));
+  };
+  return <div className="ds-ruler" ref={ref} data-testid="roll-ruler" title="Click or drag to move the playhead (Shift: no snap)">
+    <canvas ref={cv} style={{ width: "100%", height: "100%", display: "block", touchAction: "none", cursor: "col-resize" }} aria-label="Timeline ruler: click or drag to seek"
+      onPointerDown={(e) => { if (e.button !== 0) return; (e.target as Element).setPointerCapture(e.pointerId); drag.current = true; seekAt(e); }}
+      onPointerMove={(e) => { if (drag.current) seekAt(e); }}
+      onPointerUp={() => { drag.current = false; }} onPointerCancel={() => { drag.current = false; }} />
   </div>;
 }
 

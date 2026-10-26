@@ -99,7 +99,7 @@ interface Ev { tick: number; order: number; seq: number; bytes: number[] }
 /** Serialize to SMF format 1. Track 0 = conductor (tempo/meter); then one MTrk per project track. */
 /** soundNrpn: also emit the project's additive voice overrides as SF2 NRPNs (9.6) at tick 0 (file export only;
  * the internal player path applies overrides directly and must not receive them twice). */
-export function serializeSmf(p: Project, opts: { soundNrpn?: boolean } = {}): Uint8Array {
+export function serializeSmf(p: Project, opts: { soundNrpn?: boolean; /** Leave out these CC lanes (automation Read off). */ skipCC?: (trackId: string, controller: number) => boolean } = {}): Uint8Array {
   const chunks: number[][] = [];
   let seq = 0;
   const conductor: Ev[] = [];
@@ -117,7 +117,7 @@ export function serializeSmf(p: Project, opts: { soundNrpn?: boolean } = {}): Ui
     const nameBytes = Array.from(new TextEncoder().encode(tr.name));
     evs.push({ tick: 0, order: -1, seq: seq++, bytes: [0xff, 0x03, ...encVlq(nameBytes.length), ...nameBytes] });
     for (const r of p.raw) if (r.trackId === tr.id) evs.push({ tick: r.tick, order: -1, seq: seq++, bytes: r.bytes });
-    for (const c of p.ccs) if (c.trackId === tr.id) evs.push({ tick: c.tick, order: c.controller === 0 || c.controller === 32 ? 0 : 4, seq: seq++, bytes: [0xb0 | c.channel, c.controller, c.value] });
+    for (const c of p.ccs) if (c.trackId === tr.id && !opts.skipCC?.(c.trackId, c.controller)) evs.push({ tick: c.tick, order: c.controller === 0 || c.controller === 32 ? 0 : 4, seq: seq++, bytes: [0xb0 | c.channel, c.controller, c.value] });
     for (const g of p.programs) if (g.trackId === tr.id) evs.push({ tick: g.tick, order: 1, seq: seq++, bytes: [0xc0 | g.channel, g.program] });
     for (const n of p.notes) if (n.trackId === tr.id) {
       evs.push({ tick: n.tick, order: 3, seq: seq++, bytes: [0x90 | n.channel, n.pitch, n.velocity] });

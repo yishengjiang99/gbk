@@ -103,3 +103,45 @@ test("desktop studio grid: clicking a track focuses it and zooms to its range (g
   await page.getByTestId("track-Melody").getByTestId("track-focus").click(); await page.getByTestId("patch-search").fill("violin"); await page.getByTestId("patch").first().click();
   await expect.poll(() => page.evaluate(() => (globalThis as any).__gbkWorkstation.project.programs.find((x: any) => x.trackId === "t_mel")?.program)).toBe(40);
 });
+
+test("desktop studio grid: automation Read/Write drive playback, the metronome clicks the first beat, the ruler seeks (follows zoom + scroll)", async ({ page }) => {
+  await open(page, 1440, 900); await seed(page);
+  await page.evaluate(() => (globalThis as any).__gbkWorkstation.edit([{ op: "setCC", trackId: "t_mel", channel: 0, controller: 11, startTick: 0, endTick: 1920, mode: "replace", points: [{ tick: 0, value: 30 }, { tick: 1920, value: 120 }] }], { label: "cc11" }));
+  const pos = () => page.evaluate(() => (globalThis as any).__gbkWorkstation.getState().transport.positionTick as number);
+  const playing = () => page.evaluate(() => (globalThis as any).__gbkWorkstation.getState().transport.playing as boolean);
+  const lanes = () => page.evaluate(() => ((globalThis as any).__gbkPlayerLoad?.ccLanes ?? null) as Record<string, number> | null);
+
+  // ruler: click seeks to the tick under the pointer (roll view: key strip + scroll + zoom), drag follows
+  const ruler = page.getByTestId("roll-ruler").locator("canvas");
+  const view = () => page.evaluate(() => { const r = document.querySelector("[data-testid=piano-roll]")!.parentElement!; return { scroll: +r.dataset.scrollTick!, ppt: +r.dataset.pxPerTick! }; });
+  const rb = (await ruler.boundingBox())!;
+  const expectAt = async (x: number) => { const v = await view(); const tk = v.scroll + (x - 36) / v.ppt; await expect.poll(pos).toBeGreaterThan(tk - 121); expect(Math.abs((await pos()) - tk)).toBeLessThanOrEqual(120 + 1); };
+  await ruler.click({ position: { x: 336, y: rb.height / 2 } }); await expectAt(336);
+  await page.getByTestId("zoom-time-in").click(); await page.getByTestId("zoom-time-in").click();
+  await ruler.click({ position: { x: 236, y: rb.height / 2 } }); await expectAt(236);
+  await page.mouse.move(rb.x + 236, rb.y + rb.height / 2); await page.mouse.down(); await page.mouse.move(rb.x + 536, rb.y + rb.height / 2, { steps: 5 }); await page.mouse.up(); await expectAt(536);
+  await page.getByTestId("zoom-fit").click();
+
+  // metronome on, play from bar 1: the first click is the downbeat at the start
+  await page.evaluate(() => (globalThis as any).__gbkWorkstation.seek(0)); await expect.poll(pos).toBe(0);
+  await page.getByTestId("metro-toggle").click();
+  await page.getByTestId("track-Melody").getByTestId("track-focus").click(); await page.getByTestId("lane-select").selectOption("11");
+  await page.getByTestId("ws-play").click(); await expect.poll(playing, { timeout: 120_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__gbkMetronome.clickTicks.length as number)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => (globalThis as any).__gbkMetronome.clickTicks[0] as number)).toBeLessThan(480 * 0.3);
+  // Read on: the lane's CCs reach the engine; Read off: the song is re-sent without them and keeps playing
+  expect((await lanes())?.["t_mel:11"]).toBe(2);
+  await expect(page.getByTestId("lane-read")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("lane-read").click(); await expect(page.getByTestId("lane-read")).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(async () => (await lanes())?.["t_mel:11"] ?? 0).toBe(0);
+  await expect.poll(playing).toBe(true);
+  await page.getByTestId("lane-read").click(); await expect.poll(async () => (await lanes())?.["t_mel:11"] ?? 0).toBe(2);
+  // Write: slider moves during playback are recorded into the lane at the playhead (one take, committed on pause)
+  await page.getByTestId("lane-write").click();
+  const t0 = await pos();
+  for (const v of [10, 60, 110]) { await page.getByTestId("lane-value").fill(String(v)); await page.waitForTimeout(250); }
+  await page.getByTestId("ws-play").click(); await expect.poll(playing).toBe(false);
+  const written = await page.evaluate((t0) => (globalThis as any).__gbkWorkstation.project.ccs.filter((c: any) => c.trackId === "t_mel" && c.controller === 11 && c.tick >= t0).map((c: any) => c.value), t0);
+  expect(written).toEqual(expect.arrayContaining([10, 60, 110]));
+  await page.getByTestId("lane-write").click();
+});

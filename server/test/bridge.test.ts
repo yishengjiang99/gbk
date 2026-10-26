@@ -169,3 +169,21 @@ test("a new message from a live tab supersedes a run orphaned by a closed tab (n
     assert.ok(Date.now() - t0 < 6000);
   } finally { await s.app.close(); }
 });
+
+test("a run adopted by the next tab after a disconnect (now waiting on a tool call there) is superseded at once by that tab's new message", async () => {
+  // Leak between e2e tests: tab A starts a run and closes; tab B (same account) opens, the run resumes on B and sends B a
+  // tool call; B's own message must cancel that call and start right away, not wait for the call's timeout.
+  const model = new ScriptModel([() => calls(tc("a", "gbk_list_tracks")), () => calls(tc("b", "gbk_list_tracks")), () => reply("new run"), () => reply("x")]);
+  const s = await startServer(model, { AGENT_RECONNECT_GRACE_MS: "120000", AGENT_TOOL_TIMEOUT_MS: "120000" });
+  try {
+    const a = await login(s.base, "code-a");
+    const tab = new TestTab(); tab.autoRespond = false; await tab.open(s.base, a.cookie);
+    tab.send({ type: "user_message", clientMessageId: "u1", text: "go" }); await tab.waitFor("tool_call"); tab.ws.terminate();
+    const tab2 = new TestTab(); tab2.autoRespond = false; await tab2.open(s.base, a.cookie);
+    await tab2.waitFor("tool_call"); // the adopted run now waits on tab2
+    const t0 = Date.now(); tab2.send({ type: "user_message", clientMessageId: "u2", text: "again" });
+    await tab2.waitFor("run_started");
+    assert.equal(tab2.events.some((e) => e.type === "error" && e.code === "RUN_ACTIVE"), false);
+    assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+  } finally { await s.app.close(); }
+});

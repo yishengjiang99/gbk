@@ -387,7 +387,11 @@ test("mobile composer view: each reply is a version card; older versions play an
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/studio"); await signIn(page, "e2e-code-2");
   page.on("dialog", (d) => d.accept());
-  await page.getByTestId("composer-input").fill(PROMPT); await page.getByTestId("composer-send").click();
+  // Right after the sign-in reload the conversation history lands and WebKit can drop a fill that races that render
+  // (seen in full-suite runs: input focused but empty). Type only once the restored history is on screen, then check it took.
+  await expect(page.locator("main").first()).toBeVisible();
+  await expect(async () => { await page.getByTestId("composer-input").fill(PROMPT); await expect(page.getByTestId("composer-send")).toBeVisible({ timeout: 1000 }); }).toPass({ timeout: 15_000 });
+  await page.getByTestId("composer-send").click();
   const steps = page.getByTestId("composer-steps"); await expect(steps).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("composer-stop")).toBeVisible(); await inputOk(page, "composing");
   await expect(steps).not.toContainText(/gbk_|_/);
