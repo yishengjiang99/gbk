@@ -153,7 +153,7 @@ export function pageRoutes(app: FastifyInstance, cfg: Config, funnel?: FunnelSto
   });
   app.get("/chatgpt", html(chatgpt)); app.get("/privacy", html(privacy)); app.get("/terms", html(terms)); app.get("/support", html(support));
   app.get("/robots.txt", async (_r, reply) => reply.type("text/plain; charset=utf-8").send(
-    `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /oauth/\nDisallow: /mcp\nSitemap: ${cfg.publicOrigin}/sitemap.xml\n`));
+    `User-agent: *\nAllow: /\nAllow: /api/shares/*/media/mp3\nDisallow: /api/\nDisallow: /oauth/\nDisallow: /mcp\nSitemap: ${cfg.publicOrigin}/sitemap.xml\n`));
 }
 
 /** OpenAI plugin domain verification: serve the exact portal token as plain text (OPENAI_APPS_CHALLENGE). 404 until set. */

@@ -8,6 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Config } from "../config.ts";
 import { PAGE_PATHS } from "./pages.ts";
+import { ogImage } from "../og-image.ts";
 
 export const SITEMAP_CHUNK = 45_000;
 export const STATIC_PATHS = ["/", "/feed", "/explore", ...PAGE_PATHS, "/chatgpt/gallery", "/pricing", "/plans"];
@@ -36,7 +37,7 @@ function sendXml(req: FastifyRequest, reply: FastifyReply, body: string) {
   return reply.type("application/xml; charset=utf-8").send(body);
 }
 
-export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, opts: { chunk?: number; shellFile?: string } = {}) {
+export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, opts: { chunk?: number; shellFile?: string; ogDir?: string } = {}) {
   const chunk = opts.chunk ?? SITEMAP_CHUNK, origin = cfg.publicOrigin;
   app.get("/sitemap.xml", async (req, reply) => {
     const { pages, songs } = sitemapEntries(db, origin);
@@ -53,18 +54,21 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
     return sendXml(req, reply, urlset(songs));
   });
 
-  // SPA shell with per-page meta. The built index.html lives in dist/ under the service WorkingDirectory.
+  // SPA shell with per-page meta + crawlable body. The built index.html lives in dist/ under the service WorkingDirectory.
+  // The server-rendered block sits inside #root, so createRoot().render() replaces it when the app mounts.
   let shell: string | null = null;
   const loadShell = () => {
     if (shell) return shell;
     try { shell = readFileSync(opts.shellFile ?? join(process.cwd(), "dist", "index.html"), "utf8"); } catch { return null; }
     return shell;
   };
-  const render = (reply: FastifyReply, m: { title: string; description: string; url: string; index: boolean; type?: string }) => {
+  const ogDir = opts.ogDir ?? join(cfg.dataDir, "og-cache");
+  interface Meta { title: string; description: string; url: string; index: boolean; type?: string; image?: string; extraHead?: string; jsonLd?: object; body?: string }
+  const render = (reply: FastifyReply, m: Meta) => {
     const base = loadShell();
     if (!base) return reply.code(503).send("shell unavailable");
     const t = htmlEsc(m.title), d = htmlEsc(m.description), u = htmlEsc(m.url);
-    const html = base
+    let html = base
       .replace(/<title>[\s\S]*?<\/title>/, `<title>${t}</title>`)
       .replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${d}" />`)
       .replace(/<meta property="og:type"[^>]*>/, `<meta property="og:type" content="${m.type ?? "website"}" />`)
@@ -72,27 +76,100 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
       .replace(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${d}" />`)
       .replace(/<meta name="twitter:title"[^>]*>/, `<meta name="twitter:title" content="${t}" />`)
       .replace(/<meta name="twitter:description"[^>]*>/, `<meta name="twitter:description" content="${d}" />`)
-      .replace(/<link rel="canonical"[^>]*>\s*/g, "").replace(/<meta property="og:url"[^>]*>\s*/g, "")
-      .replace("</head>", `  <link rel="canonical" href="${u}" />\n    <meta property="og:url" content="${u}" />\n    <meta name="robots" content="${m.index ? "index,follow" : "noindex"}" />\n  </head>`);
+      .replace(/<link rel="canonical"[^>]*>\s*/g, "").replace(/<meta property="og:url"[^>]*>\s*/g, "");
+    if (m.image) {
+      const img = htmlEsc(m.image);
+      html = html.replace(/<meta property="og:image(:width|:height)?"[^>]*>\s*/g, "").replace(/<meta name="twitter:image"[^>]*>\s*/g, "")
+        .replace("</head>", `  <meta property="og:image" content="${img}" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="630" />\n    <meta property="og:image:alt" content="${t}" />\n    <meta name="twitter:image" content="${img}" />\n  </head>`);
+    }
+    if (m.jsonLd) html = html.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/, `<script type="application/ld+json">${JSON.stringify(m.jsonLd).replace(/</g, "\\u003c")}</script>`);
+    html = html.replace("</head>", `  <link rel="canonical" href="${u}" />\n    <meta property="og:url" content="${u}" />\n    <meta name="robots" content="${m.index ? "index,follow" : "noindex"}" />\n${m.extraHead ?? ""}${m.body ? `    <style>${SSR_CSS}</style>\n` : ""}  </head>`);
+    if (m.body) html = html.replace(/<div id="root"><\/div>/, `<div id="root"><main class="ssr">${m.body}</main></div>`);
     return reply.type("text/html; charset=utf-8").header("cache-control", "no-cache").send(html);
   };
-  const songQ = db.prepare(`SELECT s.title, s.slug, s.owner, s.labels, s.prompt_shared, s.prompt_text, p.handle, p.display_name FROM shares s LEFT JOIN profiles p ON p.user_id = s.owner WHERE s.slug = ? AND s.public = 1`);
+  const generic = (url: string): Meta => ({ title: "GBK Composer", description: "Compose, edit and share MIDI music.", url, index: false });
+
+  const songQ = db.prepare(`SELECT s.id, s.title, s.slug, s.owner, s.labels, s.prompt_shared, s.prompt_text, s.wav_meta, s.project_json, s.created_at, s.published_at, s.updated_at,
+    s.mp3 IS NOT NULL AS h3, p.handle, p.display_name FROM shares s LEFT JOIN profiles p ON p.user_id = s.owner WHERE s.slug = ? AND s.public = 1`);
+  const tagsQ = db.prepare("SELECT tag FROM share_tags WHERE share_id = ? ORDER BY tag");
+  const byOwnerQ = db.prepare("SELECT slug, title, labels, created_at, published_at FROM shares WHERE owner = ? AND public = 1 ORDER BY COALESCE(published_at, created_at) DESC LIMIT ?");
+  type SongRow = { id: string; title: string; slug: string; owner: string; labels: string; prompt_shared: number; prompt_text: string | null; wav_meta: string | null; project_json: string; created_at: number; published_at: number | null; updated_at: number | null; h3: number; handle: string | null; display_name: string | null };
+  const song = (slug: string) => songQ.get(slug) as SongRow | undefined;
+  const labelsOf = (j: string): string[] => { try { const v = JSON.parse(j || "[]"); return Array.isArray(v) ? v.map(String) : []; } catch { return []; } };
+  const ogOf = (r: SongRow) => ({ slug: r.slug, title: r.title, artist: r.display_name ?? "GBK Composer", genre: labelsOf(r.labels).join(" · "), projectJson: r.project_json, rev: r.updated_at ?? r.created_at });
+
+  app.get("/og/s/:file", async (req, reply) => {
+    const m = /^([a-zA-Z0-9-]{1,140})\.png$/.exec((req.params as { file: string }).file);
+    const r = m ? song(m[1]) : undefined;
+    if (!r) return reply.code(404).send("not found");
+    const png = readFileSync(ogImage(ogDir, ogOf(r)));
+    return reply.type("image/png").header("cache-control", "public, max-age=86400").header("x-content-type-options", "nosniff").send(png);
+  });
+
   app.get("/s/:slug", async (req, reply) => {
     const slug = (req.params as { slug: string }).slug;
-    const r = songQ.get(slug) as { title: string; slug: string; labels: string; prompt_shared: number; prompt_text: string | null; handle: string | null; display_name: string | null } | undefined;
-    if (!r) return render(reply, { title: "GBK Composer", description: "Compose, edit and share MIDI music.", url: `${origin}/s/${encodeURIComponent(slug)}`, index: false });
-    let labels: string[] = []; try { labels = JSON.parse(r.labels || "[]"); } catch { /* ignore */ }
+    const r = song(slug);
+    if (!r) return render(reply, generic(`${origin}/s/${encodeURIComponent(slug)}`));
+    const url = `${origin}/s/${encodeURIComponent(r.slug)}`, labels = labelsOf(r.labels), tags = (tagsQ.all(r.id) as { tag: string }[]).map((x) => x.tag);
+    const artist = r.display_name ?? "GBK Composer", artistUrl = r.handle ? `${origin}/u/${encodeURIComponent(r.handle)}` : null;
     const by = r.display_name ? ` by ${r.display_name}` : "";
-    const desc = [`${r.title}${by}: an original song made with GBK Composer. Listen, remix, and download the MIDI.`, labels.length ? `Genre: ${labels.join(", ")}.` : "", r.prompt_shared && r.prompt_text ? `Prompt: ${r.prompt_text}` : ""].filter(Boolean).join(" ").slice(0, 300);
-    return render(reply, { title: `${r.title}${by} · GBK Composer`, description: desc, url: `${origin}/s/${encodeURIComponent(r.slug)}`, index: true, type: "music.song" });
+    const prompt = r.prompt_shared && r.prompt_text ? r.prompt_text : null;
+    const secs = durationSeconds(r.wav_meta, r.project_json), published = new Date(r.published_at ?? r.created_at);
+    const desc = [`${r.title}${by}: an original song made with GBK Composer. Listen, remix, and download the MIDI.`, labels.length ? `Genre: ${labels.join(", ")}.` : "", prompt ? `Prompt: ${prompt}` : ""].filter(Boolean).join(" ").slice(0, 300);
+    const image = `${origin}/og/s/${encodeURIComponent(r.slug)}.png`, audio = r.h3 ? `${origin}/api/shares/${encodeURIComponent(r.slug)}/media/mp3` : null;
+    const more = r.owner ? (byOwnerQ.all(r.owner, 11) as { slug: string; title: string }[]).filter((x) => x.slug !== r.slug).slice(0, 10) : [];
+    const extraHead = [audio && `    <meta property="og:audio" content="${htmlEsc(audio)}" />\n    <meta property="og:audio:type" content="audio/mpeg" />\n`,
+      artistUrl && `    <meta property="music:musician" content="${htmlEsc(artistUrl)}" />\n`, secs ? `    <meta property="music:duration" content="${Math.round(secs)}" />\n` : "",
+      `    <meta property="music:release_date" content="${published.toISOString().slice(0, 10)}" />\n`].filter(Boolean).join("");
+    const jsonLd = { "@context": "https://schema.org", "@type": "MusicRecording", name: r.title, url, image, datePublished: published.toISOString().slice(0, 10),
+      byArtist: { "@type": "MusicGroup", name: artist, ...(artistUrl ? { url: artistUrl } : {}) }, ...(secs ? { duration: isoDuration(secs) } : {}),
+      ...(labels.length ? { genre: labels } : {}), ...(tags.length ? { keywords: tags.join(", ") } : {}), ...(prompt ? { description: prompt } : {}),
+      ...(audio ? { audio: { "@type": "AudioObject", contentUrl: audio, encodingFormat: "audio/mpeg", ...(secs ? { duration: isoDuration(secs) } : {}) } } : {}) };
+    const a = (href: string, txt: string) => `<a href="${htmlEsc(href)}">${htmlEsc(txt)}</a>`;
+    const body = `<h1>${htmlEsc(r.title)}</h1><p class="by">by ${artistUrl ? a(`/u/${encodeURIComponent(r.handle!)}`, artist) : htmlEsc(artist)}</p>
+<dl>${labels.length ? `<dt>Genre</dt><dd>${htmlEsc(labels.join(", "))}</dd>` : ""}${tags.length ? `<dt>Tags</dt><dd>${tags.map((x) => `#${htmlEsc(x)}`).join(" ")}</dd>` : ""}${secs ? `<dt>Duration</dt><dd><time datetime="${isoDuration(secs)}">${clock(secs)}</time></dd>` : ""}<dt>Published</dt><dd><time datetime="${published.toISOString()}">${published.toISOString().slice(0, 10)}</time></dd></dl>
+${prompt ? `<h2>Prompt</h2><blockquote>${htmlEsc(prompt)}</blockquote>` : ""}<p>${a(`/s/${encodeURIComponent(r.slug)}`, "Listen and remix in GBK Composer")}</p>
+${more.length ? `<h2>More by ${htmlEsc(artist)}</h2><ul>${more.map((x) => `<li>${a(`/s/${encodeURIComponent(x.slug)}`, x.title)}</li>`).join("")}</ul>` : ""}`;
+    return render(reply, { title: `${r.title}${by} · GBK Composer`, description: desc, url, index: true, type: "music.song", image, extraHead, jsonLd, body });
   });
-  const profQ = db.prepare(`SELECT p.handle, p.display_name, p.bio, p.badge, (SELECT COUNT(*) FROM shares s WHERE s.owner = p.user_id AND s.public = 1) AS n FROM profiles p WHERE p.handle = ?`);
+
+  const profQ = db.prepare(`SELECT p.user_id, p.handle, p.display_name, p.bio, p.badge, (SELECT COUNT(*) FROM shares s WHERE s.owner = p.user_id AND s.public = 1) AS n FROM profiles p WHERE p.handle = ?`);
   app.get("/u/:handle", async (req, reply) => {
     const h = String((req.params as { handle: string }).handle).toLowerCase().slice(0, 40);
-    const p = profQ.get(h) as { handle: string; display_name: string; bio: string | null; badge: string | null; n: number } | undefined;
+    const p = profQ.get(h) as { user_id: string; handle: string; display_name: string; bio: string | null; badge: string | null; n: number } | undefined;
     const url = `${origin}/u/${encodeURIComponent(h)}`;
-    if (!p || (!Number(p.n) && p.badge !== "AI artist")) return render(reply, { title: "GBK Composer", description: "Compose, edit and share MIDI music.", url, index: false });
-    const desc = (p.bio ? `${p.bio} ` : "") + `${Number(p.n)} public song${Number(p.n) === 1 ? "" : "s"} by ${p.display_name}${p.badge ? ` (${p.badge})` : ""} on GBK Composer.`;
-    return render(reply, { title: `${p.display_name} (@${p.handle}) · GBK Composer`, description: desc.slice(0, 300), url, index: true, type: "profile" });
+    if (!p || (!Number(p.n) && p.badge !== "AI artist")) return render(reply, generic(url));
+    const n = Number(p.n), songs = byOwnerQ.all(p.user_id, 100) as { slug: string; title: string; labels: string; created_at: number; published_at: number | null }[];
+    const desc = (p.bio ? `${p.bio} ` : "") + `${n} public song${n === 1 ? "" : "s"} by ${p.display_name}${p.badge ? ` (${p.badge})` : ""} on GBK Composer.`;
+    const latest = songs[0] ? `${origin}/og/s/${encodeURIComponent(songs[0].slug)}.png` : undefined;
+    const jsonLd = { "@context": "https://schema.org", "@type": "ProfilePage", url, mainEntity: { "@type": "MusicGroup", name: p.display_name, alternateName: `@${p.handle}`, url, ...(p.bio ? { description: p.bio } : {}),
+      track: songs.slice(0, 20).map((x) => ({ "@type": "MusicRecording", name: x.title, url: `${origin}/s/${encodeURIComponent(x.slug)}` })) } };
+    const body = `<h1>${htmlEsc(p.display_name)}</h1><p class="by">@${htmlEsc(p.handle)}${p.badge ? ` · ${htmlEsc(p.badge)}` : ""}</p>${p.bio ? `<p>${htmlEsc(p.bio)}</p>` : ""}
+<h2>${n} public song${n === 1 ? "" : "s"}</h2><ul>${songs.map((x) => { const l = labelsOf(x.labels); return `<li><a href="/s/${encodeURIComponent(x.slug)}">${htmlEsc(x.title)}</a>${l.length ? ` <span>${htmlEsc(l.join(", "))}</span>` : ""}</li>`; }).join("")}</ul>`;
+    return render(reply, { title: `${p.display_name} (@${p.handle}) · GBK Composer`, description: desc.slice(0, 300), url, index: true, type: "profile", image: latest, jsonLd, body,
+      extraHead: `    <meta property="profile:username" content="${htmlEsc(p.handle)}" />\n` });
   });
+}
+
+// Matches the social palette (light default, dark via prefers-color-scheme) so the pre-hydrate block does not flash.
+const SSR_CSS = `.ssr{max-width:760px;margin:0 auto;padding:32px 20px;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#16324a;background:#fdfefe;min-height:100vh}
+.ssr h1{margin:0 0 4px;font-size:32px;line-height:1.2}.ssr h2{font-size:18px;margin:24px 0 8px}.ssr a{color:#2d6a93}.ssr .by{margin:0 0 16px;color:#5f7a90}
+.ssr dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}.ssr dt{color:#5f7a90}.ssr dd{margin:0}
+.ssr blockquote{margin:0;padding:10px 14px;border-left:4px solid #61a6d1;background:#eef3f7;border-radius:6px;white-space:pre-wrap}
+@media (prefers-color-scheme: dark){body{background:#0b1620}.ssr{color:#e6f0f8;background:#0b1620}.ssr a{color:#61a6d1}.ssr .by,.ssr dt{color:#93acc0}.ssr blockquote{background:#1c3247}}`;
+
+export function isoDuration(secs: number): string {
+  const t = Math.max(1, Math.round(secs)), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return `PT${h ? `${h}H` : ""}${m ? `${m}M` : ""}${s || (!h && !m) ? `${s}S` : ""}`;
+}
+const clock = (secs: number) => { const t = Math.round(secs); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+/** Rendered audio length when known, else the note span under the first tempo. */
+export function durationSeconds(wavMeta: string | null, projectJson: string): number | null {
+  try { const w = wavMeta ? JSON.parse(wavMeta) : null; if (w && Number(w.durationSeconds) > 0) return Number(w.durationSeconds); } catch { /* fall through */ }
+  try {
+    const p = JSON.parse(projectJson) as { ppq?: number; tempos?: { microPerQuarter: number }[]; notes?: { tick: number; duration: number }[]; endTick?: number };
+    let end = Number(p.endTick) || 0; for (const n of p.notes ?? []) end = Math.max(end, n.tick + n.duration);
+    const ppq = Number(p.ppq) || 480, mpq = Number(p.tempos?.[0]?.microPerQuarter) || 500_000;
+    const s = (end / ppq) * (mpq / 1e6); return s > 0 ? s : null;
+  } catch { return null; }
 }

@@ -1,22 +1,22 @@
 // Live sitemap (public only, escaped, chunked index) and per-song/profile meta injection.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import { ShareStore } from "../src/persistence/shares.ts";
 import { SocialStore } from "../src/persistence/social.ts";
-import { seoRoutes, xmlEsc } from "../src/routes/seo.ts";
+import { seoRoutes, xmlEsc, isoDuration, durationSeconds } from "../src/routes/seo.ts";
 import type { Config } from "../src/config.ts";
 
-const SHELL = `<!doctype html><html><head><title>Generic</title><meta name="description" content="generic" /><meta property="og:type" content="website" /><meta property="og:title" content="g" /><meta property="og:description" content="g" /><meta name="twitter:title" content="g" /><meta name="twitter:description" content="g" /></head><body><div id="root"></div></body></html>`;
+const SHELL = `<!doctype html><html><head><title>Generic</title><meta name="description" content="generic" /><meta property="og:type" content="website" /><meta property="og:title" content="g" /><meta property="og:description" content="g" /><meta name="twitter:title" content="g" /><meta name="twitter:description" content="g" /><meta property="og:image" content="https://x/cover.jpg" /><meta name="twitter:image" content="https://x/cover.jpg" /><script type="application/ld+json">{"@type":"SoftwareApplication"}</script></head><body><div id="root"></div></body></html>`;
 
 async function setup(chunk?: number) {
   const shares = new ShareStore(":memory:"); const social = new SocialStore(shares.database);
   const dir = mkdtempSync(join(tmpdir(), "seo-")); const shellFile = join(dir, "index.html"); writeFileSync(shellFile, SHELL);
-  const app = Fastify(); seoRoutes(app, { publicOrigin: "https://compose.test" } as Config, shares.database, { chunk, shellFile });
-  await app.ready(); return { app, shares, social };
+  const app = Fastify(); seoRoutes(app, { publicOrigin: "https://compose.test" } as Config, shares.database, { chunk, shellFile, ogDir: join(dir, "og") });
+  await app.ready(); return { app, shares, social, dir };
 }
 const proj = JSON.stringify({ name: "x", tracks: [] });
 
@@ -60,4 +60,40 @@ test("/s/<slug> and /u/<handle> get server-injected title, description, canonica
   assert.match(h, /og:title" content="Night &quot;Drive&quot;/); assert.match(h, /name="description" content="Night/); assert.match(h, /index,follow/); assert.match(h, /id="root"/);
   const p = (await app.inject(`/s/${priv.slug}`)).body; assert.ok(!p.includes("Secret")); assert.match(p, /noindex/);
   const u = (await app.inject(`/u/${social.profile("u1")!.handle}`)).body; assert.match(u, /<title>Alice \(@/); assert.match(u, /1 public song by Alice/);
+});
+
+test("song page: per-song og image, og:audio, musician, crawlable body and valid MusicRecording JSON-LD", async () => {
+  const { app, shares, social, dir } = await setup();
+  social.ensureProfile("u1", "Alice <B>");
+  const project = JSON.stringify({ name: "x", ppq: 480, tempos: [{ tick: 0, microPerQuarter: 500000 }], tracks: [{ id: "t1", color: "#ff8800" }], notes: [{ trackId: "t1", tick: 0, duration: 480 * 8, pitch: 60 }, { trackId: "t1", tick: 960, duration: 480, pitch: 67 }] });
+  const a = shares.create({ owner: "u1", title: "Song A", projectJson: project, public: true });
+  const b = shares.create({ owner: "u1", title: "Song B", projectJson: proj, public: true });
+  social.setMeta(a.id, { labels: ["jazz"], tags: ["late-night"], prompt_shared: true, prompt_text: "slow <jazz> waltz" });
+  shares.setMedia(a.slug, "mp3", new Uint8Array([0x49, 0x44, 0x33, 0, 0]));
+  const h = (await app.inject(`/s/${a.slug}`)).body;
+  assert.ok(h.includes(`<meta property="og:image" content="https://compose.test/og/s/${a.slug}.png" />`)); assert.ok(!h.includes("cover.jpg"));
+  assert.match(h, /og:image:width" content="1200"/); assert.match(h, /og:image:height" content="630"/); assert.match(h, /twitter:image" content="https:\/\/compose.test\/og\/s\//);
+  assert.ok(h.includes(`<meta property="og:audio" content="https://compose.test/api/shares/${a.slug}/media/mp3" />`));
+  assert.match(h, /music:musician" content="https:\/\/compose.test\/u\//);
+  const root = /<div id="root">([\s\S]*?)<\/div>\s*<\/body>/.exec(h)?.[1] ?? h.split('<div id="root">')[1];
+  assert.match(root, /<h1>Song A<\/h1>/); assert.match(root, /by <a href="\/u\/[^"]+">Alice &lt;B&gt;<\/a>/); assert.match(root, /jazz/); assert.match(root, /#late-night/);
+  assert.match(root, /slow &lt;jazz&gt; waltz/); assert.match(root, /datetime="PT4S"/); assert.ok(root.includes(`href="/s/${b.slug}"`));
+  const ld = [...h.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1]));
+  assert.equal(ld.length, 1); const r = ld[0];
+  assert.equal(r["@type"], "MusicRecording"); assert.equal(r.name, "Song A"); assert.equal(r.url, `https://compose.test/s/${a.slug}`);
+  assert.equal(r.byArtist.name, "Alice <B>"); assert.match(r.byArtist.url, /\/u\//); assert.equal(r.duration, "PT4S"); assert.match(r.datePublished, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(r.audio["@type"], "AudioObject"); assert.match(r.audio.contentUrl, /media\/mp3$/);
+  assert.ok(!/<\/script>[^<]*waltz/.test(h.split("ld+json")[1].split("</script>")[0]));
+  const img = await app.inject(`/og/s/${a.slug}.png`);
+  assert.equal(img.statusCode, 200); assert.equal(img.headers["content-type"], "image/png");
+  const buf = img.rawPayload; assert.equal(buf.readUInt32BE(16), 1200); assert.equal(buf.readUInt32BE(20), 630);
+  assert.ok(readdirSync(join(dir, "og")).some((f) => f.startsWith(a.slug)));
+  assert.equal((await app.inject("/og/s/nope.png")).statusCode, 404);
+  const u = (await app.inject(`/u/${social.profile("u1")!.handle}`)).body;
+  assert.match(u, /<h1>Alice &lt;B&gt;<\/h1>/); assert.ok(u.includes(`href="/s/${a.slug}"`)); assert.match(u, /"@type":"ProfilePage"/);
+});
+
+test("ISO 8601 durations", () => {
+  assert.equal(isoDuration(4), "PT4S"); assert.equal(isoDuration(125.4), "PT2M5S"); assert.equal(isoDuration(3600), "PT1H"); assert.equal(isoDuration(0), "PT1S");
+  assert.equal(durationSeconds(JSON.stringify({ durationSeconds: 61 }), "{}"), 61);
 });

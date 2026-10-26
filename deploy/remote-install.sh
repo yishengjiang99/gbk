@@ -8,7 +8,7 @@ set -euo pipefail
 TGZ=$1; ID=$2; ROOT=/var/www/gbk-composer; REL=$ROOT/releases/$ID
 mkdir -p "$REL" /var/lib/gbk-composer; chown www-data:www-data /var/lib/gbk-composer
 tar xzf "$TGZ" -C "$REL"
-(cd "$REL" && npm install --omit=dev --no-audit --no-fund --ignore-scripts fastify@5 ws@8 @modelcontextprotocol/sdk@1 zod@4 >/dev/null)
+(cd "$REL" && npm install --omit=dev --no-audit --no-fund --ignore-scripts fastify@5 ws@8 @modelcontextprotocol/sdk@1 zod@4 @resvg/resvg-js@2 >/dev/null)
 PREV=$(readlink -f $ROOT/current 2>/dev/null || true)
 if [ ! -f /etc/gbk-composer.env ]; then install -m 0640 -o root -g www-data "$REL/deploy/compose.env.example" /etc/gbk-composer.env; echo "WARNING: created /etc/gbk-composer.env from the example; edit it"; fi
 healthy() { for i in $(seq 1 30); do sleep 1; curl -fsS "http://127.0.0.1:$1/api/health" >/dev/null 2>&1 && return 0; done; return 1; }
