@@ -33,9 +33,13 @@ final class ScanUITests: XCTestCase {
         let newProject = web.buttons["Open as new project"]
         XCTAssertTrue(newProject.waitForExistence(timeout: 600), "studio MIDI import chooser opened with the scanned file")
         attach(app, "scan-ui-import-chooser")
-        newProject.tap()
         let done = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Imported 1 track, 8 notes'")).firstMatch
-        XCTAssertTrue(done.waitForExistence(timeout: 20), "studio imported the scanned track")
+        // A tap on a web button right after the chooser mounts is sometimes dropped by WebKit: retry while it's still there.
+        for _ in 0..<3 where !done.exists {
+            if newProject.exists && newProject.isEnabled { newProject.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+            if done.waitForExistence(timeout: 20) { break }
+        }
+        XCTAssertTrue(done.exists, "studio imported the scanned track")
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: newProject)
         wait(for: [gone], timeout: 10)
         XCTAssertFalse(web.staticTexts["No tracks yet."].exists, "the studio now has the scanned track")
