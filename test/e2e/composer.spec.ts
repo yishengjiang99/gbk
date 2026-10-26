@@ -219,8 +219,8 @@ test("theme: landing background is uniform full height; Keys track picker follow
   await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_keys", program: 0 }], { label: "seed" }); });
   await (await studioReveal(page, "keys-toggle")).click();
   const sel = page.getByTestId("live-track"); await expect(sel).toBeVisible({ timeout: 60_000 });
-  // bright: white on desktop, the light card colour in the phone studio's MIDI keyboard sheet
-  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toMatch(/^rgb\((255, 255, 255|244, 245, 247)\)$/);
+  // desktop keeps the original dark workstation palette; phones (light) use the bright card colour in the MIDI keyboard sheet
+  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(page.viewportSize()!.width < 500 ? "rgb(244, 245, 247)" : "rgb(26, 32, 41)");
   await page.getByTestId("live-keyboard").screenshot({ path: `${SHOTS}/keys-track-picker.png` });
 });
 
@@ -340,7 +340,9 @@ test("mobile composer view: chat studio has no tab bar/rewind/scrubber, fits 375
     if (await page.evaluate(() => (globalThis as any).__gbkWorkstation.project.tracks.length)) { await page.getByTestId("studio-overflow").click(); await page.getByTestId("new-project").click(); }
     const lbl = `${scheme} ${w}x${h}`;
     // header: title, play pill, ⋯ only; none of the old desktop chrome
-    const head = page.getByTestId("compact-head"); await expect(head.locator("button")).toHaveCount(2);
+    const head = page.getByTestId("compact-head"); await expect(head.locator("button")).toHaveCount(3); // back to Explore, play pill, ⋯
+    await expect(page.getByTestId("studio-back")).toBeInViewport();
+    expect(await head.evaluate((e) => e.scrollWidth <= e.clientWidth && [...e.children].every((c) => c.getBoundingClientRect().right <= innerWidth + 0.5)), `${lbl} header fits`).toBe(true);
     for (const id of ["tab-tracks", "tab-composer", "tab-agent", "tab-sound", "tab-files", "scrubber", "ws-play", "keys-toggle"]) await expect(page.getByTestId(id), `${lbl} ${id}`).toBeHidden();
     await expect(page.getByRole("button", { name: /^(Rewind|Stop)$/ })).toHaveCount(0); await expect(page.getByText("Automation for")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /sign in/i })).toHaveCount(0);
@@ -355,7 +357,7 @@ test("mobile composer view: chat studio has no tab bar/rewind/scrubber, fits 375
     await inputOk(page, `${lbl} midi sheet`); await page.getByTestId("sheet-scrim").click({ position: { x: 10, y: 120 } });
     // ⋯ : the seven actions (model/tokens/account only in Settings)
     await page.getByTestId("studio-overflow").click();
-    await expect(page.getByTestId("sheet-more").locator(".ms-row")).toHaveText([/Publish & share/, /Export/, /My songs/, /Explore/, /Rename/, /New song/, /Settings/]);
+    await expect(page.getByTestId("sheet-more").locator(".ms-row")).toHaveText([/Publish & share/, /Export/, /My songs/, /Rename/, /New song/, /Settings/]);
     await inputOk(page, `${lbl} ⋯ sheet`); await shot("more", scheme);
     await page.getByTestId("more-rename").click(); await expect(page.getByTestId("rename-input")).toHaveCSS("font-size", "16px");
     await page.getByTestId("rename-input").fill("Night Drive"); await page.getByTestId("rename-save").click(); await expect(page.getByTestId("studio-title")).toHaveText("Night Drive");
@@ -404,6 +406,25 @@ test("mobile composer view: each reply is a version card; older versions play an
   await expect(v2).toHaveAttribute("data-current", "0"); // undo is a new revision, shown as "latest edits"
   await inputOk(page, "after restore + undo");
   if (P === "mobile-webkit") for (const scheme of ["light", "dark"] as const) { await page.emulateMedia({ colorScheme: scheme }); await page.screenshot({ path: `${SHOTS}/studio-redesign-versions-${scheme}.png` }); }
+});
+
+test("mobile composer view: the header back button goes to Explore in one tap", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
+  await page.goto("/studio"); await page.getByTestId("studio-back").click();
+  await expect(page.getByTestId("social-app")).toBeVisible(); await expect(page).not.toHaveURL(/\/studio/);
+});
+
+test("desktop studio keeps the full-screen workstation: no chat-first layout, dark palette, no vertical scroll, composer input visible", async ({ page }) => {
+  test.skip(test.info().project.name !== "chrome-no-webmcp", "desktop");
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme }); await page.setViewportSize({ width: 1440, height: 900 }); await page.goto("/studio");
+    const ws = page.getByTestId("workstation"); await expect(ws).toHaveAttribute("data-compact", "0");
+    await expect(page.getByTestId("plus-btn")).toHaveCount(0); await expect(page.getByTestId("nav-explore")).toBeVisible();
+    expect(await ws.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(22, 27, 36)");
+    await expect(page.getByTestId("composer-input")).toBeInViewport();
+    expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight && document.scrollingElement!.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `${SHOTS}/studio-desktop-local-${scheme}.png` });
+  }
 });
 
 test("mobile composer view: Bluetooth MIDI pairing offered when gbkMidiNative.bluetooth is set; MIDI file + sheet image pickers", async ({ page }) => {

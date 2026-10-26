@@ -46,7 +46,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const c = cv.current; if (!c) return;
     const dpr = window.devicePixelRatio || 1; c.width = width * dpr; c.height = H * dpr;
     const g = c.getContext("2d")!; g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const dk = matchMedia("(prefers-color-scheme: dark)").matches; g.fillStyle = dk ? "#0f1115" : "#ffffff"; g.fillRect(0, 0, width, H);
+    const dk = !matchMedia("(prefers-color-scheme: light) and (max-width: 499px)").matches; g.fillStyle = dk ? "#0f1115" : "#ffffff"; g.fillRect(0, 0, width, H);
     const sel = project.selection;
     if (sel.endTick > sel.startTick) { g.fillStyle = "rgba(120,170,255,0.12)"; g.fillRect(x(sel.startTick), 0, (sel.endTick - sel.startTick) * view.pxPerTick, H); }
     g.strokeStyle = dk ? "#2a2e38" : "#dde3ec"; g.beginPath(); g.moveTo(KEY_W, yv(max / 2)); g.lineTo(width, yv(max / 2)); g.stroke();

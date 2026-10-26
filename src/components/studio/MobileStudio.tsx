@@ -156,6 +156,7 @@ export function MobileStudio(props: MobileStudioProps) {
   return (
     <div className="ms" ref={root} data-testid="workstation" data-compact="1" data-sheet={sheet ?? ""}>
       <header className="ms-head" data-testid="compact-head">
+        {props.onExplore && <button className="ms-btn ms-back" aria-label="Back to Explore" data-testid="studio-back" onClick={() => { stopPreview(); props.onExplore!(); }}>‹</button>}
         <h1 className="ms-title" data-testid="studio-title" title={title}>{title}</h1>
         <button className={`ms-btn ms-pill${t.playing ? " on" : ""}`} data-testid="play-pill" disabled={!p.tracks.length || (loading && !t.starting)} aria-label={t.playing ? "Pause" : "Play"} onClick={playCurrent}>
           {t.playing ? <>❚❚ <span data-testid="play-time">{fmtTime(pos)}</span></> : t.starting ? "Loading…" : loading && p.tracks.length ? `Loading${t.sf2Progress != null ? ` ${Math.round(t.sf2Progress * 100)}%` : "…"}` : "▶︎ Play"}
@@ -190,7 +191,6 @@ export function MobileStudio(props: MobileStudioProps) {
         <Row icon="📤" title="Publish & share" sub="Get a public link" testId="more-publish" onClick={() => void doPublish()} />
         <Row icon="⬇️" title="Export" sub="MIDI, WAV, video" testId="more-export" onClick={() => setSheet("export")} />
         <Row icon="📁" title="My songs" testId="more-songs" onClick={() => { if (!s.auth.authenticated) { setSheet(null); needSignIn("Sign in to see your saved songs."); } else setSheet("songs"); }} />
-        {props.onExplore && <Row icon="🧭" title="Explore" sub="Songs from everyone" testId="nav-explore" onClick={() => { setSheet(null); props.onExplore!(); }} />}
         <Row icon="✏️" title="Rename" testId="more-rename" onClick={() => setSheet("rename")} />
         <Row icon="🆕" title="New song" testId="new-project" onClick={() => void newSong()} />
         <Row icon="⚙️" title="Settings" sub="Model, usage, account" testId="more-settings" onClick={() => setSheet("settings")} />

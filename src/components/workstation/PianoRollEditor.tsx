@@ -8,8 +8,8 @@ import { workstation } from "./useWorkstation.ts";
 
 export interface View { scrollTick: number; pxPerTick: number; lowPitch: number; highPitch: number }
 const KEY_W = 36;
-// Bright default; dark palette under prefers-color-scheme: dark.
-const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+// Dark workstation palette on desktop; phones (<500px) follow prefers-color-scheme (bright when light).
+const dark = () => !matchMedia("(prefers-color-scheme: light) and (max-width: 499px)").matches;
 
 interface Props { project: Project; proposal: Proposal | null; view: View; setView: (v: View) => void; height: number; onManualScroll?: () => void; onWidth?: (px: number) => void }
 

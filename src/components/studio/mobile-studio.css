@@ -107,3 +107,5 @@ html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
 .ms .ms-sheet button:not(.ms-btn):not(.ms-row):not(.ms-link):not(.pri):not([role=tab]):not(.ws-pkey) { background: var(--ms-card); color: var(--ms-fg); border: 1px solid var(--ms-line); border-radius: 10px; min-height: 36px; padding: 0 12px; }
 .ms .ms-sheet select, .ms .ms-sheet input:not([type=range]):not([type=checkbox]):not([type=radio]) { background: var(--ms-card); color: var(--ms-fg); border: 1px solid var(--ms-line); border-radius: 8px; min-height: 36px; font-size: 16px; }
 .ms .ms-sheet, .ms .ms-sheet label, .ms .ms-sheet summary { color: var(--ms-fg); }
+
+.ms-back { font-size: 28px; line-height: 1; padding: 0 0 4px; background: none; margin-left: -6px; }
