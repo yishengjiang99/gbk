@@ -1,6 +1,6 @@
 name: iOS Release (TestFlight)
 
-# Manual only. Automatic (cloud-managed) signing via the ASC admin API key; no p12 or profile secrets.
+# Manual only. Unsigned archive, then cloud-managed distribution signing at export via the ASC admin API key; no p12 or profile secrets.
 # Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8.
 # Bundle com.grepawk.moviefone matches ASC app 6826906431 (GBK Music Composer). Build number = run_number.
 on:
@@ -102,15 +102,11 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE_PATH" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             MARKETING_VERSION="$MV" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGNING_ALLOWED=NO \
             archive
           test -d "$ARCHIVE_PATH"
 
@@ -132,6 +128,26 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion $minos" "$plist" 2>/dev/null \
               || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string $minos" "$plist"
           done
+
+      - name: Ad-hoc sign archive with entitlements
+        # The archive is built unsigned: automatic signing on an ephemeral runner mints a new
+        # Apple Development certificate every run and the team hits Apple's certificate cap.
+        # Export re-signs with the cloud-managed distribution certificate (no cap); it reads
+        # entitlements from the archived binary, so embed them here with an ad-hoc signature.
+        run: |
+          set -euo pipefail
+          APP=$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name '*.app' | head -1)
+          ENT="$RUNNER_TEMP/app.entitlements"
+          cp ios/GBKComposer/Resources/GBKComposer.entitlements "$ENT"
+          /usr/libexec/PlistBuddy -c "Add :application-identifier string ${TEAM_ID}.${BUNDLE_ID}" "$ENT"
+          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string ${TEAM_ID}" "$ENT"
+          /usr/libexec/PlistBuddy -c "Add :get-task-allow bool false" "$ENT"
+          for fw in "$APP"/Frameworks/*; do
+            [[ -e "$fw" ]] || continue
+            codesign --force --sign - --timestamp=none "$fw"
+          done
+          codesign --force --sign - --timestamp=none --entitlements "$ENT" "$APP"
+          codesign -d --entitlements - "$APP"
 
       - name: Export IPA
         run: |
