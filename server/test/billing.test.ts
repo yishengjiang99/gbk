@@ -202,7 +202,7 @@ test("engagement channel records plan_select to billing (#116 modal -> #118 funn
     const alice = await login(base, "code-a");
     const danAcc = b.accounts.upsertOAuth("google", "g-dan", "Dan", "dan@example.com").account;
     const ds = b.sessions.create(danAcc.id);
-    const dan = { cookie: `${COOKIE}=${b.sessions.cookieValue(ds)}` };
+    const dan = { cookie: `${COOKIE}=${b.sessions.cookieValue(ds)}; gbk_csrf=${ds.csrf}`, origin: "http://composer.test", "x-gbk-csrf": ds.csrf };
     const okRes = await post("/api/me/engagement", { event: "plan_select", plan: "pro_yearly", surface: "studio", platform: "web", reason: "ai_limit" }, dan);
     assert.equal(okRes.status, 200); // was 422 before plan_select joined the engagement taxonomy
     const badRes = await post("/api/me/engagement", { event: "purchase", plan: "pro_yearly" }, dan);
