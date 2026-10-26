@@ -8,6 +8,7 @@ final class StudioPublishUITests: XCTestCase {
 
     func testGuestPublishUsesNativeSheetWithoutSignIn() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-uiTestStudioMIDI", "-uiTestPublishMock"] // mock: never publish to prod from CI
         app.launch()
         let create = app.tabBars.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 90))
@@ -19,6 +20,12 @@ final class StudioPublishUITests: XCTestCase {
         let tabBar = app.tabBars.firstMatch.frame
         XCTAssertLessThanOrEqual(web.frame.maxY, tabBar.minY + 1, "web view \(web.frame) ends above the tab bar \(tabBar)")
 
+        // Web publishes only a song with tracks: load a scale through the studio's MIDI import first.
+        app.buttons["load-test-midi"].tap()
+        let open = web.buttons["Open as new project"]
+        if open.waitForExistence(timeout: 20) {
+            for _ in 0..<3 where open.exists { open.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); sleep(2) }
+        }
         web.descendants(matching: .any)["More"].firstMatch.tap() // studio-overflow
         let publish = web.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Publish & share' OR label BEGINSWITH '📤'")).firstMatch
         XCTAssertTrue(publish.waitForExistence(timeout: 5), "more-publish row")
@@ -29,7 +36,8 @@ final class StudioPublishUITests: XCTestCase {
         let title = app.textFields["publish-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10), "native publish sheet")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Continue with Google'")).firstMatch.exists, "no sign-in")
-        title.tap(); title.typeText("Gentle Piano Hum in C")
+        XCTAssertFalse(web.descendants(matching: .any)["Publish song"].exists, "web publish dialog not shown (native hook)")
+        title.tap(); title.typeText(" Gentle Piano")
         app.buttons["publish-label-ambient"].tap()
         app.buttons["publish-label-jazz"].tap()
         let tag = app.textFields["publish-tag-input"]

@@ -16,7 +16,12 @@ import WebKit
 @MainActor
 final class HumBridge: NSObject, WKScriptMessageHandler {
     static let handlerName = "hum"
-    static let capabilityScript = #"window.gbkNative = Object.freeze({ platform: "ios", version: 1, capabilities: ["hum", "midi"] });"#
+    /// Also carries the guest identity for web guest publish (docs/social-api.md): `deviceId` (Keychain UUID v4, the
+    /// same string sent to POST /api/auth/anonymous) and `guestName` (two-word username).
+    static func capabilityScript(deviceId: String, guestName: String) -> String {
+        "window.gbkNative = Object.freeze({ platform: \"ios\", version: 1, capabilities: [\"hum\", \"midi\"], deviceId: \(jsonString(deviceId)), guestName: \(jsonString(guestName)) });"
+    }
+    static var capabilityScript: String { capabilityScript(deviceId: AnonymousIdentity.deviceID, guestName: AnonymousIdentity.username) }
 
     enum Phase: String { case idle, recording, transcribing }
 

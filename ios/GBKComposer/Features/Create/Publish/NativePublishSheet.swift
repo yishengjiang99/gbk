@@ -4,8 +4,9 @@ import SwiftUI
 /// share-prompt toggle. Guests publish as the device's two-word username; no sign-in.
 struct NativePublishSheet: View {
     @State var draft: PublishDraft
+    var projectId: String
     var username: String = AnonymousIdentity.username
-    var service: GuestPublishing = GuestPublishServices.current
+    var service: GuestPublishing
     var onClose: () -> Void
 
     @State private var tagText = ""
@@ -88,7 +89,7 @@ struct NativePublishSheet: View {
     private func done(_ r: PublishResult) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Published!").font(.title2.bold()).accessibilityIdentifier("publish-done")
-            Text("Your song is on the Feed as \(r.author).").foregroundStyle(.secondary)
+            Text("Your song is on the Feed as @\(r.author).").foregroundStyle(.secondary)
             ShareLink(item: r.url) { Label("Share link", systemImage: "square.and.arrow.up") }
         }
     }
@@ -102,8 +103,9 @@ struct NativePublishSheet: View {
     private func publish() async {
         busy = true; error = nil
         defer { busy = false }
-        do { result = try await service.publish(draft, as: username) }
-        catch { self.error = "Couldn't publish. Check your connection and try again." }
+        do { result = try await service.publish(draft, projectId: projectId, as: username) }
+        catch let e as PublishError { self.error = e.message }
+        catch { self.error = PublishError.failed("").message }
     }
 }
 
@@ -129,4 +131,4 @@ struct FlowLayout: Layout {
     }
 }
 
-#Preview("Publish") { NativePublishSheet(draft: PublishDraft(title: "Gentle Piano Hum in C"), username: "MellowFox", onClose: {}) }
+#Preview("Publish") { NativePublishSheet(draft: PublishDraft(title: "Gentle Piano Hum in C"), projectId: "p1", username: "MellowFox", service: MockGuestPublishService(), onClose: {}) }

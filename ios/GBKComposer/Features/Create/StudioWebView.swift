@@ -15,7 +15,7 @@ struct StudioWebView: View {
     /// UI tests (`-uiTestDark`): the app is locked to Light (Info.plist), so dark screenshots need an override.
     static var forcedScheme: ColorScheme? { ProcessInfo.processInfo.arguments.contains("-uiTestDark") ? .dark : nil }
     @StateObject private var scan = ScanController()
-    @State private var publishTitle: String?
+    @State private var publishRequest: PublishBridge.Request?
 
     var body: some View {
         // Composer input must always be visible (keyboard up or down, during playback). Keyboard handling:
@@ -33,7 +33,7 @@ struct StudioWebView: View {
             GeometryReader { g in
                 Group {
                     if let url {
-                        WebView(url: url, scan: scan, onPublish: { publishTitle = $0 })
+                        WebView(url: url, scan: scan, onPublish: { publishRequest = $0 })
                             .accessibilityIdentifier("studio-webview")
                     } else { ProgressView().tint(Theme.accent) }
                 }
@@ -44,8 +44,10 @@ struct StudioWebView: View {
         .background(Theme.background.ignoresSafeArea())
         .preferredColorScheme(Self.forcedScheme)
         .sheet(isPresented: $scan.isPresented) { ScanSheetView(controller: scan) }
-        .sheet(isPresented: Binding(get: { publishTitle != nil }, set: { if !$0 { publishTitle = nil } })) {
-            NativePublishSheet(draft: PublishDraft(title: publishTitle ?? ""), onClose: { publishTitle = nil })
+        .sheet(item: $publishRequest) { r in
+            NativePublishSheet(draft: PublishDraft(title: r.title, labels: Array(r.labels.prefix(PublishDraft.maxLabels)), tags: Array(r.tags.prefix(PublishDraft.maxTags))),
+                               projectId: r.projectId, service: GuestPublishServices.make(webView: scan.webView),
+                               onClose: { publishRequest = nil })
         }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
@@ -89,7 +91,7 @@ struct StudioNativeBar: View {
 struct WebView: UIViewRepresentable {
     let url: URL
     var scan: ScanController? = nil
-    var onPublish: (@MainActor (String) -> Void)? = nil
+    var onPublish: (@MainActor (PublishBridge.Request) -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
