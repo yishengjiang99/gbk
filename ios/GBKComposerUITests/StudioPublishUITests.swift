@@ -50,7 +50,8 @@ final class StudioPublishUITests: XCTestCase {
         app.buttons["publish-tag-add"].tap()
         XCTAssertTrue(app.buttons["publish-tag-piano"].waitForExistence(timeout: 3))
         app.switches["publish-share-prompt"].firstMatch.tap()
-        app.navigationBars["Publish"].staticTexts["Publish"].tap() // dismiss the keyboard
+        tag.typeText("\n") // return dismisses the keyboard (empty tag is ignored)
+        XCTAssertTrue(title.isHittable, "title field not under the nav bar")
         sleep(1)
         attach(app, "studio-native-publish-\(mode)")
         let submit = app.buttons["publish-submit"]

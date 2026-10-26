@@ -17,11 +17,15 @@ struct NativePublishSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let result { done(result) } else { form }
+            VStack(spacing: 0) {
+                // Intro + title stay fixed under the nav bar; only labels/tags/toggle scroll (never under the bar).
+                if result == nil { header.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8) }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let result { done(result) } else { form }
+                    }
+                    .padding(20)
                 }
-                .padding(20)
             }
             .background(Color.white)
             .scrollDismissesKeyboard(.interactively)
@@ -48,13 +52,19 @@ struct NativePublishSheet: View {
         .accessibilityIdentifier("publish-sheet")
     }
 
-    @ViewBuilder private var form: some View {
-        Text("Publishing makes your song visible to everyone in the Feed with a shareable link. You publish as **\(username)**.")
-            .font(.subheadline).foregroundStyle(.secondary)
-        section("Title") {
-            TextField("Song title", text: $draft.title)
-                .textFieldStyle(.roundedBorder).accessibilityIdentifier("publish-title")
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Publishing makes your song visible to everyone in the Feed with a shareable link. You publish as **\(username)**.")
+                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            section("Title") {
+                TextField("Song title", text: $draft.title)
+                    .textFieldStyle(.roundedBorder).accessibilityIdentifier("publish-title")
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var form: some View {
         section("Labels (up to \(PublishDraft.maxLabels))") {
             FlowLayout(spacing: 8) {
                 ForEach(PublishDraft.labelOptions, id: \.self) { l in
