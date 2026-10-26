@@ -26,8 +26,12 @@ final class MIDIBridgeIntegrationTests: XCTestCase {
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 480), configuration: config)
         bridge.webView = web
         web.loadHTMLString(page, baseURL: URL(string: "https://compose.grepawk.com/studio"))
+        // On a busy CI simulator the WebContent process can take >30 s to commit the page. Until it does, JS runs in the
+        // initial about:blank document (readyState "complete", no user scripts), which looked like a missing polyfill.
+        // Wait for the real document first; only then is a missing polyfill a bridge bug.
+        try await waitJS(web, "location.href.indexOf('compose.grepawk.com') >= 0 && document.readyState === 'complete'", "test page committed", timeout: 120)
         do { try await waitJS(web, "window.ready === true", "requestMIDIAccess resolved", timeout: 30) } catch {
-            let diag = (try? await web.evaluateJavaScript("[typeof navigator.requestMIDIAccess, typeof window.__gbkMidi, typeof window.gbkMidiNative, document.readyState].join(',')")) as? String
+            let diag = (try? await web.evaluateJavaScript("[typeof navigator.requestMIDIAccess, typeof window.__gbkMidi, typeof window.gbkMidiNative, document.readyState, location.href].join(',')")) as? String
             XCTFail("diag js=\(diag ?? "nil") requested=\(bridge.requested) started=\(bridge.hub.started) err=\(bridge.hub.lastError) devices=\(bridge.hub.devices.count)")
             throw error
         }
