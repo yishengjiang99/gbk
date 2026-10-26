@@ -262,6 +262,8 @@ Mapping to an account uses `originalTransactionId`, then `appAccountToken`. Inva
 
 Pro from either source lifts the agent token budget and render limits.
 
+The public `User` object (profile payloads and every `Song.author`) also gains `pro: boolean` (#133) — the same unified entitlement as a bare flag, shown as a Pro badge on profiles and feed cards. Source, expiry and environment are never exposed publicly; those stay on `Me` only.
+
 Guest → Apple/Google upgrade or merge carries Apple entitlements over: purchases move to the surviving account.
 
 `DELETE /api/me` detaches purchases from the account. They stay re-claimable by `app_account_token` / Restore.

@@ -18,11 +18,14 @@ struct FeedCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title).font(.title2.bold()).foregroundStyle(Theme.text).lineLimit(2)
-                NavigationLink(value: song.author.handle) {
-                    Text("@\(song.author.handle)").font(.subheadline)
+                HStack(spacing: 6) {
+                    NavigationLink(value: song.author.handle) {
+                        Text("@\(song.author.handle)").font(.subheadline)
+                    }
+                    .simultaneousGesture(TapGesture().onEnded { ImpressionLogger.shared.mark(.profileTap, song: song.slug) })
+                    .foregroundStyle(Theme.textSecondary)
+                    if song.author.pro == true { ProBadge() }
                 }
-                .simultaneousGesture(TapGesture().onEnded { ImpressionLogger.shared.mark(.profileTap, song: song.slug) })
-                .foregroundStyle(Theme.textSecondary)
             }
 
             NowPlayingVizView(preview: song.preview, playback: playback)

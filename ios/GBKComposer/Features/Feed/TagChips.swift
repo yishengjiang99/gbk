@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// "Pro" pill next to an author's name when the public payload carries `pro` (#133).
+/// Display only — social stays ungated. Amber reads on both colour schemes.
+struct ProBadge: View {
+    var body: some View {
+        Text("Pro")
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color(red: 0.97, green: 0.71, blue: 0.0)))
+            .foregroundStyle(Color(red: 0.14, green: 0.10, blue: 0.0))
+            .accessibilityLabel("Pro member")
+    }
+}
+
 /// Card labels + tags as ONE text paragraph (Yisheng, 2026-10-25): "rnb · #groove #key‑change #late‑night".
 /// Wraps only at the spaces between words; hyphens are U+2011 (non-breaking) so a tag never splits.
 /// Footnote, secondary colour, labels semibold, max 3 lines. Tapping a tag filters by it (gbktag:// link).

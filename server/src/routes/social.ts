@@ -24,7 +24,10 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
   const nameOf = (u: string) => accounts.get(u)?.name || u;
   const prof = (u: string) => social.ensureProfile(u, nameOf(u));
-  const user = (u: string) => { const p = prof(u); return { handle: p.handle, display_name: p.display_name, bio: p.bio ?? null, badge: p.badge ?? null, avatar_url: null, ...social.userStats(u), created_at: p.created_at }; };
+  /** #133: public Pro flag — the same unified entitlement /api/me reports (Apple IAP OR Stripe via
+   *  limits.proSource, the predicate app.ts wires), as a bare boolean: no source, expiry or plan leaks. */
+  const proOf = (u: string) => !!iap?.pro(u).pro || !!limits?.proSource(u);
+  const user = (u: string) => { const p = prof(u); return { handle: p.handle, display_name: p.display_name, bio: p.bio ?? null, badge: p.badge ?? null, pro: proOf(u), avatar_url: null, ...social.userStats(u), created_at: p.created_at }; };
   const guestComments = new RateLimiter(20, 86_400_000);
   const me = (u: string) => { const p = prof(u); const a = accounts.get(u); return { ...user(u), id: u, provider: a?.provider ?? null, is_guest: a?.provider === "guest", ...(() => { const e = iap?.pro(u); const src = e?.pro ? "apple" : limits?.proSource(u) ?? null; return { pro: !!src, pro_source: src, pro_expires_at: src === "apple" ? e?.expires_at ?? null : null, pro_environment: src === "apple" ? e?.environment ?? null : null }; })(), dm_policy: p.dm_policy, handle_changed: !!p.handle_changed, is_admin: cfg.adminUsers.includes(u), ...engage(u) }; };
   /** #115: lifetime counters + paywall eligibility (no UI here). Pro (Apple/Stripe) or admin is never eligible. */

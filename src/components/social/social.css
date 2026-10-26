@@ -69,6 +69,7 @@
 .so-feed{position:relative}
 .so-unlock{position:sticky;top:10px;left:0;margin:0 auto -44px;display:block;z-index:5;border:0;border-radius:20px;padding:10px 16px;background:var(--so-text);color:var(--so-surface);font:inherit;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)}
 .so-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;background:var(--so-ok-bg);border:1px solid var(--so-ok-border);color:var(--so-ok-text);font-size:11px;font-weight:600;vertical-align:middle}
+.so-badge.so-pro{background:#f7b500;border-color:#d99a00;color:#241a00;font-weight:700}
 .so-bio{margin-top:4px;font-size:13px;overflow-wrap:anywhere;white-space:pre-wrap}
 .so-meta .so-prompt{display:flex;gap:8px;align-items:center;margin:4px 0}
 .so-clamp{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}

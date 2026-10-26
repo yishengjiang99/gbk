@@ -104,7 +104,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     if (r && parent && parent.owner !== r.owner && !isGuest(r.owner)) notify(parent.owner, { kind: "fork", title: `${social.ensureProfile(r.owner, accounts.get(r.owner)?.name ?? r.owner).display_name} remixed ${parent.title}`, body: r.title, link: `${cfg.publicOrigin}/s/${r.slug}` });
   });
   const social = new SocialStore(shares.database, deps.now);
-  seoRoutes(app, cfg, shares.database);
+  seoRoutes(app, cfg, shares.database, { proOf: (u) => limits.pro(u) });
   const native = new NativeStore(persist ? join(cfg.dataDir, "native.sqlite") : ":memory:", deps.now);
   const notify = createNotifier(cfg, native, (o) => app.log.info(o), deps.apns);
   const events = new EventStore(shares.database, deps.now);

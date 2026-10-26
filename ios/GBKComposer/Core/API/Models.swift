@@ -10,6 +10,8 @@ struct User: Codable, Hashable, Identifiable {
     let songCount: Int?
     let ratingAvg: Double?
     let createdAt: Int64?
+    /// Public Pro flag (#133): bare boolean from the server; no source or expiry is ever exposed.
+    var pro: Bool? = nil
     var id: String { handle }
 }
 
@@ -47,7 +49,7 @@ struct Me: Codable, Hashable {
     }
 
     var asUser: User {
-        User(handle: handle, displayName: displayName, avatarUrl: avatarUrl, songCount: songCount, ratingAvg: ratingAvg, createdAt: createdAt)
+        User(handle: handle, displayName: displayName, avatarUrl: avatarUrl, songCount: songCount, ratingAvg: ratingAvg, createdAt: createdAt, pro: pro)
     }
 }
 

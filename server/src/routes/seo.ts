@@ -37,7 +37,7 @@ function sendXml(req: FastifyRequest, reply: FastifyReply, body: string) {
   return reply.type("application/xml; charset=utf-8").send(body);
 }
 
-export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, opts: { chunk?: number; shellFile?: string; ogDir?: string } = {}) {
+export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, opts: { chunk?: number; shellFile?: string; ogDir?: string; proOf?: (userId: string) => boolean } = {}) {
   const chunk = opts.chunk ?? SITEMAP_CHUNK, origin = cfg.publicOrigin;
   app.get("/sitemap.xml", async (req, reply) => {
     const { pages, songs } = sitemapEntries(db, origin);
@@ -144,7 +144,7 @@ ${more.length ? `<h2>More by ${htmlEsc(artist)}</h2><ul>${more.map((x) => `<li>$
     const latest = songs[0] ? `${origin}/og/s/${encodeURIComponent(songs[0].slug)}.png` : undefined;
     const jsonLd = { "@context": "https://schema.org", "@type": "ProfilePage", url, mainEntity: { "@type": "MusicGroup", name: p.display_name, alternateName: `@${p.handle}`, url, ...(p.bio ? { description: p.bio } : {}),
       track: songs.slice(0, 20).map((x) => ({ "@type": "MusicRecording", name: x.title, url: `${origin}/s/${encodeURIComponent(x.slug)}` })) } };
-    const body = `<h1>${htmlEsc(p.display_name)}</h1><p class="by">@${htmlEsc(p.handle)}${p.badge ? ` · ${htmlEsc(p.badge)}` : ""}</p>${p.bio ? `<p>${htmlEsc(p.bio)}</p>` : ""}
+    const body = `<h1>${htmlEsc(p.display_name)}${opts.proOf?.(p.user_id) ? ` <span class="pro">Pro</span>` : ""}</h1><p class="by">@${htmlEsc(p.handle)}${p.badge ? ` · ${htmlEsc(p.badge)}` : ""}</p>${p.bio ? `<p>${htmlEsc(p.bio)}</p>` : ""}
 <h2>${n} public song${n === 1 ? "" : "s"}</h2><ul>${songs.map((x) => { const l = labelsOf(x.labels); return `<li><a href="/s/${encodeURIComponent(x.slug)}">${htmlEsc(x.title)}</a>${l.length ? ` <span>${htmlEsc(l.join(", "))}</span>` : ""}</li>`; }).join("")}</ul>`;
     return render(reply, { title: `${p.display_name} (@${p.handle}) · GBK Composer`, description: desc.slice(0, 300), url, index: true, type: "profile", image: latest, jsonLd, body,
       extraHead: `    <meta property="profile:username" content="${htmlEsc(p.handle)}" />\n` });
@@ -154,6 +154,7 @@ ${more.length ? `<h2>More by ${htmlEsc(artist)}</h2><ul>${more.map((x) => `<li>$
 // Matches the social palette (light default, dark via prefers-color-scheme) so the pre-hydrate block does not flash.
 const SSR_CSS = `.ssr{max-width:760px;margin:0 auto;padding:32px 20px;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#16324a;background:#fdfefe;min-height:100vh}
 .ssr h1{margin:0 0 4px;font-size:32px;line-height:1.2}.ssr h2{font-size:18px;margin:24px 0 8px}.ssr a{color:#2d6a93}.ssr .by{margin:0 0 16px;color:#5f7a90}
+.ssr .pro{display:inline-block;vertical-align:middle;padding:2px 9px;border-radius:999px;background:#f7b500;color:#241a00;font-size:13px;font-weight:700;letter-spacing:.02em}
 .ssr dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}.ssr dt{color:#5f7a90}.ssr dd{margin:0}
 .ssr blockquote{margin:0;padding:10px 14px;border-left:4px solid #61a6d1;background:#eef3f7;border-radius:6px;white-space:pre-wrap}
 @media (prefers-color-scheme: dark){body{background:#0b1620}.ssr{color:#e6f0f8;background:#0b1620}.ssr a{color:#61a6d1}.ssr .by,.ssr dt{color:#93acc0}.ssr blockquote{background:#1c3247}}`;

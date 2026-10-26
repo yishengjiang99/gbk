@@ -31,7 +31,10 @@ struct UserProfileView: View {
             if let u = model.user {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(u.displayName ?? u.handle).font(.title2.bold()).foregroundStyle(Theme.accent)
+                        HStack(spacing: 8) {
+                            Text(u.displayName ?? u.handle).font(.title2.bold()).foregroundStyle(Theme.accent)
+                            if u.pro == true { ProBadge() }
+                        }
                         Text("@\(u.handle)").foregroundStyle(Theme.textSecondary)
                         HStack(spacing: 12) {
                             Label("\(u.songCount ?? 0) songs", systemImage: "music.note")
