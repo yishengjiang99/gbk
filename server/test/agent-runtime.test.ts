@@ -122,7 +122,7 @@ test("tool results containing instructions are passed as untrusted data, not obe
   assert.equal(link.executed.filter((e) => e.tool === "gbk_delete_render_artifact").length, 0); // not in the vetted list
 });
 
-test("browser disconnect: waits for reconnect, resumes on the same project, fails on a different one", async () => {
+test("browser disconnect: waits for reconnect, resumes on the same project, and continues on a different one", async () => {
   const link = new FakeLink(ALL, () => { throw new BridgeCallError("BROWSER_DISCONNECTED", "gone"); });
   const back = new FakeLink(ALL); back.projectId = link.projectId; link.reconnectTo = back;
   const { go, conv } = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("resumed")], {}, link);
@@ -131,9 +131,25 @@ test("browser disconnect: waits for reconnect, resumes on the same project, fail
   assert.ok(back.events.some((e) => e.type === "session_reconnected" && e.resumed));
   const link2 = new FakeLink(ALL, () => { throw new BridgeCallError("BROWSER_DISCONNECTED", "gone"); });
   const other = new FakeLink(ALL); other.projectId = "prj_other"; link2.reconnectTo = other;
-  const s2 = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("no")], {}, link2); s2.conv.projectId = "prj_1";
-  assert.equal((await s2.go()).code, "PROJECT_CHANGED");
+  const s2 = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("continued")], {}, link2); s2.conv.projectId = "prj_1";
+  const r2 = await s2.go(); assert.equal(r2.status, "completed"); assert.equal(s2.conv.projectId, "prj_other");
+  assert.ok(s2.model.requests[1].messages.some((m) => m.role === "user" && String(m.content).includes("different project open")));
   const link3 = new FakeLink(ALL, () => { throw new BridgeCallError("BROWSER_DISCONNECTED", "gone"); });
   const s3 = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("no")], {}, link3);
   assert.equal((await s3.go()).code, "BROWSER_DISCONNECTED");
+});
+
+test("a new message binds to the currently open project; a mid-run PROJECT_CHANGED re-reads and continues; failures are plain text", async () => {
+  const link = new FakeLink(ALL); link.projectId = "prj_now";
+  const s = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("ok")], {}, link); s.conv.projectId = "prj_old";
+  assert.equal((await s.go()).status, "completed"); assert.equal(link.executed[0].expect, "prj_now"); assert.equal(s.conv.projectId, "prj_now");
+  let n = 0;
+  const l2 = new FakeLink(ALL, () => (n++ === 0 ? { ok: false, projectId: "prj_b", revision: 0, warnings: [], error: { code: "PROJECT_CHANGED", message: "the open project changed (expected prj_a, now prj_b)" } } : { ok: true, projectId: "prj_b", revision: 1, warnings: [] }));
+  l2.projectId = "prj_a";
+  const s2 = setup([() => calls(tc("a", "gbk_list_tracks")), () => calls(tc("b", "gbk_list_tracks")), () => reply("done")], {}, l2);
+  const r2 = await s2.go(); assert.equal(r2.status, "completed"); assert.equal(l2.executed[1].expect, "prj_b");
+  assert.ok(s2.model.requests[1].messages.some((m) => m.role === "user" && String(m.content).includes("open project changed during this run")));
+  const l3 = new FakeLink(ALL, () => { throw new BridgeCallError("BROWSER_DISCONNECTED", "gone"); });
+  const s3 = setup([() => calls(tc("a", "gbk_list_tracks"))], {}, l3); await s3.go();
+  assert.doesNotMatch(s3.conv.history.at(-1)!.text, /[A-Z_]{6,}|prj_/);
 });

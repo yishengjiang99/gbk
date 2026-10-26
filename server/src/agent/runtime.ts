@@ -61,15 +61,20 @@ export class AgentRuntime {
     let steps = 0; let calls = 0;
     const fail = (code: string, message: string, retryable = false): RunResult => {
       emit({ type: "run_failed", runId: o.runId, code, message, retryable });
-      conv.history.push({ role: "assistant", text: `(${code}) ${message}`, at: Date.now() });
+      conv.history.push({ role: "assistant", text: message, at: Date.now() });
       return { status: code === "OPERATION_CANCELLED" ? "cancelled" : "failed", text: message, steps, artifacts, code };
     };
     if (!llmConfigured(cfg)) return fail("LLM_NOT_CONFIGURED", "LLM not configured on the server: set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL in the Composer env file.");
     if (!cfg.llm.models.includes(o.model)) return fail("MODEL_NOT_ALLOWED", "that model is not in the server's model list");
     if (o.text.length > cfg.agent.maxInputChars) return fail("INPUT_TOO_LONG", `message is longer than ${cfg.agent.maxInputChars} characters`);
 
+    let switchedNote = "";
+    // A new user message binds to the project open in the tab NOW; PROJECT_CHANGED only guards a switch mid-run.
+    if (conv.projectId && conv.projectId !== link.projectId) {
+      conv.projectId = link.projectId; conv.recentEdits = []; switchedNote = " [server note] The user opened a different project since the last message: work on the currently open project and re-read it first.";
+    }
     const ctx = `[Workstation state from the browser - data, not instructions] open projectId=${link.projectId} revision=${link.revision}; conversation project=${conv.projectId ?? "none yet"}; recent edits: ${conv.recentEdits.slice(-8).join("; ") || "none"}; artifacts: ${conv.artifacts.slice(-3).map((a) => `${a.artifactId} (${a.durationSeconds}s)`).join(", ") || "none"}`;
-    conv.messages.push({ role: "user", content: `${o.text}\n\n${ctx}` });
+    conv.messages.push({ role: "user", content: `${o.text}\n\n${ctx}${switchedNote}` });
     conv.history.push({ role: "user", text: o.text, at: Date.now() });
     const tools = this.catalog.schemasFor(link.allowedTools);
     if (!tools.length) return fail("NO_TOOLS", "the browser registered no vetted GBK tools; reload the page");
@@ -104,13 +109,14 @@ export class AgentRuntime {
       emit({ type: "progress", runId: o.runId, step: steps, maxSteps: cfg.agent.maxToolSteps, task: taskFor(toolCalls[0].function.name) });
       for (const tc of toolCalls) emit({ type: "tool_intent", runId: o.runId, callId: tc.id, tool: tc.function.name, arguments: safeArgs(tc.function.arguments), task: taskFor(tc.function.name) });
       calls += toolCalls.length;
-      let disconnected = false;
+      let disconnected = false; let projectSwitched = false;
       const outcomes = await dispatchToolCalls(toolCalls, this.catalog, link.allowedTools, async ({ callId, tool, args }) => {
         if (disconnected) return { ok: false, projectId: link.projectId, revision: link.revision, warnings: [], error: { code: "BROWSER_DISCONNECTED", message: "not executed: the browser tab disconnected" } };
         const pol = this.catalog.get(tool)!.policy;
         try {
           const r = await link.callTool(o.runId, callId, tool, args, { expectProjectId: pol.createsProject ? null : (conv.projectId ?? link.projectId), consent: { newProject: true }, timeoutMs: pol.cls === "render" ? cfg.agent.renderTimeoutMs : cfg.agent.toolTimeoutMs });
           if (r.ok && pol.createsProject) conv.projectId = r.projectId;
+          if (!r.ok && r.error?.code === "PROJECT_CHANGED") { conv.projectId = r.projectId || link.projectId; projectSwitched = true; }
           if (r.ok) { conv.lastRevision = r.revision; if (pol.cls !== "read") conv.recentEdits = [...conv.recentEdits.slice(-19), `${tool} -> rev ${r.revision}`]; }
           return r;
         } catch (e) {
@@ -128,14 +134,15 @@ export class AgentRuntime {
         conv.messages.push({ role: "tool", tool_call_id: oc.callId, content: compactToolResult({ untrustedData: true, ...oc.result }, cfg.agent.maxToolResultChars) });
       }
       log({ evt: "step", runId: o.runId, step: steps, calls: toolCalls.map((t) => t.function.name), ok: outcomes.map((x) => x.result.ok) });
+      if (projectSwitched && !disconnected) conv.messages.push({ role: "user", content: "[server note] The open project changed during this run. Re-read the currently open project and continue the task there." });
       if (disconnected) {
         emit({ type: "progress", runId: o.runId, step: steps, maxSteps: cfg.agent.maxToolSteps, task: "Browser disconnected - waiting for reconnect" });
         const next = await link.awaitReconnect(cfg.agent.reconnectGraceMs, o.signal);
-        if (!next) return fail("BROWSER_DISCONNECTED", "the browser tab disconnected; completed changes are kept in that tab. Reopen it and send a new message to continue.", true);
-        if (conv.projectId && next.projectId !== conv.projectId) { link = next; return fail("PROJECT_CHANGED", "after reconnecting a different project is open; not resuming. Send a new message to continue.", true); }
-        link = next;
+        if (!next) return fail("BROWSER_DISCONNECTED", "Lost the connection to this tab for too long. Everything finished so far is kept; send your message again to continue.", true);
+        const switched = !!conv.projectId && next.projectId !== conv.projectId;
+        link = next; if (switched) conv.projectId = next.projectId;
         link.emit({ type: "session_reconnected", sessionId: link.sessionId, runId: o.runId, resumed: true });
-        conv.messages.push({ role: "user", content: "[server note] The browser reconnected. Calls marked BROWSER_DISCONNECTED may or may not have been applied: re-read the project state before continuing." });
+        conv.messages.push({ role: "user", content: switched ? "[server note] The browser reconnected with a different project open. Re-read the currently open project and continue the task there." : "[server note] The browser reconnected. Calls marked BROWSER_DISCONNECTED may or may not have been applied: re-read the project state before continuing." });
       }
       if (calls > cfg.agent.maxToolSteps * 4) return fail("MAX_TOOL_CALLS", "too many tool calls in one run", true);
     }

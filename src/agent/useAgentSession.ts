@@ -1,5 +1,6 @@
 // React state for the Composer panel. Music state is NOT copied here: the workstation controller stays the single
 // source of truth; this hook only tracks the conversation, tool activity, usage and artifacts.
+import { friendlyError } from "./friendly-error.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { workstation } from "../workstation/instance.ts";
 import { BridgeClient, apiBase, type ConnState } from "./bridge-client.ts";
@@ -52,12 +53,12 @@ export function useAgentSession() {
       case "tool_intent": patchLastAssistant(m.runId, (x) => ({ ...x, steps: [...(x.steps ?? []), { callId: m.callId, tool: m.tool, task: m.task, status: "pending" }] })); setRun((r) => r && { ...r, task: m.task }); break;
       case "tool_started": patchLastAssistant(m.runId, (x) => ({ ...x, steps: (x.steps ?? []).map((s) => s.callId === m.callId ? { ...s, status: "running" } : s) })); break;
       case "tool_progress": patchLastAssistant(m.runId, (x) => ({ ...x, steps: (x.steps ?? []).map((s) => s.callId === m.callId ? { ...s, progress: m.detail } : s) })); break;
-      case "tool_completed": patchLastAssistant(m.runId, (x) => ({ ...x, steps: (x.steps ?? []).map((s) => s.callId === m.callId ? { ...s, status: m.ok ? "done" : "failed", summary: m.summary, error: m.error ? `${m.error.code}: ${m.error.message}` : undefined } : s), artifacts: m.artifact ? [...(x.artifacts ?? []), m.artifact] : x.artifacts })); break;
+      case "tool_completed": patchLastAssistant(m.runId, (x) => ({ ...x, steps: (x.steps ?? []).map((s) => s.callId === m.callId ? { ...s, status: m.ok ? "done" : "failed", summary: m.summary, error: m.error ? friendlyError(m.error.code, m.error.message) : undefined } : s), artifacts: m.artifact ? [...(x.artifacts ?? []), m.artifact] : x.artifacts })); break;
       case "progress": setRun((r) => r && { ...r, step: m.step, maxSteps: m.maxSteps, task: m.task }); break;
       case "usage": setUsage(m.usage); break;
       case "run_completed": setRun(null); patchLastAssistant(m.runId, (x) => ({ ...x, text: m.text || x.text, artifacts: m.artifacts.length ? dedupe([...(x.artifacts ?? []), ...m.artifacts]) : x.artifacts })); break;
-      case "run_failed": setRun(null); setItems((xs) => [...xs, { id: `e_${m.runId}_${Date.now()}`, role: "error", text: `${m.code}: ${m.message}`, runId: m.runId, retryText: m.retryable ? lastUser(xs) : undefined }]); break;
-      case "error": setItems((xs) => [...xs, { id: `e_${Date.now()}`, role: "error", text: `${m.code}: ${m.message}` }]); break;
+      case "run_failed": setRun(null); setItems((xs) => [...xs, { id: `e_${m.runId}_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message), runId: m.runId, retryText: m.retryable ? lastUser(xs) : undefined }]); break;
+      case "error": setItems((xs) => [...xs, { id: `e_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message) }]); break;
       case "session_reconnected": if (!m.resumed && m.runId) setRun(null); break;
     }
   }, []);
