@@ -145,3 +145,39 @@ test("desktop studio grid: automation Read/Write drive playback, the metronome c
   expect(written).toEqual(expect.arrayContaining([10, 60, 110]));
   await page.getByTestId("lane-write").click();
 });
+
+test("desktop studio grid: plain wheel zooms time at the cursor, Shift+wheel zooms pitch, hovering an edge pans with a visible cue", async ({ page }) => {
+  for (const scheme of ["light", "dark"] as const) {
+    await open(page, 1440, 900, scheme); await seed(page);
+    await page.evaluate(() => localStorage.removeItem("gbk.rollZoomHint")); await page.reload(); await expect(page.getByTestId("workstation")).toHaveAttribute("data-layout", "grid"); await seed(page);
+    await expect(page.getByTestId("roll-hint")).toBeVisible();
+    const b = (await page.getByTestId("piano-roll").boundingBox())!;
+    const cx = b.x + 36 + 300, cy = b.y + b.height / 2;
+    await page.mouse.move(cx, cy);
+    const tickAt = async () => { const r = roll(page); return +(await r.getAttribute("data-scroll-tick"))! + 300 / +(await r.getAttribute("data-px-per-tick"))!; };
+    const p0 = await ppt(page), t0 = await tickAt();
+    await page.mouse.wheel(0, -300); await expect.poll(() => ppt(page)).toBeGreaterThan(p0 * 1.5);
+    await expect(page.getByTestId("roll-zoom-toast")).toBeVisible(); await expect(page.getByTestId("roll-hint")).toHaveCount(0);
+    expect(Math.abs((await tickAt()) - t0)).toBeLessThan(20 / (await ppt(page)) + 2); // anchored at the cursor (rounding of scroll-tick)
+    expect(await page.evaluate(() => scrollY)).toBe(0);
+    const p1 = await ppt(page); await page.mouse.wheel(0, 300); await expect.poll(() => ppt(page)).toBeLessThan(p1);
+    const [lo0, hi0] = await range(page); await page.keyboard.down("Shift"); await page.mouse.wheel(0, -300); await page.keyboard.up("Shift");
+    await expect.poll(async () => { const [lo, hi] = await range(page); return hi - lo; }).toBeLessThan(hi0 - lo0);
+    // edge hover: right edge pans later in time, cue + cursor shown; leaving stops
+    await page.getByTestId("zoom-time").fill("70");
+    const s0 = +(await roll(page).getAttribute("data-scroll-tick"))!;
+    await page.mouse.move(b.x + b.width - 6, cy);
+    await expect(page.getByTestId("roll-edge-right")).toHaveAttribute("data-active", "1");
+    expect(await page.getByTestId("piano-roll").evaluate((e) => getComputedStyle(e).cursor)).toBe("e-resize");
+    await expect.poll(async () => +(await roll(page).getAttribute("data-scroll-tick"))!).toBeGreaterThan(s0 + 50);
+    await page.screenshot({ path: `${SHOTS}/pianoroll-zoompan-${scheme}.png` });
+    await page.mouse.move(b.x + b.width / 2, cy); await expect(page.getByTestId("roll-edge-right")).toHaveAttribute("data-active", "0");
+    const s1 = +(await roll(page).getAttribute("data-scroll-tick"))!; await page.waitForTimeout(300); expect(+(await roll(page).getAttribute("data-scroll-tick"))!).toBe(s1);
+    // left edge pans back and stops at 0
+    await page.mouse.move(b.x + 36 + 3, cy); await expect.poll(async () => +(await roll(page).getAttribute("data-scroll-tick"))!, { timeout: 15000 }).toBe(0);
+    // top edge pans up in pitch
+    const [, hiT] = await range(page); await page.mouse.move(cx, b.y + 4);
+    await expect.poll(async () => (await range(page))[1]).toBeGreaterThan(Math.min(126, hiT));
+    await page.mouse.move(cx, cy);
+  }
+});

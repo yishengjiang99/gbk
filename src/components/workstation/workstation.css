@@ -273,3 +273,20 @@ html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-
 }
 .ws [hidden] { display: none !important; }
 .ws-composer-full .ws-sheet-toggle { display: none; }
+/* Desktop piano roll: edge-hover pan cues, zoom toast, first-run hint (light default, dark via prefers-color-scheme). */
+.ws-edge { position: absolute; pointer-events: none; display: flex; align-items: center; justify-content: center; transition: opacity .15s ease; color: #3b47d6; font: 700 16px/1 system-ui, sans-serif; --ws-edge-c: rgba(91, 91, 246, .28); }
+.ws-edge span { text-shadow: 0 0 6px rgba(255,255,255,.9); animation: ws-edge-nudge .9s ease-in-out infinite; }
+.ws-edge-left { background: linear-gradient(to right, var(--ws-edge-c), transparent); }
+.ws-edge-right { background: linear-gradient(to left, var(--ws-edge-c), transparent); }
+.ws-edge-top { background: linear-gradient(to bottom, var(--ws-edge-c), transparent); }
+.ws-edge-bottom { background: linear-gradient(to top, var(--ws-edge-c), transparent); }
+.ws-edge-left span { --nx: -3px; --ny: 0; } .ws-edge-right span { --nx: 3px; --ny: 0; } .ws-edge-top span { --nx: 0; --ny: -3px; } .ws-edge-bottom span { --nx: 0; --ny: 3px; }
+@keyframes ws-edge-nudge { 50% { transform: translate(var(--nx), var(--ny)); } }
+.ws-zoom-toast { position: absolute; pointer-events: none; padding: 3px 8px; border-radius: 6px; font: 600 12px/1.4 system-ui, sans-serif; white-space: nowrap; background: rgba(255,255,255,.95); color: #1d2433; border: 1px solid #d5dae6; box-shadow: 0 2px 8px rgba(20,30,60,.15); }
+.ws-roll-hint { position: absolute; top: 6px; right: 8px; max-width: 60%; padding: 4px 10px; border-radius: 999px; font: 12px/1.4 system-ui, sans-serif; pointer-events: none; background: rgba(255,255,255,.94); color: #3b4456; border: 1px solid #d5dae6; box-shadow: 0 2px 8px rgba(20,30,60,.12); }
+@media (prefers-color-scheme: dark) {
+  .ws-edge { color: #b9c2ff; --ws-edge-c: rgba(130, 140, 255, .30); }
+  .ws-edge span { text-shadow: 0 0 6px rgba(0,0,0,.8); }
+  .ws-zoom-toast, .ws-roll-hint { background: rgba(28,32,42,.95); color: #e6e9f2; border-color: #3a4152; box-shadow: 0 2px 10px rgba(0,0,0,.5); }
+}
+@media (prefers-reduced-motion: reduce) { .ws-edge span { animation: none; } }

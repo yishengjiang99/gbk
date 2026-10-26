@@ -5,6 +5,9 @@ import { diffNotes } from "../../workstation/diff.ts";
 import { buildNoteIndex, visibleNotes } from "../../workstation/visible.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import { workstation } from "./useWorkstation.ts";
+import { EDGE_PX, edgeVector, panStep, wheelFactor, zoomPitchAt, zoomTimeAt } from "../../workstation/roll-zoompan.ts";
+
+export const ROLL_HINT = "Scroll to zoom time · Shift+scroll (or Alt) for pitch · pinch zooms · hover the edges to pan";
 
 export interface View { scrollTick: number; pxPerTick: number; lowPitch: number; highPitch: number }
 const KEY_W = 36;
@@ -33,7 +36,15 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
   const drag = useRef<null | { kind: "select" | "move" | "resize" | "draw"; startTick: number; startPitch: number; noteIds: string[]; dTick: number; dPitch: number; x0: number; hadNotes?: boolean; moved?: boolean }>(null);
   const clickAdded = useRef(0);
+  // Desktop studio (explicit tools): wheel zooms at the cursor, hovering an edge auto-pans.
+  const zp = tool !== undefined;
+  const [edge, setEdge] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const [toast, setToast] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [hint, setHint] = useState(() => { try { return zp && !localStorage.getItem("gbk.rollZoomHint"); } catch { return false; } });
+  const live = useRef({ view, setView, onManualScroll, maxScroll: 0 });
+  const edgeRef = useRef({ dx: 0, dy: 0 }); const panRaf = useRef(0); const rowAcc = useRef({ rows: 0 }); const toastT = useRef(0);
   const sel = project.selection;
+  live.current = { view, setView, onManualScroll, maxScroll: Math.max(0, project.endTick + project.ppq * 8 - (width - KEY_W) / view.pxPerTick) };
   const rowH = height / (view.highPitch - view.lowPitch + 1);
   const diff = useMemo(() => (proposal ? diffNotes(proposal.original, proposal.candidate) : null), [proposal]);
   const barsMemo = useMemo(() => barList(project, project.endTick + project.ppq * 16), [project.timeSigs, project.ppq, project.endTick]);
@@ -140,6 +151,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
   }, [project, diff, view, width, height, barsMemo, noteIndex, focusTrackId, themeAuto, dark()]);
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (zp) { dismissHint(); stopPan(); }
     const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
     if (px < KEY_W) return;
     (e.target as Element).setPointerCapture(e.pointerId);
@@ -166,6 +178,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     const d = drag.current;
     if (erase.current) { const n = noteAt(px, py); if (n && !erase.current.has(n.id)) { erase.current.add(n.id); setHover({ x: px, y: py, text: `erase ${erase.current.size}` }); } return; }
     if (d?.kind === "draw") { const len = grid > 0 ? grid : project.ppq / 4; const end = Math.max(d.startTick + len, grid > 0 ? Math.ceil(tickAt(px) / grid) * grid : tickAt(px)); setDraft({ tick: d.startTick, pitch: d.startPitch, duration: end - d.startTick }); return; }
+    if (zp) updateEdge(d || erase.current ? 0 : px, py, !d && !erase.current);
     if (!d) {
       const n = noteAt(px, py);
       setHover(n ? { x: px, y: py, text: `${trackById.get(n.trackId)?.name ?? ""} · pitch ${n.pitch} · vel ${n.velocity} · tick ${n.tick} (${tickToSec(project, n.tick).toFixed(2)}s) · dur ${n.duration}` } : null);
@@ -234,9 +247,52 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     else if (e.key === "-") setView({ ...view, pxPerTick: Math.max(0.005, view.pxPerTick / 1.25) });
     else if (e.key === "Escape") workstation.setSelection({ noteIds: [], startTick: 0, endTick: 0 });
   };
+  const dismissHint = () => { if (!hint) return; setHint(false); try { localStorage.setItem("gbk.rollZoomHint", "1"); } catch { /* private mode */ } };
+  const stopPan = () => { cancelAnimationFrame(panRaf.current); panRaf.current = 0; edgeRef.current = { dx: 0, dy: 0 }; setEdge((e) => (e.dx || e.dy ? { dx: 0, dy: 0 } : e)); };
+  function updateEdge(px: number, py: number, on: boolean) {
+    const v = on ? edgeVector(px - KEY_W, py, width - KEY_W, height) : { dx: 0, dy: 0 };
+    if (px < KEY_W) { v.dx = 0; v.dy = 0; } // over the keyboard: no pan
+    edgeRef.current = v;
+    const q = { dx: Math.round(v.dx * 10) / 10, dy: Math.round(v.dy * 10) / 10 };
+    setEdge((e) => (e.dx === q.dx && e.dy === q.dy ? e : q));
+    if ((v.dx || v.dy) && !panRaf.current) {
+      let last = performance.now();
+      const step = (now: number) => {
+        const { dx, dy } = edgeRef.current; if (!dx && !dy) { panRaf.current = 0; return; }
+        const L = live.current; const dt = Math.min(50, now - last); last = now;
+        const nv = panStep(L.view, dx, dy, dt, L.maxScroll, rowAcc.current);
+        if (nv !== L.view && (nv.scrollTick !== L.view.scrollTick || nv.lowPitch !== L.view.lowPitch)) { if (nv.scrollTick !== L.view.scrollTick) L.onManualScroll?.(); L.view = nv; L.setView(nv); }
+        panRaf.current = requestAnimationFrame(step);
+      };
+      panRaf.current = requestAnimationFrame(step);
+    }
+  }
+  useEffect(() => () => { cancelAnimationFrame(panRaf.current); clearTimeout(toastT.current); }, []);
+  // Desktop: every wheel zooms (plain = time at the cursor; Shift/Alt = pitch at the cursor; ctrlKey = trackpad pinch) and never scrolls the page.
+  const zoomWheel = useRef<(e: WheelEvent) => void>(() => {});
+  zoomWheel.current = (e: WheelEvent) => {
+    e.preventDefault();
+    const r = canvas.current!.getBoundingClientRect(); const px = Math.max(KEY_W, e.clientX - r.left), py = Math.max(0, Math.min(height, e.clientY - r.top));
+    const L = live.current; const v = L.view;
+    const pitch = e.shiftKey || e.altKey; const raw = pitch && !e.deltaY ? e.deltaX : (!pitch && Math.abs(e.deltaX) > Math.abs(e.deltaY) * 2 && !e.ctrlKey ? 0 : e.deltaY);
+    if (!raw) { // horizontal trackpad swipe still scrolls time
+      const nv = { ...v, scrollTick: Math.max(0, Math.min(L.maxScroll, v.scrollTick + e.deltaX / v.pxPerTick)) }; L.onManualScroll?.(); L.view = nv; L.setView(nv); return;
+    }
+    const f = wheelFactor(raw * (e.ctrlKey ? 4 : 1), e.deltaMode);
+    let nv; let text;
+    if (pitch) { nv = zoomPitchAt(v, f, py / Math.max(1, height)); const rows = nv.highPitch - nv.lowPitch + 1; text = `↕ ${rows} keys · ${Math.round((128 / rows) * 100) / 100}×`; }
+    else {
+      const maxS = Math.max(0, project.endTick + project.ppq * 8);
+      nv = zoomTimeAt(v, f, px - KEY_W, maxS); L.onManualScroll?.();
+      const bars = (width - KEY_W) / nv.pxPerTick / (project.ppq * 4); text = `⟷ ${bars >= 10 ? Math.round(bars) : bars.toFixed(1)} bars · ${Math.round(nv.pxPerTick * 1000) / 10}%`;
+    }
+    L.view = nv; L.setView(nv); dismissHint();
+    setToast({ x: e.clientX - r.left, y: e.clientY - r.top, text }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToast(null), 900);
+  };
   // Ctrl/⌘/Alt+wheel must not zoom or scroll the page: a non-passive listener (React's wheel handlers are passive).
-  useEffect(() => { const c = canvas.current; if (!c) return; const f = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey || e.altKey) e.preventDefault(); }; c.addEventListener("wheel", f, { passive: false }); return () => c.removeEventListener("wheel", f); }, []);
+  useEffect(() => { const c = canvas.current; if (!c) return; const f = (e: WheelEvent) => { if (zp) zoomWheel.current(e); else if (e.ctrlKey || e.metaKey || e.altKey) e.preventDefault(); }; c.addEventListener("wheel", f, { passive: false }); return () => c.removeEventListener("wheel", f); }, [zp]);
   const onWheel = (e: React.WheelEvent) => {
+    if (zp) return; // handled by the native listener above
     const r = canvas.current!.getBoundingClientRect(); const px = Math.max(KEY_W, e.clientX - r.left), py = e.clientY - r.top;
     if (e.ctrlKey || e.metaKey) { // time zoom anchored at the pointer
       const at = view.scrollTick + (px - KEY_W) / view.pxPerTick; const ppt = Math.max(0.005, Math.min(2, view.pxPerTick * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
@@ -250,13 +306,29 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     else { const d = e.deltaY > 0 ? -2 : 2; const lo = Math.max(0, Math.min(127 - (view.highPitch - view.lowPitch), view.lowPitch + d)); setView({ ...view, lowPitch: lo, highPitch: lo + (view.highPitch - view.lowPitch) }); }
   };
 
+  useEffect(() => { if (!hint) return; const t = setTimeout(dismissHint, 12000); return () => clearTimeout(t); }, [hint]);
   return (
     <div ref={wrap} className="ws-roll" style={{ position: "relative", height }} data-scroll-tick={Math.round(view.scrollTick)} data-px-per-tick={view.pxPerTick.toFixed(5)} data-pitch-range={`${view.lowPitch}-${view.highPitch}`} data-focus-track={focusTrackId ?? ""} data-tool={tool ?? ""} data-visible-ticks={Math.round((width - KEY_W) / view.pxPerTick)}>
-      <canvas ref={canvas} style={{ width: "100%", height, display: "block", touchAction: "none" }} tabIndex={0} role="application"
+      <canvas ref={canvas} tabIndex={0} role="application"
         aria-label="Piano roll editor. Drag to select a range, drag notes to move, drag note end to resize, click empty space to add a note on the selected track, double-click to add or delete, arrows transpose/scroll, alt+arrows nudge, +/- zoom, Delete removes."
-        data-testid="piano-roll" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onKeyDown={onKeyDown} onWheel={onWheel} onPointerLeave={() => setHover(null)} />
+        data-testid="piano-roll" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onKeyDown={onKeyDown} onWheel={onWheel} onPointerLeave={() => { setHover(null); if (zp) stopPan(); }}
+        title={zp ? ROLL_HINT : undefined} data-edge={zp ? `${Math.sign(edge.dx)},${Math.sign(edge.dy)}` : undefined}
+        style={{ width: "100%", height, display: "block", touchAction: "none", cursor: zp ? edgeCursor(edge) : undefined }} />
+      {zp && (["left", "right", "top", "bottom"] as const).map((side) => {
+        const a = side === "left" ? Math.max(0, -edge.dx) : side === "right" ? Math.max(0, edge.dx) : side === "top" ? Math.max(0, -edge.dy) : Math.max(0, edge.dy);
+        const pos = side === "left" ? { left: KEY_W, top: 0, bottom: 0, width: EDGE_PX } : side === "right" ? { right: 0, top: 0, bottom: 0, width: EDGE_PX } : side === "top" ? { left: KEY_W, right: 0, top: 0, height: EDGE_PX } : { left: KEY_W, right: 0, bottom: 0, height: EDGE_PX };
+        return <div key={side} className={`ws-edge ws-edge-${side}`} data-testid={`roll-edge-${side}`} data-active={a > 0 ? "1" : "0"} style={{ ...pos, opacity: a > 0 ? 0.35 + 0.65 * a : 0 }} aria-hidden="true">
+          <span>{side === "left" ? "‹‹" : side === "right" ? "››" : side === "top" ? "︿" : "﹀"}</span></div>;
+      })}
+      {toast && <div className="ws-zoom-toast" data-testid="roll-zoom-toast" style={{ left: Math.max(KEY_W + 4, Math.min(toast.x + 14, width - 170)), top: Math.max(4, Math.min(toast.y - 30, height - 28)) }}>{toast.text}</div>}
+      {zp && hint && <div className="ws-roll-hint" data-testid="roll-hint">🖱 {ROLL_HINT}</div>}
       {draft && <div className="ws-draft" data-testid="roll-draft" style={{ position: "absolute", pointerEvents: "none", left: x(draft.tick), top: y(draft.pitch), width: Math.max(2, draft.duration * view.pxPerTick), height: Math.max(2, rowH), background: (trackById.get(focusTrackId ?? sel.trackIds[0] ?? "")?.color ?? "#5b5bf6"), opacity: 0.7, borderRadius: 3 }} />}
       {hover && <div className="ws-tooltip" style={{ left: Math.min(hover.x + 12, width - 260), top: hover.y + 12 }}>{hover.text}</div>}
     </div>
   );
+}
+
+function edgeCursor(e: { dx: number; dy: number }): string | undefined {
+  const v = e.dy < 0 ? "n" : e.dy > 0 ? "s" : "", h = e.dx < 0 ? "w" : e.dx > 0 ? "e" : "";
+  return v || h ? `${v}${h}-resize` : undefined;
 }

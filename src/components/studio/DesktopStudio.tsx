@@ -428,11 +428,11 @@ export function DesktopStudio(props: DesktopStudioProps) {
             <option value={1}>Snap 1/4</option><option value={2}>Snap 1/8</option><option value={4}>Snap 1/16</option><option value={8}>Snap 1/32</option><option value={0}>Snap off</option></select>
           <button className="ds-btn" data-testid="quantize" title="Line up the selected notes (or the focused track) to the snap grid" onClick={quantize}>Quantize</button>
           <span className="ds-sep" />
-          <span className="ds-small" title="Time zoom (Ctrl/⌘ + wheel)">Time</span>
+          <span className="ds-small" title="Time zoom (scroll over the roll; hover the left/right edge to pan)">Time</span>
           <button className="ds-btn ds-ic" data-testid="zoom-time-out" aria-label="Zoom out (time)" onClick={() => zoomTime(1 / 1.3)}>−</button>
           <input type="range" className="ds-zoom" data-testid="zoom-time" aria-label="Time zoom" min={0} max={100} value={pptToSlider(view.pxPerTick)} onChange={(e) => zoomTime(null, +e.target.value)} />
           <button className="ds-btn ds-ic" data-testid="zoom-time-in" aria-label="Zoom in (time)" onClick={() => zoomTime(1.3)}>+</button>
-          <span className="ds-small" title="Pitch zoom (Alt + wheel)">Pitch</span>
+          <span className="ds-small" title="Pitch zoom (Shift/Alt + scroll; hover the top/bottom edge to pan)">Pitch</span>
           <button className="ds-btn ds-ic" data-testid="zoom-pitch-out" aria-label="Zoom out (pitch)" onClick={() => zoomPitch(span * 1.25)}>−</button>
           <input type="range" className="ds-zoom" data-testid="zoom-pitch" aria-label="Pitch zoom" min={0} max={120} value={128 - span} onChange={(e) => zoomPitch(128 - +e.target.value)} />
           <button className="ds-btn ds-ic" data-testid="zoom-pitch-in" aria-label="Zoom in (pitch)" onClick={() => zoomPitch(span / 1.25)}>+</button>
