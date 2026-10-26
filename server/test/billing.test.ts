@@ -193,3 +193,25 @@ test("ios bridge: billing rows posted to /api/events land in the recorder (#119 
     assert.match(view?.detail ?? "", /reason=second_composition/);
   } finally { await b.app.close(); }
 });
+
+test("engagement channel records plan_select to billing (#116 modal -> #118 funnel)", { timeout: 60_000 }, async () => {
+  const { b, base } = await serve();
+  const J = { "content-type": "application/json" };
+  const post = (path: string, body: unknown, h: Record<string, string> = {}) => fetch(`${base}${path}`, { method: "POST", headers: { ...J, ...h }, body: JSON.stringify(body) });
+  try {
+    const alice = await login(base, "code-a");
+    const danAcc = b.accounts.upsertOAuth("google", "g-dan", "Dan", "dan@example.com").account;
+    const ds = b.sessions.create(danAcc.id);
+    const dan = { cookie: `${COOKIE}=${b.sessions.cookieValue(ds)}` };
+    const okRes = await post("/api/me/engagement", { event: "plan_select", plan: "pro_yearly", surface: "studio", platform: "web", reason: "ai_limit" }, dan);
+    assert.equal(okRes.status, 200); // was 422 before plan_select joined the engagement taxonomy
+    const badRes = await post("/api/me/engagement", { event: "purchase", plan: "pro_yearly" }, dan);
+    assert.equal(badRes.status, 422); // money events still refused on the client channel
+    const rep = await (await fetch(`${base}/api/admin/billing?days=7`, { headers: { cookie: alice.cookie } })).json() as { totals: Record<string, number> };
+    assert.equal(rep.totals.plan_select, 1);
+    const log = await (await fetch(`${base}/api/admin/billing-log?account=${danAcc.id}`, { headers: { cookie: alice.cookie } })).json() as { events: { event: string; plan: string; surface: string; detail: string }[] };
+    const sel = log.events.find((e) => e.event === "plan_select");
+    assert.equal(sel?.plan, "pro_yearly"); assert.equal(sel?.surface, "studio");
+    assert.match(sel?.detail ?? "", /reason=ai_limit/);
+  } finally { await b.app.close(); }
+});

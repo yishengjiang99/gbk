@@ -62,13 +62,16 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   // #118: the same reports feed the billing funnel (recorder sanitizes the optional dims; defaults studio/web).
   app.post("/api/me/engagement", async (req, reply) => {
     const s = auth(req, reply); if (!s) return; if (!engagement) return reply.code(404).send({ code: "NOT_FOUND", message: "not enabled" });
-    const b = (req.body ?? {}) as { event?: unknown; surface?: unknown; platform?: unknown; reason?: unknown };
+    const b = (req.body ?? {}) as { event?: unknown; surface?: unknown; platform?: unknown; reason?: unknown; plan?: unknown };
     const ev = b.event;
-    const dims = { account: s.user, surface: typeof b.surface === "string" ? b.surface : "studio", platform: typeof b.platform === "string" ? b.platform : "web", reason: typeof b.reason === "string" ? b.reason : undefined };
+    const dims = { account: s.user, surface: typeof b.surface === "string" ? b.surface : "studio", platform: typeof b.platform === "string" ? b.platform : "web", reason: typeof b.reason === "string" ? b.reason : undefined, plan: typeof b.plan === "string" ? b.plan : undefined };
     if (ev === "paywall_view") { engagement.usage.bump(s.user, "paywall_views"); engagement.billing?.record("paywall_view", dims); }
     else if (ev === "paywall_dismiss") { engagement.usage.dismiss(s.user); engagement.billing?.record("paywall_dismiss", dims); }
     else if (ev === "export") { engagement.usage.bump(s.user, "exports"); engagement.billing?.record("export", dims); }
-    else return reply.code(422).send({ code: "INVALID_ARGUMENT", message: "event is paywall_view, paywall_dismiss or export" });
+    // #116/#118: plan picks from the paywall modals arrive on this channel too — billing-only (no
+    // #115 usage counter exists for them); the recorder sanitizes the plan slug.
+    else if (ev === "plan_select") engagement.billing?.record("plan_select", dims);
+    else return reply.code(422).send({ code: "INVALID_ARGUMENT", message: "event is paywall_view, paywall_dismiss, plan_select or export" });
     const e = engage(s.user) as { usage: unknown; paywall: unknown };
     return { usage: e.usage, paywall: e.paywall };
   });
