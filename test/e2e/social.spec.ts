@@ -5,6 +5,16 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { readFileSync } from "node:fs";
 
 const project = JSON.parse(readFileSync(new URL("../fixtures/social-song.json", import.meta.url), "utf8"));
+/** The landing paywall greets a freshly signed-in non-Pro user ~1 s after a page load and covers the
+ * app. Dismiss it when it appears so feed/studio clicks are not blocked; tolerant when it does not
+ * come (guest page, Pro, or the account is inside the dismiss cooldown). */
+async function dismissLandingPaywall(page: Page) {
+  const modal = page.getByTestId("paywall-modal");
+  try { await expect(modal).toBeVisible({ timeout: 10_000 }); } catch { return; }
+  await page.getByTestId("paywall-later").click();
+  await expect(modal).toHaveCount(0);
+}
+
 async function apiLogin(req: APIRequestContext, base: string, code: string) {
   const csrf = (await (await req.get("/api/session")).json()).csrf as string;
   const r = await req.post("/api/login", { headers: { origin: base, "x-gbk-csrf": csrf }, data: { code } }); expect(r.ok()).toBeTruthy();
@@ -31,6 +41,7 @@ test("social feed: rate, comment, tag filter, report, profile (mobile + desktop)
     await page.goto("/feed?sort=new");
     const card = page.getByTestId("feed-card").filter({ hasText: title }).first();
     await expect(card).toBeVisible();
+    await dismissLandingPaywall(page);
     await expect(card.getByTestId("card-pianoroll")).toBeVisible();
     // rating
     await card.getByTestId("star-4").click();
@@ -116,6 +127,7 @@ test("social prompt sharing: off by default, owner opts in, feed shows prompt, R
     await page.goto("/feed?sort=new");
     const card = page.getByTestId("feed-card").filter({ hasText: title }).first();
     await expect(card.getByTestId("card-prompt")).toContainText("a stormy sea shanty in A minor");
+    await dismissLandingPaywall(page);
     await card.getByTestId("card-remix").click();
     await expect(page).toHaveURL(/\/studio$/);
     const tab = page.getByTestId("tab-composer"); if (await tab.isVisible() && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
@@ -191,6 +203,7 @@ test("social studio: composer input always visible + in viewport on every tab, k
   await page.goto("/studio"); await expect(input).toBeVisible(); await input.fill("draft before sign-in");
   await apiLogin(page.request, new URL(baseURL!).origin, "e2e-code");
   await page.goto("/studio");
+  await dismissLandingPaywall(page);
   const check = async (label: string) => {
     await expect(input, label).toBeVisible();
     const r = await input.evaluate((e) => { const b = e.getBoundingClientRect(); const vv = window.visualViewport; return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, h: vv ? vv.height + vv.offsetTop : innerHeight, w: innerWidth, fs: getComputedStyle(e).fontSize, ox: document.documentElement.scrollWidth - innerWidth }; });
@@ -240,7 +253,7 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
   const title = `Gate E2E ${P} ${Date.now() % 100000}`;
   const sh = await createShare(owner.request, oh, { title, project, public: true });
   const noSignInButton = async () => { await expect(page.getByRole("button", { name: /sign in/i })).toHaveCount(0); await expect(page.getByRole("link", { name: /sign in/i })).toHaveCount(0); };
-  const signInViaSheet = async () => { const s = page.getByTestId("signin-sheet"); await expect(s).toBeVisible(); await s.getByTestId("signin-code").fill("e2e-code-2"); await s.getByTestId("signin-code-submit").click(); await expect(page.getByTestId("signin-sheet")).toBeHidden({ timeout: 15_000 }); await page.waitForLoadState("load"); await expect(page.getByTestId("me-handle").or(page.getByTestId("composer-input")).first()).toBeVisible({ timeout: 15_000 }); };
+  const signInViaSheet = async () => { const s = page.getByTestId("signin-sheet"); await expect(s).toBeVisible(); await s.getByTestId("signin-code").fill("e2e-code-2"); await s.getByTestId("signin-code-submit").click(); await expect(page.getByTestId("signin-sheet")).toBeHidden({ timeout: 15_000 }); await page.waitForLoadState("load"); await expect(page.getByTestId("me-handle").or(page.getByTestId("composer-input")).first()).toBeVisible({ timeout: 15_000 }); await dismissLandingPaywall(page); };
   const shots = process.env.GBK_SHOTS ?? "/workspace/shots";
   try {
     // guests browse + play; no standalone Sign in anywhere (feed, profile tab, studio)
@@ -304,6 +317,7 @@ test("MIDI upload: Settings import accepts .mid, choose new project or add to cu
   const base = new URL(baseURL!).origin; await apiLogin(page.request, base, "e2e-code-2");
   await page.goto("/studio"); await (await studioReveal(page, "tab-composer")).click();
   await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
+  await dismissLandingPaywall(page);
   const input = await studioReveal(page, "import-input");
   expect(await input.getAttribute("accept")).toContain(".mid");
   const fixture = new URL("../fixtures/import-test.mid", import.meta.url).pathname;

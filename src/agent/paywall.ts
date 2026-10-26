@@ -1,5 +1,5 @@
 // Web Studio paywall (#116): the modal is driven entirely by GET /api/me's `paywall` block (#115) — the server
-// owns eligibility, reasons and the 24 h dismiss cooldown; this module is the client plumbing: surface
+// owns eligibility, reasons and the 1 h dismiss cooldown; this module is the client plumbing: surface
 // suppression (iOS app / ChatGPT widget), the engagement event channel (#115/#118 taxonomy), the /pricing link
 // carrying the stored attribution ids (#131), and the plan display data (mirrors server/src/routes/pricing.ts).
 import { inNativeApp } from "./native-guest.ts";

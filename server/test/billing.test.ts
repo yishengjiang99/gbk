@@ -205,11 +205,15 @@ test("engagement channel records plan_select to billing (#116 modal -> #118 funn
     const dan = { cookie: `${COOKIE}=${b.sessions.cookieValue(ds)}; gbk_csrf=${ds.csrf}`, origin: "http://composer.test", "x-gbk-csrf": ds.csrf };
     const okRes = await post("/api/me/engagement", { event: "plan_select", plan: "pro_yearly", surface: "studio", platform: "web", reason: "ai_limit" }, dan);
     assert.equal(okRes.status, 200); // was 422 before plan_select joined the engagement taxonomy
+    const landRes = await post("/api/me/engagement", { event: "paywall_view", surface: "studio", platform: "web", reason: "landing" }, dan);
+    assert.equal(landRes.status, 200);
     const badRes = await post("/api/me/engagement", { event: "purchase", plan: "pro_yearly" }, dan);
     assert.equal(badRes.status, 422); // money events still refused on the client channel
     const rep = await (await fetch(`${base}/api/admin/billing?days=7`, { headers: { cookie: alice.cookie } })).json() as { totals: Record<string, number> };
     assert.equal(rep.totals.plan_select, 1);
     const log = await (await fetch(`${base}/api/admin/billing-log?account=${danAcc.id}`, { headers: { cookie: alice.cookie } })).json() as { events: { event: string; plan: string; surface: string; detail: string }[] };
+    const land = log.events.find((e) => e.event === "paywall_view");
+    assert.match(land?.detail ?? "", /reason=landing/); // the landing reason survives recorder sanitization
     const sel = log.events.find((e) => e.event === "plan_select");
     assert.equal(sel?.plan, "pro_yearly"); assert.equal(sel?.surface, "studio");
     assert.match(sel?.detail ?? "", /reason=ai_limit/);

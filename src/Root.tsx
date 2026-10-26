@@ -3,6 +3,7 @@ import App from "./App";
 import { WorkstationView } from "./components/workstation/WorkstationView.tsx";
 import { SocialApp } from "./components/social/SocialApp.tsx";
 import { SignInSheet } from "./components/auth/SignInSheet.tsx";
+import { PaywallHost } from "./components/composer/PaywallModal.tsx";
 import { MidiImportChooser } from "./components/workstation/MidiImportChooser.tsx";
 import "./components/social/social.css";
 import { parseRoute, navigate, appUrl, type Route } from "./agent/routes.ts";
@@ -60,6 +61,9 @@ export default function Root() {
         </div>
       </div>
       <SignInSheet />
+      {/* One paywall host for the whole app shell: mounted outside the (sometimes hidden) workstation
+          tree so a landing presentation is actually visible on social routes too, and reported once. */}
+      <PaywallHost />
       {!explore && <MidiImportChooser />}
     </>
   );

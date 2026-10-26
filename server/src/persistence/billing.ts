@@ -15,7 +15,7 @@ export const BILLING_PLATFORMS = ["web", "ios", "server"] as const;
 export const BILLING_PLANS = ["pro_monthly", "pro_yearly", "lifetime"] as const;
 export const BILLING_PROVIDERS = ["apple", "stripe"] as const;
 /** Paywall triggers from #115 (usage.ts PaywallReason) plus a manual upgrade tap. */
-export const BILLING_REASONS = ["second_composition", "export_after_2", "ai_limit", "render_limit", "manual", "profile", "studio_link"] as const;
+export const BILLING_REASONS = ["second_composition", "export_after_2", "ai_limit", "render_limit", "landing", "manual", "profile", "studio_link"] as const;
 /** Client-reported plan value -> billing plan id: accepts a plan slug as-is, or a StoreKit product id
  *  (suffix match, mirroring routes/iap.ts planOf) since the iOS app reports product ids (#119). */
 export const billingPlanOf = (v: string): string => ((BILLING_PLANS as readonly string[]).includes(v) ? v

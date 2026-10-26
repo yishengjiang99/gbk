@@ -1,13 +1,15 @@
 // Per-user lifetime engagement counters (accounts, app guests and MCP guest owners) and paywall eligibility (#115).
 // Counts only: no content, no IPs. Surfaced to the signed-in user in /api/me; never in MCP/ChatGPT responses.
 // Trigger (monetization plan): soft paywall when the 2nd composition completes; again on the 1st WAV/MIDI export
-// after that; hard gates at real cost limits (daily AI budget, render limit). A dismiss starts a 24 h cooldown.
+// after that; hard gates at real cost limits (daily AI budget, render limit). A dismiss starts a 1 h cooldown.
 import type { DatabaseSync } from "node:sqlite";
 
 export const USAGE_COUNTERS = ["compositions", "ai_runs", "renders", "exports", "shares", "paywall_views"] as const;
 export type UsageCounter = typeof USAGE_COUNTERS[number];
-export type PaywallReason = "second_composition" | "export_after_2" | "ai_limit" | "render_limit";
-export const PAYWALL_COOLDOWN_MS = 24 * 3_600_000;
+export type PaywallReason = "second_composition" | "export_after_2" | "ai_limit" | "render_limit" | "landing";
+// 1 h (was 24 h until 2026-10-26): the owner directed the paywall to show more frequently — a dismiss
+// silences soft triggers for an hour, then the landing/composition triggers may present again.
+export const PAYWALL_COOLDOWN_MS = 3_600_000;
 
 interface Row { user: string; compositions: number; ai_runs: number; renders: number; exports: number; shares: number; paywall_views: number;
   last_paywall_at: number | null; last_export_at: number | null; dismissed_at: number | null }
@@ -41,7 +43,12 @@ export class UsageStore {
     if (o.pro) return { eligible: false, reason: null, cooldown_until: cooldown };
     const reason: PaywallReason | null = o.aiLimit ? "ai_limit" : o.renderLimit ? "render_limit"
       : r.compositions >= 2 && r.paywall_views > 0 && r.last_export_at !== null && r.last_export_at > (r.last_paywall_at ?? 0) ? "export_after_2"
-      : r.compositions >= 2 && r.paywall_views === 0 ? "second_composition" : null;
+      : r.compositions >= 2 && r.paywall_views === 0 ? "second_composition"
+      // Landing (owner direction 2026-10-26): a non-Pro user with no stronger trigger is shown the soft
+      // paywall right after landing. The dismiss cooldown above is the only frequency gate — a dismiss
+      // (any reason) silences every soft trigger for 1 h; the client fires the landing check once per
+      // page load so it cannot repeat within a session.
+      : "landing";
     return { eligible: reason !== null && cooldown === null, reason, cooldown_until: cooldown };
   }
   moveUser(from: string, to: string) {

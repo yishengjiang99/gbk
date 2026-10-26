@@ -24,6 +24,16 @@ async function signIn(page: Page, code = "e2e-code") {
   await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
 }
 
+/** The landing paywall greets a fresh signed-in user ~1 s after load and covers the Studio. Dismiss it
+ * when it appears so compose flows can proceed; the dismissal starts the server-side 24 h cooldown,
+ * which also means no composition-triggered soft paywall appears later in the flow. */
+async function dismissLandingPaywall(page: Page) {
+  const modal = page.getByTestId("paywall-modal");
+  try { await expect(modal).toBeVisible({ timeout: 10_000 }); } catch { return; }
+  await page.getByTestId("paywall-later").click();
+  await expect(modal).toHaveCount(0);
+}
+
 test("compose a fugue through the server agent, render a valid WAV, follow-up edit, share + fork", async ({ page, browser }) => {
   // The full flow shares one server user/conversation; run it once (desktop). Mobile has its own test below.
   test.skip(test.info().project.name !== "chrome-no-webmcp", "full flow runs on desktop Chrome only");
@@ -36,6 +46,7 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await expect(page).toHaveURL(/\/studio$/);
   await expect(page.getByTestId("workstation")).toBeVisible();
   await signIn(page);
+  await dismissLandingPaywall(page);
   await expect(page.getByTestId("starter-prompts")).toBeVisible();
 
   const t0 = Date.now();
@@ -99,11 +110,11 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   expect(JSON.stringify(after.voice)).toMatch(/"gen":8|filterCutoff|"value"/);
   await page.screenshot({ path: `${SHOTS}/composer-e2e-followup.png` });
 
-  // #116: the follow-up was this user's 2nd composition, so the soft paywall appears (the feature working as
-  // designed). Dismiss it — the dismiss is recorded server-side (24 h cooldown) — before publishing below.
-  await expect(page.getByTestId("paywall-modal")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("paywall-modal")).toHaveAttribute("data-reason", "second_composition");
-  await page.getByTestId("paywall-later").click();
+  // The landing paywall was dismissed right after sign-in, so this user is inside the 24 h dismiss
+  // cooldown: the follow-up (their 2nd composition) raises NO soft paywall, and the publish offer below
+  // is not gated by a paywall decision. (Before the landing trigger, this beat asserted the
+  // second_composition modal; the trigger itself is covered by the dedicated paywall test + unit tests.)
+  await page.waitForTimeout(3_000); // let the run-completed eligibility check settle
   await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
 
   // the follow-up run finished: Publish dialog again -> edit the suggested title -> confirm (the only way to go public)
@@ -393,6 +404,7 @@ test("mobile composer view: each reply is a version card; older versions play an
   const P = test.info().project.name;
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/studio"); await signIn(page, "e2e-code-2");
+  await dismissLandingPaywall(page);
   page.on("dialog", (d) => d.accept());
   // Right after the sign-in reload the conversation history lands and WebKit can drop a fill that races that render
   // (seen in full-suite runs: input focused but empty). Type only once the restored history is on screen, then check it took.
@@ -408,10 +420,9 @@ test("mobile composer view: each reply is a version card; older versions play an
   await page.getByTestId("composer-input").fill("Make the cello darker"); await page.getByTestId("composer-send").click();
   const v2 = page.locator("[data-testid=version-card][data-version='2']"); await expect(v2).toBeVisible({ timeout: 240_000 });
   await expect(v2).toHaveAttribute("data-current", "1");
-  // #116: that was this user's 2nd composition, so the soft paywall appears in the phone studio too.
-  // Dismiss it (recorded server-side) so the version restore below is not covered by the modal.
-  await expect(page.getByTestId("paywall-modal")).toBeVisible({ timeout: 30_000 });
-  await page.getByTestId("paywall-later").click();
+  // The landing paywall was dismissed right after sign-in (24 h cooldown), so the 2nd composition raises
+  // no soft paywall in the phone studio either — nothing covers the version restore below.
+  await page.waitForTimeout(2_000);
   await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
   const v1 = page.locator("[data-testid=version-card][data-version='1']"); await expect(v1).toHaveAttribute("data-current", "0");
   const rev = await page.evaluate(() => (globalThis as any).__gbkWorkstation.project.revision);
@@ -455,10 +466,11 @@ test("mobile composer view: in the iOS app (gbkNative) the + sheet has two rows,
   await inputOk(page, "app + sheet");
 });
 
-// #116: the web Studio paywall modal. A dedicated access-code user (paywall:e2e-code-3) keeps the per-user
-// usage counters deterministic: NO modal after the 1st composition, the soft modal after the 2nd (annual
-// preselected, trial CTA, view + dismiss recorded server-side), then the hard variant on a budget failure.
-test("paywall modal: soft after the 2nd composition (not the 1st), dismiss records a cooldown, hard variant blocks", async ({ page }) => {
+// Landing paywall + #116. The modal greets a non-Pro user right after landing (reason "landing"; annual
+// preselected, trial CTA, view + dismiss recorded server-side); the dismiss starts a 24 h cooldown that
+// also silences the composition triggers; the hard variant still blocks on a budget failure. A dedicated
+// access-code user (paywall:e2e-code-3) keeps the per-user usage counters deterministic.
+test("paywall modal: landing right after sign-in, dismiss cooldown silences composition triggers, hard variant blocks", async ({ page }) => {
   test.skip(test.info().project.name !== "chrome-no-webmcp", "paywall flow runs on desktop Chrome only");
   page.on("pageerror", (e) => console.log("pageerror", e.message));
   await page.goto("/");
@@ -471,8 +483,24 @@ test("paywall modal: soft after the 2nd composition (not the 1st), dismiss recor
 
   const me = () => page.evaluate(async () => { const r = await fetch("/api/me", { credentials: "same-origin" }); return r.ok ? (await r.json()) as any : null; });
   expect((await me())?.usage?.compositions ?? 0).toBe(0);
+  expect((await me())?.paywall?.reason).toBe("landing");
 
-  // --- 1st composition: counted, but no paywall.
+  // --- landing: the soft paywall greets the fresh signed-in user (the host checks once on mount).
+  const modal = page.getByTestId("paywall-modal");
+  await expect(modal).toBeVisible({ timeout: 30_000 });
+  await expect(modal).toHaveAttribute("data-kind", "soft");
+  await expect(modal).toHaveAttribute("data-reason", "landing");
+  await expect(page.getByTestId("paywall-plan-pro_yearly")).toHaveClass(/sel/); // annual preselected
+  await expect(page.getByTestId("paywall-cta")).toHaveText("Start 7-day free trial");
+  await page.screenshot({ path: `${SHOTS}/composer-e2e-paywall-soft.png` });
+  await expect.poll(async () => (await me())?.usage?.paywall_views, { timeout: 15_000 }).toBe(1); // paywall_view recorded
+
+  // --- dismiss: modal gone, and the server recorded the dismiss (24 h cooldown in /api/me.paywall).
+  await page.getByTestId("paywall-later").click();
+  await expect(modal).toHaveCount(0);
+  await expect.poll(async () => (await me())?.paywall?.cooldown_until ?? 0, { timeout: 15_000 }).toBeGreaterThan(Date.now());
+
+  // --- 1st composition: counted, but no paywall (the dismiss cooldown silences every soft trigger).
   await page.getByTestId("composer-input").fill(PROMPT);
   await page.getByTestId("composer-input").press("Enter");
   await expect(page.getByTestId("assistant-text").last()).toContainText("Rendered WAV artifact", { timeout: 540_000 });
@@ -482,24 +510,16 @@ test("paywall modal: soft after the 2nd composition (not the 1st), dismiss recor
   await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
   expect((await me())?.usage?.compositions).toBe(1);
 
-  // --- 2nd composition: the soft paywall appears.
+  // --- 2nd composition: second_composition would fire, but the cooldown keeps the modal away; the
+  // publish offer still arrives (the paywall gate releases it once the decision settles).
   await page.getByTestId("composer-input").fill("Make the cello darker and reduce the reverb.");
   await page.getByTestId("composer-send").click();
   await expect(page.getByTestId("assistant-text").last()).toContainText("cello is darker", { timeout: 120_000 });
-  const modal = page.getByTestId("paywall-modal");
-  await expect(modal).toBeVisible({ timeout: 30_000 });
-  await expect(modal).toHaveAttribute("data-kind", "soft");
-  await expect(modal).toHaveAttribute("data-reason", "second_composition");
-  await expect(page.getByTestId("paywall-plan-pro_yearly")).toHaveClass(/sel/); // annual preselected
-  await expect(page.getByTestId("paywall-cta")).toHaveText("Start 7-day free trial");
-  await page.screenshot({ path: `${SHOTS}/composer-e2e-paywall-soft.png` });
-  await expect.poll(async () => (await me())?.usage?.paywall_views, { timeout: 15_000 }).toBe(1); // paywall_view recorded
+  await expect(page.getByTestId("publish-dialog")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("publish-cancel").click();
+  await page.waitForTimeout(3_000);
+  await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
   expect((await me())?.usage?.compositions).toBe(2);
-
-  // --- dismiss: modal gone, and the server recorded the dismiss (24 h cooldown in /api/me.paywall).
-  await page.getByTestId("paywall-later").click();
-  await expect(modal).toHaveCount(0);
-  await expect.poll(async () => (await me())?.paywall?.cooldown_until ?? 0, { timeout: 15_000 }).toBeGreaterThan(Date.now());
 
   // --- hard variant: a budget failure blocks with the reset time; Escape does not dismiss it.
   const budgetFail = () => page.evaluate(() => window.dispatchEvent(new CustomEvent("gbk:run-failed", { detail: { runId: "e2e-paywall", code: "TOKEN_BUDGET_EXHAUSTED", message: "budget" } })));

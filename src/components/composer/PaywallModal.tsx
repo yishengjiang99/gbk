@@ -11,7 +11,10 @@ import "./paywall.css";
 
 interface Showing { kind: "soft" | "hard"; reason: PaywallReason }
 
+/** Minimum gap between two presentations of the same soft reason within one page session. */
+const SOFT_RESHOW_MS = 30 * 60_000;
 const SOFT_COPY: Record<string, { title: string; body: string }> = {
+  landing: { title: "Unlock the full Composer", body: "Free is perfect for trying things out. Pro gives the Composer a 10× daily AI budget and longer server renders, so bigger pieces finish in one go." },
   second_composition: { title: "You've composed 2 songs with GBK", body: "Free is perfect for trying things out. Pro gives the Composer a 10× daily AI budget and longer server renders, so bigger pieces finish in one go." },
   export_after_2: { title: "You're exporting your songs", body: "Nice — the music is leaving the Studio. Pro gives the Composer a 10× daily AI budget and longer server renders for the next ones." },
 };
@@ -25,7 +28,7 @@ export function PaywallHost() {
   const [plan, setPlan] = useState(DEFAULT_PLAN);
   const showingRef = useRef<Showing | null>(null);
   const busy = useRef(false);
-  const shownSoft = useRef(new Set<PaywallReason>());
+  const shownSoftAt = useRef(new Map<PaywallReason, number>());
   const dismissedHard = useRef(new Set<PaywallReason>());
 
   const open = useCallback((s: Showing) => {
@@ -58,9 +61,15 @@ export function PaywallHost() {
         if (isHardReason(reason)) {
           if (!eligible || dismissedHard.current.has(reason)) return;
           open({ kind: "hard", reason });
-        } else if (eligible && !shownSoft.current.has(reason)) {
-          shownSoft.current.add(reason);
-          open({ kind: "soft", reason });
+        } else if (eligible) {
+          // Frequency is the server's job (1 h dismiss cooldown); within one session the same soft
+          // reason may present again once SOFT_RESHOW_MS has passed since its last presentation —
+          // covers long sessions that outlive the cooldown and returns from /pricing with no dismiss.
+          const last = shownSoftAt.current.get(reason);
+          if (last === undefined || Date.now() - last >= SOFT_RESHOW_MS) {
+            shownSoftAt.current.set(reason, Date.now());
+            open({ kind: "soft", reason });
+          }
         }
       } finally { busy.current = false; }
     } finally { publishPromptGate.endDecision(); }
@@ -68,6 +77,10 @@ export function PaywallHost() {
 
   useEffect(() => {
     if (paywallSuppressed()) return;
+    // Landing check: the host is mounted once in the app shell (Root), so this runs once per page load
+    // on any route — feed included. The server decides (reason "landing" for a non-Pro user with no
+    // stronger trigger, silenced by the 24 h dismiss cooldown).
+    const landingTimer = setTimeout(() => { void decide(false); }, 900);
     const onRunCompleted = () => { void decide(false); };
     const onRunFailed = (e: Event) => {
       const code = (e as CustomEvent<{ code?: string }>).detail?.code;
@@ -78,6 +91,7 @@ export function PaywallHost() {
     window.addEventListener("gbk:run-failed", onRunFailed);
     window.addEventListener("gbk:exported", onExported);
     return () => {
+      clearTimeout(landingTimer);
       window.removeEventListener("gbk:run-completed", onRunCompleted);
       window.removeEventListener("gbk:run-failed", onRunFailed);
       window.removeEventListener("gbk:exported", onExported);
