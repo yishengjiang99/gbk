@@ -6,9 +6,14 @@ import XCTest
 final class StudioPublishUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    func testGuestPublishUsesNativeSheetWithoutSignIn() throws {
+    func testGuestPublishUsesNativeSheetWithoutSignIn() throws { try run(dark: false) }
+    /// The sheet stays bright even when the system (forced via -uiTestDark) is dark.
+    func testGuestPublishNativeSheetDark() throws { try run(dark: true) }
+
+    private func run(dark: Bool) throws {
+        let mode = dark ? "dark" : "light"
         let app = XCUIApplication()
-        app.launchArguments += ["-uiTestStudioMIDI", "-uiTestPublishMock"] // mock: never publish to prod from CI
+        app.launchArguments += ["-uiTestStudioMIDI", "-uiTestPublishMock"] + (dark ? ["-uiTestDark"] : []) // mock: never publish to prod from CI
         app.launch()
         let create = app.tabBars.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 90))
@@ -45,13 +50,13 @@ final class StudioPublishUITests: XCTestCase {
         app.buttons["publish-tag-add"].tap()
         XCTAssertTrue(app.buttons["publish-tag-piano"].waitForExistence(timeout: 3))
         app.switches["publish-share-prompt"].firstMatch.tap()
-        attach(app, "studio-native-publish")
+        attach(app, "studio-native-publish-\(mode)")
         let submit = app.buttons["publish-submit"]
         XCTAssertTrue(submit.waitForExistence(timeout: 3))
         XCTAssertTrue(submit.isHittable, "publish button hittable")
         submit.tap()
         XCTAssertTrue(app.staticTexts["publish-done"].waitForExistence(timeout: 10), "published (mock guest service)")
-        attach(app, "studio-native-publish-done")
+        attach(app, "studio-native-publish-done-\(mode)")
         app.buttons["publish-cancel"].tap()
         XCTAssertTrue(input.waitForExistence(timeout: 5) && input.isHittable, "composer visible after publish")
     }
