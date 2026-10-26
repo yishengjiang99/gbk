@@ -2,7 +2,7 @@
 
 ## iOS
 - iOS: the app is locked to Light (Info.plist `UIUserInterfaceStyle`), so the studio web view never gets `prefers-color-scheme: dark` in the app even though MobileStudio has dark tokens. Decide whether to unlock dark mode app-wide.
-- Web (GBK Social): in the app, a guest who taps Publish sees both the native sign-in sheet and the web SignInSheet (both listen to `gbk:need-signin`). Skip the web sheet when `window.gbkNative` exists and the pending kind is `publish`.
+- GBK Social: guest publish on iOS without sign-in (device two-word username); send the guest-identity contract (header or token) so the app can pass it to the studio web view. Then replace `MockGuestPublishService` with the live call (save → `PATCH /api/shares/:slug {title, public:true}` → `PATCH /api/songs/:slug/meta {labels, tags, prompt_shared}`); the native sheet needs the song slug, so web should post `{type:'publish', slug, title}` itself when `gbkNative.capabilities` has "publish" (today iOS intercepts the more-publish/version-publish clicks).
 - iOS: on a real iPhone, check Hum cancel restores full-volume playback and the Bluetooth pairing sheet opens from the studio + › Connect MIDI keyboard.
 
 - iOS: on a real iPhone, confirm feed songs play live through SF2 (no MP3), bars + waveform move, level matches web live playback (fixed 0.8 gain), and check `timeToFirstAudio` in the FeedPlayer log (Console, subsystem com.grepawk.moviefone) when swiping.
