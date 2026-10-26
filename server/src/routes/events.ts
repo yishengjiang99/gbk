@@ -9,10 +9,12 @@ import { originAllowed } from "../security/authorization.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import type { ShareStore } from "../persistence/shares.ts";
 import { ACTIONS, MAX_ACTIONS, MAX_SCROLL_V, type EventStore, type Impression } from "../persistence/events.ts";
+import { billingPlanOf, type BillingRecorder } from "../persistence/billing.ts";
+import type { BillingEvent } from "../persistence/funnel.ts";
 import { currentSession } from "./agent.ts";
 
 const GID = "gbk_gid"; const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
-export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, events: EventStore, admins: string[]) {
+export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, events: EventStore, admins: string[], billing?: BillingRecorder) {
   const lim = new RateLimiter(30); const ipLim = new RateLimiter(120);
   app.post("/api/events", { bodyLimit: 65536 }, async (req, reply) => {
     const s = currentSession(req, sessions); const bearer = /^Bearer /i.test(String(req.headers.authorization ?? ""));
@@ -31,8 +33,29 @@ export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const client = b.client === "ios" ? "ios" : "web";
     const num = (v: unknown, lo: number, hi: number) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo; };
     const rows: Impression[] = [];
+    let bridged = 0;
     for (const e of list as Record<string, unknown>[]) {
       if (!e || typeof e !== "object") continue;
+      // #118 bridge: the iOS app posts its paywall/StoreKit funnel events (#119) to this endpoint in the
+      // same batch shape as impressions. A row carrying a billing event name is not an impression —
+      // forward it to the billing recorder instead of dropping it for lacking a song slug.
+      // iap_purchase_start counts as the funnel's checkout_start; iap_purchase_result is deliberately
+      // NOT forwarded (purchase truth comes from ASSN, never from the client).
+      if (billing && typeof e.event === "string" && e.event !== "iap_purchase_result") {
+        const name = e.event === "iap_purchase_start" ? "checkout_start" : e.event;
+        if (name === "paywall_view" || name === "paywall_dismiss" || name === "plan_select" || name === "checkout_start" || name === "restore") {
+          billing.record(name as BillingEvent, {
+            account: s?.user ?? null,
+            surface: client === "ios" ? "ios" : "studio", platform: client,
+            plan: typeof e.plan === "string" ? billingPlanOf(e.plan) : undefined,
+            reason: typeof e.reason === "string" ? e.reason : undefined,
+            result: typeof e.result === "string" ? e.result : undefined,
+            provider: name === "restore" && client === "ios" ? "apple" : undefined,
+          });
+          bridged++;
+          continue;
+        }
+      }
       const r = typeof e.song === "string" ? shares.bySlug(e.song) : null; if (!r || !r.public) continue;
       const dwell = Math.round(num(e.dwell_ms, 0, 3_600_000));
       rows.push({ actor, session, share_id: r.id, dwell_ms: dwell, listen_ratio: num(e.listen_ratio, 0, 50), completed: !!e.completed, fast_skip: e.fast_skip === undefined ? dwell < 2000 : !!e.fast_skip,
@@ -42,7 +65,7 @@ export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: Session
         scroll_v: e.scroll_v === undefined || e.scroll_v === null || !Number.isFinite(Number(e.scroll_v)) ? null : Math.round(num(e.scroll_v, 0, MAX_SCROLL_V)) });
     }
     events.insert(rows);
-    return { ok: true, accepted: rows.length };
+    return { ok: true, accepted: rows.length + bridged };
   });
   app.get("/api/admin/metrics", async (req, reply) => {
     const s = currentSession(req, sessions); if (!s || !admins.includes(s.user)) return reply.code(s ? 403 : 401).send({ code: s ? "FORBIDDEN" : "UNAUTHENTICATED", message: "admin only" });

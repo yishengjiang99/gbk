@@ -5,15 +5,19 @@ import type { X509Certificate } from "node:crypto";
 import type { Config } from "../config.ts";
 import type { SessionStore } from "../security/authentication.ts";
 import type { IapStore } from "../persistence/iap.ts";
+import type { BillingRecorder } from "../persistence/billing.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import { currentSession } from "./agent.ts";
 import { verifyAppleJws, JwsError } from "../iap/apple-jws.ts";
 
 export const iapProducts = (bundle: string) => ({ [`${bundle}.pro_monthly`]: "sub", [`${bundle}.pro_yearly`]: "sub", [`${bundle}.lifetime`]: "life" }) as Record<string, "sub" | "life">;
-interface Tx { transactionId?: string; originalTransactionId?: string; bundleId?: string; productId?: string; expiresDate?: number; revocationDate?: number; environment?: string; appAccountToken?: string }
+interface Tx { transactionId?: string; originalTransactionId?: string; bundleId?: string; productId?: string; expiresDate?: number; revocationDate?: number; environment?: string; appAccountToken?: string; offerDiscountType?: string; price?: number }
+/** productId -> billing plan id (#118) and the tx price (Apple milliunits) -> cents. */
+const planOf = (productId: string) => (productId.endsWith(".pro_monthly") ? "pro_monthly" : productId.endsWith(".pro_yearly") ? "pro_yearly" : productId.endsWith(".lifetime") ? "lifetime" : "");
+const centsOf = (tx: Tx) => (typeof tx.price === "number" && Number.isFinite(tx.price) ? Math.round(tx.price / 10) : null);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function iapRoutes(app: FastifyInstance, cfg: Config, d: { sessions: SessionStore; iap: IapStore; roots: X509Certificate[]; now?: () => number }) {
+export function iapRoutes(app: FastifyInstance, cfg: Config, d: { sessions: SessionStore; iap: IapStore; roots: X509Certificate[]; now?: () => number; billing?: BillingRecorder }) {
   const now = d.now ?? Date.now; const { iap } = d; const bundle = cfg.iap.bundleId; const products = iapProducts(bundle);
   const ipL = new RateLimiter(30), userL = new RateLimiter(10), hookL = new RateLimiter(300);
   const bad = (reply: FastifyReply, status: number, code: string, message: string) => reply.code(status).send({ code, message, error: status === 409 ? "Conflict" : status === 429 ? "Too Many Requests" : "Bad Request", statusCode: status });
@@ -36,9 +40,13 @@ export function iapRoutes(app: FastifyInstance, cfg: Config, d: { sessions: Sess
     const prior = iap.get(orig); const tokenUser = appToken ? iap.tokenOwner(appToken) : null;
     const user = s?.user ?? tokenUser ?? prior?.user ?? null;
     if (user && ((prior?.user && prior.user !== user) || (tokenUser && tokenUser !== user))) return bad(reply, 409, "IAP_OWNED_BY_OTHER", "this purchase belongs to another account");
-    if (prior && iap.seenTx(txid) && (!user || prior.user === user)) return answer(orig); // idempotent repost
+    if (prior && iap.seenTx(txid) && (!user || prior.user === user)) { // idempotent repost = a restore on the device
+      d.billing?.record("restore", { account: user, surface: "ios", platform: "ios", plan: planOf(tx.productId), provider: "apple", result: "success" });
+      return answer(orig);
+    }
     iap.upsert({ original_tx: orig, last_tx: txid, user, app_token: appToken, product_id: tx.productId, environment: String(tx.environment), expires_at: products[tx.productId] === "life" ? null : Number(tx.expiresDate ?? 0) || null, revoked_at: tx.revocationDate ? Number(tx.revocationDate) : null });
     if (user && appToken) iap.bindToken(appToken, user);
+    if (!tx.revocationDate) d.billing?.record(tx.offerDiscountType === "FREE_TRIAL" ? "trial_start" : "purchase", { account: user, surface: "ios", platform: "ios", plan: planOf(tx.productId), provider: "apple", valueCents: centsOf(tx) });
     req.log.info({ evt: "iap_apple", user, product: tx.productId, env: tx.environment });
     return answer(orig);
   });
@@ -68,6 +76,14 @@ export function iapRoutes(app: FastifyInstance, cfg: Config, d: { sessions: Sess
       else if (type === "GRACE_PERIOD_EXPIRED" || type === "EXPIRED") iap.upsert({ ...base, expires_at: Math.min(exp ?? t, t), grace_until: null });
       else if (type === "REFUND" || type === "REVOKE") iap.upsert({ ...base, revoked_at: Number(tx.revocationDate ?? t) });
       else if (type === "DID_CHANGE_RENEWAL_STATUS" || type === "DID_CHANGE_RENEWAL_PREF") { if (prior) iap.patch(orig, { auto_renew: base.auto_renew }); }
+      // #118: billing funnel events from the same notification — money truth comes from Apple, not the app.
+      // EXPIRED / DID_FAIL_TO_RENEW record nothing: a cancel is counted once, at AUTO_RENEW_DISABLED.
+      const bd = { account: user, surface: "server", platform: "ios", plan: planOf(tx.productId), provider: "apple", valueCents: centsOf(tx) };
+      if (type === "SUBSCRIBED") d.billing?.record(tx.offerDiscountType === "FREE_TRIAL" ? "trial_start" : "purchase", bd);
+      else if (type === "OFFER_REDEEMED") d.billing?.record("purchase", bd);
+      else if (type === "DID_RENEW") d.billing?.record(d.billing?.hasOpenTrial(user) ? "trial_convert" : "renewal", bd);
+      else if (type === "DID_CHANGE_RENEWAL_STATUS" && n.subtype === "AUTO_RENEW_DISABLED") d.billing?.record("cancel", bd);
+      else if (type === "REFUND" || type === "REVOKE") d.billing?.record("refund", bd);
     }
     req.log.info({ evt: "iap_notify", type, subtype: n.subtype ?? null });
     return { ok: true };

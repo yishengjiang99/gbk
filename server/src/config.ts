@@ -19,6 +19,9 @@ export interface Config {
   iap: { bundleId: string; allowSandbox: boolean };
   /** Stripe (web) Pro entitlement lookup on grepawk.com. Empty token = Stripe Pro off (Apple only). */
   stripe: { entitlementOrigin: string; entitlementToken: string };
+  /** Billing funnel telemetry (#118): shared token for the finalcut -> composer event hop
+   * (POST /api/billing/stripe-events). Empty = the hop is disabled (404). */
+  billing: { webhookToken: string };
   native: { appleBundleId: string; googleClientIds: string[]; iosAppIds: string[]; apns: { keyId: string; teamId: string; privateKey: string; topic: string } };
   auth: { github: { clientId: string; clientSecret: string } | null; google: { clientId: string; clientSecret: string } | null; newAccountDays: number;
     /** OpenAI app-review login (one account, openai-reviewer). Off unless REVIEWER_LOGIN_ENABLED=1 and REVIEWER_PASSWORD_HASH are set. */
@@ -88,6 +91,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     iap: { bundleId: (env.IAP_BUNDLE_ID ?? "com.grepawk.moviefone").trim(), allowSandbox: env.IAP_ALLOW_SANDBOX === undefined ? env.NODE_ENV !== "production" : env.IAP_ALLOW_SANDBOX === "1" },
     stripe: { entitlementOrigin: (env.COMPOSE_ENTITLEMENT_ORIGIN ?? "https://grepawk.com").trim().replace(/\/$/, ""), entitlementToken: (env.COMPOSE_ENTITLEMENT_TOKEN ?? "").trim() },
+    billing: { webhookToken: (env.COMPOSE_BILLING_WEBHOOK_TOKEN ?? "").trim() },
     native: {
       // iOS bundle id: Sign in with Apple client id (id_token aud) and APNs topic. Set APPLE_BUNDLE_ID="" to disable.
       appleBundleId: (env.APPLE_BUNDLE_ID ?? "com.grepawk.moviefone").trim(),

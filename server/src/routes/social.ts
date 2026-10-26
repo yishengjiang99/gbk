@@ -18,7 +18,7 @@ const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const lim = (v: unknown, d = 20, max = 50) => Math.min(max, Math.max(1, Number(v) || d));
 
 export const OWNER_HANDLE = "yishengjiang";
-export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker, iap?: import("../persistence/iap.ts").IapStore, limits?: import("../agent/limits.ts").AccountLimits, engagement?: { usage: import("../persistence/usage.ts").UsageStore; aiLimit: (u: string) => boolean; renderLimit: (u: string) => boolean }) {
+export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, accounts: AccountStore, social: SocialStore, notify?: import("../push/notifier.ts").Notify, ranker?: import("../ranking/ranker.ts").Ranker, iap?: import("../persistence/iap.ts").IapStore, limits?: import("../agent/limits.ts").AccountLimits, engagement?: { usage: import("../persistence/usage.ts").UsageStore; billing?: import("../persistence/billing.ts").BillingRecorder; aiLimit: (u: string) => boolean; renderLimit: (u: string) => boolean }) {
   const origin = cfg.publicOrigin;
   const L = { comment: new RateLimiter(10), rating: new RateLimiter(60), report: new RateLimiter(10, 3_600_000), play: new RateLimiter(120) };
   const limited = (reply: FastifyReply, l: RateLimiter, key: string) => { if (l.take(key)) return false; void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message: "slow down" }); return true; };
@@ -59,12 +59,15 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   // ---- me / profiles ----
   app.get("/api/me", async (req, reply) => { const s = auth(req, reply, false); if (!s) return; await limits?.refresh(s.user); return me(s.user); });
   // #115: the app reports paywall impressions/dismissals and client-side (Studio) WAV/MIDI exports. Counts only.
+  // #118: the same reports feed the billing funnel (recorder sanitizes the optional dims; defaults studio/web).
   app.post("/api/me/engagement", async (req, reply) => {
     const s = auth(req, reply); if (!s) return; if (!engagement) return reply.code(404).send({ code: "NOT_FOUND", message: "not enabled" });
-    const ev = ((req.body ?? {}) as { event?: unknown }).event;
-    if (ev === "paywall_view") engagement.usage.bump(s.user, "paywall_views");
-    else if (ev === "paywall_dismiss") engagement.usage.dismiss(s.user);
-    else if (ev === "export") engagement.usage.bump(s.user, "exports");
+    const b = (req.body ?? {}) as { event?: unknown; surface?: unknown; platform?: unknown; reason?: unknown };
+    const ev = b.event;
+    const dims = { account: s.user, surface: typeof b.surface === "string" ? b.surface : "studio", platform: typeof b.platform === "string" ? b.platform : "web", reason: typeof b.reason === "string" ? b.reason : undefined };
+    if (ev === "paywall_view") { engagement.usage.bump(s.user, "paywall_views"); engagement.billing?.record("paywall_view", dims); }
+    else if (ev === "paywall_dismiss") { engagement.usage.dismiss(s.user); engagement.billing?.record("paywall_dismiss", dims); }
+    else if (ev === "export") { engagement.usage.bump(s.user, "exports"); engagement.billing?.record("export", dims); }
     else return reply.code(422).send({ code: "INVALID_ARGUMENT", message: "event is paywall_view, paywall_dismiss or export" });
     const e = engage(s.user) as { usage: unknown; paywall: unknown };
     return { usage: e.usage, paywall: e.paywall };

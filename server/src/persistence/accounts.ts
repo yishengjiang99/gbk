@@ -17,6 +17,9 @@ const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 export const accountIdFor = (provider: Exclude<Provider, "legacy">, providerId: string) => `${provider === "github" ? "gh" : provider === "apple" ? "ap" : provider === "phone" ? "ph" : provider === "guest" ? "gu" : "g"}-${providerId.replace(/[^\w.-]/g, "")}`.slice(0, 40);
 
 export class AccountStore {
+  /** Optional hook set by app wiring (#118): fired once per brand-new account (never for legacy
+   * migration or guest upgrades). Must not throw into the sign-in path; the caller guards it. */
+  onCreated: ((a: Account) => void) | null = null;
   private db: DatabaseSync;
   constructor(file: string, private now: () => number = Date.now) {
     if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
@@ -33,7 +36,9 @@ export class AccountStore {
     const cur = this.db.prepare("SELECT * FROM accounts WHERE provider = ? AND provider_id = ?").get(provider, providerId) as unknown as Account | undefined;
     if (cur) { this.db.prepare("UPDATE accounts SET name = ?, email = ?, last_login = ? WHERE id = ?").run(name.slice(0, 80), email, now, cur.id); return { account: this.get(cur.id)!, created: false }; }
     this.db.prepare("INSERT INTO accounts (id, provider, provider_id, name, email, created_at, last_login) VALUES (?,?,?,?,?,?,?)").run(id, provider, providerId, name.slice(0, 80), email, now, now);
-    return { account: this.get(id)!, created: true };
+    const account = this.get(id)!;
+    if (this.onCreated) { try { this.onCreated(account); } catch { /* telemetry must not break sign-in */ } }
+    return { account, created: true };
   }
   byProvider(provider: string, providerId: string): Account | null { return (this.db.prepare("SELECT * FROM accounts WHERE provider = ? AND provider_id = ?").get(provider, providerId) as unknown as Account) ?? null; }
   /** Guest upgrade in place: attach an external identity to the guest's account (same id). */

@@ -28,7 +28,9 @@ import { ClientErrorStore } from "./persistence/client-errors.ts";
 import { StripePro } from "./billing/stripe-pro.ts";
 import { UsageStore } from "./persistence/usage.ts";
 import { FunnelStore } from "./persistence/funnel.ts";
+import { BillingLog, BillingRecorder } from "./persistence/billing.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
+import { billingRoutes } from "./routes/billing.ts";
 import { galleryRoutes } from "./routes/gallery.ts";
 import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
@@ -116,12 +118,21 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   limits.refresh = (u) => stripePro.ensure(u);
   limits.recheck = (u) => stripePro.recheck(u);
   const usage = new UsageStore(shares.database, deps.now);
-  runtime.onUsage = (u, c) => usage.bump(u, c);
-  app.addHook("onResponse", async (req, reply) => { if (req.method === "POST" && req.routeOptions.url === "/api/shares" && reply.statusCode < 300) { const s = currentSession(req, sessions); if (s) usage.bump(s.user, "shares"); } });
-  iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now });
+  // Billing funnel telemetry (#118): aggregates in the funnel DB, per-account log in the shares DB.
+  const billingLog = new BillingLog(shares.database, deps.now);
+  const billing = new BillingRecorder(funnel, billingLog, deps.now);
+  accounts.onCreated = (a) => billing.record("signup", { account: a.id, detail: `provider=${a.provider}` });
+  const billComposition = (u: string, surface: string, platform: string) => {
+    billing.record("composition_created", { account: u, surface, platform });
+    if (usage.usage(u).compositions === 1) billing.record("first_composition", { account: u, surface, platform });
+  };
+  runtime.onUsage = (u, c) => { usage.bump(u, c); if (c === "compositions") billComposition(u, "studio", "web"); };
+  app.addHook("onResponse", async (req, reply) => { if (req.method === "POST" && req.routeOptions.url === "/api/shares" && reply.statusCode < 300) { const s = currentSession(req, sessions); if (s) { usage.bump(s.user, "shares"); billing.record("share_published", { account: s.user, surface: "studio", platform: "web" }); } } });
+  iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now, billing });
   const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits,
-    { usage, aiLimit: (u) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens, renderLimit: (u) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders });
-  eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers);
+    { usage, billing, aiLimit: (u) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens, renderLimit: (u) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders });
+  eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers, billing);
+  billingRoutes(app, cfg, sessions, { funnel, billing, log: billingLog });
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
     const s = currentSession(req, sessions); const row = shares.bySlug((req.params as { slug: string }).slug);
@@ -163,7 +174,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     app.log.info({ evt: "mcp_guest_pruned", artifacts: a.count, compositions: c.count, freedBytes: a.bytes + c.bytes, guestBytes: mcpStore.guestStorageBytes() }); } catch (e) { app.log.warn({ evt: "mcp_guest_prune_failed", message: (e as Error).message }); } };
   prune(); pruneGuests(); const pruneTimer = setInterval(prune, 3_600_000); pruneTimer.unref(); const guestTimer = setInterval(pruneGuests, 86_400_000); guestTimer.unref();
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
-  const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, usage: (u, c) => usage.bump(u, c), log: (o) => app.log.info(o) });
+  const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, usage: (u, c) => { usage.bump(u, c); if (c === "compositions") billComposition(u, "mcp", "server"); else billing.record("export", { account: u, surface: "mcp", platform: "server" }); }, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
     close: async () => { clearInterval(pruneTimer); clearInterval(guestTimer); clearInterval(rescoreTimer); native.close(); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
