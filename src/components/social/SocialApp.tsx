@@ -1,7 +1,7 @@
 // gbk Social web UI: one Feed tab (Explore merged: chips + Browse sheet), Create, Inbox, Profile; song ratings,
 // flat comments, reports, profiles and the admin report queue. All user text renders as React text nodes.
 import { Crossfader, type FadeState } from "./crossfade.ts";
-import { prepare, preparedCount, songProject, warmSoundFont } from "./live-song.ts";
+import { loadWorklet, prepare, preparedCount, songProject, warmSoundFont } from "./live-song.ts";
 import { startImpression, endImpression, attachAudio, markAction, markRate, noteScroll } from "./impressions.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { social, LABELS, type Me, type Song, type SComment, type SUser } from "../../agent/social-client.ts";
@@ -67,6 +67,7 @@ function useAudio() {
   const slugBySrc = useRef(new Map<string, string>());
   useEffect(() => {
     const x = new Crossfader(host.current!, setSt); xf.current = x; warmSoundFont();
+    { const c = x.warm(); if (c) void loadWorklet(c).catch(() => undefined); }
     // test/debug hook (read-only counters)
     (window as unknown as { __gbkFeedAudio?: object }).__gbkFeedAudio = { playing: () => x.playingCount, live: () => x.currentIsLive, prepared: () => preparedCount(), level: () => { const a = x.analyser; if (!a) return 0; const d = new Float32Array(a.fftSize); a.getFloatTimeDomainData(d); let m = 0; for (const v of d) m = Math.max(m, Math.abs(v)); return m; } };
     const vis = () => { if (document.hidden) x.stop(); };

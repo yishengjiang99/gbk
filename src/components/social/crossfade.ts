@@ -48,9 +48,12 @@ export class Crossfader {
   private hard(v: Voice) { this.cancel(v); if (v.live) { v.live.stop(); return; } v.el.pause(); this.set(v, 0); }
   private emit() { this.onChange({ current: this.current && !isPaused(this.current) ? this.current.src : null, fading: this.fading?.src ?? null }); }
 
+  /** Before any gesture: create the (suspended) AudioContext so the live engine's worklet loads ahead of the first tap. */
+  warm(): AudioContext | null { if (!this.ctx) this.makeCtx(); return this.ctx; }
+  private makeCtx() { const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext; if (AC) { try { this.ctx = new AC(); const a = this.ctx.createAnalyser(); a.fftSize = 2048; a.smoothingTimeConstant = 0; a.connect(this.ctx.destination); this.analyser = a; } catch { this.ctx = null; } } for (const v of this.pool.values()) this.wire(v); }
   /** Call inside the first user gesture: creates/resumes the AudioContext (iOS unlock). */
   unlock() {
-    if (!this.ctx) { const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext; if (AC) { try { this.ctx = new AC(); const a = this.ctx.createAnalyser(); a.fftSize = 2048; a.smoothingTimeConstant = 0; a.connect(this.ctx.destination); this.analyser = a; } catch { this.ctx = null; } } for (const v of this.pool.values()) this.wire(v); }
+    if (!this.ctx) { this.makeCtx(); }
     void this.ctx?.resume().catch(() => undefined);
     // Bless every warm element now (silent play+pause inside the gesture) so later scroll switches can autoplay.
     for (const v of this.pool.values()) if (v !== this.current && v.el.paused) { this.set(v, 0); const p = v.el.play(); v.el.pause(); void p?.catch(() => undefined); }
@@ -82,7 +85,8 @@ export class Crossfader {
     const prev = this.current;
     if (prev?.src === key && prev.live && !prev.live.clock.paused) { this.emit(); return true; }
     this.fadeOut(prev); this.current = null;
-    if (this.ctx.state !== "running") await this.ctx.resume().catch(() => undefined);
+    if (this.ctx.state !== "running") await Promise.race([this.ctx.resume().catch(() => undefined), new Promise((r) => setTimeout(r, 300))]);
+    if (this.ctx.state !== "running") { this.emit(); return false; } // no gesture yet (iOS): "Tap to play" stays
     let lv: LiveVoice;
     try { lv = await startLive(this.ctx, this.analyser ?? this.ctx.destination, p); } catch { this.emit(); return false; }
     if (my !== this.seq) { lv.stop(); return false; } // superseded while the engine started
