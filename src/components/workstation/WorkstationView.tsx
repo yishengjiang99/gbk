@@ -38,6 +38,7 @@ import { MobileStudio } from "../studio/MobileStudio.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
 import { funnelBeacon } from "../../telemetry/funnel.ts";
 import { tickToBarBeat, tickToSec, barBeatToTick } from "../../workstation/timing.ts";
+import { resolveCompactStudioMode } from "./compact-studio.ts";
 
 export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: { onOpenPlayer: () => void; composer?: boolean; onExplore?: () => void }) {
   const state = useWorkstation();
@@ -73,8 +74,10 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [keysOn, setKeysOn] = useState(false); const [, setMidiTick] = useState(0);
   const narrow = useMedia("(max-width: 900px)");
   const phone = useMedia("(max-width: 600px)");
+  const inApp = typeof (window as { gbkNative?: unknown }).gbkNative === "object";
   // Compact phone studio (<500px or inside the iOS app): title + one overflow menu, play/stop/time only, panels behind "More".
-  const compact = useMedia("(max-width: 499px)") || typeof (window as { gbkNative?: unknown }).gbkNative === "object";
+  // Composer mode uses the chat-first compact contract even when the native/mobile signals are delayed or absent.
+  const compact = resolveCompactStudioMode({ composer, narrow, inApp }) || useMedia("(max-width: 499px)");
   const [menuOpen, setMenuOpen] = useState(false); const [sheetOpen, setSheetOpen] = useState(false);
   const hasTracks = p.tracks.length > 0;
   // iOS keyboard: size the studio to the visual viewport and undo Safari's pan, so the docked composer input sits
