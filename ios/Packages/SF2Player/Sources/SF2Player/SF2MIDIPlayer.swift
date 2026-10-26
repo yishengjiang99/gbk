@@ -213,6 +213,7 @@ public final class SF2MIDIPlayer: ObservableObject {
 
     /// Master-bus input gain (dB, before compressor + limiter); used by the host's loudness AGC.
     public func setMasterGainDb(_ db: Double) { core?.setMasterGainDb(db) }
+    public func setMasterDynamicsEnabled(_ on: Bool) { core?.setMasterDynamicsEnabled(on) }
 
     public func pause() {
         core?.pause()

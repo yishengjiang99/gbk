@@ -98,7 +98,7 @@ struct SequenceView {
 }
 
 struct RTCommand {
-    enum Op: Int32 { case setSequence, play, pause, stop, seek, tempo, mute, loop, masterGain }
+    enum Op: Int32 { case setSequence, play, pause, stop, seek, tempo, mute, loop, masterGain, masterDynamics }
     var op: Op
     var value: Double = 0
     var value2: Double = 0
@@ -233,6 +233,8 @@ public final class SF2RealtimeCore: @unchecked Sendable {
     @discardableResult public func seek(toSeconds s: Double) -> Bool { commands.push(RTCommand(op: .seek, value: max(0, s) * sampleRate)) }
     /// Master bus input gain (dB, before the compressor + brickwall limiter). Engine default -3.
     @discardableResult public func setMasterGainDb(_ db: Double) -> Bool { commands.push(RTCommand(op: .masterGain, value: db)) }
+    /// Master compressor + brickwall limiter on/off.
+    @discardableResult public func setMasterDynamicsEnabled(_ on: Bool) -> Bool { commands.push(RTCommand(op: .masterDynamics, value: on ? 1 : 0)) }
     @discardableResult public func setTempoScale(_ x: Double) -> Bool { commands.push(RTCommand(op: .tempo, value: x)) }
     /// Mutes SMF tracks by index (bit i = track i, i < 64): their sounding notes are released and
     /// later noteOns skipped; unmuting re-sounds notes held at the current position.
@@ -349,6 +351,8 @@ public final class SF2RealtimeCore: @unchecked Sendable {
                 seekRT(0)
             case .seek:
                 seekRT(c.value)
+            case .masterDynamics:
+                engine.masterDynamicsEnabled = c.value != 0
             case .masterGain:
                 engine.masterGainDb = c.value.isFinite ? max(-40, min(30, c.value)) : -3
             case .tempo:

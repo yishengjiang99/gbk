@@ -131,6 +131,7 @@ final class LiveSF2VisualizerTests: XCTestCase {
         let probe = try LiveRenderProbe.run(midi: Data(contentsOf: fixtureMIDI()), soundFont: sfURL, seconds: 1.5) // mid-chord + melody
         let scope = probe.scope
         XCTAssertTrue(probe.sawAudio, "tap saw non-silent output")
+        XCTAssertEqual(FeedPlayer.headroomGain, 0.8, "web live playback: fixed 0.8 headroom, no LUFS normalization")
 
         let analyzer = SpectrumAnalyzer()
         analyzer.source = scope

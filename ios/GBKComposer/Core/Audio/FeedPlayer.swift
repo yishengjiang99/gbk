@@ -6,9 +6,9 @@ import QuartzCore
 import SF2Player
 
 /// Feed playback: every song is its MIDI (`media.midi`) sequenced live through SF2Engine (sf2player-swift 6ce4941,
-/// GeneralUser GS 2.0.2) on AVAudioEngine, with the engine's reverb/chorus (CC91/93), compressor and brickwall
-/// limiter applied in real time. Nothing is prerendered and no MP3/WAV is played. A live loudness AGC
-/// (`SF2LoudnessAGC`, BS.1770 over 2 s blocks) steers the master-bus gain toward -16 LUFS.
+/// GeneralUser GS 2.0.2) on AVAudioEngine, with the engine's reverb/chorus (CC91/93) applied in real time.
+/// Nothing is prerendered and no MP3/WAV is played. Output level matches web live playback: no LUFS
+/// normalization and no compressor/limiter, just a fixed 0.8 headroom gain (`headroomGain`).
 /// Song switch (Yisheng, 2026-10-25): the next song starts immediately at full volume; only the outgoing song
 /// fades out, over exactly 58 ms with gain cos(t·π/2). Started on scroll settle.
 /// The spectrum + waveform read a tap on the playing engine's main mixer output.
@@ -40,6 +40,9 @@ final class FeedPlayer: ObservableObject {
         Float(cos(min(max(t, 0), 1) * .pi / 2))
     }
     nonisolated static let incomingGain: Float = 1
+    /// Web live playback's fixed headroom gain (GBK Social, 2026-10-25). Applied as the SF2 master gain.
+    nonisolated static let headroomGain: Double = 0.8
+    nonisolated static var headroomGainDb: Double { 20 * log10(headroomGain) }
 
     init() {}
 
@@ -97,14 +100,13 @@ final class FeedPlayer: ObservableObject {
             return
         }
         incoming.fadeGain = Self.incomingGain
-        let mixRate = incoming.engine.mainMixerNode.outputFormat(forBus: 0).sampleRate
-        let agc = SF2LoudnessAGC(sampleRate: mixRate > 0 ? mixRate : 48_000)
-        incoming.setMasterGainDb(agc.gainDb)
+        incoming.setMasterDynamicsEnabled(false)
+        incoming.setMasterGainDb(Self.headroomGainDb)
         let scope = OutputScope()
         self.scope = scope
         analyzer.reset()
         analyzer.source = scope
-        installTap(on: incoming, scope: scope, agc: agc, slug: slug, requested: requested)
+        installTap(on: incoming, scope: scope, slug: slug, requested: requested)
         AudioSessionController.shared.start()
         if isPlaying { incoming.play() }
         fadeTask?.cancel()
@@ -113,10 +115,9 @@ final class FeedPlayer: ObservableObject {
         active = incoming
     }
 
-    /// Tap on the engine's output: feeds the spectrum/waveform scope, the loudness AGC and the first-audio timer.
-    private func installTap(on p: SF2MIDIPlayer, scope: OutputScope, agc: SF2LoudnessAGC, slug: String, requested: CFTimeInterval) {
-        let block = Self.makeTapBlock(scope: scope, agc: agc,
-            onGain: { [weak p] g in Task { @MainActor in p?.setMasterGainDb(g) } },
+    /// Tap on the engine's output: feeds the spectrum/waveform scope and the first-audio timer.
+    private func installTap(on p: SF2MIDIPlayer, scope: OutputScope, slug: String, requested: CFTimeInterval) {
+        let block = Self.makeTapBlock(scope: scope,
             onFirstAudio: { [weak self] in
                 let dt = CACurrentMediaTime() - requested
                 Task { @MainActor in
@@ -128,8 +129,7 @@ final class FeedPlayer: ObservableObject {
     }
 
     /// Built outside the main actor: the block runs on the audio tap thread.
-    nonisolated static func makeTapBlock(scope: OutputScope, agc: SF2LoudnessAGC,
-                                         onGain: @escaping (Double) -> Void,
+    nonisolated static func makeTapBlock(scope: OutputScope,
                                          onFirstAudio: @escaping () -> Void) -> AVAudioNodeTapBlock {
         var reported = false
         return { buffer, _ in
@@ -137,8 +137,6 @@ final class FeedPlayer: ObservableObject {
             guard let ch = buffer.floatChannelData, buffer.format.channelCount >= 1 else { return }
             let n = Int(buffer.frameLength)
             guard n > 0 else { return }
-            let r = buffer.format.channelCount > 1 ? ch[1] : ch[0]
-            if let g = agc.push(ch[0], r, n) { onGain(g) }
             if !reported {
                 var peak: Float = 0
                 vDSP_maxmgv(ch[0], 1, &peak, vDSP_Length(n))
@@ -201,9 +199,9 @@ final class FeedPlayer: ObservableObject {
 
 
 /// Drives the real SF2 core block-by-block (like the audio thread) through the same tap block the feed installs,
-/// for tests and diagnostics. Not a prerender for playback: output goes only to the scope / AGC.
+/// for tests and diagnostics. Not a prerender for playback: output goes only to the scope.
 enum LiveRenderProbe {
-    struct Result { let scope: OutputScope; let gains: [Double]; let sawAudio: Bool }
+    struct Result { let scope: OutputScope; let sawAudio: Bool }
 
     static func run(midi: Data, soundFont url: URL, seconds: Double, sampleRate rate: Double = 48_000, block: Int = 1024) throws -> Result {
         let sf = try SF2SoundFont(data: Data(contentsOf: url, options: .mappedIfSafe), options: .lenient)
@@ -211,14 +209,13 @@ enum LiveRenderProbe {
         let plan = try SF2SequenceBuilder.plan(song: song, soundFont: sf, sampleRate: rate, fidelity: .spec)
         let core = SF2RealtimeCore(sampleRate: rate)
         core.setSequence(SF2CompiledSequence(plan: plan))
-        let agc = SF2LoudnessAGC(sampleRate: rate)
-        core.setMasterGainDb(agc.gainDb)
+        core.setMasterDynamicsEnabled(false)
+        core.setMasterGainDb(FeedPlayer.headroomGainDb)
         core.play()
         let scope = OutputScope()
-        var gains: [Double] = [], saw = false
-        let tap = FeedPlayer.makeTapBlock(scope: scope, agc: agc, onGain: { gains.append($0); core.setMasterGainDb($0) },
-                                          onFirstAudio: { saw = true })
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2) else { return Result(scope: scope, gains: [], sawAudio: false) }
+        var saw = false
+        let tap = FeedPlayer.makeTapBlock(scope: scope, onFirstAudio: { saw = true })
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2) else { return Result(scope: scope, sawAudio: false) }
         for i in 0..<Int(rate * seconds) / block {
             guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(block)),
                   let ch = buf.floatChannelData else { break }
@@ -226,6 +223,6 @@ enum LiveRenderProbe {
             core.render(ch[0], ch[1], block)
             tap(buf, AVAudioTime(sampleTime: AVAudioFramePosition(i * block), atRate: rate))
         }
-        return Result(scope: scope, gains: gains, sawAudio: saw)
+        return Result(scope: scope, sawAudio: saw)
     }
 }

@@ -2,7 +2,7 @@
 
 ## iOS
 
-- iOS: on a real iPhone, confirm feed songs play live through SF2 (no MP3), bars + waveform move, loudness settles near -16 LUFS within ~4 s, and check `timeToFirstAudio` in the FeedPlayer log (Console, subsystem com.grepawk.moviefone) when swiping.
+- iOS: on a real iPhone, confirm feed songs play live through SF2 (no MP3), bars + waveform move, level matches web live playback (fixed 0.8 gain), and check `timeToFirstAudio` in the FeedPlayer log (Console, subsystem com.grepawk.moviefone) when swiping.
 - iOS feed: apply project-JSON effect settings (if the server exposes them) to SF2Engine `setEffectParams`; today only the MIDI's CC91/CC93 and engine defaults drive reverb/chorus. Songs without `media.midi` are hidden in the native feed.
 - iOS: on a real iPhone, confirm feed + studio playback is full loudness at max volume (silent switch on and off) and stays loud after a Hum take (AudioSessionController).
 - Web (GBK Social): in the Keys/MIDI UI, when `window.gbkMidiNative?.bluetooth`, show a "Bluetooth MIDI" button calling `window.gbkMidiNative.openBluetoothPairing()` (iOS app pairing sheet; today only in Profile ⚙︎). Contract: docs/ios/midi.md.
