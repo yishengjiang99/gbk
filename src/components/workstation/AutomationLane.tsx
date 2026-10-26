@@ -3,7 +3,7 @@ import type { Project } from "../../workstation/model.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import { workstation } from "./useWorkstation.ts";
 import { lowerBound, visiblePoints } from "../../workstation/visible.ts";
-import type { View } from "./PianoRollEditor.tsx";
+import { rollDark, type View } from "./PianoRollEditor.tsx";
 
 const KEY_W = 36;
 export const LANE_CHOICES = [1, 7, 10, 11, 64, 71, 74, 91, 93] as const;
@@ -12,7 +12,8 @@ const NAMES: Record<number, string> = { 1: "Mod", 7: "Volume", 10: "Pan", 11: "E
 export type LaneKind = number | "bend" | "pressure";
 
 interface Pt { id: string; tick: number; value: number }
-interface Props { project: Project; proposal: Proposal | null; view: View; trackId: string; lane: LaneKind; onChangeLane: (l: LaneKind) => void; onRemove: () => void; width?: number }
+interface Props { project: Project; proposal: Proposal | null; view: View; trackId: string; lane: LaneKind; onChangeLane: (l: LaneKind) => void; onRemove: () => void; width?: number;
+  /** Desktop studio footer: no head row (the footer has its own picker), plain drag draws, theme follows prefers-color-scheme. */ bare?: boolean }
 
 function points(p: Project, trackId: string, lane: LaneKind): Pt[] {
   if (lane === "bend") return p.pitchBends.filter((b) => b.trackId === trackId);
@@ -20,7 +21,7 @@ function points(p: Project, trackId: string, lane: LaneKind): Pt[] {
   return p.ccs.filter((c) => c.trackId === trackId && c.controller === lane);
 }
 
-export function AutomationLane({ project, proposal, view, trackId, lane, onChangeLane, onRemove, height = 72 }: Props & { height?: number }) {
+export function AutomationLane({ project, proposal, view, trackId, lane, onChangeLane, onRemove, height = 72, bare = false }: Props & { height?: number }) {
   const H = height;
   const cv = useRef<HTMLCanvasElement | null>(null);
   const [width, setWidth] = useState(800);
@@ -46,7 +47,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const c = cv.current; if (!c) return;
     const dpr = window.devicePixelRatio || 1; c.width = width * dpr; c.height = H * dpr;
     const g = c.getContext("2d")!; g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const dk = !matchMedia("(prefers-color-scheme: light) and (max-width: 499px)").matches; g.fillStyle = dk ? "#0f1115" : "#ffffff"; g.fillRect(0, 0, width, H);
+    const dk = rollDark(bare); g.fillStyle = dk ? (bare ? "#12151c" : "#0f1115") : (bare ? "#fbfbfd" : "#ffffff"); g.fillRect(0, 0, width, H);
     const sel = project.selection;
     if (sel.endTick > sel.startTick) { g.fillStyle = "rgba(120,170,255,0.12)"; g.fillRect(x(sel.startTick), 0, (sel.endTick - sel.startTick) * view.pxPerTick, H); }
     g.strokeStyle = dk ? "#2a2e38" : "#dde3ec"; g.beginPath(); g.moveTo(KEY_W, yv(max / 2)); g.lineTo(width, yv(max / 2)); g.stroke();
@@ -68,11 +69,11 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const margin = (width * 0.25) / view.pxPerTick;
     curve(visiblePoints(pts, view.scrollTick - margin, endTick + margin), track?.color ?? "#4fc3f7", false);
     if (candPts) curve(visiblePoints(candPts, view.scrollTick - margin, endTick + margin), "#7cffb2", true);
-    if (drawPts.current) curve(drawPts.current, "#fff", true);
+    if (drawPts.current) curve(drawPts.current, dk ? "#fff" : "#111", true);
     g.fillStyle = dk ? "#1b1e25" : "#eef2f8"; g.fillRect(0, 0, KEY_W, H);
     g.fillStyle = dk ? "#aaa" : "#5b6677"; g.font = "9px sans-serif"; g.fillText(String(max), 2, 10); g.fillText("0", 2, H - 3);
     const pos = workstation.getState().transport.positionTick; g.fillStyle = "#ff4081"; g.fillRect(x(pos), 0, 2, H);
-  }, [pts, candPts, view, width, project.selection, live]);
+  }, [pts, candPts, view, width, project.selection, live, H]);
 
   // Live value during playback (rAF-throttled via controller subscription, not per-event React state).
   useEffect(() => workstation.subscribe((s) => {
@@ -93,7 +94,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const h = hit(px, py);
     if (h && (e.altKey || e.button === 2)) { if (typeof lane === "number") workstation.userEdit([{ op: "removeCC", ids: [h.id] }], { label: `delete CC${lane} point` }); return; }
     if (h) { dragPt.current = h; return; }
-    if (e.shiftKey) { drawPts.current = [{ tick: tickAt(px), value: valAt(py) }]; return; }
+    if (e.shiftKey || bare) { drawPts.current = [{ tick: tickAt(px), value: valAt(py) }]; return; }
     commitPoint(tickAt(px), valAt(py));
   };
   const onMove = (e: React.PointerEvent) => {
@@ -105,7 +106,8 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
     const r = cv.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
     if (drawPts.current && track && typeof lane === "number") {
       const d = drawPts.current; drawPts.current = null;
-      if (d.length > 1) workstation.userEdit([{ op: "setCC", trackId, channel: track.channel, controller: lane, startTick: d[0].tick, endTick: d[d.length - 1].tick, mode: "replace", points: d }], { label: `draw CC${lane}` });
+      if (d.length === 1 && bare) commitPoint(d[0].tick, d[0].value);
+      else if (d.length > 1) workstation.userEdit([{ op: "setCC", trackId, channel: track.channel, controller: lane, startTick: d[0].tick, endTick: d[d.length - 1].tick, mode: "replace", points: d }], { label: `draw CC${lane}` });
     } else if (dragPt.current && typeof lane === "number" && track) {
       const p = dragPt.current; dragPt.current = null; const t = tickAt(px), v = valAt(py);
       workstation.userEdit([{ op: "removeCC", ids: [p.id] }, { op: "setCC", trackId, channel: track.channel, controller: lane, startTick: t, endTick: t, mode: "merge", points: [{ tick: t, value: v }] }], { label: `move CC${lane} point` });
@@ -122,7 +124,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
 
   return (
     <div className="ws-lane" data-testid={`lane-${lane}`}>
-      <div className="ws-lane-head">
+      {!bare && <div className="ws-lane-head">
         <select aria-label="Automation controller" value={String(lane)} onChange={(e) => onChangeLane(e.target.value === "bend" || e.target.value === "pressure" ? e.target.value : Number(e.target.value))}>
           {LANE_CHOICES.map((c) => <option key={c} value={c}>CC{c} {NAMES[c]}</option>)}
           <option value="bend">Pitch bend (14-bit)</option>
@@ -133,7 +135,7 @@ export function AutomationLane({ project, proposal, view, trackId, lane, onChang
         <span className="ws-live" aria-live="off">{live ?? "–"}</span>
         <span className="ws-dim">{pts.length} pts{candPts ? ` → ${candPts.length} proposed` : ""}</span>
         <button onClick={onRemove} aria-label="Remove lane">×</button>
-      </div>
+      </div>}
       <canvas ref={cv} style={{ width: "100%", height: H, display: "block", touchAction: "none" }} tabIndex={0}
         aria-label={`Automation lane ${typeof lane === "number" ? `CC${lane}` : lane}. Click adds a point, drag moves, alt-click deletes, shift-drag draws, Enter/arrows edit at playhead.`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onKeyDown={onKey} onContextMenu={(e) => e.preventDefault()} />

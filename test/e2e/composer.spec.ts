@@ -79,7 +79,7 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await expect(page.getByTestId("publish-title")).toHaveValue("Midnight Fugue in D Minor", { timeout: 15_000 });
   await page.screenshot({ path: `${SHOTS}/composer-e2e-publish-dialog.png` });
   await page.getByTestId("publish-cancel").click();
-  await page.getByTestId("my-songs-studio").locator("summary").click();
+  const mySongs = await studioReveal(page, "my-songs-studio"); if ((await mySongs.getAttribute("open")) === null) await mySongs.locator("summary").click();
   await expect(page.getByTestId("my-song").first()).toHaveAttribute("data-public", "0");
   const privSlug = await page.getByTestId("my-song").first().getAttribute("data-slug");
   const anon0 = await browser.newContext(); const a0 = await anon0.newPage();
@@ -219,8 +219,8 @@ test("theme: landing background is uniform full height; Keys track picker follow
   await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; if (!c.project.tracks.length) c.edit([{ op: "addTrack", name: "Piano", channel: 0, id: "t_keys", program: 0 }], { label: "seed" }); });
   await (await studioReveal(page, "keys-toggle")).click();
   const sel = page.getByTestId("live-track"); await expect(sel).toBeVisible({ timeout: 60_000 });
-  // desktop keeps the original dark workstation palette; phones (light) use the bright card colour in the MIDI keyboard sheet
-  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(page.viewportSize()!.width < 500 ? "rgb(244, 245, 247)" : "rgb(26, 32, 41)");
+  // bright theme by default on phones and the desktop studio grid alike (card colour in the MIDI keyboard picker)
+  expect(await sel.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(244, 245, 247)");
   await page.getByTestId("live-keyboard").screenshot({ path: `${SHOTS}/keys-track-picker.png` });
 });
 
@@ -235,7 +235,7 @@ test("studio fits the viewport: no vertical scrolling of the page or any panel",
       const r = await page.evaluate(() => {
         const bad: string[] = [];
         for (const e of document.querySelectorAll(".ws, .ws *")) {
-          if (e.closest("[hidden]") || e.tagName === "TEXTAREA" || e.tagName === "SELECT") continue;
+          if (e.closest("[hidden]") || e.closest("[data-scroll-ok]") || e.tagName === "TEXTAREA" || e.tagName === "SELECT") continue; // desktop grid: track list, patch browser and chat log scroll by design
           const c = getComputedStyle(e);
           if (c.overflowY !== "visible" && e.scrollHeight > e.clientHeight + 2 && e.clientHeight > 0) bad.push(`${e.tagName}.${e.className} ${e.scrollHeight}/${e.clientHeight}`);
         }
@@ -412,19 +412,6 @@ test("mobile composer view: the header back button goes to Explore in one tap", 
   test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
   await page.goto("/studio"); await page.getByTestId("studio-back").click();
   await expect(page.getByTestId("social-app")).toBeVisible(); await expect(page).not.toHaveURL(/\/studio/);
-});
-
-test("desktop studio keeps the full-screen workstation: no chat-first layout, dark palette, no vertical scroll, composer input visible", async ({ page }) => {
-  test.skip(test.info().project.name !== "chrome-no-webmcp", "desktop");
-  for (const scheme of ["light", "dark"] as const) {
-    await page.emulateMedia({ colorScheme: scheme }); await page.setViewportSize({ width: 1440, height: 900 }); await page.goto("/studio");
-    const ws = page.getByTestId("workstation"); await expect(ws).toHaveAttribute("data-compact", "0");
-    await expect(page.getByTestId("plus-btn")).toHaveCount(0); await expect(page.getByTestId("nav-explore")).toBeVisible();
-    expect(await ws.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(22, 27, 36)");
-    await expect(page.getByTestId("composer-input")).toBeInViewport();
-    expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight && document.scrollingElement!.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: `${SHOTS}/studio-desktop-local-${scheme}.png` });
-  }
 });
 
 test("mobile composer view: Bluetooth MIDI pairing offered when gbkMidiNative.bluetooth is set; MIDI file + sheet image pickers", async ({ page }) => {

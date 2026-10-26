@@ -35,6 +35,7 @@ import { ArtifactPanel } from "./ArtifactPanel.tsx";
 import { VideoExportButton } from "./VideoExport.tsx";
 import { ComposerPanel } from "../composer/ComposerPanel.tsx";
 import { MobileStudio } from "../studio/MobileStudio.tsx";
+import { DesktopStudio } from "../studio/DesktopStudio.tsx";
 import { renderJobs, safeFilename } from "../../audio/render-job.ts";
 import { funnelBeacon } from "../../telemetry/funnel.ts";
 import { tickToBarBeat, tickToSec, barBeatToTick } from "../../workstation/timing.ts";
@@ -190,6 +191,10 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const roToast = roHint && <div role="status" aria-live="polite" data-testid="readonly-hint" style={{ position: "fixed", left: "50%", bottom: 80, transform: "translateX(-50%)", zIndex: 1000, pointerEvents: "none", background: "rgba(20,20,28,.92)", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 14 }}>{roHint}</div>;
   if (compact && composer) return <>{roToast}<MobileStudio view={view} setView={setView} onRollWidth={(px) => { rollPx.current = px; }} onManualScroll={() => setFollow(false)}
     focus={focus} setFocus={setFocus} lanes={lanes} setLanes={setLanes} laneTrackId={trackForLanes?.id} onExplore={onExplore}
+    newProject={() => createNew().catch((e: Error) => { alert(e.message); return false; })} exportMidi={exportMidi} exportWav={renderWav} /></>;
+  // Desktop (>=500px, not the iOS app): the studio grid (header / tracks + patches / piano roll / composer + automation).
+  if (composer) return <>{roToast}<DesktopStudio view={view} setView={setView} rollWidth={() => rollPx.current} onRollWidth={(px) => { rollPx.current = px; }} onManualScroll={() => setFollow(false)}
+    focus={focus} setFocus={setFocus} lanes={lanes} laneTrackId={trackForLanes?.id} onExplore={onExplore} onOpenPlayer={onOpenPlayer} agentTools={agent}
     newProject={() => createNew().catch((e: Error) => { alert(e.message); return false; })} exportMidi={exportMidi} exportWav={renderWav} /></>;
   return (
     <div className={`ws${phone && composer && activeTab === "Composer" && (!compact || sheetOpen) ? " ws-composer-full" : ""}`} data-testid="workstation" data-compact={compact ? "1" : "0"}>

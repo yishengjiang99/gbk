@@ -9,16 +9,29 @@ import { workstation } from "./useWorkstation.ts";
 export interface View { scrollTick: number; pxPerTick: number; lowPitch: number; highPitch: number }
 const KEY_W = 36;
 // Dark workstation palette on desktop; phones (<500px) follow prefers-color-scheme (bright when light).
-const dark = () => !matchMedia("(prefers-color-scheme: light) and (max-width: 499px)").matches;
+// The desktop studio grid (themeAuto) follows prefers-color-scheme at every width (bright by default).
+export const rollDark = (auto?: boolean) => auto ? matchMedia("(prefers-color-scheme: dark)").matches : !matchMedia("(prefers-color-scheme: light) and (max-width: 499px)").matches;
+export type RollTool = "draw" | "select" | "erase";
+export const ROLL_KEY_W = KEY_W;
 
-interface Props { project: Project; proposal: Proposal | null; view: View; setView: (v: View) => void; height: number; onManualScroll?: () => void; onWidth?: (px: number) => void }
+interface Props { project: Project; proposal: Proposal | null; view: View; setView: (v: View) => void; height: number; onManualScroll?: () => void; onWidth?: (px: number) => void;
+  /** Desktop studio: explicit tool (undefined = the original click-to-add behaviour). */ tool?: RollTool;
+  /** Grid for drawing/moving (ticks, 0 = off). Default: a 16th note. */ snapTicks?: number;
+  /** Focused track: other tracks are drawn as faint, non-editable ghost notes. */ focusTrackId?: string | null;
+  /** Follow prefers-color-scheme at every width. */ themeAuto?: boolean;
+  /** Double-click on a note (tool mode): e.g. focus its track. */ onNoteDoubleClick?: (n: Note) => void }
 
-export function PianoRollEditor({ project, proposal, view, setView, height, onManualScroll, onWidth }: Props) {
+export function PianoRollEditor({ project, proposal, view, setView, height, onManualScroll, onWidth, tool, snapTicks, focusTrackId, themeAuto, onNoteDoubleClick }: Props) {
+  const dark = () => rollDark(themeAuto);
+  const [, setScheme] = useState(0);
+  useEffect(() => { if (!themeAuto) return; const mq = matchMedia("(prefers-color-scheme: dark)"); const f = () => setScheme((x) => x + 1); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); }, [themeAuto]);
+  const [draft, setDraft] = useState<{ tick: number; pitch: number; duration: number } | null>(null);
+  const erase = useRef<Set<string> | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
-  const drag = useRef<null | { kind: "select" | "move" | "resize"; startTick: number; startPitch: number; noteIds: string[]; dTick: number; dPitch: number; x0: number; hadNotes?: boolean; moved?: boolean }>(null);
+  const drag = useRef<null | { kind: "select" | "move" | "resize" | "draw"; startTick: number; startPitch: number; noteIds: string[]; dTick: number; dPitch: number; x0: number; hadNotes?: boolean; moved?: boolean }>(null);
   const clickAdded = useRef(0);
   const sel = project.selection;
   const rowH = height / (view.highPitch - view.lowPitch + 1);
@@ -37,11 +50,14 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
   const y = (pitch: number) => (view.highPitch - pitch) * rowH;
   const tickAt = (px: number) => Math.max(0, Math.round(view.scrollTick + (px - KEY_W) / view.pxPerTick));
   const pitchAt = (py: number) => Math.max(0, Math.min(127, view.highPitch - Math.floor(py / rowH)));
-  const snap = (t: number) => { const q = project.ppq / 4; return Math.round(t / q) * q; };
+  const grid = snapTicks === undefined ? project.ppq / 4 : snapTicks;
+  const snap = (t: number) => (grid > 0 ? Math.round(t / grid) * grid : Math.round(t));
+  const snapDown = (t: number) => (grid > 0 ? Math.floor(t / grid) * grid : Math.round(t));
+  const editable = (n: Note) => trackById.get(n.trackId)?.visible !== false && (!focusTrackId || n.trackId === focusTrackId);
   const noteAt = (px: number, py: number): Note | undefined => {
     const t = tickAt(px), p = pitchAt(py);
     const cand = visibleNotes(noteIndex, t, t);
-    for (let i = cand.length - 1; i >= 0; i--) { const n = cand[i]; if (n.pitch === p && n.tick <= t && n.tick + n.duration >= t && trackById.get(n.trackId)?.visible !== false) return n; }
+    for (let i = cand.length - 1; i >= 0; i--) { const n = cand[i]; if (n.pitch === p && n.tick <= t && n.tick + n.duration >= t && editable(n)) return n; }
   };
 
   // Static layer (grid + notes + overlays) redrawn when inputs change; playhead on rAF.
@@ -53,8 +69,8 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     let raf = 0;
     const endTick = view.scrollTick + (width - KEY_W) / view.pxPerTick;
     const draw = () => {
-      const dk = dark(); g.fillStyle = dk ? "#14161b" : "#ffffff"; g.fillRect(0, 0, width, height);
-      for (let p = view.lowPitch; p <= view.highPitch; p++) if ([1, 3, 6, 8, 10].includes(p % 12)) { g.fillStyle = dk ? "#101216" : "#f1f4f9"; g.fillRect(KEY_W, y(p), width, rowH); }
+      const dk = dark(); g.fillStyle = dk ? (themeAuto ? "#12151c" : "#14161b") : (themeAuto ? "#fbfbfd" : "#ffffff"); g.fillRect(0, 0, width, height);
+      for (let p = view.lowPitch; p <= view.highPitch; p++) if ([1, 3, 6, 8, 10].includes(p % 12)) { g.fillStyle = dk ? (themeAuto ? "#171a22" : "#101216") : "#f1f2f6"; g.fillRect(KEY_W, y(p), width, rowH); }
       // selection
       if (sel.endTick > sel.startTick) { g.fillStyle = "rgba(120,170,255,0.12)"; g.fillRect(x(sel.startTick), 0, (sel.endTick - sel.startTick) * view.pxPerTick, height); }
       if (project.loop.enabled) { g.strokeStyle = "#ffb74d"; g.strokeRect(x(project.loop.startTick), 1, (project.loop.endTick - project.loop.startTick) * view.pxPerTick, height - 2); }
@@ -74,11 +90,12 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
       for (const n of visibleNotes(noteIndex, view.scrollTick - margin, endTick + margin)) {
         if (n.tick > endTick || n.tick + n.duration < view.scrollTick || n.pitch < view.lowPitch || n.pitch > view.highPitch) continue;
         const t = trackById.get(n.trackId); if (t && !t.visible) continue;
-        const alpha = 0.35 + (n.velocity / 127) * 0.65;
+        const ghost = !!focusTrackId && n.trackId !== focusTrackId;
+        const alpha = ghost ? 0.16 : 0.35 + (n.velocity / 127) * 0.65;
         g.globalAlpha = alpha; g.fillStyle = t?.color ?? "#ccc";
         g.fillRect(x(n.tick), y(n.pitch) + 0.5, Math.max(2, n.duration * view.pxPerTick - 1), Math.max(1, rowH - 1));
         g.globalAlpha = 1;
-        if (selIds.has(n.id)) { g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.strokeRect(x(n.tick), y(n.pitch) + 0.5, Math.max(2, n.duration * view.pxPerTick - 1), Math.max(1, rowH - 1)); }
+        if (selIds.has(n.id)) { g.strokeStyle = dk || !themeAuto ? "#fff" : "#111"; g.lineWidth = 1.5; g.strokeRect(x(n.tick), y(n.pitch) + 0.5, Math.max(2, n.duration * view.pxPerTick - 1), Math.max(1, rowH - 1)); }
         if (removed.has(n.id) || moved.has(n.id)) { g.strokeStyle = "#ff5252"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x(n.tick), y(n.pitch)); g.lineTo(x(n.tick + n.duration), y(n.pitch) + rowH); g.stroke(); }
       }
       // proposal overlays: added + moved-after as dashed translucent
@@ -107,7 +124,7 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
       for (const t of project.timeSigs) if (t.tick > 0 && t.tick >= view.scrollTick && t.tick <= endTick) g.fillText(`${t.numerator}/${t.denominator}`, x(t.tick) + 3, height - 16);
       // keyboard
       for (let p = view.lowPitch; p <= view.highPitch; p++) {
-        g.fillStyle = [1, 3, 6, 8, 10].includes(p % 12) ? "#222" : "#ddd"; g.fillRect(0, y(p), KEY_W - 2, rowH - 0.5);
+        g.fillStyle = [1, 3, 6, 8, 10].includes(p % 12) ? (themeAuto && !dk ? "#2b2d33" : "#222") : (themeAuto && !dk ? "#ffffff" : "#ddd"); g.fillRect(0, y(p), KEY_W - 2, rowH - 0.5);
         if (p % 12 === 0 && rowH > 6) { g.fillStyle = "#333"; g.fillText(`C${p / 12 - 1}`, 2, y(p) + rowH - 1); }
       }
     };
@@ -120,13 +137,19 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     tick();
     const unsub = workstation.subscribe((s) => { if (s.transport.playing && !raf) raf = requestAnimationFrame(tick); else if (!s.transport.playing) { cancelAnimationFrame(raf); raf = 0; tick(); } });
     return () => { cancelAnimationFrame(raf); unsub(); };
-  }, [project, diff, view, width, height, barsMemo, noteIndex]);
+  }, [project, diff, view, width, height, barsMemo, noteIndex, focusTrackId, themeAuto, dark()]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
     if (px < KEY_W) return;
     (e.target as Element).setPointerCapture(e.pointerId);
     const n = noteAt(px, py);
+    if (tool === "erase") { erase.current = new Set(n ? [n.id] : []); setDraft(null); return; }
+    if (tool === "draw" && !n) {
+      const t = snapDown(tickAt(px)); const len = grid > 0 ? grid : project.ppq / 4;
+      drag.current = { kind: "draw", startTick: t, startPitch: pitchAt(py), noteIds: [], dTick: 0, dPitch: 0, x0: px };
+      setDraft({ tick: t, pitch: pitchAt(py), duration: len }); return;
+    }
     if (n) {
       const ids = sel.noteIds.includes(n.id) ? sel.noteIds : [n.id];
       if (!sel.noteIds.includes(n.id)) workstation.setSelection({ noteIds: ids, trackIds: [n.trackId] });
@@ -141,6 +164,8 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
   const onPointerMove = (e: React.PointerEvent) => {
     const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
     const d = drag.current;
+    if (erase.current) { const n = noteAt(px, py); if (n && !erase.current.has(n.id)) { erase.current.add(n.id); setHover({ x: px, y: py, text: `erase ${erase.current.size}` }); } return; }
+    if (d?.kind === "draw") { const len = grid > 0 ? grid : project.ppq / 4; const end = Math.max(d.startTick + len, grid > 0 ? Math.ceil(tickAt(px) / grid) * grid : tickAt(px)); setDraft({ tick: d.startTick, pitch: d.startPitch, duration: end - d.startTick }); return; }
     if (!d) {
       const n = noteAt(px, py);
       setHover(n ? { x: px, y: py, text: `${trackById.get(n.trackId)?.name ?? ""} · pitch ${n.pitch} · vel ${n.velocity} · tick ${n.tick} (${tickToSec(project, n.tick).toFixed(2)}s) · dur ${n.duration}` } : null);
@@ -149,13 +174,24 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     if (d.kind === "select") {
       if (Math.abs(px - d.x0) > 4) d.moved = true;
       const t = snap(tickAt(px)); const [a, b] = t < d.startTick ? [t, d.startTick] : [d.startTick, t];
-      const noteIds = project.notes.filter((n) => n.tick >= a && n.tick < b && trackById.get(n.trackId)?.visible !== false).map((n) => n.id);
+      const noteIds = project.notes.filter((n) => n.tick >= a && n.tick < b && editable(n)).map((n) => n.id);
       workstation.setSelection({ startTick: a, endTick: b, noteIds });
     } else { d.dTick = snap(tickAt(px) - d.startTick); d.dPitch = pitchAt(py) - d.startPitch; }
   };
   const onPointerUp = (e?: React.PointerEvent) => {
+    if (erase.current) { const ids = [...erase.current]; erase.current = null; setHover(null); if (ids.length) workstation.userEdit([{ op: "removeNotes", ids }], { label: ids.length > 1 ? "erase notes" : "erase note" }); return; }
     const d = drag.current; drag.current = null; if (!d) return;
+    if (d.kind === "draw") {
+      const nd = draft; setDraft(null); if (!nd) return;
+      const track = project.tracks.find((t) => t.id === (focusTrackId ?? sel.trackIds[0])) ?? project.tracks.find((t) => t.visible) ?? project.tracks[0];
+      if (!track) return;
+      clickAdded.current = Date.now();
+      workstation.userEdit([{ op: "addNotes", notes: [{ trackId: track.id, channel: track.channel, tick: nd.tick, duration: nd.duration, pitch: nd.pitch, velocity: 96 }] }], { label: "draw note" });
+      if (!sel.trackIds.includes(track.id)) workstation.setSelection({ trackIds: [track.id] });
+      return;
+    }
     if (d.kind === "select") {
+      if (tool) return; // explicit tools: a click on empty space only clears/sets the range
       // A plain click (no drag) on empty space with an explicitly selected track and no selected notes adds a note.
       const track = project.tracks.find((t) => t.id === sel.trackIds[0]);
       if (!d.moved && !d.hadNotes && track && track.visible && e) {
@@ -172,8 +208,12 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     try { workstation.userEdit([{ op: "updateNotes", updates }], { label: d.kind === "move" ? "move notes" : "resize notes" }); } catch (err) { console.warn(err); }
   };
   const onDoubleClick = (e: React.MouseEvent) => {
-    if (Date.now() - clickAdded.current < 700) return; // the first click of this double-click already added the note
     const r = canvas.current!.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
+    if (tool) { // any note (ghosts included) -> its track
+      const t = tickAt(px), p = pitchAt(py); const hitN = visibleNotes(noteIndex, t, t).filter((n) => n.pitch === p && n.tick <= t && n.tick + n.duration >= t && trackById.get(n.trackId)?.visible !== false).pop();
+      if (hitN) onNoteDoubleClick?.(hitN); return;
+    }
+    if (Date.now() - clickAdded.current < 700) return; // the first click of this double-click already added the note
     const n = noteAt(px, py);
     if (n) { workstation.userEdit([{ op: "removeNotes", ids: [n.id] }], { label: "delete note" }); return; }
     const track = project.tracks.find((t) => t.id === sel.trackIds[0]) ?? project.tracks.find((t) => t.visible && project.notes.some((x) => x.trackId === t.id)) ?? project.tracks[0];
@@ -194,18 +234,29 @@ export function PianoRollEditor({ project, proposal, view, setView, height, onMa
     else if (e.key === "-") setView({ ...view, pxPerTick: Math.max(0.005, view.pxPerTick / 1.25) });
     else if (e.key === "Escape") workstation.setSelection({ noteIds: [], startTick: 0, endTick: 0 });
   };
+  // Ctrl/⌘/Alt+wheel must not zoom or scroll the page: a non-passive listener (React's wheel handlers are passive).
+  useEffect(() => { const c = canvas.current; if (!c) return; const f = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey || e.altKey) e.preventDefault(); }; c.addEventListener("wheel", f, { passive: false }); return () => c.removeEventListener("wheel", f); }, []);
   const onWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) setView({ ...view, pxPerTick: Math.max(0.005, Math.min(2, view.pxPerTick * (e.deltaY < 0 ? 1.15 : 1 / 1.15))) });
+    const r = canvas.current!.getBoundingClientRect(); const px = Math.max(KEY_W, e.clientX - r.left), py = e.clientY - r.top;
+    if (e.ctrlKey || e.metaKey) { // time zoom anchored at the pointer
+      const at = view.scrollTick + (px - KEY_W) / view.pxPerTick; const ppt = Math.max(0.005, Math.min(2, view.pxPerTick * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      onManualScroll?.(); setView({ ...view, pxPerTick: ppt, scrollTick: Math.max(0, at - (px - KEY_W) / ppt) });
+    } else if (e.altKey) { // pitch zoom anchored at the pointer row
+      const span = view.highPitch - view.lowPitch + 1; const next = Math.max(8, Math.min(128, Math.round(span * (e.deltaY < 0 ? 1 / 1.15 : 1.15)))); if (next === span) return;
+      const at = view.highPitch - py / rowH; const frac = py / Math.max(1, height); let hi = Math.round(at + frac * next); hi = Math.max(next - 1, Math.min(127, hi));
+      setView({ ...view, highPitch: hi, lowPitch: hi - next + 1 });
+    }
     else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) { onManualScroll?.(); setView({ ...view, scrollTick: Math.max(0, view.scrollTick + (e.deltaX || e.deltaY) / view.pxPerTick) }); }
     else { const d = e.deltaY > 0 ? -2 : 2; const lo = Math.max(0, Math.min(127 - (view.highPitch - view.lowPitch), view.lowPitch + d)); setView({ ...view, lowPitch: lo, highPitch: lo + (view.highPitch - view.lowPitch) }); }
   };
 
   return (
-    <div ref={wrap} className="ws-roll" style={{ position: "relative", height }} data-scroll-tick={Math.round(view.scrollTick)} data-visible-ticks={Math.round((width - KEY_W) / view.pxPerTick)}>
+    <div ref={wrap} className="ws-roll" style={{ position: "relative", height }} data-scroll-tick={Math.round(view.scrollTick)} data-px-per-tick={view.pxPerTick.toFixed(5)} data-pitch-range={`${view.lowPitch}-${view.highPitch}`} data-focus-track={focusTrackId ?? ""} data-tool={tool ?? ""} data-visible-ticks={Math.round((width - KEY_W) / view.pxPerTick)}>
       <canvas ref={canvas} style={{ width: "100%", height, display: "block", touchAction: "none" }} tabIndex={0} role="application"
         aria-label="Piano roll editor. Drag to select a range, drag notes to move, drag note end to resize, click empty space to add a note on the selected track, double-click to add or delete, arrows transpose/scroll, alt+arrows nudge, +/- zoom, Delete removes."
         data-testid="piano-roll" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onKeyDown={onKeyDown} onWheel={onWheel} onPointerLeave={() => setHover(null)} />
-      {hover && <div className="ws-tooltip" style={{ left: hover.x + 12, top: hover.y + 12 }}>{hover.text}</div>}
+      {draft && <div className="ws-draft" data-testid="roll-draft" style={{ position: "absolute", pointerEvents: "none", left: x(draft.tick), top: y(draft.pitch), width: Math.max(2, draft.duration * view.pxPerTick), height: Math.max(2, rowH), background: (trackById.get(focusTrackId ?? sel.trackIds[0] ?? "")?.color ?? "#5b5bf6"), opacity: 0.7, borderRadius: 3 }} />}
+      {hover && <div className="ws-tooltip" style={{ left: Math.min(hover.x + 12, width - 260), top: hover.y + 12 }}>{hover.text}</div>}
     </div>
   );
 }

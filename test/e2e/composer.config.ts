@@ -10,7 +10,7 @@ const WEB = 5181, API = 8781, MODEL = 8799;
 const origin = `http://127.0.0.1:${WEB}`;
 const node22 = process.env.GBK_NODE22 ?? "node";
 export default defineConfig({
-  testDir: ".", testMatch: /e2e\/(composer|social|guest-publish)\.spec\.ts$/, timeout: 600_000, expect: { timeout: 20_000 }, workers: 1,
+  testDir: ".", testMatch: /e2e\/(composer|social|guest-publish|studio-desktop)\.spec\.ts$/, timeout: 600_000, expect: { timeout: 20_000 }, workers: 1,
   use: { baseURL: `${origin}/`, trace: "retain-on-failure" },
   webServer: [
     { command: `${node22} --import tsx/esm server/test/fake-model.ts`, url: `http://127.0.0.1:${MODEL}/healthz`, reuseExistingServer: false, cwd: "../..", env: { FAKE_MODEL_PORT: String(MODEL) }, timeout: 30_000, ignoreHTTPSErrors: true },

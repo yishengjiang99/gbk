@@ -26,6 +26,7 @@ import {
   type LiveTakeNote,
 } from "./live-take.ts";
 import { reportError } from "./telemetry/error-reporter.ts";
+import { sfChoice } from "./audio/sf-choice.ts";
 
 // ---------------------------------------------------------------------------
 // Local interface definitions for SF2 internal structures accessed at runtime
@@ -942,6 +943,11 @@ export default function App() {
     };
   }, []);
 
+  // Desktop studio bank picker: load the requested manifest font in the player (same path as the picker here).
+  useEffect(() => {
+    const f = (e: Event) => { const d = (e as CustomEvent<{ path: string; label: string; bytes?: number }>).detail; if (d?.path) void onSelectSample(d.path, d.label, d.bytes); };
+    window.addEventListener("gbk:select-soundfont", f); return () => window.removeEventListener("gbk:select-soundfont", f);
+  });
   useEffect(() => {
     if (didAutoLoadDefault) return;
     setDidAutoLoadDefault(true);
@@ -972,6 +978,7 @@ export default function App() {
         setActiveSoundFont(parsed.soundFont, name);
       }
       setSourceName(name);
+      sfChoice.set({ label: name, path: url ?? "" });
       setSelectedPreset(null);
       setSelectedLayer(null);
       setShowSummaryModal(false);

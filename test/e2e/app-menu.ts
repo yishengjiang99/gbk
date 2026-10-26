@@ -28,7 +28,8 @@ export async function waitForSf2Ready(page: Page) {
 export async function studioReveal(page: Page, testId: string) {
   const el = page.getByTestId(testId).first();
   if (await el.isVisible()) return el;
-  if (!(await page.getByTestId("plus-btn").count())) return el; // desktop / feed
+  if (await page.locator("[data-layout=grid]").count()) return desktopReveal(page, testId, el); // desktop studio grid
+  if (!(await page.getByTestId("plus-btn").count())) return el; // feed
   if (testId === "tab-composer") return page.getByTestId("composer-input");
   const closeSheets = async () => { if (await page.getByTestId("sheet-scrim").isVisible()) await page.getByTestId("sheet-scrim").click({ position: { x: 10, y: 120 } }); };
   if (testId.startsWith("tab-") || testId === "add-track") {
@@ -42,6 +43,18 @@ export async function studioReveal(page: Page, testId: string) {
   await closeSheets(); await page.getByTestId("studio-overflow").click();
   if (["export-midi", "export-wav", "export-video"].includes(testId)) await page.getByTestId("more-export").click();
   if (["import-input", "composer-settings", "composer-model"].includes(testId)) await page.getByTestId("more-settings").click();
+  return el;
+}
+
+/** Desktop studio grid: controls live in the header menus (Import ▾, Export, ⋯) and the ⋯ side panels. */
+async function desktopReveal(page: Page, testId: string, el: ReturnType<Page["getByTestId"]>) {
+  if (testId === "tab-composer") return page.getByTestId("composer-input"); // the composer is always in the footer
+  const open = async (btn: string) => { const b = page.getByTestId(btn); if ((await b.getAttribute("aria-expanded")) !== "true") await b.click(); };
+  if (["keys-toggle", "midi-toggle", "bt-midi", "import-sheet-music", "import-midi-file"].includes(testId)) await open("import-menu");
+  else if (["export-midi", "export-wav", "export-video"].includes(testId)) await open("export-menu");
+  else if (["import-input", "composer-settings", "composer-model", "import-file"].includes(testId)) { await open("studio-overflow"); await page.getByTestId("more-settings").click(); }
+  else if (testId === "my-songs-studio") { await open("studio-overflow"); await page.getByTestId("more-songs").click(); }
+  else if (["new-project", "open-player", "agent-toggle", "more-agent", "more-settings", "more-songs", "ts-select", "key-select", "bpm-tap"].includes(testId)) await open("studio-overflow");
   return el;
 }
 
