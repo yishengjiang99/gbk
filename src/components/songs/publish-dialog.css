@@ -1,0 +1,36 @@
+/* Publish sheet on phones and in the iOS app web view: bright bottom sheet (dark via prefers-color-scheme), 16px inputs,
+   no horizontal overflow, actions pinned above the home indicator and the app's tab bar (--pub-tabbar, set in the app). */
+.pub-backdrop.pub-native, .pub-backdrop.pub-phone {
+  --pub-bg: #ffffff; --pub-text: #112331; --pub-dim: #5b6b7a; --pub-line: #d5dde6; --pub-field: #ffffff; --pub-chip: #eef3f8; --pub-accent: #2f6fd6;
+  align-items: flex-end; overflow: hidden; color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  .pub-backdrop.pub-native, .pub-backdrop.pub-phone { --pub-bg: #16283a; --pub-text: #e6f0f8; --pub-dim: #93acc0; --pub-line: #2c4258; --pub-field: #0f1d2a; --pub-chip: #1c3247; --pub-accent: #4c9bd6; color-scheme: dark; }
+}
+.pub-native .pub-card, .pub-phone .pub-card {
+  width: 100%; max-width: 100%; box-sizing: border-box; margin: 0; border-radius: 16px 16px 0 0; border: 1px solid var(--pub-line);
+  background: var(--pub-bg) !important; color: var(--pub-text); padding: 14px 16px 0; overflow-x: hidden; overflow-y: auto;
+  max-height: calc(100dvh - env(safe-area-inset-top) - 12px); gap: 8px; font-size: 16px;
+}
+.pub-native .pub-card *, .pub-phone .pub-card * { box-sizing: border-box; max-width: 100%; }
+.pub-native .pub-card .ws-dim, .pub-phone .pub-card .ws-dim { color: var(--pub-dim); }
+.pub-native .pub-card label, .pub-phone .pub-card label { display: block; min-width: 0; }
+.pub-native .pub-card input:not([type="checkbox"]), .pub-native .pub-card textarea, .pub-phone .pub-card input:not([type="checkbox"]), .pub-phone .pub-card textarea {
+  -webkit-appearance: none; appearance: none; background: var(--pub-field) !important; color: var(--pub-text) !important; border: 1px solid var(--pub-line);
+  border-radius: 10px; padding: 10px 12px; font-size: 16px; min-height: 44px; width: 100%; min-width: 0;
+}
+.pub-native .pub-card ::placeholder, .pub-phone .pub-card ::placeholder { color: var(--pub-dim); opacity: 1; }
+.pub-native .pub-tagrow, .pub-phone .pub-tagrow { display: flex; gap: 8px; width: 100%; min-width: 0; }
+.pub-native .pub-tagrow input, .pub-phone .pub-tagrow input { flex: 1 1 auto; }
+.pub-native .pub-tagrow button, .pub-phone .pub-tagrow button { flex: none; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--pub-line); background: var(--pub-chip); color: var(--pub-text); font-size: 16px; }
+.pub-native .pub-share-prompt, .pub-phone .pub-share-prompt { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.pub-native .pub-share-prompt input, .pub-phone .pub-share-prompt input { flex: none; width: 22px; height: 22px; margin: 0; }
+.pub-native .pub-share-prompt span, .pub-phone .pub-share-prompt span { flex: 1 1 auto; min-width: 0; }
+.pub-native .so-chip, .pub-phone .so-chip { min-height: 36px; font-size: 15px; }
+.pub-native .pub-actions, .pub-phone .pub-actions {
+  position: sticky; bottom: 0; z-index: 1; display: flex; max-width: none; width: auto; gap: 10px; margin: 4px -16px 0; background: var(--pub-bg); border-top: 1px solid var(--pub-line);
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom) + var(--pub-tabbar, 0px));
+}
+.pub-native .pub-actions button, .pub-phone .pub-actions button { flex: 1 1 0; min-width: 0; min-height: 48px; border-radius: 12px; font-size: 16px; border: 1px solid var(--pub-line); background: var(--pub-chip); color: var(--pub-text); }
+.pub-native .pub-actions .pub-primary, .pub-phone .pub-actions .pub-primary { background: var(--pub-accent); border-color: var(--pub-accent); color: #fff; }
+.pub-native { --pub-tabbar: 56px; }

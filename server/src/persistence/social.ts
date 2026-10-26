@@ -196,7 +196,7 @@ export class SocialStore {
       for (const r of this.db.prepare("SELECT share_id FROM ratings WHERE user_id = ?").all(from) as { share_id: string }[]) this.rate(r.share_id, from, null);
       this.db.prepare("UPDATE comments SET user_id = ? WHERE user_id = ?").run(to, from);
       this.db.prepare("UPDATE reports SET reporter = ? WHERE reporter = ?").run(to, from);
-      this.db.prepare("UPDATE OR IGNORE blocks SET blocker = ? WHERE blocker = ?").run(to, from); this.db.prepare("DELETE FROM blocks WHERE blocker = ? OR blocker = blocked").run(from);
+      this.db.prepare("UPDATE OR IGNORE blocks SET blocker = ? WHERE blocker = ?").run(to, from); this.db.prepare("UPDATE OR IGNORE blocks SET blocked = ? WHERE blocked = ?").run(to, from); this.db.prepare("DELETE FROM blocks WHERE blocker = ? OR blocked = ? OR blocker = blocked").run(from, from);
       try { this.db.prepare("UPDATE impressions SET actor = ? WHERE actor = ?").run(to, from); } catch { /* no table yet */ }
       this.db.prepare("DELETE FROM profiles WHERE user_id = ?").run(from);
       this.db.exec("COMMIT");

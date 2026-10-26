@@ -88,7 +88,7 @@ export function useAgentSession() {
   const logout = useCallback(async () => { await api("/logout", { method: "POST", body: "{}", csrf: auth.csrf }); client.current?.close(); await refreshAuth(); }, [auth.csrf, refreshAuth]);
   const reconnect = useCallback(() => { client.current?.close(); const c = client.current; if (c) { c.maxReconnects = 8; c.connect(); } }, []);
 
-  return { auth, conn, items, run, usage, info, model, setModel, send, stop, reset, login, logout, reconnect };
+  return { auth, conn, items, run, usage, info, model, setModel, send, stop, reset, login, logout, reconnect, refreshAuth };
 }
 
 function dedupe(a: ArtifactRef[]) { const s = new Set<string>(); return a.filter((x) => !s.has(x.artifactId) && !!s.add(x.artifactId)); }

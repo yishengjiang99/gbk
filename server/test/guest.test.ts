@@ -13,7 +13,7 @@ const fakeFetch = (async () => new Response(JSON.stringify({ keys: [jwk] }), { h
 const project = JSON.parse(readFileSync(new URL("../../test/fixtures/social-song.json", import.meta.url), "utf8"));
 const J = { "content-type": "application/json" };
 
-test("guest accounts: create, idempotent per device, 409 collision, 422s, limits, rate limit, link + merge upgrade", async () => {
+test("guest accounts: create, idempotent per device, digit-suffixed collision, 422s, limits, rate limit, link + merge upgrade", async () => {
   const cfg = testConfig({ COMPOSER_PUBLIC_ORIGIN: "http://composer.test", GOOGLE_IOS_CLIENT_IDS: "ios-client" });
   const b = await buildApp(cfg, { model: new ScriptModel([() => reply("x")]), persist: false, logger: false, fetch: fakeFetch });
   b.app.addHook("preClose", (done) => { b.app.server.closeAllConnections?.(); done(); });
@@ -27,14 +27,14 @@ test("guest accounts: create, idempotent per device, 409 collision, 422s, limits
     // idempotent: same device, any username -> same guest, never 409
     const again = await (await anon("device-aaaaaaaaaaaa-1", "OtherName")).json(); assert.equal(again.user.id, g1.user.id); assert.equal(again.user.handle, "mellowfox");
     // collision on a new device
-    const c = await anon("device-bbbbbbbbbbbb-2", "MellowFox"); assert.equal(c.status, 409); assert.deepEqual(Object.keys(await c.json()).sort(), ["code", "error", "message", "statusCode"]);
+    const c = await anon("device-bbbbbbbbbbbb-2", "MellowFox"); assert.equal(c.status, 200); const cj = await c.json(); assert.equal(cj.user.handle, "mellowfox2"); assert.equal(cj.user.display_name, "MellowFox");
     // invalid
     for (const u of ["mellowfox", "Mellow Fox", "Mellow1Fox", "MellowFoxBlue", "AB", "MELLOWFOX"]) assert.equal((await anon("device-cccccccccccc-3", u)).status, 422, u);
     assert.equal((await anon("short", "BraveOwl")).status, 422);
     // guest can read me, comment and rate; cannot publish
     const A = { authorization: `Bearer ${g1.token}` };
     const me = await (await fetch(`${base}/api/me`, { headers: A })).json(); assert.equal(me.is_guest, true);
-    assert.equal((await post("/api/shares", { title: "g", project, public: true }, A)).status, 403);
+    assert.equal((await post("/api/shares", { title: "g", project, public: true }, A)).status, 200);
     const priv = await post("/api/shares", { title: "g", project }, A); assert.equal(priv.status, 200);
     // a public song by a real account (google) to rate/comment
     const gtok = (sub: string) => jwt({ iss: "https://accounts.google.com", aud: "ios-client", sub, exp: now() + 600, name: `G ${sub}`, email: `${sub}@x.test`, email_verified: true });

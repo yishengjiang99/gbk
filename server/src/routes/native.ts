@@ -15,9 +15,11 @@ import { verifyIdToken, IdTokenError } from "../security/id-token.ts";
 import { currentSession, guardWrite } from "./agent.ts";
 import { safeReturn } from "./signin.ts";
 import { isGuest } from "../mcp/guest.ts";
+import { originAllowed } from "../security/authorization.ts";
 
 export const ACCESS_TTL_MS = 3_600_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, APNS_TOKEN = /^[0-9a-f]{64,200}$/i;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const GUEST_NAME = /^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$/, GUEST_DEVICE = /^[A-Za-z0-9_-]{16,128}$/;
 const bearer = (req: FastifyRequest) => { const a = req.headers.authorization; return typeof a === "string" && /^Bearer\s+\S+$/i.test(a) ? a.replace(/^Bearer\s+/i, "").trim() : null; };
 
@@ -40,7 +42,7 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
     if (guest) {
       const existing = accounts.byProvider(provider, who.sub);
       if (!existing) { accounts.link(guest, provider, who.sub, who.name, who.email); native.revokeUser(guest); req.log.info({ evt: "login", via: `${provider}-native`, user: guest, upgraded: "linked" }); return { ...pair(guest), upgraded: "linked" }; }
-      d.social.mergeUser(guest, existing.id); native.movePush(guest, existing.id); d.iap?.moveUser(guest, existing.id); native.purgeUser(guest); sessions.destroy(gs!.id); accounts.delete(guest);
+      d.shares.moveOwner(guest, existing.id); d.social.mergeUser(guest, existing.id); native.movePush(guest, existing.id); d.iap?.moveUser(guest, existing.id); native.purgeUser(guest); sessions.destroyUser(guest); accounts.delete(guest);
       accounts.upsertOAuth(provider, who.sub, who.name, who.email);
       req.log.info({ evt: "login", via: `${provider}-native`, user: existing.id, upgraded: "merged" }); return { ...pair(existing.id), upgraded: "merged" };
     }
@@ -52,21 +54,41 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
   // ---- Guest accounts (iOS): two-word username, idempotent per device, 409 on handle collision ----
   const guestNew = new RateLimiter(5, 3_600_000), guestAll = new RateLimiter(20, 3_600_000);
   const err = (reply: FastifyReply, status: number, code: string, message: string, error: string) => reply.code(status).send({ code, message, error, statusCode: status });
+  const guestPid = (deviceId: string) => createHmac("sha256", cfg.security.sessionSecret).update(`gbk-guest-device:${deviceId}`).digest("hex").slice(0, 32);
+  const goodName = (u: unknown): u is string => typeof u === "string" && GUEST_NAME.test(u) && u.length >= 4 && u.length <= 20 && !badText(u) && !badText(u.replace(/([a-z])([A-Z])/g, "$1 $2"));
+  const tooMany = (reply: FastifyReply, l: RateLimiter, key: string, message: string) => { void reply.code(429).header("retry-after", String(l.retryAfterSec(key))).send({ code: "RATE_LIMITED", message, error: "Too Many Requests", statusCode: 429 }); };
+  /** Find or create the guest for a device. Handle collisions get digits appended (mellowfox -> mellowfox2..mellowfox999). */
+  const guestFor = (req: FastifyRequest, reply: FastifyReply, deviceId: string, username: unknown): { id: string; created: boolean } | null => {
+    const pid = guestPid(deviceId); const known = accounts.byProvider("guest", pid);
+    if (known) return { id: known.id, created: false };
+    if (!goodName(username)) { err(reply, 422, "INVALID_USERNAME", "username must be two capitalized words, letters only, 4-20 characters", "Unprocessable Entity"); return null; }
+    if (!guestNew.take(req.ip)) { tooMany(reply, guestNew, req.ip, "too many new guests; try later"); return null; }
+    const base = username.toLowerCase(); const { account } = accounts.upsertOAuth("guest", pid, username, null);
+    for (let i = 1; i < 1000; i++) { const h = i === 1 ? base : `${base}${i}`; if (!d.social.byHandle(h) && d.social.createProfileExact(account.id, h, username)) return { id: account.id, created: true }; }
+    accounts.delete(account.id); err(reply, 409, "HANDLE_TAKEN", "that username is taken; pick another", "Conflict"); return null;
+  };
   app.post("/api/auth/anonymous", async (req, reply) => {
-    if (!guestAll.take(req.ip)) return reply.code(429).header("retry-after", String(guestAll.retryAfterSec(req.ip))).send({ code: "RATE_LIMITED", message: "slow down", error: "Too Many Requests", statusCode: 429 });
+    if (!guestAll.take(req.ip)) return tooMany(reply, guestAll, req.ip, "slow down");
     const b = (req.body ?? {}) as { deviceId?: unknown; username?: unknown };
     if (typeof b.deviceId !== "string" || !GUEST_DEVICE.test(b.deviceId)) return err(reply, 422, "INVALID_DEVICE", "deviceId must be 16-128 of A-Z a-z 0-9 - _", "Unprocessable Entity");
-    const pid = createHmac("sha256", cfg.security.sessionSecret).update(`gbk-guest-device:${b.deviceId}`).digest("hex").slice(0, 32);
-    const known = accounts.byProvider("guest", pid);
-    if (known) { req.log.info({ evt: "login", via: "guest", user: known.id, created: false }); const p = pair(known.id); return { ...p, token: p.access_token, refreshToken: p.refresh_token, user: p.me }; }
-    if (typeof b.username !== "string" || !GUEST_NAME.test(b.username) || b.username.length < 4 || b.username.length > 20 || badText(b.username) || badText(b.username.replace(/([a-z])([A-Z])/g, "$1 $2"))) return err(reply, 422, "INVALID_USERNAME", "username must be two capitalized words, letters only, 4-20 characters", "Unprocessable Entity");
-    const handle = b.username.toLowerCase();
-    if (d.social.byHandle(handle)) return err(reply, 409, "HANDLE_TAKEN", "that username is taken; pick another", "Conflict");
-    if (!guestNew.take(req.ip)) return reply.code(429).header("retry-after", String(guestNew.retryAfterSec(req.ip))).send({ code: "RATE_LIMITED", message: "too many new guests; try later", error: "Too Many Requests", statusCode: 429 });
-    const { account } = accounts.upsertOAuth("guest", pid, b.username, null);
-    if (!d.social.createProfileExact(account.id, handle, b.username)) { accounts.delete(account.id); return err(reply, 409, "HANDLE_TAKEN", "that username is taken; pick another", "Conflict"); }
-    req.log.info({ evt: "login", via: "guest", user: account.id, created: true });
-    const p = pair(account.id); return { ...p, token: p.access_token, refreshToken: p.refresh_token, user: p.me };
+    const g = guestFor(req, reply, b.deviceId, b.username); if (!g) return;
+    req.log.info({ evt: "login", via: "guest", user: g.id, created: g.created });
+    const p = pair(g.id); return { ...p, token: p.access_token, refreshToken: p.refresh_token, user: p.me };
+  });
+  // Web-view guest session (docs/social-api.md "Guest publish from the web view"): the app's studio web view has no
+  // cookie yet; it sends the app's device id + two-word name as headers and gets a cookie session for the same guest.
+  app.post("/api/auth/guest/web", async (req, reply) => {
+    if (!originAllowed(cfg, req.headers.origin)) return reply.code(403).send({ code: "BAD_ORIGIN", message: "cross-origin request rejected", error: "Forbidden", statusCode: 403 });
+    if (!guestAll.take(req.ip)) return tooMany(reply, guestAll, req.ip, "slow down");
+    const dev = req.headers["x-gbk-device"], name = req.headers["x-gbk-guest-name"];
+    if (typeof dev !== "string" || !UUID_V4.test(dev)) return err(reply, 422, "INVALID_DEVICE", "X-GBK-Device must be a UUID v4", "Unprocessable Entity");
+    const cur = currentSession(req, sessions);
+    if (cur && !isGuestAccount(cur.user)) return { me: d.me(cur.user), created: false };
+    const g = guestFor(req, reply, dev, name); if (!g) return;
+    if (cur?.user !== g.id) { if (cur) sessions.destroy(cur.id); const s = sessions.create(g.id);
+      reply.header("set-cookie", [cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: sessions.maxAgeSec(s) }).replace("SameSite=Strict", "SameSite=Lax"), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]); }
+    req.log.info({ evt: "login", via: "guest-web", user: g.id, created: g.created });
+    return { me: d.me(g.id), created: g.created };
   });
 
   app.post("/api/auth/apple", async (req, reply) => {

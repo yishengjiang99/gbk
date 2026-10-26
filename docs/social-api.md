@@ -82,21 +82,39 @@ Reads with a guest or full bearer add viewer fields (`my_rating`, `is_mine`, `ca
 - `username`: exactly two capitalized English words, letters only, no digits or spaces, 4–20 chars. Regex `^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$`, e.g. `MellowFox`. Blocklisted words → `422`.
   - `display_name` = `MellowFox`, `handle` = `mellowfox` (lowercase). `me.provider` = `"guest"`, `me.is_guest` = `true`.
 - **Idempotent per device:** a known `deviceId` returns its existing guest with fresh tokens. The `username` is then ignored, never 409.
-- **Collision:** a new device whose handle is taken (by anyone) → `409 { code: "HANDLE_TAKEN", message, error: "Conflict", statusCode: 409 }`. The server never appends digits; the client generates a new two-word combo and retries.
+- **Collision:** a new device whose handle is taken (by anyone) gets digits appended: `mellowfox2`, `mellowfox3`, … up to `mellowfox999`. `display_name` stays `MellowFox`; the final handle is in `user.handle`. Only if all 998 suffixes are taken → `409 HANDLE_TAKEN`; pick another combo and retry.
 - **Errors:** invalid input → `422 { code: "INVALID_USERNAME" | "INVALID_DEVICE", message, error, statusCode }`.
 - **Rate limit:** 5 new guests per IP per hour and 20 calls per IP per hour; idempotent repeats count toward the 20. Over the limit → `429` with `retry-after`.
 - **Guest permissions:**
   - Allowed: play, rate, comment (comments 20/day), report, block.
   - Allowed: edit display name or handle via `PATCH /api/me/settings`, under the same two-word rule while still a guest. Set `dm_policy`. `DELETE /api/me`.
-  - Not allowed: publishing public songs (`POST /api/shares` with `public: true` → `403 GUEST_LIMITED`), sending DMs (`403 GUEST_LIMITED`), receiving DMs from others (guests behave as `dm_policy: "off"`), and push for DMs. Comment and rating push works after `POST /api/push/register`.
+  - Allowed: publishing public songs (see **Guest publish** below).
+  - Not allowed: sending DMs (`403 GUEST_LIMITED`), receiving DMs from others (guests behave as `dm_policy: "off"`), and push for DMs. Comment and rating push works after `POST /api/push/register`.
   - Sign in with Apple or Google to lift the limits.
+
+### Guest publish (iOS; live)
+
+Guests publish like anyone else: `POST /api/shares` with `public: true`, or `PATCH /api/shares/:slug { public: true }`, with the guest bearer (app) or the guest cookie session (web view).
+- **Limits:** 10 public publishes per guest account (one per device) and 30 per IP, per rolling 24 h. Over → `429 { code: "GUEST_PUBLISH_LIMIT", message, error, statusCode }` with `retry-after` (seconds). Private saves and the normal share limits are unchanged. Signed-in accounts are not affected.
+- Reports, admin hide/unpublish and blocks apply to guest songs and guest users exactly as to other accounts.
+
+**Web-view guest session.** The studio web view has no cookie until the user signs in. In the app (`window.gbkNative` exists) the web Publish action does this, with no sign-in sheet and no `gbk:need-signin` event:
+1. If `webkit.messageHandlers.publish` exists, it calls `postMessage({ projectId, title, labels: [], tags: [] })` and stops; the app shows its native publish sheet. `projectId` is the studio project id; `title` is the current song name.
+2. Otherwise it calls `POST /api/auth/guest/web` and opens the web publish sheet.
+
+`POST /api/auth/guest/web` (no body)
+- Headers: `X-GBK-Device: <UUID v4>` (the per-install random id the app keeps in the Keychain; any case) and `X-GBK-Guest-Name: <two-word username>` (same rule as `username` above). Same-origin `Origin` required (`403 BAD_ORIGIN`).
+- The web page reads both from `window.gbkNative.deviceId` and `window.gbkNative.guestName`, which the app injects. Send the **same device id string** as `deviceId` to `POST /api/auth/anonymous`: the server keys the guest on `HMAC-SHA256(SESSION_SECRET, "gbk-guest-device:" + id)`, so the app bearer and the web cookie are the same guest account. The raw id is never stored.
+- `200 { me, created }`, plus `Set-Cookie` for the session and `gbk_csrf`. A known device returns its existing guest (the name is ignored). A collision appends digits, as above; read the final handle from `me.handle`. With a full (non-guest) session already present, it returns that `me` and changes nothing.
+- Errors: `422 INVALID_DEVICE` (not a UUID v4), `422 INVALID_USERNAME`, `409 HANDLE_TAKEN` (all suffixes taken), `429 RATE_LIMITED` with `retry-after`. It shares limits with `/api/auth/anonymous`: 20 calls and 5 new guests per IP per hour.
+- Treat the device id as a credential: anyone who has it can act as that guest. Never log or display it.
 
 **Upgrade on sign-in.** `POST /api/auth/apple` and `POST /api/auth/google/native` accept an optional `Authorization: Bearer <guest access token>`.
 - If the bearer is a valid guest and the Apple/Google identity has **no** account yet, the guest account is upgraded in place. Same user id, handle, display name, ratings, comments, blocks and devices; the Apple/Google identity is attached and `is_guest` becomes `false`. All the guest's refresh tokens are revoked and a new `TokenPair` is returned with `upgraded: "linked"`.
 - If the identity **already** has an account, that account wins and is returned (`upgraded: "merged"`).
   - The guest's ratings move over unless that account already rated the same song.
-  - The guest's comments, reports, blocks and push devices are re-owned by that account.
-  - The guest account and its handle are then deleted.
+  - The guest's songs (public and private), comments, reports, blocks (made and received) and push devices are re-owned by that account.
+  - The guest account and its handle are then deleted, and every guest session (bearer and web-view cookie) is revoked. The trigger is the guest bearer on the sign-in call; repeating it with the now-dead bearer is a plain sign-in (`upgraded` absent), so carry-over runs once and is idempotent.
 - If the bearer is missing, invalid or not a guest, sign-in behaves as before (`upgraded` absent). An invalid bearer is ignored, never an error.
 
 `Me` gains `provider` (`"google"|"apple"|"phone"|"github"|"guest"`) and `is_guest`.

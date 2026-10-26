@@ -19,6 +19,7 @@ import { openMidiFile } from "../workstation/MidiImportChooser.tsx";
 import { ComposerSettings } from "../composer/ComposerSettings.tsx";
 import { saveForPublish } from "../composer/SharePanel.tsx";
 import { PublishDialog } from "../songs/PublishDialog.tsx";
+import { ensureGuestSession, inNativeApp, nativePublish } from "../../agent/native-guest.ts";
 import { MySongs } from "../songs/MySongs.tsx";
 import { nativeHum, type HumState } from "../../hum/native-bridge.ts";
 import { MIDI_UNSUPPORTED_MESSAGE } from "../../workstation/midi-input.ts";
@@ -112,12 +113,16 @@ export function MobileStudio(props: MobileStudioProps) {
   // ---- actions ---------------------------------------------------------------------------------------------------
   const doPublish = async (v: SongVersion | null = null) => {
     setSheet(null);
-    if (!s.auth.authenticated) { needSignIn("Sign in to publish and share your song.", { kind: "publish" }); return; }
+    const native = inNativeApp();
+    if (!native && !s.auth.authenticated) { needSignIn("Sign in to publish and share your song.", { kind: "publish" }); return; }
     if (workstation.readOnlyReason) { say("Make a copy of this song first, then publish your version."); return; }
     if (!makeCurrent(v)) return;
     if (!workstation.project.tracks.length) { say("Make something first, then publish it."); return; }
+    if (native && nativePublish({ projectId: workstation.project.id, title: workstation.project.name, labels: [], tags: [] })) return;
     setBusy("Saving your song…");
-    try { setPublish(await saveForPublish()); } catch (e) { reportError(e, { where: "studio.publish" }); say("Couldn't save your song. Check your connection and try again."); } finally { setBusy(""); }
+    try {
+      if (native && !s.auth.authenticated) { try { await ensureGuestSession(); } catch (e) { say((e as Error).message); return; } void s.refreshAuth(); }
+      setPublish(await saveForPublish()); } catch (e) { reportError(e, { where: "studio.publish" }); say("Couldn't save your song. Check your connection and try again."); } finally { setBusy(""); }
   };
   const openEditor = (v: SongVersion | null = null) => { if (makeCurrent(v)) { setTab("Tracks"); setSheet("editor"); } };
   const newSong = async () => { setSheet(null); stopPreview(); if (await props.newProject()) { if (s.auth.authenticated) s.reset(); setText(""); } };

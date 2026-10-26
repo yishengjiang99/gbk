@@ -56,7 +56,7 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     if (b.display_name !== undefined) { if (typeof b.display_name !== "string" || !b.display_name.trim() || b.display_name.length > 40 || badText(b.display_name)) return reply.code(422).send({ code: "INVALID_NAME", message: "1-40 characters" }); o.display_name = b.display_name.trim(); }
     if (b.handle !== undefined) { const h = String(b.handle).toLowerCase(); if (!HANDLE_RE.test(h) || badText(h)) return reply.code(422).send({ code: "INVALID_HANDLE", message: "3-20 of a-z, 0-9, _" }); o.handle = h; }
     if (b.dm_policy !== undefined) { if (b.dm_policy !== "all" && b.dm_policy !== "off") return reply.code(422).send({ code: "INVALID_ARGUMENT", message: "dm_policy is all or off" }); o.dm_policy = b.dm_policy; }
-    if (isGuestAccount(s.user) && ((o.display_name !== undefined && !/^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$/.test(o.display_name)) || (o.handle !== undefined && !/^[a-z]{4,20}$/.test(o.handle)))) return reply.code(422).send({ code: "INVALID_USERNAME", message: "guests use two capitalized words, letters only (sign in to choose freely)" });
+    if (isGuestAccount(s.user) && ((o.display_name !== undefined && !/^[A-Z][a-z]{1,11}[A-Z][a-z]{1,11}$/.test(o.display_name)) || (o.handle !== undefined && !/^[a-z]{4,20}[0-9]{0,3}$/.test(o.handle)))) return reply.code(422).send({ code: "INVALID_USERNAME", message: "guests use two capitalized words, letters only (sign in to choose freely)" });
     const r = social.updateProfile(s.user, o);
     if (r === "HANDLE_TAKEN") return reply.code(409).send({ code: r, message: "that handle is taken" });
     if (r === "HANDLE_LOCKED") return reply.code(403).send({ code: r, message: "handle can only be changed once" });
