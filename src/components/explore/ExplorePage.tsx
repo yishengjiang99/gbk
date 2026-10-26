@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listShares, mediaUrl, getShare, topShares, type ShareInfo, type TopShare } from "../../agent/share-client.ts";
 import { sanitizeSharedProject } from "../../agent/share-schema.ts";
-import { renderJobs } from "../../audio/render-job.ts";
+import { prepare, startLive } from "../social/live-song.ts";
 import { STARTER_PROMPTS } from "../composer/ComposerPanel.tsx";
 import { MySongs } from "../songs/MySongs.tsx";
 import { apiBase } from "../../agent/bridge-client.ts";
@@ -20,25 +20,28 @@ export function PianoRoll({ p }: { p: PianoRollPreview }) {
 }
 
 const PAGE = 12;
+// Real-time SF2 playback of the song's project (live-song.ts); prerendered audio only for songs without a project.
+let exploreCtx: AudioContext | null = null; let exploreStop: (() => void) | null = null; let exploreOwner: string | null = null;
+const exploreListeners = new Set<() => void>();
 function Preview({ s }: { s: ShareInfo }) {
-  const [url, setUrl] = useState<string | null>(s.hasMp3 ? mediaUrl(s.slug, "mp3") : s.hasWav ? mediaUrl(s.slug, "wav") : null);
-  const [state, setState] = useState(""); const ac = useRef<AbortController | null>(null);
-  useEffect(() => () => ac.current?.abort(), []);
-  if (url) return <audio controls preload="none" src={url} data-testid="card-audio" />;
-  return (
-    <button data-testid="card-render" disabled={!!state && state !== "failed"} onClick={async () => {
-      try {
-        setState("loading"); ac.current = new AbortController();
-        const p = sanitizeSharedProject((await getShare(s.slug)).project);
-        setState("rendering");
-        const job = renderJobs().submit(p, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 2 }, { saveArtifact: false, signal: ac.current.signal, keepResult: true });
-        const done = await renderJobs().wait(job.id);
-        const res = renderJobs().result(done.id);
-        if (done.status !== "completed" || !res) throw new Error(done.error?.message ?? "render failed");
-        setUrl(URL.createObjectURL(res.blob)); setState("");
-      } catch { setState("failed"); }
-    }}>{state === "" ? "▶ Render preview in browser" : state === "failed" ? "Preview failed — retry" : `${state}…`}</button>
-  );
+  const [state, setState] = useState<"" | "loading" | "playing" | "legacy" | "failed">("");
+  useEffect(() => { const f = () => setState((x) => (x === "playing" && exploreOwner !== s.slug ? "" : x)); exploreListeners.add(f); return () => { exploreListeners.delete(f); if (exploreOwner === s.slug) { exploreStop?.(); exploreStop = null; exploreOwner = null; } }; }, [s.slug]);
+  const legacy = s.hasWav ? mediaUrl(s.slug, "wav") : s.hasMp3 ? mediaUrl(s.slug, "mp3") : null;
+  if (state === "legacy" && legacy) return <audio controls autoPlay preload="none" src={legacy} data-testid="card-audio" />;
+  const stop = () => { exploreStop?.(); exploreStop = null; exploreOwner = null; setState(""); };
+  const play = async () => {
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) { setState(legacy ? "legacy" : "failed"); return; }
+    exploreCtx ??= new AC(); void exploreCtx.resume().catch(() => undefined); // inside the tap (iOS unlock)
+    setState("loading");
+    const p = await prepare(s.slug, exploreCtx.sampleRate);
+    if (!p) { setState(legacy ? "legacy" : "failed"); return; }
+    exploreStop?.(); const v = await startLive(exploreCtx, exploreCtx.destination, p);
+    exploreStop = v.stop; exploreOwner = s.slug; exploreListeners.forEach((f) => f()); setState("playing");
+  };
+  return state === "playing"
+    ? <button data-testid="card-stop" aria-pressed="true" onClick={stop}>❚❚ Stop</button>
+    : <button data-testid="card-play-live" disabled={state === "loading"} onClick={() => void play().catch(() => setState("failed"))}>{state === "loading" ? "Loading…" : state === "failed" ? "Can't play — retry" : "▶ Play"}</button>;
 }
 
 export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string) => void; onOpen: (slug: string, fork: boolean) => void }) {

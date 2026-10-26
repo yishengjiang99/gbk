@@ -95,3 +95,7 @@ Differences: iOS hides notes once they finish (per the iOS card spec), while web
 - Tab bridge reconnects on visibilitychange/pageshow/online/focus (replaces a socket silent >45s unless a tool is running; revives after giving up); server reconnect grace 120s.
 - A new message binds to the project open now; a mid-run switch rebinds and the agent re-reads and continues. Chat errors are plain language (`src/agent/friendly-error.ts`), no codes or ids.
 - Known pre-existing flake: the desktop fugue e2e fails only when run in parallel with other same-user tests (also fails on main without this change); passes alone.
+
+### Real-time feed playback (2026-10-25)
+- Feed and Explore play each song's project live through the SF2 engine (`src/components/social/live-song.ts`): same render plan as WAV export (`buildRenderPlan` + `planVoices`, one `sf2-processor` worklet per audible track, project reverb/chorus/voice edits as setup events) in the realtime AudioContext, through the feed's shared AnalyserNode and the 58 ms Crossfader fade. The SoundFont warms at feed mount; the next songs' projects and render plans warm with preload. Prerendered WAV/MP3 is used only for songs without a playable project. `/s/<slug>` opens the studio, which already plays live.
+- Offline-only: LUFS loudness normalization (live uses a fixed 0.8 headroom gain). MP3 remains only for og:audio (artist CLI); the web publish path never encoded MP3.

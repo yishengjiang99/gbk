@@ -126,14 +126,17 @@ test("social feed switch: next starts at once, old fades out 58ms on settle, one
     slugs.unshift(sh.slug);
   }
   const feed = page.getByTestId("feed"); const cards = page.getByTestId("feed-card");
-  const playing = () => page.getByTestId("feed-audio").evaluate((h) => [...h.querySelectorAll("audio")].filter((a) => !a.paused).length);
+  type FA = { __gbkFeedAudio: { playing: () => number; live: () => boolean; prepared: () => number } };
+  const playing = () => page.evaluate(() => (window as unknown as FA).__gbkFeedAudio.playing());
   try {
     await page.goto("/feed?sort=new");
     await expect(cards.first()).toHaveAttribute("data-slug", slugs[0]);
     await page.getByTestId("tap-to-play").click();
     await expect(cards.first()).toHaveAttribute("data-playing", "1");
-    // neighbours preloaded (current + next)
-    await expect.poll(() => page.getByTestId("feed-audio").evaluate((h) => h.querySelectorAll("audio").length)).toBeGreaterThanOrEqual(2);
+    // real-time SF2 engine, not a prerendered file; neighbours' render plans warmed (current + next)
+    expect(await page.evaluate(() => (window as unknown as FA).__gbkFeedAudio.live())).toBe(true);
+    expect(await page.getByTestId("feed-audio").evaluate((h) => [...h.querySelectorAll("audio")].filter((a) => !a.paused).length)).toBe(0);
+    await expect.poll(() => page.evaluate(() => (window as unknown as FA).__gbkFeedAudio.prepared())).toBeGreaterThanOrEqual(2);
     // settle on card 2: card 1 fades out while card 2 fades in, then only one voice plays
     const sawFade = page.evaluate(() => new Promise<string>((res) => { const f = document.querySelector("[data-testid=feed]")!; const o = new MutationObserver(() => { if (f.getAttribute("data-fading")) { o.disconnect(); res(f.getAttribute("data-fading")!); } }); o.observe(f, { attributes: true }); setTimeout(() => res(""), 3000); }));
     await feed.evaluate((f) => f.scrollBy({ top: f.clientHeight }));
@@ -143,7 +146,7 @@ test("social feed switch: next starts at once, old fades out 58ms on settle, one
     expect(await playing()).toBe(1);
     // fast scrolls: never more than 2 voices, the stale fade is cancelled
     const samples = page.evaluate(() => new Promise<number>((res) => { let max = 0; const h = document.querySelector("[data-testid=feed-audio]")!; const t0 = performance.now();
-      const tick = () => { max = Math.max(max, [...h.querySelectorAll("audio")].filter((a) => !a.paused).length); if (performance.now() - t0 < 1500) requestAnimationFrame(tick); else res(max); }; tick(); }));
+      const tick = () => { void h; max = Math.max(max, (window as unknown as { __gbkFeedAudio: { playing: () => number } }).__gbkFeedAudio.playing()); if (performance.now() - t0 < 1500) requestAnimationFrame(tick); else res(max); }; tick(); }));
     for (let i = 0; i < 2; i++) { await feed.evaluate((f) => f.scrollBy({ top: f.clientHeight })); await expect(feed).toHaveAttribute("data-active", String(2 + i)); }
     expect(await samples).toBeLessThanOrEqual(2);
     await expect(cards.nth(3)).toHaveAttribute("data-playing", "1");
