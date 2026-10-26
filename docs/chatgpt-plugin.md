@@ -110,7 +110,7 @@ Scopes: `gbk:compositions.read`, `gbk:compositions.write`, `gbk:renders.create`,
 - Limits (env, defaults): `MCP_GUEST_MAX_SECONDS` 180, `MCP_GUEST_MAX_BARS` 64, `MCP_GUEST_MAX_EVENTS`
   20000, `MCP_GUEST_MAX_REVISIONS` 100, `MCP_GUEST_RENDERS_PER_DAY` 20 per project, durable global
   rolling-24h `MCP_GUEST_CREATES_PER_DAY` 200 and `MCP_GUEST_MUTATIONS_PER_DAY` 2000,
-  `MCP_GUEST_MAX_COMPOSITIONS` 2000, `MCP_GUEST_MAX_STORAGE_BYTES` 256 MiB, anonymous calls
+  `MCP_GUEST_MAX_COMPOSITIONS` 2000, `MCP_GUEST_MAX_STORAGE_BYTES` 256 MiB (all guests, project data and revisions only), `MCP_GUEST_MAX_PROJECT_BYTES` 64 MiB (one guest project incl. its renders), guest renders expire after `MCP_GUEST_ARTIFACT_RETENTION_DAYS` 7, unpublished guest projects untouched for `MCP_GUEST_PROJECT_TTL_DAYS` 14 are deleted (startup + daily), anonymous calls
   `MCP_GUEST_CALLS_PER_MINUTE` 60 per IP, at most 2000 live MCP sessions, artifact bytes deleted after
   `MCP_ARTIFACT_RETENTION_DAYS` (hourly sweep; expired URLs return 410).
 - Off switch: `MCP_GUEST=0` restores OAuth-only access (401 + `WWW-Authenticate` challenge).

@@ -158,6 +158,9 @@ test("guest size, revision, per-project render, storage and composition caps rej
     await assert.rejects(a.call("gbk_render_composition", args), errorCode("QUOTA_EXCEEDED"));
     s.cfg.mcp.guestMaxStorageBytes = 1;
     await assert.rejects(a.call("gbk_create_composition", { ...brief, idempotencyKey: "guest-create-2" }), errorCode("QUOTA_EXCEEDED"));
+    s.cfg.mcp.guestMaxStorageBytes = 256 * 1024 ** 2; s.cfg.mcp.guestMaxProjectBytes = 1; // per-project cap (renders included)
+    await assert.rejects(a.call("gbk_create_composition", { ...brief, idempotencyKey: "guest-create-2b" }), errorCode("QUOTA_EXCEEDED"));
+    s.cfg.mcp.guestMaxProjectBytes = 64 * 1024 ** 2;
     s.cfg.mcp.guestMaxStorageBytes = 256 * 1024 ** 2; s.cfg.mcp.guestMaxCompositions = 1;
     await assert.rejects(a.call("gbk_create_composition", { ...brief, idempotencyKey: "guest-create-3" }), errorCode("QUOTA_EXCEEDED"));
     assert.equal(s.mcp.store.guestCompositionCount(), 1);

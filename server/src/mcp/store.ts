@@ -99,14 +99,34 @@ export class McpStore {
     const r = this.db.prepare("INSERT INTO mcp_guest_usage (bucket, at) SELECT ?, ? WHERE (SELECT COUNT(*) FROM mcp_guest_usage WHERE bucket=?) < ?").run(bucket, Date.now(), bucket, limit);
     return Number(r.changes) === 1;
   }
-  /** Bytes held by guest projects: latest copies (x2 for the Studio snapshot), revisions, retry results and artifacts. */
-  guestStorageBytes(): number {
+  /** Bytes held by guest project data: latest copies (x2 for the Studio snapshot), revisions and retry results.
+   *  With `owner`: that one guest project, plus its render artifacts. Without: all guests, artifacts excluded
+   *  (artifacts are bounded per project and by guest artifact retention, so they cannot fill the shared budget). */
+  guestStorageBytes(owner?: string): number {
+    const o = owner ?? "guest:%", op = owner ? "=" : "LIKE";
     const row = this.db.prepare(`SELECT
-      (SELECT COALESCE(SUM(2 * length(CAST(project_json AS BLOB))),0) FROM mcp_compositions WHERE owner LIKE 'guest:%') +
-      (SELECT COALESCE(SUM(length(CAST(project_json AS BLOB))),0) FROM mcp_revisions WHERE composition_id IN (SELECT id FROM mcp_compositions WHERE owner LIKE 'guest:%')) +
-      (SELECT COALESCE(SUM(length(CAST(result_json AS BLOB))),0) FROM mcp_idempotency WHERE owner LIKE 'guest:%') +
-      (SELECT COALESCE(SUM(size_bytes),0) FROM mcp_artifacts WHERE owner LIKE 'guest:%') AS n`).get() as { n: number };
+      (SELECT COALESCE(SUM(2 * length(CAST(project_json AS BLOB))),0) FROM mcp_compositions WHERE owner ${op} ?) +
+      (SELECT COALESCE(SUM(length(CAST(project_json AS BLOB))),0) FROM mcp_revisions WHERE composition_id IN (SELECT id FROM mcp_compositions WHERE owner ${op} ?)) +
+      (SELECT COALESCE(SUM(length(CAST(result_json AS BLOB))),0) FROM mcp_idempotency WHERE owner ${op} ?)
+      ${owner ? "+ (SELECT COALESCE(SUM(size_bytes),0) FROM mcp_artifacts WHERE owner = ?)" : ""} AS n`).get(...(owner ? [o, o, o, o] : [o, o, o])) as { n: number };
     return Number(row.n);
+  }
+  /** Expire guest projects untouched (no edit, render or artifact) for `days` that were never made public. Never touches
+   *  signed-in owners or public compositions; published Feed shares live in shares.sqlite and are not affected. */
+  pruneGuestCompositions(days: number): { count: number; bytes: number } {
+    const cutoff = Date.now() - days * 86_400_000;
+    const rows = this.db.prepare(`SELECT id, owner FROM mcp_compositions c WHERE owner LIKE 'guest:%' AND visibility != 'public' AND updated_at <= ?
+      AND NOT EXISTS (SELECT 1 FROM mcp_render_jobs j WHERE j.composition_id = c.id AND j.created_at > ?)
+      AND NOT EXISTS (SELECT 1 FROM mcp_artifacts a WHERE a.composition_id = c.id AND a.created_at > ?)`).all(cutoff, cutoff, cutoff) as { id: string; owner: string }[];
+    let bytes = 0, count = 0;
+    for (const r of rows) { if (!r.owner.startsWith("guest:")) continue; const b = this.guestStorageBytes(r.owner); if (this.deleteComposition(r.id, r.owner)) { count++; bytes += b; } }
+    return { count, bytes };
+  }
+  /** Guest render artifacts expire sooner than account ones. Returns { count, bytes } removed. */
+  pruneGuestArtifacts(days: number): { count: number; bytes: number } {
+    const rows = this.db.prepare("SELECT * FROM mcp_artifacts WHERE owner LIKE 'guest:%' AND created_at <= ?").all(Date.now() - days * 86_400_000) as unknown as ArtifactRow[];
+    let bytes = 0; for (const row of rows) { rmSync(this.artifactAbsPath(row), { force: true }); this.db.prepare("DELETE FROM mcp_artifacts WHERE id=?").run(row.id); bytes += row.size_bytes; }
+    return { count: rows.length, bytes };
   }
   guestCompositionCount(): number {
     return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_compositions WHERE owner LIKE 'guest:%'").get() as { n: number }).n);

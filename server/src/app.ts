@@ -146,11 +146,15 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   if (process.env.NODE_ENV === "production") void serverPool.start(); // warm the workers + SoundFont at boot
   // Artifact expiry: bytes + rows past MCP_ARTIFACT_RETENTION_DAYS are deleted at startup and hourly.
   const prune = () => { try { const n = mcpStore.pruneArtifacts(cfg.mcp.artifactRetentionDays); if (n) app.log.info({ evt: "mcp_artifacts_pruned", count: n }); } catch (e) { app.log.warn({ evt: "mcp_artifact_prune_failed", message: (e as Error).message }); } };
-  prune(); const pruneTimer = setInterval(prune, 3_600_000); pruneTimer.unref();
+  // Guest MCP expiry: renders after MCP_GUEST_ARTIFACT_RETENTION_DAYS; unpublished projects untouched for
+  // MCP_GUEST_PROJECT_TTL_DAYS. Startup + daily. Signed-in owners and public compositions are never touched.
+  const pruneGuests = () => { try { const a = mcpStore.pruneGuestArtifacts(cfg.mcp.guestArtifactRetentionDays), c = mcpStore.pruneGuestCompositions(cfg.mcp.guestProjectTtlDays);
+    app.log.info({ evt: "mcp_guest_pruned", artifacts: a.count, compositions: c.count, freedBytes: a.bytes + c.bytes, guestBytes: mcpStore.guestStorageBytes() }); } catch (e) { app.log.warn({ evt: "mcp_guest_prune_failed", message: (e as Error).message }); } };
+  prune(); pruneGuests(); const pruneTimer = setInterval(prune, 3_600_000); pruneTimer.unref(); const guestTimer = setInterval(pruneGuests, 86_400_000); guestTimer.unref();
   const mcpMetrics: McpMetrics = { calls: 0, errors: 0, authFailures: 0, byTool: {} };
   const mcpHttp = mcpRoutes(app, cfg, sessions, { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics, funnel, log: (o) => app.log.info(o) });
   const mcp: McpHandle = { store: mcpStore, service: mcpService, renders: mcpRenders, metrics: mcpMetrics,
-    close: async () => { clearInterval(pruneTimer); clearInterval(rescoreTimer); native.close(); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
+    close: async () => { clearInterval(pruneTimer); clearInterval(guestTimer); clearInterval(rescoreTimer); native.close(); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);

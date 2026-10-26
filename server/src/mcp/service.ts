@@ -153,7 +153,10 @@ export class CompositionService {
     if (!Number.isFinite(duration) || duration > m.guestMaxSeconds || tickToBarBeat(project, project.endTick).bar > m.guestMaxBars + 1
       || project.notes.length > m.guestMaxEvents || project.ccs.length > m.guestMaxEvents || json.length > 2 * 1024 * 1024)
       throw new McpError("QUOTA_EXCEEDED", `guest projects are limited to ${m.guestMaxSeconds} seconds, ${m.guestMaxBars} bars, ${m.guestMaxEvents} notes/controllers and 2 MiB; sign in for larger projects`);
-    if (this.store.guestStorageBytes() + 4 * Buffer.byteLength(json) > m.guestMaxStorageBytes)
+    const add = 4 * Buffer.byteLength(json);
+    if (this.store.guestStorageBytes(owner) + add > m.guestMaxProjectBytes)
+      throw new McpError("QUOTA_EXCEEDED", `this guest project reached its ${Math.round(m.guestMaxProjectBytes / 1024 ** 2)} MiB storage limit (revisions and renders included); start a new composition or sign in`);
+    if (this.store.guestStorageBytes() + add > m.guestMaxStorageBytes)
       throw new McpError("QUOTA_EXCEEDED", "global guest storage capacity reached; retry later");
   }
 

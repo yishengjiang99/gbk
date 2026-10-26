@@ -42,7 +42,7 @@ export interface Config {
     guestRendersPerDay: number;
     /** Durable global rolling-24h budgets: new sessions/IPs/projects cannot reset them. */
     guestCreatesPerDay: number; guestMutationsPerDay: number;
-    guestMaxCompositions: number; guestMaxStorageBytes: number;
+    guestMaxCompositions: number; guestMaxStorageBytes: number; guestMaxProjectBytes: number; guestProjectTtlDays: number; guestArtifactRetentionDays: number;
     /** Per-IP throttle for anonymous tool calls (supplements the global budgets; IP is never an identity). */
     guestCallsPerMinute: number;
     /** Per-client creation cap (rolling 24h, keyed by a salted hash of the client IP), far below the global cap. */
@@ -123,7 +123,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       guestCreatesPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_DAY, 200))),
       guestMutationsPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_MUTATIONS_PER_DAY, 2000))),
       guestMaxCompositions: Math.max(1, Math.floor(num(env.MCP_GUEST_MAX_COMPOSITIONS, 2000))),
-      guestMaxStorageBytes: Math.max(1, num(env.MCP_GUEST_MAX_STORAGE_BYTES, 256 * 1024 ** 2)),
+      guestMaxStorageBytes: Math.max(1, num(env.MCP_GUEST_MAX_STORAGE_BYTES, 256 * 1024 ** 2)), // all guests: project data only
+      guestMaxProjectBytes: Math.max(1, num(env.MCP_GUEST_MAX_PROJECT_BYTES, 64 * 1024 ** 2)), // one guest project incl. its renders
+      guestProjectTtlDays: Math.max(1, num(env.MCP_GUEST_PROJECT_TTL_DAYS, 14)),
+      guestArtifactRetentionDays: Math.max(1, num(env.MCP_GUEST_ARTIFACT_RETENTION_DAYS, 7)),
       guestCallsPerMinute: Math.max(1, Math.floor(num(env.MCP_GUEST_CALLS_PER_MINUTE, 60))),
       guestCreatesPerClientPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_CLIENT_PER_DAY, 20))),
     },
