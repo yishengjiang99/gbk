@@ -4,7 +4,8 @@ import WebKit
 /// Native Hum for the studio web view. Contract (for GBK Social; see docs/social/STATUS.md "iOS native Hum"):
 /// - Native injects `window.gbkNative = { platform: "ios", version: 1, capabilities: ["hum"] }` at document start.
 /// - Web renders the mic button in the composer prompt bar when `gbkNative.capabilities` has "hum", and on tap
-///   posts `webkit.messageHandlers.hum.postMessage({ type: "toggle" })`.
+///   posts `webkit.messageHandlers.hum.postMessage({ type: "toggle" })`; `{ type: "cancel" }` discards the take
+///   (recording: capture stops, audio session restored; transcribing: the result is dropped) and reports idle.
 /// - Web exposes `window.gbkHum`:
 ///   - `context()` → `{ ppq, tempos: [{tick, microPerQuarter}], tracks: [{channel}], readOnlyReason: string|null }`
 ///   - `apply(ops, { label: "hum a melody", selectTrackId })` → `{ ok: true }` or `{ ok: false, error }`; one
@@ -34,9 +35,33 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, Self.isTrusted(message.frameInfo.securityOrigin) else { return }
-        guard (message.body as? [String: Any])?["type"] as? String == "toggle" else { return }
-        Task { await toggle() }
+        switch Self.command(message.body) {
+        case .toggle: Task { await toggle() }
+        case .cancel: cancel()
+        case nil: break
+        }
     }
+
+    enum Command: String { case toggle, cancel }
+    nonisolated static func command(_ body: Any) -> Command? {
+        ((body as? [String: Any])?["type"] as? String).flatMap(Command.init(rawValue:))
+    }
+
+    /// Discards the current take. The recorder's stop() restores the session through AudioSessionController.
+    func cancel() {
+        switch phase {
+        case .idle: return
+        case .recording:
+            ticker?.invalidate(); ticker = nil
+            if fixtureURL == nil { _ = recorder.stop() } else { HumRecorder.restoreSession() }
+            generation += 1
+            setPhase(.idle)
+        case .transcribing:
+            generation += 1 // stopAndTranscribe drops its result
+            setPhase(.idle)
+        }
+    }
+    private var generation = 0
 
     nonisolated static func isTrusted(_ origin: WKSecurityOrigin) -> Bool {
         (origin.protocol == "https" && origin.host == "compose.grepawk.com") || origin.protocol == "file"
@@ -77,7 +102,8 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         guard phase == .recording else { return }
         ticker?.invalidate(); ticker = nil
         setPhase(.transcribing)
-        defer { setPhase(.idle) }
+        let gen = generation
+        defer { if gen == generation { setPhase(.idle) } }
         let take: (samples: [Float], seconds: Double)
         if let fixtureURL {
             let s = (try? HumRecorder.load(url: fixtureURL)) ?? []
@@ -91,8 +117,9 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         }
         do {
             let notes = try await HumTranscriber.transcribe(take.samples) { f in
-                Task { @MainActor [weak self] in self?.report(progress: f) }
+                Task { @MainActor [weak self] in if self?.generation == gen { self?.report(progress: f) } }
             }
+            guard gen == generation else { return } // cancelled while transcribing
             guard !notes.isEmpty else {
                 alert("No melody detected in that take — try humming a clear, single tune closer to the microphone.")
                 return
@@ -105,6 +132,7 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
                 alert("Transcription failed: \(d["error"] as? String ?? "the studio rejected the notes")")
             }
         } catch {
+            guard gen == generation else { return }
             alert("Transcription failed: \(error)")
         }
     }

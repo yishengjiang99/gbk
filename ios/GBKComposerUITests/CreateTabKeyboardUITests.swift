@@ -1,56 +1,105 @@
 import XCTest
 
-/// Standing rule: the composer input in the Create tab (studio WKWebView) is always visible,
-/// keyboard up or down. Loads the live https://compose.grepawk.com/studio.
+/// Standing rule: the composer input (web `composer-input`) in the Create tab is always visible: keyboard up or
+/// down, during playback (`play-pill`). Loads the live chat-first https://compose.grepawk.com/studio (MobileStudio,
+/// active because `window.gbkNative` exists). Runs light and dark (`-uiTestDark`; the app itself is locked Light).
+/// Web test ids are reached through their aria-labels (WebKit exposes those, not data-testid):
+/// composer-input "Describe a song or a change", plus-btn "Add", composer-send "Send", hum-btn "Hum a melody",
+/// play-pill "Play"/"Pause", studio-overflow "More" (compact-head row), plus-sheet-music "Import sheet music".
 final class CreateTabKeyboardUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    func testComposerInputVisibleWithKeyboardDownAndUp() throws {
+    func testComposerAlwaysVisibleLight() throws { try run(dark: false) }
+    func testComposerAlwaysVisibleDark() throws { try run(dark: true) }
+
+    private func run(dark: Bool) throws {
+        let mode = dark ? "dark" : "light"
         let app = XCUIApplication()
+        app.launchArguments += ["-uiTestStudioMIDI"] + (dark ? ["-uiTestDark"] : [])
         app.launch()
         app.tabBars.buttons["Create"].tap()
 
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30), "studio web view")
-        // Web 54e9d10 pins the composer input under every dock tab (guests included), so no tab switch needed.
-        let input = web.textViews.firstMatch
+        let input = web.textViews["Describe a song or a change"]
         guard input.waitForExistence(timeout: 60) else {
-            attach(app, "create-tab-no-input")
-            throw XCTSkip("composer input did not load from compose.grepawk.com/studio (network or web layout)")
+            attach(app, "create-tab-no-input-\(mode)")
+            throw XCTSkip("composer-input did not load from compose.grepawk.com/studio (network or web layout)")
         }
         let window = app.windows.firstMatch.frame
         let tabBar = app.tabBars.firstMatch.frame
+        let plus = web.buttons["Add"], hum = web.buttons["Hum a melody"], more = web.buttons["More"]
+        let pill = web.buttons["Play"]
+        XCTAssertTrue(plus.exists && hum.exists && more.exists && pill.exists, "plus-btn, hum-btn, studio-overflow, play-pill")
 
-        // Keyboard down: inside the window and above the tab bar.
-        attach(app, "create-tab-keyboard-down")
-        XCTAssertTrue(input.isHittable, "composer input hittable with keyboard down")
-        XCTAssertTrue(window.contains(input.frame), "input \(input.frame) inside window \(window)")
-        XCTAssertLessThanOrEqual(input.frame.maxY, tabBar.minY + 1, "input above the tab bar")
+        // Header: native Scan bar, then the web compact-head, no overlap or doubled top bar; safe areas respected.
+        let bar = app.otherElements["studio-native-bar"].firstMatch
+        XCTAssertTrue(app.buttons["scan-open"].exists, "native Scan bar kept")
+        let barFrame = bar.exists ? bar.frame : app.buttons["scan-open"].frame
+        XCTAssertGreaterThanOrEqual(barFrame.minY, app.statusBars.firstMatch.exists ? app.statusBars.firstMatch.frame.maxY - 1 : 0, "native bar below the status bar")
+        XCTAssertGreaterThanOrEqual(more.frame.minY, barFrame.maxY - 1, "compact-head below the native bar")
+        XCTAssertLessThan(more.frame.minY - barFrame.maxY, 30, "no empty safe-area gap doubled under the native bar")
+        XCTAssertEqual(web.staticTexts.matching(NSPredicate(format: "label == 'Scan sheet music'")).count, 0, "no web Scan entry")
 
-        // Start playback (web ws-play, aria-label "Play") so the rest runs while playing.
-        let play = web.buttons["Play"]
-        if play.waitForExistence(timeout: 30) { play.tap(); sleep(1); attach(app, "create-tab-playing") }
-        XCTAssertTrue(input.isHittable, "composer input visible during playback")
+        // Keyboard down, empty project.
+        attach(app, "create-empty-\(mode)")
+        assertVisible(input, above: tabBar.minY, window, "keyboard down")
 
-        // Keyboard up.
-        input.tap()
+        // + sheet: no web photo Scan inside the app (Scan is native-only); Bluetooth pairing via gbkMidiNative.
+        plus.tap()
+        XCTAssertTrue(web.buttons.matching(NSPredicate(format: "label CONTAINS 'Import MIDI file'")).firstMatch.waitForExistence(timeout: 5), "plus sheet opened")
+        XCTAssertFalse(web.buttons.matching(NSPredicate(format: "label CONTAINS 'Import sheet music'")).firstMatch.exists, "web photo Scan hidden in the app")
+        web.buttons.matching(NSPredicate(format: "label CONTAINS 'Connect MIDI keyboard'")).firstMatch.tap()
+        XCTAssertTrue(web.buttons.matching(NSPredicate(format: "label CONTAINS 'Pair a Bluetooth keyboard'")).firstMatch.waitForExistence(timeout: 5),
+                      "gbkMidiNative.bluetooth + openBluetoothPairing() detected by the web")
+        attach(app, "create-midi-sheet-\(mode)")
+        assertVisible(input, above: tabBar.minY, window, "with the MIDI sheet open")
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap() // scrim closes the sheet
+        sleep(1)
+
+        // gbk:focus-composer focuses the input (software keyboard appears).
+        app.buttons["test-focus-composer"].tap()
         let keyboard = app.keyboards.firstMatch
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "software keyboard (CI disables the hardware keyboard)")
-        sleep(1) // let the keyboard animation and viewport resize settle
-        attach(app, "create-tab-keyboard-up")
-        XCTAssertTrue(input.isHittable, "composer input hittable with keyboard up")
-        XCTAssertGreaterThanOrEqual(input.frame.minY, window.minY - 1, "input not scrolled above the top")
-        XCTAssertLessThanOrEqual(input.frame.maxY, keyboard.frame.minY + 1, "input \(input.frame) above keyboard \(keyboard.frame)")
-
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "gbk:focus-composer focused composer-input")
+        sleep(1)
+        attach(app, "create-keyboard-up-\(mode)")
+        assertVisible(input, above: keyboard.frame.minY, window, "keyboard up")
         input.typeText("calm piano in D minor")
-        XCTAssertLessThanOrEqual(input.frame.maxY, keyboard.frame.minY + 1, "still visible while typing")
-        attach(app, "create-tab-typing")
-
-        // Keyboard down again.
-        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+        XCTAssertTrue(web.buttons["Send"].waitForExistence(timeout: 5), "composer-send appears with text")
+        assertVisible(input, above: keyboard.frame.minY, window, "typing")
+        attach(app, "create-typing-\(mode)")
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
         _ = keyboard.waitForNonExistence(timeout: 5)
-        attach(app, "create-tab-keyboard-dismissed")
-        XCTAssertTrue(input.isHittable, "composer input visible after the keyboard closes")
+
+        // Playback: load a scale through the studio's MIDI import, then play-pill.
+        app.buttons["load-test-midi"].tap()
+        let open = web.buttons["Open as new project"]
+        if open.waitForExistence(timeout: 20) {
+            for _ in 0..<3 where open.exists { open.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); sleep(2) }
+        }
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: pill)
+        wait(for: [enabled], timeout: 60)
+        pill.tap()
+        XCTAssertTrue(web.buttons["Pause"].waitForExistence(timeout: 30), "play-pill shows Pause while playing")
+        sleep(1)
+        attach(app, "create-playing-\(mode)")
+        assertVisible(input, above: tabBar.minY, window, "during playback")
+        input.tap()
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+        sleep(1)
+        attach(app, "create-playing-keyboard-up-\(mode)")
+        assertVisible(input, above: keyboard.frame.minY, window, "playing, keyboard up")
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        _ = keyboard.waitForNonExistence(timeout: 5)
+        assertVisible(input, above: tabBar.minY, window, "after the keyboard closes")
+    }
+
+    private func assertVisible(_ input: XCUIElement, above limit: CGFloat, _ window: CGRect, _ when: String,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(input.isHittable, "composer-input hittable (\(when))", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(input.frame.minY, window.minY - 1, "not above the top (\(when))", file: file, line: line)
+        XCTAssertLessThanOrEqual(input.frame.maxY, limit + 1, "input \(input.frame) above \(limit) (\(when))", file: file, line: line)
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {

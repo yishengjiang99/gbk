@@ -16,6 +16,13 @@ final class HumUITests: XCTestCase {
         let hum = web.buttons["Hum"]
         XCTAssertTrue(hum.waitForExistence(timeout: 10))
         attach(app, "hum-idle")
+        // Cancel discards the take: back to idle, no track.
+        hum.tap()
+        XCTAssertTrue(web.staticTexts["phase: recording"].waitForExistence(timeout: 10))
+        web.buttons["Cancel hum"].tap()
+        XCTAssertTrue(web.staticTexts["phase: idle"].waitForExistence(timeout: 5), "cancel reports idle")
+        sleep(2)
+        XCTAssertFalse(web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Hummed melody:'")).firstMatch.exists, "cancelled take adds nothing")
         hum.tap()
         XCTAssertTrue(web.staticTexts["phase: recording"].waitForExistence(timeout: 10))
         attach(app, "hum-recording")

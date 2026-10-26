@@ -5,13 +5,14 @@
 <style>body{font:16px -apple-system;margin:0;padding:16px}#bar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:8px;padding:12px;border-top:1px solid #ccc;background:#fff}
 #bar input{flex:1;font-size:16px}#out div{margin:4px 0}</style></head>
 <body><h3>Hum harness</h3><div id="caps"></div><div id="state">phase: idle</div><div id="out"></div>
-<div id="bar"><input placeholder="Describe the music to compose…" aria-label="composer input"><button id="hum" data-testid="hum-btn" aria-label="Hum">🎤 Hum</button><button>Send</button></div>
+<div id="bar"><input placeholder="Describe the music to compose…" aria-label="composer input"><button id="hum" data-testid="hum-btn" aria-label="Hum">🎤 Hum</button><button id="cancel" aria-label="Cancel hum">✕</button><button>Send</button></div>
 <script>
 const project = { ppq: 480, tempos: [{ tick: 0, microPerQuarter: 500000 }], tracks: [{ id: "t0", channel: 0 }], readOnlyReason: null };
 const caps = window.gbkNative && window.gbkNative.capabilities || [];
 document.getElementById('caps').textContent = 'native: ' + caps.join(',');
 document.getElementById('hum').style.display = caps.includes('hum') ? '' : 'none';
 document.getElementById('hum').onclick = () => webkit.messageHandlers.hum.postMessage({ type: 'toggle' });
+document.getElementById('cancel').onclick = () => webkit.messageHandlers.hum.postMessage({ type: 'cancel' });
 window.gbkHum = {
   context: () => ({ ppq: project.ppq, tempos: project.tempos, tracks: project.tracks.map(t => ({ channel: t.channel })), readOnlyReason: project.readOnlyReason }),
   apply: (ops, opts) => {
