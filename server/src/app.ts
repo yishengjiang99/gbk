@@ -141,6 +141,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   // clients) they run on the server in worker threads (SERVER_RENDER=0 turns that off).
   const serverPool = new ServerRenderPool(cfg, () => resolveSoundFontPath(cfg), (o) => app.log.info(o));
   const mcpRenders = new RenderService(cfg, mcpStore, (u) => hub.registry.get(u), (o) => { const e = o as { evt?: string; executor?: string }; if (e.evt === "mcp_render_completed") { if (e.executor === "server") funnel.bump("server_render_completed", "server"); else funnel.bump("browser_render_completed", e.executor === "widget" ? "widget" : "studio-tab"); } if (e.evt === "mcp_render_failed") funnel.bump("render_failed"); app.log.info(o); }, (u) => limits.for(u).dailyRenders, serverPool);
+  mcpRenders.isPro = (u) => !isGuest(u) && limits.pro(u); mcpRenders.refreshPro = (u) => limits.refresh(u);
   // Migration from invite-code login: every access-code user and every existing song/composition owner becomes an
   // established account with the same id, so their songs, compositions and OAuth grants keep working unchanged.
   const legacy = new Set([...cfg.security.accessCodes.map((e) => { const i = e.indexOf(":"); return (i > 0 ? e.slice(0, i) : "user").replace(/[^\w.-]/g, "").slice(0, 40) || "user"; }), ...shares.owners(), ...mcpStore.owners()]);

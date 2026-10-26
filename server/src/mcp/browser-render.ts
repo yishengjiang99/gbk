@@ -70,6 +70,16 @@ export class RenderService {
   constructor(private cfg: Config, private store: McpStore, private studio: StudioLookup, private log: (o: object) => void = () => {},
     private rendersPerDay: (owner: string) => number = () => cfg.mcp.maxRendersPerDay, private serverPool?: ServerRenderPool) {}
   private recentServer = new Map<string, number[]>();
+  /** Unified Pro status (Apple OR Stripe) and its async refresh; set by app.ts. Guests are never Pro. */
+  isPro: (owner: string) => boolean = () => false;
+  refreshPro: (owner: string) => Promise<unknown> = async () => {};
+  /** Server-render limits for an owner: guest 6/h 180 s, account 30/h 300 s, Pro 120/h 600 s (defaults). */
+  serverLimits(owner: string, guest: boolean) {
+    const sr = this.cfg.serverRender;
+    if (guest) return { tier: "guest" as const, perHour: sr.guestPerHour, maxSeconds: sr.guestMaxSeconds };
+    if (this.isPro(owner)) return { tier: "pro" as const, perHour: sr.proPerHour, maxSeconds: Math.max(sr.proMaxSeconds, sr.accountMaxSeconds) };
+    return { tier: "free" as const, perHour: sr.accountPerHour, maxSeconds: sr.accountMaxSeconds };
+  }
 
   /** True when headless server rendering is available (SERVER_RENDER is not 0 and the pool exists). */
   get serverRenderEnabled() { return !!this.serverPool?.enabled; }
@@ -97,12 +107,12 @@ export class RenderService {
     if (!pool?.enabled) throw new McpError("WORKER_UNAVAILABLE", "server rendering is turned off on this deployment");
     const jobFont = this.resolveJobFont(config);
     const sr = this.cfg.serverRender;
-    const maxSeconds = o.guest ? sr.guestMaxSeconds : sr.accountMaxSeconds;
+    const { maxSeconds, perHour } = this.serverLimits(owner, o.guest);
     const seconds = tickToSec(snapshot, snapshot.endTick) + (config.tailSeconds ?? 3);
     if (!Number.isFinite(seconds) || seconds > maxSeconds) throw new McpError("QUOTA_EXCEEDED", `server renders are limited to ${maxSeconds} s (this one is ${Math.round(seconds)} s including the tail); shorten the piece or render it in GBK Studio`);
     const perDay = o.perDay ?? this.rendersPerDay(owner);
     if (this.store.countJobsSince(owner, 86_400_000) >= perDay) throw new McpError("QUOTA_EXCEEDED", `daily render limit reached (${perDay})`);
-    const now = Date.now(), perHour = o.guest ? sr.guestPerHour : sr.accountPerHour;
+    const now = Date.now();
     const recent = (this.recentServer.get(owner) ?? []).filter((t) => t > now - 3_600_000);
     if (recent.length >= perHour) throw new McpError("QUOTA_EXCEEDED", `server render rate limit reached (${perHour} per hour); retry later`);
     if (pool.inFlight(owner) > 0) throw new McpError("QUOTA_EXCEEDED", "a server render for this project/account is already running; wait for it (gbk_get_render_status) before starting another");

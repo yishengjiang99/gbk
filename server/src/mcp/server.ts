@@ -249,6 +249,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     // INVALID_ARGUMENT, catalog font not installed in this deployment -> NOT_FOUND.
     if (a.soundFont) resolveRenderFont(cfg, a.soundFont);
     const serverJob = async (guest: boolean) => {
+      if (!guest) await renders.refreshPro(user);
       const job = renders.submitServer(user, { ...row, revision: rowRev }, snapshot, config, { guest, client: ctx.auth.client, ...(guest ? { perDay: cfg.mcp.guestRendersPerDay } : {}) });
       const final = await renders.waitFor(user, job.id, (a.waitSeconds ?? SERVER_RENDER_DEFAULT_WAIT_S) * 1000);
       return { ...renders.jobView(user, final), renderedOn: "server",

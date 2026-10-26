@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { ScriptModel, reply } from "./helpers.ts";
 import { startServer } from "./ws-helpers.ts";
 import { McpClient } from "./mcp-helpers.ts";
+import { entitlementFetch } from "./stripe-helpers.ts";
 
 const model = () => new ScriptModel([() => reply("unused")]);
 const errorCode = (code: string) => (e: unknown) => JSON.stringify(e).includes(code) || String((e as Error)?.message ?? "").includes(code);
@@ -94,4 +95,39 @@ test("signed-in client with no Studio tab renders on the server; limits: duratio
     assert.deepEqual(r.artifacts.map((a) => a.kind).sort(), ["midi", "wav"]);
     await assert.rejects(c.call("gbk_render_composition", { compositionId: g.compositionId }), errorCode("QUOTA_EXCEEDED"), "hourly rate");
   } finally { await s.app.close(); }
+});
+
+test("server render limits by plan: Stripe Pro gets 120/h + 600 s, free account 30/h + 300 s, guests unchanged; hourly boundary per plan", { timeout: 180_000 }, async () => {
+  const state = { pro: new Set(["pro@example.com"]), down: false, calls: [] as string[] };
+  const s = await startServer(model(), { MCP_TEST_AUTH: "1", COMPOSE_ENTITLEMENT_ORIGIN: "https://billing.test", COMPOSE_ENTITLEMENT_TOKEN: "test-entitlement-token" }, { fetch: entitlementFetch(state) });
+  try {
+    const pro = s.accounts.upsertOAuth("google", "g-pro", "Pro", "pro@example.com").account.id;
+    const free = s.accounts.upsertOAuth("google", "g-free", "Free", "free@example.com").account.id;
+    const r = s.mcp.renders;
+    await r.refreshPro(pro); await r.refreshPro(free);
+    assert.deepEqual(r.serverLimits(pro, false), { tier: "pro", perHour: 120, maxSeconds: 600 });
+    assert.deepEqual(r.serverLimits(free, false), { tier: "free", perHour: 30, maxSeconds: 300 });
+    assert.deepEqual(r.serverLimits("guest:abc", true), { tier: "guest", perHour: 6, maxSeconds: 180 });
+    assert.equal(s.limits.for(pro).pro, true); assert.equal(s.limits.for(free).pro, false);
+  } finally { await s.app.close(); }
+  // Boundary: free 1/h vs Pro 2/h (scaled down); the free account's 2nd render is refused, the Pro account's 2nd succeeds and its 3rd is refused.
+  const s2 = await startServer(model(), { MCP_TEST_AUTH: "1", SERVER_RENDER_ACCOUNT_PER_HOUR: "1", SERVER_RENDER_PRO_PER_HOUR: "2", SERVER_RENDER_ACCOUNT_MAX_SECONDS: "20", SERVER_RENDER_PRO_MAX_SECONDS: "60",
+    COMPOSE_ENTITLEMENT_ORIGIN: "https://billing.test", COMPOSE_ENTITLEMENT_TOKEN: "test-entitlement-token" }, { fetch: entitlementFetch(state) });
+  try {
+    const pro = s2.accounts.upsertOAuth("google", "g-pro", "Pro", "pro@example.com").account.id;
+    const free = s2.accounts.upsertOAuth("google", "g-free", "Free", "free@example.com").account.id;
+    for (const [user, allowed] of [[free, 1], [pro, 2]] as const) {
+      const c = new McpClient(s2.base, { "x-gbk-test-user": user }); await c.initialize();
+      const g = await c.call<{ compositionId: string }>("gbk_create_composition", { title: "Short", style: "pop", bars: 2, tempo: 120, seed: 2 });
+      for (let i = 0; i < allowed; i++) { const j = await c.call<Job>("gbk_render_composition", { compositionId: g.compositionId, waitSeconds: 110 }); assert.equal(j.status, "completed", JSON.stringify(j.error)); }
+      await assert.rejects(c.call("gbk_render_composition", { compositionId: g.compositionId }), errorCode("QUOTA_EXCEEDED"), `${user === pro ? "pro" : "free"} hourly boundary`);
+    }
+    // duration: a ~32 s piece is over the free cap (20 s) but inside Pro's (60 s)
+    const cp = new McpClient(s2.base, { "x-gbk-test-user": pro }); await cp.initialize();
+    const cf = new McpClient(s2.base, { "x-gbk-test-user": free }); await cf.initialize();
+    const lp = await cp.call<{ compositionId: string }>("gbk_create_composition", { title: "Mid", style: "classical", bars: 8, tempo: 60, seed: 1 });
+    const lf = await cf.call<{ compositionId: string }>("gbk_create_composition", { title: "Mid", style: "classical", bars: 8, tempo: 60, seed: 1 });
+    await assert.rejects(cf.call("gbk_render_composition", { compositionId: lf.compositionId }), (e: unknown) => /limited to 20 s/.test(JSON.stringify(e) + String((e as Error)?.message)), "free duration cap");
+    await assert.rejects(cp.call("gbk_render_composition", { compositionId: lp.compositionId }), (e: unknown) => !/limited to 60 s/.test(JSON.stringify(e) + String((e as Error)?.message)), "pro passes the duration cap (then hits its hourly limit)");
+  } finally { await s2.app.close(); }
 });

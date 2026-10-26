@@ -3,22 +3,9 @@ import assert from "node:assert/strict";
 import { buildApp } from "../src/app.ts";
 import { COOKIE } from "../src/security/authentication.ts";
 import { testConfig, ScriptModel, reply } from "./helpers.ts";
+import { entitlementFetch } from "./stripe-helpers.ts";
 
-/** Mocked grepawk.com entitlement endpoint: emails in `pro` have an active Stripe subscription. */
-function entitlementFetch(state: { pro: Set<string>; down: boolean; calls: string[] }): typeof fetch {
-  const real = globalThis.fetch;
-  return (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input instanceof Request ? input.url : input);
-    if (!url.startsWith("https://billing.test/")) return real(input, init);
-    state.calls.push(url);
-    assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-entitlement-token");
-    if (state.down) return new Response("boom", { status: 503 });
-    const email = new URL(url).searchParams.get("email")!;
-    return Response.json({ product: "compose", pro: state.pro.has(email) });
-  }) as typeof fetch;
-}
-
-export async function stripeApp(over: Record<string, string> = {}) {
+async function stripeApp(over: Record<string, string> = {}) {
   let now = Date.now();
   const state = { pro: new Set<string>(), down: false, calls: [] as string[] };
   const cfg = testConfig({ COMPOSER_PUBLIC_ORIGIN: "http://composer.test", COMPOSE_ENTITLEMENT_ORIGIN: "https://billing.test", COMPOSE_ENTITLEMENT_TOKEN: "test-entitlement-token", ...over });

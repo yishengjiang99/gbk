@@ -52,7 +52,7 @@ export interface Config {
   };
   /** Headless server-side rendering for MCP clients without a Studio tab. SERVER_RENDER=0 turns it off. */
   serverRender: { enabled: boolean; concurrency: number; maxQueue: number; timeoutMs: number; workerHeapMb: number;
-    guestMaxSeconds: number; accountMaxSeconds: number; guestPerHour: number; accountPerHour: number; guestPerClientPerDay: number };
+    guestMaxSeconds: number; accountMaxSeconds: number; guestPerHour: number; accountPerHour: number; proPerHour: number; proMaxSeconds: number; guestPerClientPerDay: number };
 }
 
 const num = (v: string | undefined, d: number) => { const n = Number(v); return v !== undefined && v !== "" && Number.isFinite(n) ? n : d; };
@@ -143,6 +143,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       accountMaxSeconds: Math.max(1, num(env.SERVER_RENDER_ACCOUNT_MAX_SECONDS, 300)),
       guestPerHour: Math.max(1, Math.floor(num(env.SERVER_RENDER_GUEST_PER_HOUR, 6))),
       accountPerHour: Math.max(1, Math.floor(num(env.SERVER_RENDER_ACCOUNT_PER_HOUR, 30))),
+      proPerHour: Math.max(1, Math.floor(num(env.SERVER_RENDER_PRO_PER_HOUR, 120))),
+      proMaxSeconds: Math.max(1, num(env.SERVER_RENDER_PRO_MAX_SECONDS, 600)),
       guestPerClientPerDay: Math.max(1, Math.floor(num(env.SERVER_RENDER_GUEST_PER_CLIENT_PER_DAY, 30))),
     },
   };
