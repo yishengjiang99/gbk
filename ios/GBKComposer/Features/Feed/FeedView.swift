@@ -31,7 +31,7 @@ final class FeedViewModel: ObservableObject {
             let page = try await provider.feedPage(requested, cursor: cursor, limit: 20)
             guard requested == query else { return }
             let known = Set(items.map(\.slug))
-            items.append(contentsOf: page.items.filter { $0.mp3URL != nil && !known.contains($0.slug) })
+            items.append(contentsOf: page.items.filter { $0.audioURL != nil && !known.contains($0.slug) })
             for s in page.items { modelVersions[s.slug] = page.modelVersion ?? "unknown" }
             cursor = page.nextCursor
             exhausted = page.nextCursor == nil
@@ -45,7 +45,7 @@ final class FeedViewModel: ObservableObject {
     /// Returns false when the song can't be found or has no audio.
     func focus(slug: String, fetch: (String) async throws -> Song = { try await APIClient.shared.send(Endpoints.song($0), as: Song.self) }) async -> Bool {
         if items.contains(where: { $0.slug == slug }) { return true }
-        guard let song = try? await fetch(slug), song.mp3URL != nil else { return false }
+        guard let song = try? await fetch(slug), song.audioURL != nil else { return false }
         items.removeAll { $0.slug == song.slug }
         items.insert(song, at: 0)
         return true
@@ -192,13 +192,13 @@ struct FeedView: View {
 
     private func playVisible(_ slug: String?) {
         guard let slug, let idx = model.items.firstIndex(where: { $0.slug == slug }),
-              let url = model.items[idx].mp3URL else { return }
+              let url = model.items[idx].audioURL else { return }
         let p = player
         ImpressionLogger.shared.start(song: slug, position: idx, feed: model.query.sort.rawValue,
                                       modelVersion: model.modelVersions[slug] ?? "unknown",
                                       time: { p.currentSeconds(for: slug) }, duration: { p.durationSeconds(for: slug) })
         let next = idx + 1 < model.items.count ? model.items[idx + 1] : nil
-        player.play(slug: slug, url: url, next: next.flatMap { n in n.mp3URL.map { (slug: n.slug, url: $0) } })
+        player.play(slug: slug, url: url, next: next.flatMap { n in n.audioURL.map { (slug: n.slug, url: $0) } })
     }
 }
 

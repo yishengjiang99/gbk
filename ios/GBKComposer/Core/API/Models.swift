@@ -92,6 +92,10 @@ struct Song: Codable, Hashable, Identifiable {
 
     var id: String { slug }
     var mp3URL: URL? { media?.mp3.flatMap(URL.init(string:)) }
+    var wavURL: URL? { media?.wav.flatMap(URL.init(string:)) }
+    /// What the feed plays: lossless WAV (PCM) when the server has one; MP3 only for songs without a WAV
+    /// (older shares, e.g. `media.wav == null`), decoded to the same PCM path.
+    var audioURL: URL? { wavURL ?? mp3URL }
 }
 
 /// Generic cursor page: `{ items: [...], next_cursor }`.

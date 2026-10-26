@@ -117,13 +117,19 @@ final class SpectrumTests: XCTestCase {
     }
 }
 
-/// Real audio, no mocks: decode a bundled mp3 (220 Hz + 1 kHz, 2 s) through the same DecodedPCM path the
+/// Real audio, no mocks: decode a bundled WAV / mp3 (220 Hz + 1 kHz, 2 s) through the same DecodedPCM path the
 /// feed uses, then read bars + waveform at a playhead exactly like the card's Canvas does each frame.
 final class RealAudioVisualizerTests: XCTestCase {
-    func testDecodedMp3DrivesBarsAndWaveform() throws {
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mp3", subdirectory: "Fixtures")
-                                ?? Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mp3"))
+    func testDecodedWavDrivesBarsAndWaveform() throws { try check(ext: "wav") }
+    /// MP3 is only the fallback for songs without `media.wav`.
+    func testDecodedMp3FallbackDrivesBarsAndWaveform() throws { try check(ext: "mp3") }
+
+    private func check(ext: String) throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: ext, subdirectory: "Fixtures")
+                                ?? Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: ext))
         let pcm = try DecodedPCM.decode(fileURL: url)
+        let buffer = try XCTUnwrap(pcm.buffer, "playback buffer is the same PCM the analyzer reads")
+        XCTAssertEqual(Int(buffer.frameLength), pcm.samples.count)
         XCTAssertGreaterThan(pcm.samples.count, Int(pcm.sampleRate * 1.5), "decoded ~2 s of audio")
 
         let analyzer = SpectrumAnalyzer()

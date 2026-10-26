@@ -1,17 +1,20 @@
 import Accelerate
 import AVFoundation
 
-/// Whole-song mono PCM decoded from the mp3 the feed is playing, indexed by the player's clock.
-/// Replaces the MTAudioProcessingTap: on device AVPlayer never ran the tap's process callback for the
-/// remote progressive mp3 items, so the ring stayed all zeros and bars + waveform were a flat line.
+/// One song as PCM in memory: `buffer` is what AVAudioPlayerNode plays, `samples` is its mono mixdown that the
+/// spectrum + waveform read at the node's clock. Same audio, same timeline, no tap needed.
 final class DecodedPCM: @unchecked Sendable {
     let samples: [Float]
     let sampleRate: Double
+    let buffer: AVAudioPCMBuffer?
 
-    init(samples: [Float], sampleRate: Double) {
+    init(samples: [Float], sampleRate: Double, buffer: AVAudioPCMBuffer? = nil) {
         self.samples = samples
         self.sampleRate = sampleRate > 0 ? sampleRate : 44_100
+        self.buffer = buffer
     }
+
+    var duration: Double { Double(samples.count) / sampleRate }
 
     /// `count` samples ending at `seconds` (zero-padded outside the song), oldest first.
     func window(endingAt seconds: Double, count: Int) -> [Float] {
@@ -25,39 +28,39 @@ final class DecodedPCM: @unchecked Sendable {
         return out
     }
 
-    /// Decode any AVAudioFile-readable file (mp3, m4a, wav) to mono float (channel average).
+    /// Read a WAV (or, as fallback, MP3/M4A) file into one float PCM buffer plus its mono mixdown.
     static func decode(fileURL: URL) throws -> DecodedPCM {
         let file = try AVAudioFile(forReading: fileURL, commonFormat: .pcmFormatFloat32, interleaved: false)
         let format = file.processingFormat
-        let channels = Int(format.channelCount)
-        var mono = [Float]()
-        mono.reserveCapacity(Int(max(file.length, 0)))
-        let chunk: AVAudioFrameCount = 32_768
-        guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else { return DecodedPCM(samples: [], sampleRate: format.sampleRate) }
-        while file.framePosition < file.length {
-            try file.read(into: buf, frameCount: chunk)
-            let n = Int(buf.frameLength)
-            if n == 0 { break }
-            guard let ch = buf.floatChannelData else { break }
-            let scale = 1 / Float(max(channels, 1))
-            for i in 0..<n {
-                var v: Float = 0
-                for c in 0..<channels { v += ch[c][i] }
-                mono.append(v * scale)
+        let frames = AVAudioFrameCount(max(file.length, 0))
+        guard frames > 0, let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
+            return DecodedPCM(samples: [], sampleRate: format.sampleRate)
+        }
+        try file.read(into: buf)
+        let n = Int(buf.frameLength), channels = Int(format.channelCount)
+        var mono = [Float](repeating: 0, count: n)
+        if let ch = buf.floatChannelData, channels > 0 {
+            let scale = 1 / Float(channels)
+            mono.withUnsafeMutableBufferPointer { m in
+                guard let mp = m.baseAddress else { return }
+                for c in 0..<channels { vDSP_vadd(mp, 1, ch[c], 1, mp, 1, vDSP_Length(n)) }
+                var k = scale
+                vDSP_vsmul(mp, 1, &k, mp, 1, vDSP_Length(n))
             }
         }
-        return DecodedPCM(samples: mono, sampleRate: format.sampleRate)
+        return DecodedPCM(samples: mono, sampleRate: format.sampleRate, buffer: buf)
     }
 
     /// Download `url` (or read it if it's a file URL) and decode it off the main thread.
     static func load(url: URL) async throws -> DecodedPCM {
-        if url.isFileURL { return try await Task.detached(priority: .utility) { try decode(fileURL: url) }.value }
+        if url.isFileURL { return try await Task.detached(priority: .userInitiated) { try decode(fileURL: url) }.value }
         let (tmp, _) = try await URLSession.shared.download(from: url)
-        let ext = url.pathExtension.isEmpty ? "mp3" : url.pathExtension
-        let local = FileManager.default.temporaryDirectory.appendingPathComponent("viz-\(UUID().uuidString).\(ext)")
+        let ext = url.lastPathComponent == "wav" || url.pathExtension == "wav" ? "wav"
+            : (url.lastPathComponent == "mp3" ? "mp3" : (url.pathExtension.isEmpty ? "wav" : url.pathExtension))
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent("feed-\(UUID().uuidString).\(ext)")
         try FileManager.default.moveItem(at: tmp, to: local)
         defer { try? FileManager.default.removeItem(at: local) }
-        return try await Task.detached(priority: .utility) { try decode(fileURL: local) }.value
+        return try await Task.detached(priority: .userInitiated) { try decode(fileURL: local) }.value
     }
 }
 
