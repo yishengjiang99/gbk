@@ -116,3 +116,37 @@ final class SpectrumTests: XCTestCase {
         XCTAssertEqual(WaveformMath.points([], count: 3), [0, 0, 0])
     }
 }
+
+/// Real audio, no mocks: decode a bundled mp3 (220 Hz + 1 kHz, 2 s) through the same DecodedPCM path the
+/// feed uses, then read bars + waveform at a playhead exactly like the card's Canvas does each frame.
+final class RealAudioVisualizerTests: XCTestCase {
+    func testDecodedMp3DrivesBarsAndWaveform() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mp3", subdirectory: "Fixtures")
+                                ?? Bundle(for: Self.self).url(forResource: "viz_chord", withExtension: "mp3"))
+        let pcm = try DecodedPCM.decode(fileURL: url)
+        XCTAssertGreaterThan(pcm.samples.count, Int(pcm.sampleRate * 1.5), "decoded ~2 s of audio")
+
+        let analyzer = SpectrumAnalyzer()
+        var t = 1.0
+        analyzer.source = pcm
+        analyzer.clock = { t }
+        let bars = analyzer.bars(now: 0)
+        XCTAssertEqual(bars.count, FeedVisuals.barCount)
+        XCTAssertGreaterThan(bars.max() ?? 0, 0.5, "spectrum not flat while playing")
+        let bands = SpectrumMath.logBands(fftSize: FeedVisuals.fftSize, sampleRate: pcm.sampleRate)
+        for f in [220.0, 1000.0] {
+            let bin = Int(f / pcm.sampleRate * Double(FeedVisuals.fftSize))
+            let b = try XCTUnwrap(bands.firstIndex { $0.contains(bin) })
+            XCTAssertGreaterThan(bars[b], 0.5, "\(f) Hz bar lit")
+        }
+        let wave = analyzer.waveform()
+        XCTAssertEqual(wave.count, FeedVisuals.waveformPoints)
+        XCTAssertGreaterThan(wave.map(abs).max() ?? 0, 0.2, "waveform has amplitude")
+
+        // Before decode (no source) and past the end: silence, as on a non-playing card.
+        t = 10
+        XCTAssertEqual(analyzer.waveform().map(abs).max(), 0)
+        analyzer.source = nil
+        XCTAssertNil(analyzer.latestSamples())
+    }
+}

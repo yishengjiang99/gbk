@@ -24,6 +24,7 @@ final class FeedPlayer: ObservableObject {
     /// Spectrum for the active item; cards pull from it per frame.
     let analyzer = SpectrumAnalyzer()
     private var tapTask: Task<Void, Never>?
+    private var decoded: [String: DecodedPCM] = [:]
 
     /// Session ownership lives in AudioSessionController (single owner; `.playback` unless something records).
     @MainActor static func configureAudioSession() { AudioSessionController.shared.start() }
@@ -56,7 +57,7 @@ final class FeedPlayer: ObservableObject {
             currentSlug = slug
             onStart?(slug)
             loopOnEnd(item, player: incoming)
-            attachTap(to: item)
+            attachAnalysis(slug: slug, url: url)
             if hadPrevious { fadeOut(outgoing) } else { outgoing.pause() }
         } else {
             active.play()
@@ -95,16 +96,17 @@ final class FeedPlayer: ObservableObject {
         return d.isFinite && d > 0 ? d : nil
     }
 
-    /// Install an MTAudioProcessingTap (via AVAudioMix) on the item's audio track for the spectrum.
-    private func attachTap(to item: AVPlayerItem) {
+    /// Decode the item's mp3 for the spectrum + waveform; the analyzer reads it at the player's clock.
+    private func attachAnalysis(slug: String, url: URL) {
         tapTask?.cancel()
-        let sink = AudioTapSink()
-        analyzer.sink = sink
+        analyzer.source = nil
+        analyzer.clock = { [weak self] in MainActor.assumeIsolated { self?.currentSeconds(for: slug) } }
         analyzer.reset()
-        tapTask = Task { @MainActor in
-            guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first, !Task.isCancelled,
-                  let mix = sink.makeAudioMix(for: track) else { return }
-            item.audioMix = mix
+        if let cached = decoded[slug] { analyzer.source = cached; return }
+        tapTask = Task { @MainActor [weak self] in
+            guard let pcm = try? await DecodedPCM.load(url: url), !Task.isCancelled, let self else { return }
+            self.decoded = [slug: pcm]
+            if self.currentSlug == slug { self.analyzer.source = pcm }
         }
     }
 

@@ -1,84 +1,63 @@
 import Accelerate
 import AVFoundation
-import MediaToolbox
 
-/// Lock-protected mono sample ring filled from the audio render thread by an MTAudioProcessingTap.
-final class AudioTapSink: @unchecked Sendable {
-    private let lock = NSLock()
-    private var ring: [Float]
-    private var writeIndex = 0
-    private(set) var sampleRate: Double = 44_100
-    private var channels = 1
-    private var interleaved = false
+/// Whole-song mono PCM decoded from the mp3 the feed is playing, indexed by the player's clock.
+/// Replaces the MTAudioProcessingTap: on device AVPlayer never ran the tap's process callback for the
+/// remote progressive mp3 items, so the ring stayed all zeros and bars + waveform were a flat line.
+final class DecodedPCM: @unchecked Sendable {
+    let samples: [Float]
+    let sampleRate: Double
 
-    init(capacity: Int = FeedVisuals.fftSize * 2) { ring = [Float](repeating: 0, count: capacity) }
-
-    func prepare(_ asbd: AudioStreamBasicDescription) {
-        lock.lock(); defer { lock.unlock() }
-        sampleRate = asbd.mSampleRate > 0 ? asbd.mSampleRate : 44_100
-        channels = max(Int(asbd.mChannelsPerFrame), 1)
-        interleaved = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
+    init(samples: [Float], sampleRate: Double) {
+        self.samples = samples
+        self.sampleRate = sampleRate > 0 ? sampleRate : 44_100
     }
 
-    /// Render thread: copy the first channel of float32 audio.
-    func push(_ list: UnsafeMutablePointer<AudioBufferList>, frames: Int) {
-        let abl = UnsafeMutableAudioBufferListPointer(list)
-        guard let buf = abl.first, let data = buf.mData, frames > 0 else { return }
-        let samples = data.assumingMemoryBound(to: Float.self)
-        lock.lock(); defer { lock.unlock() }
-        let stride = interleaved ? channels : 1
-        let available = Int(buf.mDataByteSize) / MemoryLayout<Float>.size / stride
-        let n = min(frames, available)
-        for i in 0..<n {
-            ring[writeIndex] = samples[i * stride]
-            writeIndex = (writeIndex + 1) % ring.count
-        }
-    }
-
-    /// Most recent `count` samples, oldest first.
-    func latest(_ count: Int) -> [Float] {
-        lock.lock(); defer { lock.unlock() }
-        let n = min(count, ring.count)
-        var out = [Float](repeating: 0, count: n)
-        var r = (writeIndex - n + ring.count) % ring.count
-        for i in 0..<n { out[i] = ring[r]; r = (r + 1) % ring.count }
+    /// `count` samples ending at `seconds` (zero-padded outside the song), oldest first.
+    func window(endingAt seconds: Double, count: Int) -> [Float] {
+        var out = [Float](repeating: 0, count: count)
+        guard seconds.isFinite, !samples.isEmpty else { return out }
+        let end = Int((seconds * sampleRate).rounded(.down))
+        let start = end - count
+        let lo = max(start, 0), hi = min(end, samples.count)
+        guard lo < hi else { return out }
+        for i in lo..<hi { out[i - start] = samples[i] }
         return out
     }
 
-    func clear() {
-        lock.lock(); defer { lock.unlock() }
-        for i in ring.indices { ring[i] = 0 }
+    /// Decode any AVAudioFile-readable file (mp3, m4a, wav) to mono float (channel average).
+    static func decode(fileURL: URL) throws -> DecodedPCM {
+        let file = try AVAudioFile(forReading: fileURL, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let format = file.processingFormat
+        let channels = Int(format.channelCount)
+        var mono = [Float]()
+        mono.reserveCapacity(Int(max(file.length, 0)))
+        let chunk: AVAudioFrameCount = 32_768
+        guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else { return DecodedPCM(samples: [], sampleRate: format.sampleRate) }
+        while file.framePosition < file.length {
+            try file.read(into: buf, frameCount: chunk)
+            let n = Int(buf.frameLength)
+            if n == 0 { break }
+            guard let ch = buf.floatChannelData else { break }
+            let scale = 1 / Float(max(channels, 1))
+            for i in 0..<n {
+                var v: Float = 0
+                for c in 0..<channels { v += ch[c][i] }
+                mono.append(v * scale)
+            }
+        }
+        return DecodedPCM(samples: mono, sampleRate: format.sampleRate)
     }
 
-    /// AVAudioMix that installs a post-effects tap on `track` feeding this sink.
-    func makeAudioMix(for track: AVAssetTrack) -> AVAudioMix? {
-        var callbacks = MTAudioProcessingTapCallbacks(
-            version: kMTAudioProcessingTapCallbacksVersion_0,
-            clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(self).toOpaque()),
-            init: { _, clientInfo, storageOut in storageOut.pointee = clientInfo },
-            finalize: { tap in
-                Unmanaged<AudioTapSink>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).release()
-            },
-            prepare: { tap, _, asbd in
-                Unmanaged<AudioTapSink>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue().prepare(asbd.pointee)
-            },
-            unprepare: nil,
-            process: { tap, frames, _, bufferList, framesOut, flagsOut in
-                guard MTAudioProcessingTapGetSourceAudio(tap, frames, bufferList, flagsOut, nil, framesOut) == noErr else { return }
-                Unmanaged<AudioTapSink>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
-                    .push(bufferList, frames: Int(framesOut.pointee))
-            })
-        var tap: MTAudioProcessingTap?
-        guard MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap) == noErr,
-              let tap else {
-            Unmanaged<AudioTapSink>.fromOpaque(callbacks.clientInfo!).release()
-            return nil
-        }
-        let params = AVMutableAudioMixInputParameters(track: track)
-        params.audioTapProcessor = tap
-        let mix = AVMutableAudioMix()
-        mix.inputParameters = [params]
-        return mix
+    /// Download `url` (or read it if it's a file URL) and decode it off the main thread.
+    static func load(url: URL) async throws -> DecodedPCM {
+        if url.isFileURL { return try await Task.detached(priority: .utility) { try decode(fileURL: url) }.value }
+        let (tmp, _) = try await URLSession.shared.download(from: url)
+        let ext = url.pathExtension.isEmpty ? "mp3" : url.pathExtension
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent("viz-\(UUID().uuidString).\(ext)")
+        try FileManager.default.moveItem(at: tmp, to: local)
+        defer { try? FileManager.default.removeItem(at: local) }
+        return try await Task.detached(priority: .utility) { try decode(fileURL: local) }.value
     }
 }
 
@@ -93,7 +72,9 @@ final class SpectrumAnalyzer {
     private var bands: [Range<Int>] = []
     private var bandsRate: Double = 0
     private var lastTime: Double?
-    var sink: AudioTapSink?
+    /// Decoded audio of the playing item and the player's clock (seconds); both nil → silence.
+    var source: DecodedPCM?
+    var clock: (() -> Double?)?
 
     init(fftSize: Int = FeedVisuals.fftSize) {
         n = fftSize
@@ -111,14 +92,27 @@ final class SpectrumAnalyzer {
     func bars(now: Double) -> [Float] {
         let dt = lastTime.map { now - $0 } ?? 0
         lastTime = now
-        guard let sink else { levels = SpectrumMath.smooth(previous: levels, target: levels.map { _ in 0 }, dt: dt); return levels }
-        if sink.sampleRate != bandsRate {
-            bandsRate = sink.sampleRate
+        guard let source, let samples = latestSamples() else {
+            levels = SpectrumMath.smooth(previous: levels, target: levels.map { _ in 0 }, dt: dt); return levels
+        }
+        if source.sampleRate != bandsRate {
+            bandsRate = source.sampleRate
             bands = SpectrumMath.logBands(fftSize: n, sampleRate: bandsRate)
         }
-        let target = SpectrumMath.levels(powers: powerSpectrum(sink.latest(n)), bands: bands)
+        let target = SpectrumMath.levels(powers: powerSpectrum(samples), bands: bands)
         levels = SpectrumMath.smooth(previous: levels, target: target, dt: dt)
         return levels
+    }
+
+    /// The `fftSize` samples leading up to the playhead (what web's AnalyserNode sees), or nil before decode.
+    func latestSamples() -> [Float]? {
+        guard let source, let t = clock?() else { return nil }
+        return source.window(endingAt: t, count: n)
+    }
+
+    /// 256-point waveform at the playhead (web getFloatTimeDomainData), flat before decode.
+    func waveform() -> [Float] {
+        latestSamples().map { WaveformMath.points($0) } ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
     }
 
     func powerSpectrum(_ samples: [Float]) -> [Float] {

@@ -2,6 +2,7 @@
 
 ## iOS
 
+- iOS: on a real iPhone, confirm the feed card spectrum bars and waveform move while a song plays (flat-line fix, DecodedPCM); bars may stay flat for the first second while the mp3 downloads and decodes.
 - iOS: on a real iPhone, confirm feed + studio playback is full loudness at max volume (silent switch on and off) and stays loud after a Hum take (AudioSessionController).
 - Web (GBK Social): in the Keys/MIDI UI, when `window.gbkMidiNative?.bluetooth`, show a "Bluetooth MIDI" button calling `window.gbkMidiNative.openBluetoothPairing()` (iOS app pairing sheet; today only in Profile ⚙︎). Contract: docs/ios/midi.md.
 - iOS MIDI: test with a real USB keyboard, a BLE MIDI device and a network session on device; measure end-to-end (key → sound) latency on device.

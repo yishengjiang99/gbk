@@ -52,8 +52,7 @@ struct NowPlayingVizView: View {
         }
         ctx.fill(bars, with: .color((analyzer != nil ? Theme.vizBar : Theme.vizDim).opacity(FeedVisuals.barAlpha)))
 
-        let samples = analyzer?.sink.map { WaveformMath.points($0.latest(FeedVisuals.fftSize)) }
-            ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
+        let samples = analyzer?.waveform() ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
         let mid = rH + sH / 2, amp = sH / 2 - 2
         var wave = Path()
         for (k, s) in samples.enumerated() {
