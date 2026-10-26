@@ -106,25 +106,16 @@ final class FeedCardVizSnapshotTests: XCTestCase {
                 _ = try render(card(Self.song(), nil), name: "feed-tags-320-\(tag)-\(style == .dark ? "dark" : "light")",
                                style: style, size: CGSize(width: 320, height: 760), type: type)
             }
-            // Every chip lays out on exactly one text line at this size.
-            for t in Self.longTags.prefix(8) {
-                let chip = UIHostingController(rootView: TagChip(text: "#\(t)", isLabel: false).dynamicTypeSize(type))
-                let one = UIHostingController(rootView: TagChip(text: "#", isLabel: false).dynamicTypeSize(type))
-                let h = chip.sizeThatFits(in: CGSize(width: 280, height: 1000)).height
-                let h1 = one.sizeThatFits(in: CGSize(width: 280, height: 1000)).height
-                XCTAssertEqual(h, h1, accuracy: 0.5, "#\(t) must stay on one line at \(type)")
-            }
         }
-        // The card never grows past the 320 pt screen, even with a tag wider than the card at AX3.
+        // Break opportunities exist only at the spaces between words: no ASCII hyphen or space inside a tag.
+        let text = String(TagChips.paragraph(labels: ["classical"], tags: Self.longTags).characters)
+        for word in text.split(separator: " ") { XCTAssertFalse(word.contains("-"), String(word)) }
+        XCTAssertTrue(text.contains("#film\u{2011}score"))
+        XCTAssertTrue(text.hasPrefix("classical · #cinematic"))
+        // The card never grows past the 320 pt screen at AX3.
         let card320 = UIHostingController(rootView: FeedCardView(song: Self.song(), playback: nil)
             .environmentObject(AuthStore.shared).dynamicTypeSize(.accessibility3))
         XCTAssertLessThanOrEqual(card320.sizeThatFits(in: CGSize(width: 320, height: 2000)).width, 320.5, "card")
-        let chips320 = UIHostingController(rootView: TagChips(labels: ["classical"], tags: Self.longTags).dynamicTypeSize(.accessibility3))
-        XCTAssertLessThanOrEqual(chips320.sizeThatFits(in: CGSize(width: 248, height: 4000)).width, 248.5, "chips")
-        let flow = UIHostingController(rootView: TagChips(labels: ["classical"], tags: Self.longTags).frame(width: 280))
-        XCTAssertGreaterThan(flow.sizeThatFits(in: CGSize(width: 280, height: 2000)).height,
-                             UIHostingController(rootView: TagChip(text: "#x", isLabel: false)).sizeThatFits(in: CGSize(width: 280, height: 100)).height * 2,
-                             "chips wrap as whole chips onto more rows")
     }
 
     func testSpectrumAndWaveformRenderWhilePlaying() throws {

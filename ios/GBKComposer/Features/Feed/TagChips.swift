@@ -1,82 +1,54 @@
 import SwiftUI
 
-/// Card labels + tags, a port of web `.so-chips` / `.so-chip` (src/components/social/social.css):
-/// flex-wrap with 4 pt gaps; each chip is one unbroken line (white-space: nowrap) and wraps as a whole.
+/// Card labels + tags as ONE text paragraph (Yisheng, 2026-10-25): "rnb · #groove #key‑change #late‑night".
+/// Wraps only at the spaces between words; hyphens are U+2011 (non-breaking) so a tag never splits.
+/// Footnote, secondary colour, labels semibold, max 3 lines. Tapping a tag filters by it (gbktag:// link).
 struct TagChips: View {
     let labels: [String]
     let tags: [String]
     var onTag: (String) -> Void = { _ in }
 
+    static let scheme = "gbktag"
+
+    /// Unbreakable form of one word: hyphens → U+2011, any internal whitespace → U+00A0.
+    static func unbreakable(_ s: String) -> String {
+        s.replacingOccurrences(of: "-", with: "\u{2011}")
+            .replacingOccurrences(of: " ", with: "\u{00A0}")
+    }
+
+    static func paragraph(labels: [String], tags: [String]) -> AttributedString {
+        var out = AttributedString()
+        for (i, l) in labels.enumerated() {
+            var a = AttributedString((i > 0 ? " " : "") + unbreakable(l))
+            a.font = .footnote.weight(.semibold)
+            a.foregroundColor = Theme.text
+            out += a
+        }
+        if !labels.isEmpty && !tags.isEmpty { out += AttributedString(" ·") }
+        for (i, t) in tags.enumerated() {
+            if i > 0 || !labels.isEmpty { out += AttributedString(" ") }
+            var a = AttributedString("#" + unbreakable(t))
+            a.link = URL(string: "\(scheme)://tag?t=\(t.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? t)")
+            out += a
+        }
+        return out
+    }
+
     var body: some View {
-        ChipFlowLayout(spacing: 4) {
-            ForEach(labels, id: \.self) { TagChip(text: $0, isLabel: true) }
-            ForEach(tags, id: \.self) { tag in
-                Button { onTag(tag) } label: { TagChip(text: "#\(tag)", isLabel: false) }
-                    .buttonStyle(.plain)
-            }
-        }
-        .padding(.vertical, 4)
-        .accessibilityIdentifier("card-tags")
-    }
-}
-
-struct TagChip: View {
-    let text: String
-    let isLabel: Bool
-    @ScaledMetric(relativeTo: .caption) private var hPad: CGFloat = 10
-    @ScaledMetric(relativeTo: .caption) private var vPad: CGFloat = 4
-
-    var body: some View {
-        Text(text)
-            .font(.system(.caption, design: .monospaced))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .fixedSize(horizontal: false, vertical: true)
-            .foregroundStyle(isLabel ? Theme.tagLabelText : Theme.tagChipText)
-            .padding(.horizontal, hPad).padding(.vertical, vPad)
-            .background(Capsule().fill(isLabel ? Theme.accent : Theme.vizBg))
-            .overlay(Capsule().stroke(isLabel ? Theme.accent : Theme.tagChipBorder, lineWidth: 1))
-    }
-}
-
-/// Wraps whole subviews onto new rows (never splits one). Never breaks a chip's text; a single chip wider than the whole row gets its own row, middle-truncated.
-struct ChipFlowLayout: Layout {
-    var spacing: CGFloat = 4
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        // Ideal-size queries (nil width) get the widest single chip, so a parent never grows to fit one long row.
-        let widest = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let rows = arrange(width: proposal.width ?? widest, subviews: subviews)
-        let w = rows.map { $0.width }.max() ?? 0
-        let h = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0))
-        return CGSize(width: proposal.width ?? w, height: h)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for row in arrange(width: bounds.width, subviews: subviews) {
-            var x = bounds.minX
-            for (i, size) in zip(row.indices, row.sizes) {
-                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: size.width, height: nil))
-                x += size.width + spacing
-            }
-            y += row.height + spacing
-        }
-    }
-
-    struct Row { var indices: [Int] = []; var sizes: [CGSize] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
-
-    func arrange(width maxW: CGFloat, subviews: Subviews) -> [Row] {
-        var rows: [Row] = [], row = Row()
-        for i in subviews.indices {
-            var s = subviews[i].sizeThatFits(.unspecified)
-            s.width = min(s.width, maxW)
-            if !row.indices.isEmpty && row.width + spacing + s.width > maxW { rows.append(row); row = Row() }
-            row.width += (row.indices.isEmpty ? 0 : spacing) + s.width
-            row.height = max(row.height, s.height)
-            row.indices.append(i); row.sizes.append(s)
-        }
-        if !row.indices.isEmpty { rows.append(row) }
-        return rows
+        Text(Self.paragraph(labels: labels, tags: tags))
+            .font(.footnote)
+            .foregroundStyle(Theme.textSecondary)
+            .tint(Theme.textSecondary)
+            .lineLimit(3)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == Self.scheme,
+                      let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value
+                else { return .systemAction }
+                onTag(t)
+                return .handled
+            })
+            .accessibilityIdentifier("card-tags")
     }
 }
