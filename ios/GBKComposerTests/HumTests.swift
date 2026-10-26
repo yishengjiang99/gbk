@@ -4,6 +4,15 @@ import HearSheetCore
 
 /// Parity with web test/hum.test.ts (notes-to-ops) and earsheet's decoder tests (vendored HearSheetCore).
 final class HumNotesToOpsTests: XCTestCase {
+    @MainActor func testBridgeCommandsAndCapabilities() {
+        XCTAssertEqual(HumBridge.command(["type": "toggle"]), .toggle)
+        XCTAssertEqual(HumBridge.command(["type": "cancel"]), .cancel)
+        XCTAssertNil(HumBridge.command(["type": "scan"]))
+        XCTAssertNil(HumBridge.command("cancel"))
+        XCTAssertTrue(HumBridge.capabilityScript.contains(#"["hum", "midi"]"#))
+        XCTAssertFalse(HumBridge.capabilityScript.contains("scan"), "Scan stays native-only")
+    }
+
     func testVelocityMapsLikeWeb() {
         XCTAssertEqual(HumNotesToOps.amplitudeToVelocity(1), 127)
         XCTAssertEqual(HumNotesToOps.amplitudeToVelocity(0), 1)

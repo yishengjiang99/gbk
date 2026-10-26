@@ -11,7 +11,10 @@ struct StudioWebView: View {
         ProcessInfo.processInfo.arguments.contains("-uiTestHum") ? Bundle.main.url(forResource: "hum-harness", withExtension: "html") : nil
     }
     @EnvironmentObject private var auth: AuthStore
+    @Environment(\.requestSignIn) private var requestSignIn
     @State private var url: URL?
+    /// UI tests (`-uiTestDark`): the app is locked to Light (Info.plist), so dark screenshots need an override.
+    static var forcedScheme: ColorScheme? { ProcessInfo.processInfo.arguments.contains("-uiTestDark") ? .dark : nil }
     @StateObject private var scan = ScanController()
 
     var body: some View {
@@ -22,13 +25,22 @@ struct StudioWebView: View {
         // Native Scan entry: a slim bar ABOVE the web view (stacked, not overlaid), so it can never cover the
         // web toolbar or the bottom composer input.
         VStack(spacing: 0) {
-            StudioNativeBar(onScan: { scan.start() })
+            StudioNativeBar(onScan: { scan.start() }, onTestMIDI: { scan.loadTestMIDI() },
+                            onTestFocus: { scan.webView?.evaluateJavaScript("window.dispatchEvent(new Event('gbk:focus-composer'))") })
             Group {
-                if let url { WebView(url: url, scan: scan).accessibilityIdentifier("studio-webview") } else { ProgressView().tint(Theme.accent) }
+                if let url {
+                    WebView(url: url, scan: scan, onNeedSignIn: { why, kind in
+                        guard WebView.nativeSignInKinds.contains(kind ?? "") else { return }
+                        // Web keeps the pending action in sessionStorage; signing in changes the token, this view
+                        // reloads through the web-code handoff and MobileStudio replays takePending("publish").
+                        requestSignIn(why.isEmpty ? "Sign in to publish and share your song." : why, need: .linkedAccount)
+                    }).accessibilityIdentifier("studio-webview")
+                } else { ProgressView().tint(Theme.accent) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.background.ignoresSafeArea())
+        .preferredColorScheme(Self.forcedScheme)
         .sheet(isPresented: $scan.isPresented) { ScanSheetView(controller: scan) }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
@@ -38,23 +50,33 @@ struct StudioWebView: View {
     }
 }
 
-/// Native controls for the studio, stacked above the web view.
+/// Native controls for the studio, stacked above the web view. Scan only: the web compact-head (title, play pill,
+/// ⋯) is the studio's header, so this bar carries no title or playback and stays one slim row.
 struct StudioNativeBar: View {
     var onScan: () -> Void
+    var onTestMIDI: () -> Void = {}
+    var onTestFocus: () -> Void = {}
+    static let testMIDIEnabled = ProcessInfo.processInfo.arguments.contains("-uiTestStudioMIDI")
     var body: some View {
         HStack {
+            if Self.testMIDIEnabled {
+                Button("Load test MIDI", action: onTestMIDI).font(.caption).accessibilityIdentifier("load-test-midi")
+                Button("Focus", action: onTestFocus).font(.caption).accessibilityIdentifier("test-focus-composer")
+            }
             Spacer()
             Button(action: onScan) {
                 Label("Scan sheet music", systemImage: "doc.viewfinder")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 5)
                     .foregroundStyle(Theme.onAccent)
                     .background(Theme.accent, in: Capsule())
             }
             .accessibilityIdentifier("scan-open")
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
+        .padding(.horizontal, 12).padding(.vertical, 4)
         .background(Theme.surface)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("studio-native-bar")
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 0.5) }
     }
 }
@@ -62,12 +84,23 @@ struct StudioNativeBar: View {
 struct WebView: UIViewRepresentable {
     let url: URL
     var scan: ScanController? = nil
+    var onNeedSignIn: (@MainActor (_ why: String, _ kind: String?) -> Void)? = nil
+    /// `gbk:need-signin` pending kinds that open the native Apple/Google sheet (publish needs a linked account).
+    static let nativeSignInKinds: Set<String> = ["publish"]
+    static let signInHandler = "signin"
+    static let signInScript = """
+    window.addEventListener("gbk:need-signin", function (e) { try {
+      var d = e.detail || {}; window.webkit.messageHandlers.signin.postMessage({ why: String(d.why || ""), kind: d.pending && d.pending.kind || null });
+    } catch (_) {} });
+    """
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         HumBridge.install(on: config, bridge: context.coordinator.hum)
+        config.userContentController.addUserScript(WKUserScript(source: Self.signInScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        config.userContentController.add(SignInMessageHandler(context.coordinator), name: Self.signInHandler)
         let midi = MIDIBridge.install(in: config) // Web MIDI polyfill backed by CoreMIDI (Core/MIDI, docs/ios/midi.md)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
@@ -89,6 +122,7 @@ struct WebView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
+        context.coordinator.onNeedSignIn = onNeedSignIn
         if uiView.url == nil || context.coordinator.loaded != url {
             context.coordinator.loaded = url
             Self.load(uiView, url)
@@ -103,6 +137,7 @@ struct WebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var loaded: URL?
+        var onNeedSignIn: (@MainActor (String, String?) -> Void)?
         let hum = HumBridge()
         var midi: MIDIBridge?
         private var offsetObservation: NSKeyValueObservation?
@@ -192,5 +227,17 @@ struct WebView: UIViewRepresentable {
                 decisionHandler(.allow)
             }
         }
+    }
+}
+
+/// Receives `gbk:need-signin` from our own origin (weak, so the content controller doesn't retain the coordinator).
+final class SignInMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var coordinator: WebView.Coordinator?
+    init(_ c: WebView.Coordinator) { coordinator = c }
+    func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
+        guard m.frameInfo.isMainFrame, HumBridge.isTrusted(m.frameInfo.securityOrigin),
+              let body = m.body as? [String: Any] else { return }
+        let why = body["why"] as? String ?? "", kind = body["kind"] as? String
+        Task { @MainActor [weak self] in self?.coordinator?.onNeedSignIn?(why, kind) }
     }
 }

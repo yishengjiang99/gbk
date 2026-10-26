@@ -80,4 +80,16 @@ final class ScanController: ObservableObject {
     }
 
     func cancel() { isPresented = false }
+
+    /// UI tests (`-uiTestStudioMIDI`): hands a tiny C-major scale SMF to the studio without the 3-minute OMR run.
+    func loadTestMIDI() { Task { try? await handOff(Self.testSMF) } }
+
+    nonisolated static var testSMF: Data {
+        var trk: [UInt8] = [0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0x00, 0xC0, 0x00] // 120 bpm, piano
+        for p: UInt8 in [60, 62, 64, 65, 67, 69, 71, 72] { trk += [0x00, 0x90, p, 0x60, 0x83, 0x60, 0x80, p, 0x00] }
+        trk += [0x00, 0xFF, 0x2F, 0x00]
+        let n = UInt32(trk.count)
+        let len: [UInt8] = [UInt8(n >> 24), UInt8(n >> 16 & 0xFF), UInt8(n >> 8 & 0xFF), UInt8(n & 0xFF)]
+        return Data([0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xE0, 0x4D, 0x54, 0x72, 0x6B] + len + trk)
+    }
 }
