@@ -1,6 +1,6 @@
-// Feed now-playing card visualization (issue #108). Row 1: windowed piano roll that scrolls with playback (same
-// model as the Export video: fixed playhead, notes pass under it, active notes brightened). Row 2: log-spaced spectrum
-// bars + waveform from the feed AnalyserNode. Only the playing card runs a rAF loop, and only while on screen.
+// Feed now-playing card visualization (issue #108). The piano roll fills the canvas: whole song when paused, windowed
+// roll scrolling under a fixed playhead when playing, with log-spaced spectrum bars + waveform from the feed
+// AnalyserNode overlaid semi-transparently on the bottom 38%. Only the playing card runs a rAF loop, and only while on screen.
 // Constants are shared with GBK iOS; keep them in sync with issue #108.
 import { useEffect, useRef } from "react";
 import type { PianoRollPreview } from "../../agent/piano-roll-preview.ts";
@@ -8,7 +8,8 @@ import type { PianoRollPreview } from "../../agent/piano-roll-preview.ts";
 export const VIZ = {
   windowSec: 4,          // visible seconds
   playheadFrac: 0.25,    // playhead at 25% from left => 1 s past, 3 s upcoming
-  rollFrac: 0.62,        // row 1 height share; row 2 = rest
+  overlayFrac: 0.38,     // bars + waveform overlay height, anchored to the bottom of the full-height roll
+  barAlpha: 0.35, waveAlpha: 0.8, idleAlpha: 0.5,
   pitchPad: 2, minPitchSpan: 12, noteGapPx: 1, minNoteH: 2, minNoteW: 2,
   fftSize: 2048, smoothing: 0, bars: 48, fMin: 40, fMax: 16000,
   attack: 1, decayMs: 150, // bar rises instantly, falls with exp time constant 150 ms
@@ -59,12 +60,14 @@ export function LiveRoll({ p, playing, source }: { p: PianoRollPreview; playing:
     const size = () => { const r = c.getBoundingClientRect(), d = Math.min(3, devicePixelRatio || 1); const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d)); if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } return { W: w, H: h }; };
     const frame = (now: number) => {
       const { W, H } = size(); const pal = palette(c);
-      if (!playing) { ctx.save(); drawRoll(ctx, p, 0, 1, W, H, pal, 1, 0); ctx.restore(); raf = 0; return; } // paused: whole-song overview, full height
-      const rH = Math.round(H * VIZ.rollFrac), sH = H - rH;
+      const sH = Math.round(H * VIZ.overlayFrac), mid = H - sH / 2;
+      if (!playing) { // paused: whole-song overview at full height + faint idle line
+        ctx.save(); drawRoll(ctx, p, 0, 1, W, H, pal, 1, 0); ctx.restore();
+        ctx.globalAlpha = VIZ.idleAlpha; ctx.fillStyle = pal.dim; ctx.fillRect(0, Math.round(mid), W, 1); ctx.globalAlpha = 1; raf = 0; return;
+      }
       const { el, analyser } = playing ? source() : { el: null, analyser: null };
       const dur = el && isFinite(el.duration) && el.duration > 0 ? el.duration : 30; const t = el ? el.currentTime : 0;
-      ctx.save(); drawRoll(ctx, p, t, dur, W, rH, pal); ctx.restore();
-      ctx.fillStyle = pal.bg; ctx.fillRect(0, rH, W, sH); ctx.fillStyle = pal.grid; ctx.fillRect(0, rH, W, 1);
+      ctx.save(); drawRoll(ctx, p, t, dur, W, H, pal); ctx.restore();
       const dt = Math.min(100, now - last); last = now; const fall = Math.exp(-dt / VIZ.decayMs);
       if (analyser) {
         if (!freq || freq.length !== analyser.frequencyBinCount) freq = new Uint8Array(analyser.frequencyBinCount);
@@ -78,12 +81,11 @@ export function LiveRoll({ p, playing, source }: { p: PianoRollPreview; playing:
           levels[b] = v >= levels[b] ? v : levels[b] * fall;
         }
       } else for (let b = 0; b < VIZ.bars; b++) levels[b] *= fall;
-      const bw = W / VIZ.bars; ctx.fillStyle = analyser ? pal.bar : pal.dim; ctx.globalAlpha = 0.85;
+      const bw = W / VIZ.bars; ctx.fillStyle = analyser ? pal.bar : pal.dim; ctx.globalAlpha = VIZ.barAlpha;
       for (let b = 0; b < VIZ.bars; b++) { const h = Math.max(1, levels[b] * (sH - 4)); ctx.fillRect(b * bw + 1, H - h, Math.max(1, bw - 2), h); }
-      ctx.globalAlpha = 1; ctx.strokeStyle = analyser ? pal.wave : pal.dim; ctx.lineWidth = Math.max(1, H / 200); ctx.beginPath();
-      const mid = rH + sH / 2;
+      ctx.globalAlpha = VIZ.waveAlpha; ctx.strokeStyle = analyser ? pal.wave : pal.dim; ctx.lineWidth = Math.max(1, H / 200); ctx.beginPath();
       for (let k = 0; k < VIZ.waveSamples; k++) { const s = wave && analyser ? wave[Math.floor((k / VIZ.waveSamples) * wave.length)] : 0; const x = (k / (VIZ.waveSamples - 1)) * W, y = mid - s * (sH / 2 - 2); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
-      ctx.stroke();
+      ctx.stroke(); ctx.globalAlpha = 1;
       if (playing && visible) raf = requestAnimationFrame(frame); else raf = 0;
     };
     const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };

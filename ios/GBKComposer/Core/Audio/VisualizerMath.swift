@@ -5,8 +5,10 @@ import Foundation
 enum FeedVisuals {
     static let windowSeconds: Double = 4
     static let playheadFraction: Double = 0.25
-    /// Row 1 (roll) height share; row 2 (bars + waveform overlaid) is the rest.
-    static let rollFraction: Double = 0.62
+    /// Bars + waveform overlay height share, anchored to the bottom of the full-height roll.
+    static let overlayFraction: Double = 0.38
+    static let waveAlpha: Double = 0.8
+    static let idleAlpha: Double = 0.5
     static let pitchPad: Double = 2
     static let minPitchSpan: Double = 12
     static let noteGap: Double = 1
@@ -18,7 +20,7 @@ enum FeedVisuals {
     /// Bars: instant attack, `level *= exp(-dt / 150 ms)`, dt capped at 100 ms.
     static let decaySeconds: Double = 0.15
     static let maxFrameDt: Double = 0.1
-    static let barAlpha: Double = 0.85
+    static let barAlpha: Double = 0.35
     static let waveformPoints = 256
     /// Active note = track colour mixed 45% toward white, 1 px outline in the playhead colour.
     static let activeBrighten: Double = 0.45

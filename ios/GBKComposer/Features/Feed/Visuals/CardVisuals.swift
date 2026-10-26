@@ -12,9 +12,8 @@ struct CardPlayback {
 private let blackKeys: Set<Int> = [1, 3, 6, 8, 10]
 
 /// Feed now-playing viz, a port of web `LiveRoll` (src/components/social/LiveRoll.tsx, gbk #108, db68404).
-/// Playing: row 1 (top 62%) windowed piano roll, row 2 (bottom 38%) 48 spectrum bars with the 256-point waveform
-/// drawn over them, 1 px grid line between. Not playing: the whole song as a static overview filling the canvas
-/// (no 4 s window, no playhead, no empty spectrum band).
+/// The roll fills the canvas: playing = 4 s scrolling window, else the whole song (no playhead). Playing cards overlay
+/// 48 spectrum bars + the 256-point waveform semi-transparently over the bottom 38%; paused cards show a faint idle line.
 struct NowPlayingVizView: View {
     let preview: SongPreview?
     let playback: CardPlayback?
@@ -33,20 +32,20 @@ struct NowPlayingVizView: View {
 
     private func draw(_ ctx: inout GraphicsContext, size: CGSize, now: Double, live: Bool) {
         let W = size.width, H = size.height
+        let mid = H * (1 - FeedVisuals.overlayFraction / 2), amp = H * FeedVisuals.overlayFraction / 2 - 2
         guard live else {
             // Overview: preview start/len are 0...1000 of the song, so a 1 s "song" in a 1 s window shows all of it.
             drawRoll(&ctx, W: W, H: H, t: 0, dur: 1, window: 1, playhead: 0)
+            ctx.fill(Path(CGRect(x: 0, y: mid, width: W, height: 1)), with: .color(Theme.vizDim.opacity(FeedVisuals.idleAlpha)))
             return
         }
-        let rH = (H * FeedVisuals.rollFraction).rounded(), sH = H - rH
         let dur = playback?.duration().flatMap { $0 > 0 && $0.isFinite ? $0 : nil } ?? FeedVisuals.fallbackDuration
         let t = playback?.time() ?? 0
-        drawRoll(&ctx, W: W, H: rH, t: t, dur: dur, window: FeedVisuals.windowSeconds, playhead: FeedVisuals.playheadFraction)
+        drawRoll(&ctx, W: W, H: H, t: t, dur: dur, window: FeedVisuals.windowSeconds, playhead: FeedVisuals.playheadFraction)
 
-        ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: sH)), with: .color(Theme.vizBg))
-        ctx.fill(Path(CGRect(x: 0, y: rH, width: W, height: 1)), with: .color(Theme.vizGrid))
-
-        let analyzer = live ? playback?.analyzer : nil
+        // Overlay, anchored to the bottom: spectrum bars + waveform drawn semi-transparently over the roll.
+        let sH = H * FeedVisuals.overlayFraction
+        let analyzer = playback?.analyzer
         let levels = analyzer?.bars(now: now) ?? []
         let bw = W / CGFloat(FeedVisuals.barCount)
         var bars = Path()
@@ -58,13 +57,12 @@ struct NowPlayingVizView: View {
         ctx.fill(bars, with: .color((analyzer != nil ? Theme.vizBar : Theme.vizDim).opacity(FeedVisuals.barAlpha)))
 
         let samples = analyzer?.waveform() ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
-        let mid = rH + sH / 2, amp = sH / 2 - 2
         var wave = Path()
         for (k, s) in samples.enumerated() {
             let p = CGPoint(x: CGFloat(k) / CGFloat(samples.count - 1) * W, y: mid - CGFloat(s) * amp)
             if k == 0 { wave.move(to: p) } else { wave.addLine(to: p) }
         }
-        ctx.stroke(wave, with: .color(analyzer != nil ? Theme.vizWave : Theme.vizDim), lineWidth: max(1, H / 200))
+        ctx.stroke(wave, with: .color((analyzer != nil ? Theme.vizWave : Theme.vizDim).opacity(FeedVisuals.waveAlpha)), lineWidth: max(1, H / 200))
     }
 
     private func drawRoll(_ ctx: inout GraphicsContext, W: CGFloat, H: CGFloat, t: Double, dur: Double,

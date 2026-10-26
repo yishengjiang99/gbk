@@ -11,7 +11,7 @@ final class PianoRollMathTests: XCTestCase {
         // web VIZ, gbk #108 / db68404
         XCTAssertEqual(FeedVisuals.playheadFraction, 0.25)
         XCTAssertEqual(FeedVisuals.windowSeconds, 4)
-        XCTAssertEqual(FeedVisuals.rollFraction, 0.62)
+        XCTAssertEqual(FeedVisuals.overlayFraction, 0.38)
         XCTAssertEqual(FeedVisuals.fftSize, 2048)
         XCTAssertEqual(FeedVisuals.barCount, 48)
         XCTAssertEqual(FeedVisuals.minHz, 40)
