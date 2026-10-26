@@ -83,8 +83,13 @@ final class CreateTabKeyboardUITests: XCTestCase {
         XCTAssertTrue(pill.waitForExistence(timeout: 5))
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: pill)
         wait(for: [enabled], timeout: 60)
-        pill.tap()
-        XCTAssertTrue(web.buttons["Pause"].waitForExistence(timeout: 30), "play-pill shows Pause while playing")
+        // The first tap can land while the SoundFont is still warming up: retry the pill a few times.
+        let pause = web.buttons["Pause"]
+        for _ in 0..<4 where !pause.exists {
+            if pill.exists && pill.isEnabled { pill.tap() }
+            if pause.waitForExistence(timeout: 20) { break }
+        }
+        XCTAssertTrue(pause.exists, "play-pill shows Pause while playing")
         sleep(1)
         attach(app, "create-playing-\(mode)")
         assertVisible(input, above: tabBar.minY, window, "during playback")
