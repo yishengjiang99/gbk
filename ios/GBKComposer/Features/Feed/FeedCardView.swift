@@ -44,16 +44,7 @@ struct FeedCardView: View {
                 .onTapGesture(perform: onTap)
 
             if !(song.labels.isEmpty && song.tags.isEmpty) {
-                HStack(spacing: 6) {
-                    ForEach(song.labels, id: \.self) {
-                        Text($0).font(.caption.bold()).foregroundStyle(Theme.accent)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(Theme.accent.opacity(0.15)))
-                    }
-                    ForEach(song.tags, id: \.self) { tag in
-                        Button("#\(tag)") { onTag(tag) }.font(.caption).foregroundStyle(Theme.accent)
-                    }
-                }
+                TagChips(labels: song.labels, tags: song.tags, onTag: onTag)
             }
 
             HStack(spacing: 16) {
