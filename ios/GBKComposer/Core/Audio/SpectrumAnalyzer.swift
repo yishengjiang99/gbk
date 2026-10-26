@@ -34,7 +34,8 @@ final class OutputScope: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         sampleRate = rate > 0 ? rate : 44_100
         let cap = ring.count
-        for v in mono { ring[written % cap] = v; written += 1 }
+        // One NaN/inf in the FFT window turns every bin non-finite and blanks all bars; drop them at the boundary.
+        for v in mono { ring[written % cap] = v.isFinite ? v : 0; written += 1 }
         lastBlock = mono.count
         lastBlockAt = now
     }

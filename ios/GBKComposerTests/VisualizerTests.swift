@@ -116,6 +116,16 @@ final class SpectrumTests: XCTestCase {
         XCTAssertEqual(WaveformMath.points([Float](repeating: 0.1, count: 2048)).count, 256)
         XCTAssertEqual(WaveformMath.points([], count: 3), [0, 0, 0])
     }
+
+    func testNonFiniteSampleDoesNotBlankBars() {
+        let scope = OutputScope()
+        var tone = (0..<2048).map { Float(0.5 * sin(2 * .pi * 1_000 * Double($0) / 44_100)) }
+        tone[100] = .nan
+        scope.push(tone, sampleRate: 44_100, at: 0)
+        let analyzer = SpectrumAnalyzer()
+        analyzer.source = scope
+        XCTAssertGreaterThan(analyzer.bars(now: 0).max() ?? 0, 0.5)
+    }
 }
 
 /// Real audio, no mocks: a real 20 s MIDI file sequenced through the real SF2Engine + GeneralUser GS bank, pushed
@@ -162,8 +172,14 @@ final class LiveSF2VisualizerTests: XCTestCase {
         }
         print("timeToFirstAudio(local MIDI, bank preloaded) = \(ttfa) s")
         XCTAssertLessThan(ttfa, 1.0)
-        try await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertGreaterThan(player.analyzer.bars(now: CACurrentMediaTime()).max() ?? 0, 0.3)
+        // Tap blocks land in bursts on the CI simulator, so read bars per frame for up to 1.5 s like the card does.
+        var peak: Float = 0
+        let barsDeadline = Date().addingTimeInterval(1.5)
+        repeat {
+            try await Task.sleep(nanoseconds: 16_000_000)
+            peak = max(peak, player.analyzer.bars(now: CACurrentMediaTime()).max() ?? 0)
+        } while peak <= 0.3 && Date() < barsDeadline
+        XCTAssertGreaterThan(peak, 0.3)
         XCTAssertGreaterThan(player.analyzer.waveform().map(abs).max() ?? 0, 0.02)
         XCTAssertGreaterThan(player.currentSeconds(for: "fixture") ?? 0, 0)
         player.pause()
