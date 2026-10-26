@@ -96,7 +96,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testDeepLinks() {
-        XCTAssertEqual(DeepLink(url: URL(string: "https://compose.grepawk.com/s/abc")!), .share(slug: "abc"))
+        XCTAssertEqual(DeepLink(url: URL(string: "https://compose.grepawk.com/s/abcd")!), .share(slug: "abcd"))
         XCTAssertEqual(DeepLink(url: URL(string: "https://compose.grepawk.com/u/bob")!), .user(name: "bob"))
         XCTAssertEqual(DeepLink(url: URL(string: "https://compose.grepawk.com/t/piano")!), .tag(name: "piano"))
         XCTAssertEqual(DeepLink(url: URL(string: "https://compose.grepawk.com/inbox/bob")!), .inbox(handle: "bob"))

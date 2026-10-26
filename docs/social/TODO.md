@@ -36,12 +36,12 @@
 - IAP: accept the **Paid Apps agreement** and fill **banking + tax** in ASC > Business (IAPs can't be sold/sandbox-purchased without it); then `ASC_ISSUER_ID=… python3 docs/asc/scripts/push_iap.py` (creates group "GBK Pro", pro_monthly $5.99, pro_yearly $47.99, lifetime $99.99) and `--verify`. Confirm lifetime at $99.99 (no $99.00 App Store price point) and that lifetime is still wanted. Set the App Store Server Notifications v2 URL once GBK Social ships the webhook. Attach the IAPs to the next version when submitting (manual; nothing is submitted by scripts). Add paid-plan terms/EULA link before selling.
 - Web Studio inside the app must not show Stripe buy buttons (guideline 3.1.1): the iOS WebView intercepts /pricing, compose checkout and stripe.com and opens the paywall instead; keep any new buy links on those paths.
 - Create an iOS OAuth client in Google Cloud Console (same project as the web `GOOGLE_CLIENT_ID`, bundle ID com.grepawk.moviefone). Put its ID in `ios/project.yml` `GOOGLE_IOS_CLIENT_ID` (and the reversed form in `GOOGLE_REVERSED_CLIENT_ID`), and add it to the server env `GOOGLE_IOS_CLIENT_IDS`. None exists in the repo or server config today.
-- Set `APPLE_BUNDLE_ID` on the server to enable Sign in with Apple (`/api/auth/apple` returns 503 until then), and `IOS_APP_IDS` for the AASA file (404 today).
+- Set `APPLE_BUNDLE_ID` on the server to enable Sign in with Apple (`/api/auth/apple` returns 503 until then), (AASA is live with the default app id).
 
 - Confirm Push, Sign in with Apple and Associated Domains capabilities on `com.grepawk.moviefone` (CI build 4 signed fine with automatic signing).
 - App Review notes: reviewer account `openai-reviewer` (password in server config; enter it in App Store Connect review notes) — confirm REVIEWER_LOGIN_ENABLED stays on during review.
 - TestFlight 0.1.0 (4) is live for internal testers (group "Internal", you are invited at yisheng.jiang@gmail.com; add other ASC users there). Approve before any external TestFlight (Beta App Review) or App Store submission.
-- AASA at `/.well-known/apple-app-site-association` (server, iOS-1): app id `83D36RPMUM.com.grepawk.moviefone` (iOS bundle is now com.grepawk.moviefone).
+- [ ] Deep links on a real iPhone (TestFlight): tap https://compose.grepawk.com/s/ember-crown-rmpaqyj8 in Notes/Messages (not typed in Safari) → the app opens on that song and plays. If Safari opens instead, long-press the link → "Open in GBK". AASA is live and the App ID has Associated Domains; nothing to change in Apple Developer.
 - Enter the review password for `openai-reviewer` in ASC App Review Information, and fill App Privacy / age rating from `docs/asc/app-review.md`.
 - Approve the listing copy and screenshots in `docs/asc/` (screenshots are mockups, not simulator captures).
 - Server push (P5) reuses the existing team-wide APNs key; configure it on the server only, never copy key material.
