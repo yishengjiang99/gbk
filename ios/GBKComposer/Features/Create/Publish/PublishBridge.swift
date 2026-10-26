@@ -8,7 +8,7 @@ import WebKit
 /// so `--pub-tabbar` is forced to 0.
 @MainActor
 final class PublishBridge: NSObject, WKScriptMessageHandler {
-    struct Request: Equatable, Identifiable { var id: String { projectId } var projectId: String; var title: String; var labels: [String]; var tags: [String] }
+    struct Request: Equatable, Identifiable { var id: String { projectId }; var projectId: String; var title: String; var labels: [String]; var tags: [String] }
     static let handlerName = "publish"
     static let script = #"""
     (function () { var s = document.createElement("style"); s.textContent = ".pub-native, :root { --pub-tabbar: 0px !important; }";
