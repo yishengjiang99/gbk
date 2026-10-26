@@ -38,7 +38,7 @@ export const SUGGESTIONS = [
 ];
 type Sheet = null | "plus" | "more" | "editor" | "settings" | "export" | "rename" | "songs" | "midi";
 type EditorTab = "Tracks" | "Mixer" | "Sound" | "Automation" | "Agent";
-type Native = { gbkNative?: { capabilities?: string[] }; gbkMidiNative?: { bluetooth?: unknown; openBluetoothPairing?: () => void }; webkit?: { messageHandlers?: Record<string, { postMessage: (m: unknown) => void } | undefined> } };
+type Native = { gbkNative?: object; gbkMidiNative?: { bluetooth?: unknown; openBluetoothPairing?: () => void }; webkit?: { messageHandlers?: Record<string, { postMessage: (m: unknown) => void } | undefined> } };
 const win = () => window as unknown as Native;
 
 export interface MobileStudioProps {
@@ -125,11 +125,7 @@ export function MobileStudio(props: MobileStudioProps) {
 
   // ---- + sheet: sheet music, MIDI file, MIDI keyboard ---------------------------------------------------------------
   const imgIn = useRef<HTMLInputElement>(null); const midiIn = useRef<HTMLInputElement>(null);
-  const scanSheet = () => {
-    const n = win(); setSheet(null);
-    if (n.gbkNative?.capabilities?.includes("scan") && n.webkit?.messageHandlers?.scan) { n.webkit.messageHandlers.scan.postMessage({ type: "open" }); return; }
-    imgIn.current?.click();
-  };
+  const scanSheet = () => { setSheet(null); imgIn.current?.click(); };
   const readSheetImage = async (f: File) => {
     setBusy("Reading your sheet music…");
     try {
@@ -182,7 +178,7 @@ export function MobileStudio(props: MobileStudioProps) {
 
       {(sheet || fullRoll) && <div className="ms-scrim" data-testid="sheet-scrim" onClick={() => { setSheet(null); setFullRoll(false); }} />}
       {sheet === "plus" && <SheetBox id="plus" label="Add to your song">
-        <Row icon="📷" title="Import sheet music" sub="Scan or pick a photo" testId="plus-sheet-music" onClick={scanSheet} />
+        {!win().gbkNative && <Row icon="📷" title="Import sheet music" sub="Scan or pick a photo" testId="plus-sheet-music" onClick={scanSheet} />}
         <Row icon="🎼" title="Import MIDI file" sub=".mid or .midi" testId="plus-midi-file" onClick={() => { setSheet(null); midiIn.current?.click(); }} />
         <Row icon="🎹" title="Connect MIDI keyboard" sub={hasBt ? "USB or Bluetooth" : "USB"} testId="plus-midi-keyboard" onClick={() => setSheet("midi")} />
       </SheetBox>}

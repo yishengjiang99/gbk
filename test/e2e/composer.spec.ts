@@ -421,3 +421,12 @@ test("mobile composer view: Bluetooth MIDI pairing offered when gbkMidiNative.bl
   await expect(page.getByTestId("studio-toast")).toContainText(/photo/i, { timeout: 60_000 });
   await expect(page.getByTestId("studio-toast")).not.toContainText(/[A-Z]{3,}_|Error:/);
 });
+
+test("mobile composer view: in the iOS app (gbkNative) the + sheet has two rows, no sheet-music import (native Scan bar instead)", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
+  await page.addInitScript(() => { (window as any).gbkNative = { platform: "ios", version: 1, capabilities: ["hum"] }; });
+  await page.goto("/studio"); await page.getByTestId("plus-btn").click();
+  await expect(page.getByTestId("sheet-plus").locator(".ms-row")).toHaveText([/Import MIDI file/, /Connect MIDI keyboard/]);
+  await expect(page.getByTestId("plus-sheet-music")).toHaveCount(0);
+  await inputOk(page, "app + sheet");
+});
