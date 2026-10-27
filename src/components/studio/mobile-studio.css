@@ -109,3 +109,4 @@ html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
 .ms .ms-sheet, .ms .ms-sheet label, .ms .ms-sheet summary { color: var(--ms-fg); }
 
 .ms-back { font-size: 28px; line-height: 1; padding: 0 0 4px; background: none; margin-left: -6px; }
+.ms-new { flex: none; white-space: nowrap; }

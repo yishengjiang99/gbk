@@ -1,5 +1,6 @@
 // gbk Social web UI: one Feed tab (Explore merged: chips + Browse sheet), Create, Inbox, Profile; song ratings,
 // flat comments, reports, profiles and the admin report queue. All user text renders as React text nodes.
+import { createPath } from "../../workstation/studio-api.ts";
 import { Crossfader, type FadeState } from "./crossfade.ts";
 import { loadWorklet, prepare, preparedCount, songProject, warmSoundFont } from "./live-song.ts";
 import { startImpression, endImpression, attachAudio, markAction, markRate, noteScroll } from "./impressions.ts";
@@ -38,7 +39,7 @@ function Chips({ song, onFilter }: { song: Song; onFilter: (f: { label?: string;
 
 function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter, onOpen }: { idx: number; song: Song; me: Me | null; playing: boolean; viz: () => VizSource; onPlay: (s: Song) => void; onUpdate: (s: Song) => void; onSheet: (s: Sheet) => void; onFilter: (f: { label?: string; tag?: string }) => void; onOpen: (slug: string, fork: boolean) => void }) {
   return (
-    <article className="so-card" data-testid="feed-card" data-slug={song.slug} data-idx={idx} data-playing={playing ? "1" : "0"}>
+    <article className="so-card" tabIndex={-1} data-testid="feed-card" data-slug={song.slug} data-idx={idx} data-playing={playing ? "1" : "0"}>
       <div className="so-rollwrap" onClick={() => onPlay(song)}>{song.preview ? <LiveRoll p={song.preview} playing={playing} source={viz} /> : <div className="so-noroll" />}<button type="button" className="so-playbadge" data-testid="card-play" aria-label={playing ? "Pause" : "Play"} aria-pressed={playing} onClick={(e) => { e.stopPropagation(); onPlay(song); }}><span aria-hidden="true">{playing ? "❚❚" : "▶"}</span></button></div>
       <div className="so-side">
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
@@ -85,6 +86,8 @@ function useAudio() {
   const cur = st.current ? slugBySrc.current.get(st.current) ?? null : null;
   const toggle = useCallback((s: Song) => { if (cur === s.slug) void xf.current!.play(null); else start(s, true); }, [cur, start]);
   const stop = useCallback(() => xf.current?.stop(), []);
+  /** 58 ms fade-out of whatever plays (section switch); also cancels a live start in flight. */
+  const fadeOut = useCallback(() => { void xf.current?.play(null); }, []);
   // Warm the next songs: project + render plan for the live engine; <audio> preload only for legacy audio-only songs.
   const preload = useCallback((ss: (Song | undefined)[]) => {
     const x = xf.current; if (!x) return; const ctx = x.audioContext; const list = ss.filter((s): s is Song => !!s);
@@ -94,7 +97,7 @@ function useAudio() {
   const fading = st.fading ? slugBySrc.current.get(st.fading) ?? null : null;
   const viz = useCallback((): VizSource => ({ el: xf.current?.currentEl ?? null, analyser: xf.current?.analyser ?? null }), []);
   const currentEl = useCallback(() => xf.current?.currentEl ?? null, []);
-  return { cur, fading, unlocked, start, toggle, stop, preload, host, viz, currentEl };
+  return { cur, fading, unlocked, start, toggle, stop, fadeOut, preload, host, viz, currentEl };
 }
 
 function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; filter: { sort: string; label?: string; tag?: string }; setFilter: (f: { sort: string; label?: string; tag?: string }) => void; onSheet: (s: Sheet) => void; onOpen: (slug: string, fork: boolean) => void }) {
@@ -107,8 +110,11 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; f
     try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key) return; setItems((p) => reset ? r.items : [...p, ...r.items.filter((x) => !p.some((y) => y.slug === x.slug))]); setCursor(r.next_cursor); setDone(!r.next_cursor); if (r.model_version) mv.current = r.model_version; }
     catch (e) { setErr((e as Error).message); } finally { setLoading(false); }
   }, [filter.sort, filter.label, filter.tag, cursor, key]);
-  useEffect(() => { live.current = key; setItems([]); setCursor(null); setDone(false); audio.stop(); void load(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
   const feedEl = useRef<HTMLDivElement | null>(null); const [active, setActive] = useState(0); const [candidate, setCandidate] = useState(0);
+  // Section switch (chip, #tag, Browse): fade the playing song out (58 ms), then start the new section at its first card.
+  const focusFirst = useRef(false);
+  useEffect(() => { live.current = key; setItems([]); setCursor(null); setDone(false); audio.fadeOut(); feedEl.current?.scrollTo({ top: 0 }); setActive(0); setCandidate(0); focusFirst.current = true; void load(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
+  useEffect(() => { if (!focusFirst.current || !items.length) return; focusFirst.current = false; const f = feedEl.current; if (!f) return; f.scrollTo({ top: 0 }); f.querySelector<HTMLElement>('[data-idx="0"]')?.focus({ preventScroll: true }); }, [items]);
   // Autoplay: the card that is >= 60% in view is active; it plays once audio is unlocked (first tap), and the next card preloads.
   useEffect(() => {
     const root = feedEl.current; if (!root) return;
@@ -315,7 +321,7 @@ export function SocialApp({ route, onOpen }: { route: SocialRoute; onOpen: (slug
       </main>
       <nav className="so-tabs" data-testid="tabs">
         <button className={tab === "feed" ? "on" : ""} data-testid="tab-feed" onClick={() => navigate("")}>▶<br />Feed</button>
-        <button data-testid="tab-create" onClick={() => navigate("studio")}>＋<br />Create</button>
+        <button data-testid="tab-create" onClick={() => { void createPath().then(navigate); }}>＋<br />Create</button>
         <button className={tab === "inbox" ? "on" : ""} data-testid="tab-inbox" onClick={() => (me || !meChecked ? navigate("inbox") : needSignIn("Sign in to see your messages.", { kind: "inbox" }))}>✉<br />Inbox</button>
         <button className={tab === "me" ? "on" : ""} data-testid="tab-profile" onClick={() => navigate(me ? `u/${me.handle}` : "me")}>◉<br />Profile</button>
       </nav>

@@ -31,13 +31,15 @@ import type { SavedSong } from "../../agent/share-client.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
 import { fmtTime, friendlyError, plainStep, songSeconds, trackChips, versionLog, type SongVersion } from "./studio-logic.ts";
 import "./mobile-studio.css";
+import { RecentProjects } from "./RecentProjects.tsx";
+import { startNew } from "../../workstation/studio-api.ts";
 
 export const SUGGESTIONS = [
   { icon: "🌙", text: "A calm lo-fi beat for studying" },
   { icon: "🎻", text: "Turn “Twinkle Twinkle” into a string quartet" },
   { icon: "🥁", text: "Upbeat pop groove, 120 bpm" },
 ];
-type Sheet = null | "plus" | "more" | "editor" | "settings" | "export" | "rename" | "songs" | "midi";
+type Sheet = null | "plus" | "more" | "editor" | "settings" | "export" | "rename" | "songs" | "midi" | "recent";
 type EditorTab = "Tracks" | "Mixer" | "Sound" | "Automation" | "Agent";
 type Native = { gbkNative?: object; gbkMidiNative?: { bluetooth?: unknown; openBluetoothPairing?: () => void }; webkit?: { messageHandlers?: Record<string, { postMessage: (m: unknown) => void } | undefined> } };
 const win = () => window as unknown as Native;
@@ -168,6 +170,7 @@ export function MobileStudio(props: MobileStudioProps) {
         <button className={`ms-btn ms-pill${t.playing ? " on" : ""}`} data-testid="play-pill" disabled={!p.tracks.length || (loading && !t.starting)} aria-label={t.playing ? "Pause" : "Play"} onClick={playCurrent}>
           {t.playing ? <>❚❚ <span data-testid="play-time">{fmtTime(pos)}</span></> : t.starting ? "Loading…" : loading && p.tracks.length ? `Loading${t.sf2Progress != null ? ` ${Math.round(t.sf2Progress * 100)}%` : "…"}` : "▶︎ Play"}
         </button>
+        <button className="ms-btn ms-new" data-testid="studio-new" aria-label="New project" onClick={() => { stopPreview(); setSheet(null); void startNew(); }}>＋ New</button>
         <button className="ms-btn" aria-label="More" data-testid="studio-overflow" aria-haspopup="dialog" aria-expanded={sheet === "more"} onClick={() => setSheet(sheet === "more" ? null : "more")}>⋯</button>
       </header>
 
@@ -194,9 +197,11 @@ export function MobileStudio(props: MobileStudioProps) {
         {midiSupported ? <LiveKeyboard workstation={workstation} /> : <p className="ms-mut" data-testid="midi-unsupported">{MIDI_UNSUPPORTED_MESSAGE}.</p>}
         {hasBt && <Row icon="ᛒ" title="Pair a Bluetooth keyboard" sub="Opens Bluetooth MIDI pairing" testId="bt-midi" onClick={() => bt!.openBluetoothPairing!()} />}
       </SheetBox>}
+      {sheet === "recent" && <SheetBox id="recent" label="Recent projects" title="Recent projects"><div data-testid="recent-list"><RecentProjects className="ms-row" onDone={() => setSheet(null)} /></div></SheetBox>}
       {sheet === "more" && <SheetBox id="more" label="More">
         <Row icon="📤" title="Publish & share" sub="Get a public link" testId="more-publish" onClick={() => void doPublish()} />
         <Row icon="⬇️" title="Export" sub="MIDI, WAV, video" testId="more-export" onClick={() => setSheet("export")} />
+        <Row icon="🕘" title="Recent projects" sub="Saved on this device" testId="more-recent" onClick={() => setSheet("recent")} />
         <Row icon="📁" title="My songs" testId="more-songs" onClick={() => { if (!s.auth.authenticated) { setSheet(null); needSignIn("Sign in to see your saved songs."); } else setSheet("songs"); }} />
         <Row icon="✏️" title="Rename" testId="more-rename" onClick={() => setSheet("rename")} />
         <Row icon="🆕" title="New song" testId="new-project" onClick={() => void newSong()} />

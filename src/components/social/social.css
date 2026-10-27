@@ -90,3 +90,4 @@
 .si-code summary{cursor:pointer;margin:6px 0;color:var(--so-accent)}
 .si-dim{color:var(--so-dim);font-size:14px;display:block;margin:6px 0}
 .si-err{color:var(--so-danger)}
+.so-card:focus:not(:focus-visible){outline:none}

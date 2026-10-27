@@ -24,6 +24,8 @@ import { ComposerProgress } from "../composer/ComposerProgress.tsx";
 import { ComposerArtifacts } from "../composer/ComposerArtifacts.tsx";
 import { STARTER_PROMPTS } from "../composer/ComposerPanel.tsx";
 import { saveForPublish } from "../composer/SharePanel.tsx";
+import { RecentProjects } from "./RecentProjects.tsx";
+import { startNew } from "../../workstation/studio-api.ts";
 import { PublishDialog } from "../songs/PublishDialog.tsx";
 import { MySongs } from "../songs/MySongs.tsx";
 import { ensureGuestSession, inNativeApp, nativePublish } from "../../agent/native-guest.ts";
@@ -49,7 +51,7 @@ export interface DesktopStudioProps {
   onExplore?: () => void; onOpenPlayer: () => void; newProject: () => Promise<boolean>; exportMidi: () => void; exportWav: () => Promise<void>;
   agentTools: { available: boolean; mode: string; on: boolean; setOn: (on: boolean) => void };
 }
-type Menu = null | "import" | "export" | "more";
+type Menu = null | "import" | "export" | "more" | "recent";
 type Panel = null | "songs" | "settings" | "agent";
 const LANES: { k: number; label: string }[] = [{ k: 7, label: "Volume" }, { k: 10, label: "Pan" }, { k: 11, label: "Expression" }, { k: 91, label: "Reverb" }, { k: 1, label: "CC1 Mod wheel" }, { k: 64, label: "CC64 Sustain" }];
 const GM_GROUPS = ["Piano", "Chromatic percussion", "Organ", "Guitar", "Bass", "Strings", "Ensemble", "Brass", "Reed", "Pipe", "Synth lead", "Synth pad", "Synth effects", "Ethnic", "Percussive", "Sound effects"];
@@ -319,6 +321,11 @@ export function DesktopStudio(props: DesktopStudioProps) {
       {/* ================= header ================= */}
       <header className="ds-head">
         {props.onExplore && <button className="ds-logo" data-testid="nav-explore" title="Back to Explore" onClick={props.onExplore}>← gbk</button>}
+        <button className="ds-btn" data-testid="studio-new" title="Start a new project (this one stays in Recent)" onClick={() => { setMenu(null); void startNew(); }}>＋ New</button>
+        <div className="ds-menu">
+          <button className="ds-btn" data-testid="recent-menu" aria-haspopup="menu" aria-expanded={menu === "recent"} title="Recent projects" onClick={() => setMenu(menu === "recent" ? null : "recent")}>Recent ▾</button>
+          {menu === "recent" && <div className="ds-pop" role="menu" data-testid="recent-list"><RecentProjects onDone={() => setMenu(null)} /></div>}
+        </div>
         <TitleInput name={p.name} onRename={(n) => { if (!workstation.rename(n) && workstation.readOnlyReason) say("Fork this song to rename it."); }} />
         <span className="ds-sep" />
         <div className="ds-grp">

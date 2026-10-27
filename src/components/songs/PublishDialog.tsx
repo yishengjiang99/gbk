@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { publishSong, suggestTitle, type SavedSong } from "../../agent/share-client.ts";
 import { social, LABELS } from "../../agent/social-client.ts";
 import "./publish-dialog.css";
+import { workstation } from "../../workstation/instance.ts";
+import { songAutosaver } from "../../agent/autosave.ts";
+import { markPublished } from "../../workstation/studio-api.ts";
 
 const isNative = () => typeof (window as { gbkNative?: unknown }).gbkNative === "object";
 const isPhone = () => typeof matchMedia === "function" && matchMedia("(max-width: 499px)").matches;
@@ -30,7 +33,7 @@ export function PublishDialog({ song, onClose, onPublished }: { song: SavedSong;
         {err && <div className="cmp-error">{err}</div>}
         <div className="pub-actions">
           <button onClick={onClose} data-testid="publish-cancel">Keep private</button>
-          <button className="pub-primary" data-testid="publish-confirm" disabled={busy || !title.trim()} onClick={async () => { setBusy(true); setErr(""); try { const p = await publishSong(song.slug, title.trim()); const shareP = sharePrompt && !!promptText.trim(); if (labels.length || tags.length || shareP) await social.setMeta(p.slug, { labels, tags, ...(shareP ? { prompt_shared: true, prompt_text: promptText.trim() } : {}) }); onPublished(p); } catch (e) { setErr((e as Error).message); setBusy(false); } }}>{busy ? "Publishing…" : "Publish"}</button>
+          <button className="pub-primary" data-testid="publish-confirm" disabled={busy || !title.trim()} onClick={async () => { setBusy(true); setErr(""); try { const p = await publishSong(song.slug, title.trim()); const shareP = sharePrompt && !!promptText.trim(); if (labels.length || tags.length || shareP) await social.setMeta(p.slug, { labels, tags, ...(shareP ? { prompt_shared: true, prompt_text: promptText.trim() } : {}) }); { const w = workstation.project; if (p.projectId === w.id || songAutosaver.songFor(w.id)?.slug === song.slug) markPublished(w.id, w.revision); } onPublished(p); } catch (e) { setErr((e as Error).message); setBusy(false); } }}>{busy ? "Publishing…" : "Publish"}</button>
         </div>
       </div>
     </div>

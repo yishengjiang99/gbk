@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import App from "./App";
+import "./workstation/studio-api.ts";
 import { WorkstationView } from "./components/workstation/WorkstationView.tsx";
 import { SocialApp } from "./components/social/SocialApp.tsx";
 import { SignInSheet } from "./components/auth/SignInSheet.tsx";

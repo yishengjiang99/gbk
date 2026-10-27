@@ -200,6 +200,11 @@ APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.co
 - Preload the active card's audio plus the next and previous cards.
 - The first tap unlocks audio (iOS). After that, settling on a card autoplays it. Pause everything when the tab or app is hidden.
 - Web applies gain through Web Audio GainNodes, because iOS Safari ignores `HTMLMediaElement.volume`.
+- **Feed section switch** (For you / New / Top / label / #tag chip, or a Browse pick): the playing song fades out over the same 58 ms at once, and the new section starts at its first card (scroll to top, first card focused, autoplay from card 0 once unlocked).
+- **Create entry / `window.gbkStudio`** (web studio; iOS reads it from the Create web view):
+  - `gbkStudio.currentProject()` returns `{ id: string, title: string, published: boolean, dirtySincePublish: boolean, hasContent: boolean, updatedAt: number | null }`. `published` is true when this project was published (this device's publish record, or one of my public songs with the same project id or title). `dirtySincePublish` is true when it was edited after that publish. `hasContent` is true when the project has notes and is my own editable project (not a read-only share). `updatedAt` is epoch ms of the last local edit or save, or null.
+  - Rule: Create resumes the current project only when `hasContent && (!published || dirtySincePublish)`. Otherwise it opens `/studio?new=<timestamp>`, which starts a blank project. A published, unedited project counts as done.
+  - `gbkStudio.shouldResume()` applies the rule. `gbkStudio.createPath()` resolves to `"studio"` or `"studio?new=<ts>"` after a short check of my public songs. `gbkStudio.startNew()` saves the current project locally and starts a blank one (the studio's **New** button). `gbkStudio.recentProjects()` returns `[{ id, title, savedAt }]`, newest first, and `gbkStudio.openRecent(id)` opens one.
 
 ## In-app purchases — Apple (live)
 
