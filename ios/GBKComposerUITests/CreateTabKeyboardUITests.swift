@@ -12,8 +12,8 @@ final class CreateTabKeyboardUITests: XCTestCase {
     func testComposerAlwaysVisibleLight() throws { try run(dark: false) }
     func testComposerAlwaysVisibleDark() throws { try run(dark: true) }
 
-    /// Yisheng: Create resumes an unpublished draft across tab switches; the native New button starts fresh.
-    /// (Published-and-unedited → fresh is decided by StudioWebView.statusScript against /api/shares?mine=1.)
+    /// Yisheng: Create resumes an unpublished draft across tab switches (gbkStudio.shouldResume); the studio's own
+    /// New starts a blank project. Published-and-unedited → fresh is the web rule (gbkStudio, docs/social-api.md).
     func testDraftSurvivesFeedToCreateAndNewStartsFresh() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestStudioMIDI"]
@@ -36,11 +36,16 @@ final class CreateTabKeyboardUITests: XCTestCase {
         app.tabBars.buttons["Feed"].tap()
         sleep(1)
         create.tap()
-        sleep(6) // draft check + any (wrong) reload
+        sleep(6) // entry check
         XCTAssertFalse(untitled.exists, "unpublished draft resumes after Feed→Create")
-        XCTAssertTrue(app.buttons["studio-new"].exists, "native New button next to Scan")
-        app.buttons["studio-new"].tap()
-        XCTAssertTrue(untitled.waitForExistence(timeout: 60), "New starts a blank Untitled project")
+        XCTAssertFalse(app.buttons["studio-new"].exists, "no duplicate native New (the studio has its own)")
+        web.descendants(matching: .any)["More"].firstMatch.tap()
+        let newSong = web.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'New song' OR label CONTAINS 'New project'")).firstMatch
+        XCTAssertTrue(newSong.waitForExistence(timeout: 10), "studio New in the ⋯ menu")
+        newSong.tap()
+        let ok = app.alerts.buttons["OK"]
+        if ok.waitForExistence(timeout: 5) { ok.tap() }
+        XCTAssertTrue(untitled.waitForExistence(timeout: 30), "New starts a blank Untitled project")
         XCTAssertTrue(web.textViews["Describe a song or a change"].waitForExistence(timeout: 30), "composer input visible")
         attach(app, "create-fresh")
     }

@@ -17,8 +17,6 @@ struct StudioWebView: View {
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var router: DeepLinkRouter
     @State private var url: URL?
-    /// When the user last left the Create tab (autosave is debounced 800 ms on the web; see persistence.ts).
-    @State private var leftAt: Date?
     /// UI tests (`-uiTestDark`): the app is locked to Light (Info.plist), so dark screenshots need an override.
     static var forcedScheme: ColorScheme? { ProcessInfo.processInfo.arguments.contains("-uiTestDark") ? .dark : nil }
     @StateObject private var scan = ScanController()
@@ -33,7 +31,7 @@ struct StudioWebView: View {
         // Native Scan entry: a slim bar ABOVE the web view (stacked, not overlaid), so it can never cover the
         // web toolbar or the bottom composer input.
         VStack(spacing: 0) {
-            StudioNativeBar(onScan: { scan.start() }, onNew: { Task { await startFresh() } }, onTestMIDI: { scan.loadTestMIDI() },
+            StudioNativeBar(onScan: { scan.start() }, onTestMIDI: { scan.loadTestMIDI() },
                             onTestFocus: { scan.webView?.evaluateJavaScript("window.dispatchEvent(new Event('gbk:focus-composer'))") })
             // The web view gets an explicit frame equal to the safe-area-bounded space, so it ends at the top of the
             // tab bar (iOS 26's floating glass bar otherwise lets it extend underneath, hiding web sheets' bottom
@@ -67,7 +65,6 @@ struct StudioWebView: View {
         // published (any route), is empty, or after a native publish. Sheets (publish, scan, MIDI import) don't change
         // the tab, so returning from them never resets.
         .onChange(of: router.selectedTab) { old, new in
-            if old == .create { leftAt = Date() }
             if new == .create, old != .create, url != nil, Self.humHarnessURL == nil { Task { await freshIfNoDraft() } }
         }
         .task(id: auth.accessToken) {
@@ -83,28 +80,17 @@ extension StudioWebView {
     /// Truthy while a composer run, hum recording or other busy step is in progress.
     static let busyScript = "!!document.querySelector('[data-testid=studio-busy],[data-status=running],.ms-rec')"
 
-    /// "empty" | "published" | "draft" | "unknown" for the studio's current project. Published = a public share of this
-    /// project exists (native sheet, web Publish, or any earlier build: `GET /api/shares?mine=1`, matched by projectId)
-    /// and its saved content equals the local notes/tracks, i.e. no edits since publishing. Edited after publishing = draft.
-    static let statusScript = """
-    const w = globalThis.__gbkWorkstation; if (!w) return "unknown";
+    /// The web owns the rule (docs/social-api.md, `window.gbkStudio`): resume only when
+    /// `hasContent && (!published || dirtySincePublish)`; otherwise `startNew()` (saves, then a blank project).
+    /// On a full load we first give the IndexedDB restore a moment to land.
+    static let entryScript = """
     const t0 = Date.now();
-    while (waitForRestore && !w.project.notes.length && !w.project.tracks.length && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 150));
-    const p = w.project;
-    if (!p.notes.length && !p.tracks.length) return "empty";
-    if (p.meta && p.meta.sharedFrom) return "draft";
-    const fp = (q) => JSON.stringify([(q.tracks || []).length, (q.notes || []).map(n => [n.trackId, n.tick, n.duration, n.pitch, n.velocity]).sort()]);
-    try {
-      const r = await fetch("/api/shares?mine=1&limit=100", { credentials: "include" });
-      if (!r.ok) return "unknown";
-      const hits = ((await r.json()).shares || []).filter(s => s.public && s.projectId === p.id);
-      const mine = fp(p);
-      for (const s of hits) {
-        const d = await (await fetch("/api/shares/" + encodeURIComponent(s.slug), { credentials: "include" })).json();
-        if (d && d.project && fp(d.project) === mine) return "published";
-      }
-      return "draft";
-    } catch (e) { return "unknown"; }
+    while (!window.gbkStudio && Date.now() - t0 < 5000) await new Promise(r => setTimeout(r, 100));
+    const g = window.gbkStudio; if (!g) return "unavailable";
+    if (waitForRestore) { while (!g.currentProject().hasContent && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 150)); }
+    try { await g.refreshPublished(); } catch (e) {}
+    if (afterPublish || !g.shouldResume()) { await g.startNew(); return "new"; }
+    return "resume";
     """
 
     @MainActor func freshIfNoDraft(waitForRestore: Bool = false) async {
@@ -113,27 +99,7 @@ extension StudioWebView {
         if (try? await web.evaluateJavaScript(Self.busyScript)) as? Bool == true { return } // composer run
         let afterPublish = published
         published = false
-        if !afterPublish {
-            let status = (try? await web.callAsyncJavaScript(Self.statusScript, arguments: ["waitForRestore": waitForRestore], contentWorld: .page)) as? String
-            guard status == "empty" || status == "published" else { return } // draft (or unknown): resume as is
-            if status == "empty" { return } // already blank; nothing to reset
-        }
-        await startFresh()
-    }
-
-    /// Full reload into a new blank project. The current project is flushed first: `window.gbkStudio.flushSave()`
-    /// when the web exposes it, otherwise we wait out the web autosave debounce (800 ms).
-    @MainActor func startFresh() async {
-        guard let web = scan.webView else { return }
-        let flushed = (try? await web.callAsyncJavaScript(
-            "if (window.gbkStudio && typeof window.gbkStudio.flushSave === 'function') { await window.gbkStudio.flushSave(); return true; } return false;",
-            arguments: [:], contentWorld: .page)) as? Bool == true
-        if !flushed {
-            let since = Date().timeIntervalSince(leftAt ?? .distantPast)
-            let wait = max(0, 1.2 - min(since, 1.2))
-            try? await Task.sleep(nanoseconds: UInt64(max(wait, 0.9) * 1_000_000_000))
-        }
-        url = URL(string: Self.studioPath(fresh: true), relativeTo: Self.studioURL)?.absoluteURL
+        _ = try? await web.callAsyncJavaScript(Self.entryScript, arguments: ["waitForRestore": waitForRestore, "afterPublish": afterPublish], contentWorld: .page)
     }
 }
 
@@ -141,7 +107,6 @@ extension StudioWebView {
 /// ⋯) is the studio's header, so this bar carries no title or playback and stays one slim row.
 struct StudioNativeBar: View {
     var onScan: () -> Void
-    var onNew: () -> Void = {}
     var onTestMIDI: () -> Void = {}
     var onTestFocus: () -> Void = {}
     static let testMIDIEnabled = ProcessInfo.processInfo.arguments.contains("-uiTestStudioMIDI")
@@ -152,14 +117,6 @@ struct StudioNativeBar: View {
                 Button("Focus", action: onTestFocus).font(.caption).accessibilityIdentifier("test-focus-composer")
             }
             Spacer()
-            Button(action: onNew) {
-                Label("New", systemImage: "square.and.pencil")
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .foregroundStyle(Theme.accent)
-                    .background(Theme.chip, in: Capsule())
-            }
-            .accessibilityIdentifier("studio-new")
             Button(action: onScan) {
                 Label("Scan sheet music", systemImage: "doc.viewfinder")
                     .font(.footnote.weight(.semibold))
