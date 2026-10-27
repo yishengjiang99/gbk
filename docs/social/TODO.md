@@ -2,6 +2,7 @@
 
 ## iOS
 - iOS: the app is locked to Light (Info.plist `UIUserInterfaceStyle`), so the studio web view never gets `prefers-color-scheme: dark` in the app even though MobileStudio has dark tokens. Decide whether to unlock dark mode app-wide.
+- iOS: on a real iPhone, tap a shared https://compose.grepawk.com/s/<slug> link in Messages and confirm it opens the native feed card (Universal Links need the signed build + AASA; songs without `media.midi` still can't be shown natively).
 - iOS: Live guest publish from the app not exercised in CI (UI test uses `-uiTestPublishMock`); verify on device.
 - iOS: on a real iPhone, check Hum cancel restores full-volume playback and the Bluetooth pairing sheet opens from the studio + › Connect MIDI keyboard.
 

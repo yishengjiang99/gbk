@@ -54,6 +54,11 @@ struct FeedCardView: View {
                 RatingView(song: song, onChange: onRated)
                 Button(action: onComments) { Label("\(song.commentCount)", systemImage: "bubble.left") }
                 Label("\(song.playCount)", systemImage: "play").foregroundStyle(Theme.textSecondary)
+                ShareLink(item: song.shareURL, subject: Text(song.title), message: Text(song.title)) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("Share")
+                .accessibilityIdentifier("feed-share")
                 Spacer()
                 if !song.isMine {
                     Button(action: onReport) { Image(systemName: "flag") }.accessibilityLabel("Report")

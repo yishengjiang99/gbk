@@ -115,6 +115,8 @@ struct Song: Codable, Hashable, Identifiable {
     var mp3URL: URL? { media?.mp3.flatMap(URL.init(string:)) }
     /// What the feed plays: the song's MIDI, sequenced live through SF2Engine (no MP3/WAV playback).
     var midiURL: URL? { media?.midi.flatMap(URL.init(string:)) }
+    /// Public song page; opening it in the app shows this card (DeepLink.share).
+    var shareURL: URL { URL(string: "https://\(DeepLink.host)/s/\(slug)")! }
 }
 
 /// Generic cursor page: `{ items: [...], next_cursor }`.

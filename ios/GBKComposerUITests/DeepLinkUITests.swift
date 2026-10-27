@@ -67,6 +67,11 @@ final class DeepLinkUITests: XCTestCase {
             let card = app.descendants(matching: .any)["feedCard-\(slug)"].firstMatch
             XCTAssertTrue(card.waitForExistence(timeout: 45), "card for \(slug) via \(url)")
             XCTAssertTrue(card.isHittable, "\(slug) is the visible card via \(url)")
+            XCTAssertTrue(app.buttons["feed-share"].firstMatch.waitForExistence(timeout: 10), "Share button on the card")
+            if url.hasPrefix("https"), let dir = ProcessInfo.processInfo.environment["SNAPSHOT_DIR"], !dir.isEmpty {
+                try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("feed-card-share.png"))
+            }
             app.terminate()
         }
     }

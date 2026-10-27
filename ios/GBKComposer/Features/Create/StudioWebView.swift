@@ -47,7 +47,8 @@ struct StudioWebView: View {
                         WebView(url: url, scan: scan, onLoad: { loaded in
                             // App launch (or any full load that restored a project): same draft check.
                             if Self.humHarnessURL == nil, loaded.query?.contains("new=") != true { Task { await freshIfNoDraft(waitForRestore: true) } }
-                        }, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } })
+                        }, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } },
+                           onDeepLink: { router.open($0) })
                             .accessibilityIdentifier("studio-webview")
                     } else { ProgressView().tint(Theme.accent) }
                 }
@@ -148,6 +149,8 @@ struct WebView: UIViewRepresentable {
     var scan: ScanController? = nil
     var onLoad: (@MainActor (URL) -> Void)? = nil
     var onPublish: (@MainActor (PublishBridge.Request) -> Void)? = nil
+    /// Song pages (/s/<slug>) open the native feed card instead of loading inside the studio.
+    var onDeepLink: (@MainActor (DeepLink) -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -157,6 +160,7 @@ struct WebView: UIViewRepresentable {
         PublishBridge.install(on: config, bridge: context.coordinator.publish)
         context.coordinator.publish.onPublish = onPublish
         context.coordinator.onLoad = onLoad
+        context.coordinator.onDeepLink = onDeepLink
         let midi = MIDIBridge.install(in: config) // Web MIDI polyfill backed by CoreMIDI (Core/MIDI, docs/ios/midi.md)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
@@ -180,6 +184,7 @@ struct WebView: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {
         context.coordinator.publish.onPublish = onPublish
         context.coordinator.onLoad = onLoad
+        context.coordinator.onDeepLink = onDeepLink
         if uiView.url == nil || context.coordinator.loaded != url {
             context.coordinator.loaded = url
             Self.load(uiView, url)
@@ -195,6 +200,7 @@ struct WebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var loaded: URL?
         var onLoad: (@MainActor (URL) -> Void)?
+        var onDeepLink: (@MainActor (DeepLink) -> Void)?
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard let u = webView.url, u.path.hasPrefix("/studio") else { return }
@@ -282,11 +288,20 @@ struct WebView: UIViewRepresentable {
             return (host.hasSuffix("grepawk.com") && (path.hasPrefix("/pricing") || path.hasPrefix("/api/compose/checkout")))
         }
 
+        /// A main-frame navigation to a song page (/s/<slug>) becomes the native share deep link.
+        static func songLink(_ url: URL?, mainFrame: Bool) -> DeepLink? {
+            guard mainFrame, let url, case .share? = DeepLink(url: url) else { return nil }
+            return DeepLink(url: url)
+        }
+
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if Self.isPurchaseLink(action.request.url) {
                 decisionHandler(.cancel)
                 Task { @MainActor in PurchaseStore.shared.presentPaywall(reason: "studio_link") }
+            } else if let onDeepLink, let link = Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) {
+                decisionHandler(.cancel)
+                Task { @MainActor in onDeepLink(link) }
             } else {
                 decisionHandler(.allow)
             }

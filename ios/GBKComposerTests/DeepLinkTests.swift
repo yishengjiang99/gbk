@@ -62,4 +62,15 @@ final class DeepLinkTests: XCTestCase {
         _ = await model.focus(slug: song.slug) { fetched.append($0); return song }
         XCTAssertEqual(fetched.count, 1)
     }
+
+    func testShareURLRoundTripsAndStudioDivertsSongPages() {
+        let json = APIClientTests.docSong
+        let song = try! APIClient.makeDecoder().decode(Song.self, from: Data(json.utf8))
+        XCTAssertEqual(song.shareURL.absoluteString, "https://compose.grepawk.com/s/\(song.slug)")
+        XCTAssertEqual(DeepLink(url: song.shareURL), .share(slug: song.slug))
+        XCTAssertEqual(WebView.Coordinator.songLink(song.shareURL, mainFrame: true), .share(slug: song.slug))
+        XCTAssertNil(WebView.Coordinator.songLink(song.shareURL, mainFrame: false))
+        XCTAssertNil(WebView.Coordinator.songLink(URL(string: "https://compose.grepawk.com/studio?new=1"), mainFrame: true))
+        XCTAssertNil(WebView.Coordinator.songLink(URL(string: "https://compose.grepawk.com/u/maestroaria"), mainFrame: true))
+    }
 }
