@@ -357,8 +357,8 @@ test("mobile composer view: chat studio has no tab bar/rewind/scrubber, fits 375
     page.removeAllListeners("dialog"); page.on("dialog", (d) => d.accept());
     if (await page.evaluate(() => (globalThis as any).__gbkWorkstation.project.tracks.length)) { await page.getByTestId("studio-overflow").click(); await page.getByTestId("new-project").click(); }
     const lbl = `${scheme} ${w}x${h}`;
-    // header: title, play pill, ⋯ only; none of the old desktop chrome
-    const head = page.getByTestId("compact-head"); await expect(head.locator("button")).toHaveCount(3); // back to Explore, play pill, ⋯
+    // header: title, play pill, ＋ New, ⋯ only; none of the old desktop chrome
+    const head = page.getByTestId("compact-head"); await expect(head.locator("button")).toHaveCount(4); // back to Explore, play pill, ＋ New, ⋯
     await expect(page.getByTestId("studio-back")).toBeInViewport();
     expect(await head.evaluate((e) => e.scrollWidth <= e.clientWidth && [...e.children].every((c) => c.getBoundingClientRect().right <= innerWidth + 0.5)), `${lbl} header fits`).toBe(true);
     for (const id of ["tab-tracks", "tab-composer", "tab-agent", "tab-sound", "tab-files", "scrubber", "ws-play", "keys-toggle"]) await expect(page.getByTestId(id), `${lbl} ${id}`).toBeHidden();
@@ -375,7 +375,7 @@ test("mobile composer view: chat studio has no tab bar/rewind/scrubber, fits 375
     await inputOk(page, `${lbl} midi sheet`); await page.getByTestId("sheet-scrim").click({ position: { x: 10, y: 120 } });
     // ⋯ : the seven actions (model/tokens/account only in Settings)
     await page.getByTestId("studio-overflow").click();
-    await expect(page.getByTestId("sheet-more").locator(".ms-row")).toHaveText([/Publish & share/, /Export/, /My songs/, /Rename/, /New song/, /Settings/]);
+    await expect(page.getByTestId("sheet-more").locator(".ms-row")).toHaveText([/Publish & share/, /Export/, /Recent projects/, /My songs/, /Rename/, /New song/, /Settings/]);
     await inputOk(page, `${lbl} ⋯ sheet`); await shot("more", scheme);
     await page.getByTestId("more-rename").click(); await expect(page.getByTestId("rename-input")).toHaveCSS("font-size", "16px");
     await page.getByTestId("rename-input").fill("Night Drive"); await page.getByTestId("rename-save").click(); await expect(page.getByTestId("studio-title")).toHaveText("Night Drive");
