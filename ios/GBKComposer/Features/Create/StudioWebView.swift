@@ -89,8 +89,9 @@ extension StudioWebView {
     const g = window.gbkStudio; if (!g) return "unavailable";
     if (waitForRestore) { while (!g.currentProject().hasContent && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 150)); }
     try { await g.refreshPublished(); } catch (e) {}
-    if (afterPublish || !g.shouldResume()) { try { await g.flushSave(); } catch (e) {} await g.startNew(); return "new"; }
-    return "resume";
+    const c = JSON.stringify(g.currentProject());
+    if (afterPublish || !g.shouldResume()) { try { await g.flushSave(); } catch (e) {} await g.startNew(); return "new " + c; }
+    return "resume " + c;
     """
 
     @MainActor func freshIfNoDraft(waitForRestore: Bool = false) async {
@@ -99,7 +100,8 @@ extension StudioWebView {
         if (try? await web.evaluateJavaScript(Self.busyScript)) as? Bool == true { return } // composer run
         let afterPublish = published
         published = false
-        _ = try? await web.callAsyncJavaScript(Self.entryScript, arguments: ["waitForRestore": waitForRestore, "afterPublish": afterPublish], contentWorld: .page)
+        let r = try? await web.callAsyncJavaScript(Self.entryScript, arguments: ["waitForRestore": waitForRestore, "afterPublish": afterPublish], contentWorld: .page)
+        NSLog("[gbk.create-entry] restore=%@ afterPublish=%@ url=%@ -> %@", "\(waitForRestore)", "\(afterPublish)", web.url?.absoluteString ?? "-", String(describing: r ?? "nil"))
     }
 }
 
