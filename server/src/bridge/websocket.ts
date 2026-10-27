@@ -11,6 +11,7 @@ import { originAllowed } from "../security/authorization.ts";
 import type { RateLimiter } from "../security/rate-limit.ts";
 import { PendingCalls, BridgeCallError } from "./pending-calls.ts";
 import { SessionRegistry } from "./session-registry.ts";
+import { RunLink } from "./run-link.ts";
 import { MAX_FRAME_BYTES, PROTOCOL_VERSION, type ClientMessage, type ServerMessage, type ToolResultEnvelope } from "./protocol.ts";
 import type { AgentRuntime, BrowserLink } from "../agent/runtime.ts";
 import type { ToolCatalog } from "../agent/tool-catalog.ts";
@@ -41,7 +42,7 @@ const waitReady = async (l: BrowserConnection, ms: number) => { const t0 = Date.
 export class AgentHub {
   readonly registry = new SessionRegistry<BrowserConnection>();
   readonly wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
-  private runs = new Map<string, { user: string; abort: AbortController; conn?: BrowserConnection; done?: Promise<void> }>();
+  private runs = new Map<string, { user: string; abort: AbortController; link: RunLink; origin: BrowserConnection; done?: Promise<void> }>();
   private slots: RunSlots;
   constructor(private cfg: Config, private sessions: SessionStore, private runtime: AgentRuntime, private catalog: ToolCatalog, private convs: ConversationStore, private msgLimiter: RateLimiter, private ipLimiter: RateLimiter, private log: Log) {
     this.slots = new RunSlots(cfg.agent.maxConcurrentRunsPerUser);
@@ -77,6 +78,8 @@ export class AgentHub {
     ws.on("close", () => {
       conn.alive = false; this.registry.detach(conn);
       conn.pending.rejectAll("BROWSER_DISCONNECTED", "browser tab disconnected");
+      // A run outlives its socket (iOS pauses/drops it on tab switch): hold its calls for the grace window.
+      for (const r of this.runs.values()) r.link.detach(conn);
       this.log({ evt: "ws_close", user, session: conn.sessionId });
     });
   }
@@ -90,7 +93,12 @@ export class AgentHub {
         this.registry.attach(conn);
         const conv = this.convs.get(conn.user);
         conn.emit({ type: "session_ready", sessionId: conn.sessionId, user: conn.user, model: this.cfg.llm.model, models: this.cfg.llm.models, provider: this.cfg.llm.provider, llmConfigured: llmConfigured(this.cfg), manifestHash: this.catalog.hash, acceptedTools: accepted, rejectedTools: rejected, history: conv.history.slice(-40), limits: { maxToolSteps: this.cfg.agent.maxToolSteps, maxInputChars: this.cfg.agent.maxInputChars } });
-        if (m.resumeRunId) { const live = this.runs.get(m.resumeRunId); if (!live || live.user !== conn.user) conn.emit({ type: "session_reconnected", sessionId: conn.sessionId, runId: m.resumeRunId, resumed: false, reason: "that run is no longer active" }); }
+        // The same tab reconnecting re-attaches to its in-flight run (outstanding tool calls are replayed). A fresh page
+        // (reload, iOS /studio?new=...) has no resumeRunId: the tab that ran this user's detached runs is gone, end them.
+        const resume = m.resumeRunId ? this.runs.get(String(m.resumeRunId)) : undefined;
+        if (resume && resume.user === conn.user && resume.link.rebind(conn)) { /* resumed */ }
+        else if (m.resumeRunId) conn.emit({ type: "session_reconnected", sessionId: conn.sessionId, runId: String(m.resumeRunId), resumed: false, reason: "that run is no longer active" });
+        for (const r of this.runs.values()) if (r !== resume && r.user === conn.user && !r.link.attached) r.link.end();
         this.log({ evt: "hello", user: conn.user, accepted: accepted.length, rejected: rejected.length, hashMatch: m.manifest?.hash === this.catalog.hash });
         return;
       }
@@ -101,11 +109,15 @@ export class AgentHub {
         if (m.sessionId !== conn.sessionId) { this.log({ evt: "stray_result", reason: "session" }); return; } // cross-session results are dropped
         const r = m.result;
         if (!r || typeof r.ok !== "boolean") return;
-        if (!conn.pending.settle(String(m.callId), String(m.runId), { ok: r.ok, projectId: String(r.projectId ?? ""), revision: Number(r.revision), data: r.data, warnings: Array.isArray(r.warnings) ? r.warnings.slice(0, 20).map(String) : [], ...(r.error ? { error: { code: String(r.error.code).slice(0, 60), message: String(r.error.message).slice(0, 1000) } } : {}) })) this.log({ evt: "stray_result", reason: "unknown or duplicate callId" });
+        const run = this.runs.get(String(m.runId));
+        const env: ToolResultEnvelope = { ok: r.ok, projectId: String(r.projectId ?? ""), revision: Number(r.revision), data: r.data, warnings: Array.isArray(r.warnings) ? r.warnings.slice(0, 20).map(String) : [], ...(r.error ? { error: { code: String(r.error.code).slice(0, 60), message: String(r.error.message).slice(0, 1000) } } : {}) };
+        // Agent runs settle on their RunLink (survives socket drops); MCP renders call this socket directly.
+        const settled = run && run.user === conn.user ? run.link.settle(String(m.callId), conn, env) : conn.pending.settle(String(m.callId), String(m.runId), env);
+        if (!settled) this.log({ evt: "stray_result", reason: "unknown or duplicate callId" });
         return;
       }
-      case "tool_progress": { const run = this.runs.get(String(m.runId)); if (run && run.user === conn.user && conn.pending.has(String(m.callId))) conn.emit({ type: "tool_progress", runId: m.runId, callId: m.callId, progress: Number(m.progress) || 0, detail: String(m.detail ?? "").slice(0, 80) }); return; }
-      case "cancel_run": { const run = this.runs.get(String(m.runId)); if (run && run.user === conn.user) { run.abort.abort(); for (const callId of conn.pending.idsFor(String(m.runId))) conn.emit({ type: "cancel_call", runId: String(m.runId), callId }); conn.pending.rejectAll("OPERATION_CANCELLED", "cancelled", String(m.runId)); this.log({ evt: "cancel", user: conn.user, runId: m.runId }); } return; }
+      case "tool_progress": { const run = this.runs.get(String(m.runId)); if (run && run.user === conn.user && run.link.conn === conn && run.link.has(String(m.callId))) conn.emit({ type: "tool_progress", runId: m.runId, callId: m.callId, progress: Number(m.progress) || 0, detail: String(m.detail ?? "").slice(0, 80) }); return; }
+      case "cancel_run": { const run = this.runs.get(String(m.runId)); if (run && run.user === conn.user) { run.abort.abort(); for (const callId of run.link.ids()) conn.emit({ type: "cancel_call", runId: String(m.runId), callId }); run.link.rejectAll("OPERATION_CANCELLED", "cancelled"); this.log({ evt: "cancel", user: conn.user, runId: m.runId }); } return; }
       case "reset_conversation": if ([...this.runs.values()].some((r) => r.user === conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "stop the current run first" }); this.convs.reset(conn.user); return;
       case "user_message": return void this.startRun(conn, m);
       default: conn.emit({ type: "error", code: "UNKNOWN_TYPE", message: "unknown message type" });
@@ -122,33 +134,28 @@ export class AgentHub {
     if (!this.slots.acquire(conn.user)) {
       // A run whose tab closed is only waiting out the reconnect grace. A new message from a live tab supersedes it
       // (the user can't see or stop it), so abort it and take the slot instead of answering RUN_ACTIVE for minutes.
-      const orphanIds = [...this.runs].filter(([, r]) => r.user === conn.user && r.conn && r.conn !== conn && !r.conn.alive).map(([id]) => id);
+      const orphanIds = [...this.runs].filter(([, r]) => r.user === conn.user && r.origin !== conn).map(([id]) => id);
       const orphans = orphanIds.map((id) => this.runs.get(id)!);
-      // An orphan may already have been adopted by this (or another live) tab after the disconnect and be waiting on a
-      // tool call there: aborting alone leaves that call pending until its timeout. Cancel its calls on every live link.
-      if (orphans.length) { for (const r of orphans) r.abort.abort();
-        for (const l of new Set([conn, this.registry.get(conn.user)].filter((x): x is BrowserConnection => !!x))) for (const id of orphanIds) {
-          for (const callId of l.pending.idsFor(id)) l.emit({ type: "cancel_call", runId: id, callId });
-          l.pending.rejectAll("OPERATION_CANCELLED", "superseded by a new message", id);
-        }
+      if (orphans.length) { for (const r of orphans) { r.abort.abort(); if (r.link.attached) for (const callId of r.link.ids()) r.link.conn!.emit({ type: "cancel_call", runId: r.link.runId, callId }); r.link.rejectAll("OPERATION_CANCELLED", "superseded by a new message"); }
         await Promise.race([Promise.all(orphans.map((r) => r.done)), new Promise((ok) => setTimeout(ok, 5000))]); this.log({ evt: "run_superseded", user: conn.user, n: orphans.length }); }
       if (!this.slots.acquire(conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "a run is already in progress; stop it or wait" });
     }
     const model = typeof m.model === "string" && m.model ? m.model : this.cfg.llm.model;
     const runId = rid("run"); const abort = new AbortController();
     let finished!: () => void; const done = new Promise<void>((ok) => { finished = ok; });
-    this.runs.set(runId, { user: conn.user, abort, conn, done });
+    const link = new RunLink(runId, conn, this.cfg.agent.reconnectGraceMs, () => this.registry.get(conn.user));
+    this.runs.set(runId, { user: conn.user, abort, link, origin: conn, done });
     const conv = this.convs.get(conn.user);
     conn.emit({ type: "run_started", runId, clientMessageId: String(m.clientMessageId ?? "").slice(0, 60), text: text.slice(0, 200) });
     const t0 = Date.now();
     try {
-      const r = await this.runtime.run({ runId, user: conn.user, text, model, conv, link: conn, signal: abort.signal, log: this.log });
+      const r = await this.runtime.run({ runId, user: conn.user, text, model, conv, link, signal: abort.signal, log: this.log });
       this.log({ evt: "run_end", user: conn.user, runId, status: r.status, code: r.code, steps: r.steps, ms: Date.now() - t0 });
     } catch (e) {
       this.log({ evt: "run_crash", runId, err: (e as Error).message });
-      (this.registry.get(conn.user) ?? conn).emit({ type: "run_failed", runId, code: "INTERNAL_ERROR", message: "internal error", retryable: true });
+      link.emit({ type: "run_failed", runId, code: "INTERNAL_ERROR", message: "internal error", retryable: true });
     } finally {
-      this.runs.delete(runId); this.slots.release(conn.user); this.convs.save(conv); finished();
+      link.end(); this.runs.delete(runId); this.slots.release(conn.user); this.convs.save(conv); finished();
     }
   }
 }

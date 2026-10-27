@@ -1,6 +1,6 @@
 // Composer errors in plain language: no internal codes or ids reach the chat (bridge/runtime codes stay in logs).
 const PLAIN: Record<string, string> = {
-  BROWSER_DISCONNECTED: "Lost the connection to this tab. Everything finished so far is kept; send your message again to continue.",
+  BROWSER_DISCONNECTED: "This page reloaded or closed, so the run stopped. Finished changes are saved; send your message again to continue.",
   PROJECT_CHANGED: "A different song was opened while this was running, so that step was skipped.",
   STALE_REVISION: "The song changed while this step was running, so it was skipped.",
   TOOL_TIMEOUT: "That step took too long and was stopped.",

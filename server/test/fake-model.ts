@@ -22,6 +22,11 @@ export function nextStep(msgs: Msg[]): { calls: Call[] } | { text: string } {
   const turn = msgs.slice(u + 1);
   const steps = turn.filter((m) => m.role === "assistant" && m.tool_calls?.length).length;
   const r = (t: string) => resultFor(turn, t);
+  if (userText.includes("resume check")) { // e2e: the run's 2nd model reply is held at the gate (POST /gate) while the tab is away
+    if (steps === 0) return { calls: [{ name: "gbk_list_tracks", args: {} }] };
+    if (steps === 1) return { calls: [{ name: "gbk_get_project_summary", args: {} }], gated: true } as never;
+    return { text: `Resumed OK after ${resultsFor(turn, "gbk_get_project_summary").filter((x) => x.ok).length} summary read.` };
+  }
   if (userText.includes("darker")) {
     switch (steps) {
       case 0: return { calls: [{ name: "gbk_list_tracks", args: {} }, { name: "gbk_get_project_summary", args: {} }] };
@@ -58,11 +63,12 @@ export function nextStep(msgs: Msg[]): { calls: Call[] } | { text: string } {
 }
 
 export function startFakeModel(port = 0, opts: { failFirst?: number; usage?: boolean } = {}): Promise<FakeModel> {
-  const requests: FakeModel["requests"] = []; let fails = opts.failFirst ?? 0; let seq = 0;
+  const requests: FakeModel["requests"] = []; let gate: (() => void)[] = []; let fails = opts.failFirst ?? 0; let seq = 0;
   const server: Server = createServer((req, res) => {
     let body = ""; req.on("data", (c) => (body += c));
     req.on("end", () => {
       if (req.url === "/healthz") { res.writeHead(200).end("ok"); return; }
+      if (req.url === "/gate" && req.method === "POST") { const w = gate; gate = []; w.forEach((f) => f()); res.writeHead(200).end(String(w.length)); return; }
       if (req.url !== "/v1/chat/completions" || req.headers.authorization !== "Bearer fake-key") { res.writeHead(401).end('{"error":{"message":"bad key"}}'); return; }
       if (fails > 0) { fails--; res.writeHead(429, { "retry-after": "0" }).end('{"error":{"message":"slow down"}}'); return; }
       const j = JSON.parse(body); requests.push({ messages: j.messages, tools: j.tools ?? [] });
@@ -80,9 +86,10 @@ export function startFakeModel(port = 0, opts: { failFirst?: number; usage?: boo
         chunks.push({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] });
       }
       if (opts.usage !== false) chunks.push({ ...base, choices: [], usage: { prompt_tokens: 1200, completion_tokens: 80, total_tokens: 1280 } });
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      for (const c of chunks) res.write(`data: ${JSON.stringify(c)}\n\n`);
-      res.end("data: [DONE]\n\n");
+      const send = () => { res.writeHead(200, { "content-type": "text/event-stream" });
+        for (const c of chunks) res.write(`data: ${JSON.stringify(c)}\n\n`);
+        res.end("data: [DONE]\n\n"); };
+      if ((step as { gated?: boolean }).gated) { const t = setTimeout(send, 120_000); gate.push(() => { clearTimeout(t); send(); }); } else send();
     });
   });
   return new Promise((ok) => server.listen(port, "127.0.0.1", () => { const a = server.address() as { port: number }; ok({ url: `http://127.0.0.1:${a.port}/v1`, requests, close: () => new Promise((d) => server.close(() => d())) }); }));

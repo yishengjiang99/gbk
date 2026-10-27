@@ -11,6 +11,7 @@ import { BudgetError, type UsageLedger } from "./limits.ts";
 import type { Conversation } from "./conversation.ts";
 import type { ArtifactRef, ServerMessage, ToolResultEnvelope } from "../bridge/protocol.ts";
 import { BridgeCallError } from "../bridge/pending-calls.ts";
+import { TAB_GONE } from "../bridge/run-link.ts";
 
 /** What the runtime needs from a connected browser tab. */
 export interface BrowserLink {
@@ -148,10 +149,11 @@ export class AgentRuntime {
       if (disconnected) {
         emit({ type: "progress", runId: o.runId, step: steps, maxSteps: cfg.agent.maxToolSteps, task: "Browser disconnected - waiting for reconnect" });
         const next = await link.awaitReconnect(cfg.agent.reconnectGraceMs, o.signal);
-        if (!next) return fail("BROWSER_DISCONNECTED", "Lost the connection to this tab for too long. Everything finished so far is kept; send your message again to continue.", true);
+        if (!next) return fail("BROWSER_DISCONNECTED", TAB_GONE, true);
         const switched = !!conv.projectId && next.projectId !== conv.projectId;
+        // A RunLink re-attaches in place (and announces it); a link that hands over to a different object is announced here.
+        if (next !== link) next.emit({ type: "session_reconnected", sessionId: next.sessionId, runId: o.runId, resumed: true });
         link = next; if (switched) conv.projectId = next.projectId;
-        link.emit({ type: "session_reconnected", sessionId: link.sessionId, runId: o.runId, resumed: true });
         conv.messages.push({ role: "user", content: switched ? "[server note] The browser reconnected with a different project open. Re-read the currently open project and continue the task there." : "[server note] The browser reconnected. Calls marked BROWSER_DISCONNECTED may or may not have been applied: re-read the project state before continuing." });
       }
       if (calls > cfg.agent.maxToolSteps * 4) return fail("MAX_TOOL_CALLS", "too many tool calls in one run", true);

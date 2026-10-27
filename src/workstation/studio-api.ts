@@ -93,6 +93,9 @@ if (typeof window !== "undefined") {
     void startNew();
   };
   window.addEventListener("popstate", onNav);
+  // WKWebView may freeze or discard the page right after it is hidden (app tab switch, background): save now.
+  const onHide = () => { if (document.visibilityState === "hidden") void flushSave().catch(() => undefined); };
+  window.addEventListener("pagehide", () => void flushSave().catch(() => undefined)); document.addEventListener("visibilitychange", onHide);
   (window as unknown as { gbkStudio: object }).gbkStudio = { currentProject, shouldResume, createPath, flushSave, startNew, recentProjects, openRecent, refreshPublished };
   void refreshPublished();
 }

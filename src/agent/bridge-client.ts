@@ -29,6 +29,9 @@ export class BridgeClient {
   private lastSeen = 0; private busy = 0; private gaveUp = false;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private lifecycle: (() => void) | undefined;
+  /** Tool calls of the active run, by callId: executing (no result yet) or finished. The server replays outstanding
+   *  calls after a reconnect; a replay is answered from here instead of running the tool twice. */
+  private calls = new Map<string, { runId: string; result?: ClientMessage & { type: "tool_result" } }>();
 
   constructor(private c: WorkstationController, private onEvent: (m: ServerMessage) => void, private onState: (s: ConnState, detail?: string) => void, bridge?: BrowserToolBridge) {
     this.bridge = bridge ?? new BrowserToolBridge(c);
@@ -40,7 +43,8 @@ export class BridgeClient {
     const ws = this.ws;
     if (ws && ws.readyState === 1 && (this.busy > 0 || Date.now() - this.lastSeen < BridgeClient.STALE_MS)) { this.send({ type: "ping", t: Date.now() }); return; }
     if (ws && ws.readyState === 0) return; // still connecting
-    if (!ws && !this.gaveUp) return; // a backoff retry is already scheduled (or this client was never connected)
+    if (!ws && !this.gaveUp && !this.retryTimer) return; // never connected
+    // A backoff retry may be up to 15 s away: back on screen means reconnect now (a run may be waiting on this tab).
     clearTimeout(this.retryTimer); this.attempts = Math.min(this.attempts, 1);
     console.warn("gbk-bridge: reconnecting after resume");
     if (ws) { this.ws = null; clearInterval(this.pingTimer); this.unsub?.(); this.unsub = undefined; try { ws.close(4000, "stale"); } catch { /* already closed */ } }
@@ -56,7 +60,7 @@ export class BridgeClient {
   }
 
   connect() {
-    this.closed = false; this.gaveUp = false; this.watchLifecycle(); clearTimeout(this.retryTimer);
+    this.closed = false; this.gaveUp = false; this.watchLifecycle(); clearTimeout(this.retryTimer); this.retryTimer = undefined;
     this.onState(this.attempts ? "reconnecting" : "connecting");
     const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${apiBase()}/agent/ws`;
     const ws = new WebSocket(url); this.ws = ws;
@@ -73,7 +77,9 @@ export class BridgeClient {
     ws.onmessage = (ev) => { this.lastSeen = Date.now(); let m: ServerMessage; try { m = JSON.parse(String(ev.data)); } catch (e) { reportError(e, { where: "agent-ws.parse" }); return; } void this.handle(m); };
     ws.onclose = (ev) => {
       clearInterval(this.pingTimer); this.unsub?.(); this.unsub = undefined;
-      this.bridge.cancel(); // results of a dead connection are never applied later
+      // A dropped socket mid-run (iOS tab switch) keeps the run's tool calls going: the server holds the run and the
+      // results are delivered on the next socket. Without an active run nothing can be waiting for them.
+      if (!this.activeRunId) this.bridge.cancel();
       if (this.ws !== ws) return;
       this.ws = null;
       if (ev.code === 4401) { this.onState("unauthorized"); return; }
@@ -81,7 +87,7 @@ export class BridgeClient {
       if (this.attempts >= this.maxReconnects) { this.gaveUp = true; this.onState("offline", "could not reconnect"); return; }
       const delay = Math.min(15_000, 500 * 2 ** this.attempts++);
       this.onState("reconnecting", `retry in ${Math.round(delay / 1000)}s`);
-      this.retryTimer = setTimeout(() => { if (!this.closed) this.connect(); }, delay);
+      this.retryTimer = setTimeout(() => { this.retryTimer = undefined; if (!this.closed) this.connect(); }, delay);
     };
   }
 
@@ -98,16 +104,23 @@ export class BridgeClient {
   private async handle(m: ServerMessage) {
     switch (m.type) {
       case "session_ready": this.sessionId = m.sessionId; this.onState("connected"); break;
+      case "session_reconnected": if (!m.resumed && m.runId === this.activeRunId) { this.activeRunId = null; this.calls.clear(); this.bridge.cancel(); } break;
       case "ping": this.send({ type: "pong", t: m.t }); return;
-      case "run_started": this.activeRunId = m.runId; this.c.supersedePendingProposals(); break;
+      case "run_started": this.activeRunId = m.runId; this.calls.clear(); this.c.supersedePendingProposals(); break;
       // A finished/failed/cancelled run never leaves browser work behind (e.g. an in-page render after Stop).
-      case "run_completed": case "run_failed": this.activeRunId = null; this.bridge.cancel(); break;
+      case "run_completed": case "run_failed": if (!this.activeRunId || m.runId === this.activeRunId) { this.activeRunId = null; this.calls.clear(); this.bridge.cancel(); } break;
       case "cancel_call": this.bridge.cancel(m.callId); break;
       case "tool_call": {
+        const known = this.calls.get(m.callId);
+        if (known) { if (known.result) this.send({ ...known.result, sessionId: this.sessionId }); return; } // replay after reconnect
+        this.calls.set(m.callId, { runId: m.runId });
         this.busy++; this.lastSeen = Date.now();
-        const result = await this.bridge.execute(m, this.sessionId, (progress, detail) => this.send({ type: "tool_progress", sessionId: m.sessionId, runId: m.runId, callId: m.callId, progress, detail }));
+        // Executes against this page's session; the result goes to whichever socket is live when it finishes.
+        const result = await this.bridge.execute({ ...m, sessionId: this.sessionId }, this.sessionId, (progress, detail) => this.send({ type: "tool_progress", sessionId: this.sessionId, runId: m.runId, callId: m.callId, progress, detail }));
         this.busy--; this.lastSeen = Date.now();
-        this.send({ type: "tool_result", sessionId: m.sessionId, runId: m.runId, callId: m.callId, result });
+        const msg = { type: "tool_result" as const, sessionId: this.sessionId, runId: m.runId, callId: m.callId, result };
+        const entry = this.calls.get(m.callId); if (entry) entry.result = msg; // kept for a replay if this send is lost
+        this.send(msg);
         break;
       }
     }

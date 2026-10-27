@@ -130,27 +130,58 @@ test("cross-session isolation: bob cannot answer or cancel alice's calls; newer 
   } finally { await s.app.close(); }
 });
 
-test("disconnect + reconnect: run resumes on the same project; tab close without reconnect fails clearly", async () => {
-  let first = true;
+test("disconnect + reconnect: the same tab re-attaches by run id, the outstanding call is replayed, the run completes", async () => {
   const model = new ScriptModel([() => calls(tc("a", "gbk_list_tracks")), () => reply("after reconnect")]);
   const s = await startServer(model, { AGENT_RECONNECT_GRACE_MS: "3000" });
   try {
     const a = await login(s.base, "code-a"); const c = new WorkstationController();
     const tab = new TestTab(c); tab.autoRespond = false; await tab.open(s.base, a.cookie);
     tab.send({ type: "user_message", clientMessageId: "u", text: "go" });
-    await tab.waitFor("tool_call"); tab.ws.terminate(); first = false;
-    const tab2 = new TestTab(c); await tab2.open(s.base, a.cookie);
+    const started = await tab.waitFor("run_started"); const call = await tab.waitFor("tool_call"); tab.ws.terminate();
+    await new Promise((r) => setTimeout(r, 300)); // socket gone (iOS backgrounded) for a while, within the grace
+    const tab2 = new TestTab(c); tab2.resumeRunId = started.runId; await tab2.open(s.base, a.cookie);
+    const replay = await tab2.waitFor("tool_call"); assert.equal(replay.callId, call.callId);
     const done = await tab2.waitFor("run_completed"); assert.equal(done.text, "after reconnect");
     assert.ok(tab2.events.some((e) => e.type === "session_reconnected" && e.resumed));
-    void first;
+    const tc2 = tab2.events.find((e) => e.type === "tool_completed"); assert.ok(tc2 && tc2.type === "tool_completed" && tc2.ok, "the replayed call succeeded (no BROWSER_DISCONNECTED)");
   } finally { await s.app.close(); }
-  const s2 = await startServer(new ScriptModel([() => calls(tc("a", "gbk_list_tracks")), () => reply("x")]), { AGENT_RECONNECT_GRACE_MS: "200" });
+});
+
+test("re-attach while the model is thinking: later calls go to the new socket (no wait for the grace window)", async () => {
+  let release!: () => void; const gate = new Promise<void>((ok) => { release = ok; });
+  const model = new ScriptModel([async () => { await gate; return calls(tc("a", "gbk_list_tracks")); }, () => reply("done")]);
+  const s = await startServer(model, { AGENT_RECONNECT_GRACE_MS: "60000" });
+  try {
+    const a = await login(s.base, "code-a"); const c = new WorkstationController();
+    const tab = new TestTab(c); await tab.open(s.base, a.cookie);
+    tab.send({ type: "user_message", clientMessageId: "u", text: "go" });
+    const started = await tab.waitFor("run_started"); tab.ws.terminate();
+    const tab2 = new TestTab(c); tab2.resumeRunId = started.runId; await tab2.open(s.base, a.cookie);
+    const t0 = Date.now(); release();
+    const done = await tab2.waitFor("run_completed"); assert.equal(done.text, "done"); assert.ok(Date.now() - t0 < 3000);
+    assert.deepEqual(tab2.executed, ["gbk_list_tracks"]);
+  } finally { await s.app.close(); }
+});
+
+test("tab gone: grace expiry ends the run with a short message; a fresh page (no resumeRunId) ends it at once", async () => {
+  const s = await startServer(new ScriptModel([() => calls(tc("a", "gbk_list_tracks")), () => reply("x")]), { AGENT_RECONNECT_GRACE_MS: "200" });
+  try {
+    const a = await login(s.base, "code-a"); const tab = new TestTab(); tab.autoRespond = false; await tab.open(s.base, a.cookie);
+    tab.send({ type: "user_message", clientMessageId: "u", text: "go" }); await tab.waitFor("tool_call"); tab.ws.terminate();
+    await new Promise((r) => setTimeout(r, 600));
+    const tab2 = new TestTab(); await tab2.open(s.base, a.cookie);
+    tab2.send({ type: "user_message", clientMessageId: "u2", text: "again" }); await tab2.waitFor("run_started");
+    assert.equal(tab2.events.some((e) => e.type === "error" && e.code === "RUN_ACTIVE"), false);
+  } finally { await s.app.close(); }
+  const s2 = await startServer(new ScriptModel([() => calls(tc("a", "gbk_list_tracks")), () => reply("x")]), { AGENT_RECONNECT_GRACE_MS: "120000" });
   try {
     const a = await login(s2.base, "code-a"); const tab = new TestTab(); tab.autoRespond = false; await tab.open(s2.base, a.cookie);
     tab.send({ type: "user_message", clientMessageId: "u", text: "go" }); await tab.waitFor("tool_call"); tab.ws.terminate();
-    await new Promise((r) => setTimeout(r, 600));
-    const tab2 = new TestTab(); await tab2.open(s2.base, a.cookie);
-    assert.ok(tab2.events.find((e) => e.type === "session_ready"));
+    await new Promise((r) => setTimeout(r, 100));
+    const t0 = Date.now(); const tab2 = new TestTab(); await tab2.open(s2.base, a.cookie); // reload: no resumeRunId
+    const f = await tab2.waitFor("run_failed", 3000); assert.ok(Date.now() - t0 < 3000);
+    assert.equal(f.code, "BROWSER_DISCONNECTED"); assert.match(f.message, /reloaded or closed/); assert.ok(f.message.length < 140);
+    assert.equal(tab2.executed.length, 0);
   } finally { await s2.app.close(); }
 });
 
@@ -178,8 +209,8 @@ test("a run adopted by the next tab after a disconnect (now waiting on a tool ca
   try {
     const a = await login(s.base, "code-a");
     const tab = new TestTab(); tab.autoRespond = false; await tab.open(s.base, a.cookie);
-    tab.send({ type: "user_message", clientMessageId: "u1", text: "go" }); await tab.waitFor("tool_call"); tab.ws.terminate();
-    const tab2 = new TestTab(); tab2.autoRespond = false; await tab2.open(s.base, a.cookie);
+    tab.send({ type: "user_message", clientMessageId: "u1", text: "go" }); const st = await tab.waitFor("run_started"); await tab.waitFor("tool_call"); tab.ws.terminate();
+    const tab2 = new TestTab(); tab2.autoRespond = false; tab2.resumeRunId = st.runId; await tab2.open(s.base, a.cookie);
     await tab2.waitFor("tool_call"); // the adopted run now waits on tab2
     const t0 = Date.now(); tab2.send({ type: "user_message", clientMessageId: "u2", text: "again" });
     await tab2.waitFor("run_started");
