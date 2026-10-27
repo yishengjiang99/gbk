@@ -59,13 +59,17 @@ final class SMFWriterTests: XCTestCase {
 final class StudioMIDIImportTests: XCTestCase {
     private func pages() throws -> [SheetPage] { [SheetPage(image: try XCTUnwrap(UIImage(systemName: "music.note")?.cgImage))] }
     private func waitWhileWorking(_ c: ScanController) async throws {
-        for _ in 0..<400 where c.phase == .working { try await Task.sleep(nanoseconds: 50_000_000) }
+        for _ in 0..<1200 where c.phase == .working { try await Task.sleep(nanoseconds: 50_000_000) }
     }
     private func load(_ html: String) async throws -> WKWebView {
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
         web.loadHTMLString(html, baseURL: URL(string: "https://compose.grepawk.com/"))
-        for _ in 0..<50 where web.isLoading { try await Task.sleep(nanoseconds: 50_000_000) }
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Wait until the WebContent process has actually parsed the page (listeners registered); on a loaded
+        // CI runner a cold WebContent launch can take well over the old fixed 2.5 s.
+        for _ in 0..<300 {
+            if !web.isLoading, (try? await web.evaluateJavaScript("document.readyState")) as? String == "complete" { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
         return web
     }
 
