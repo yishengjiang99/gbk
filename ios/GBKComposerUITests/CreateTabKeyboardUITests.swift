@@ -25,28 +25,28 @@ final class CreateTabKeyboardUITests: XCTestCase {
         guard web.textViews["Describe a song or a change"].waitForExistence(timeout: 60) else {
             throw XCTSkip("studio did not load from compose.grepawk.com")
         }
-        let untitled = web.staticTexts["Untitled"]
+        // The imported test MIDI's project is titled "Scanned sheet music" (an unpublished draft).
+        let draft = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Scanned sh'")).firstMatch
         app.buttons["load-test-midi"].tap()
         let open = web.buttons["Open as new project"]
         if open.waitForExistence(timeout: 20) {
             for _ in 0..<3 where open.exists { open.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); sleep(2) }
         }
-        XCTAssertTrue(untitled.waitForNonExistence(timeout: 15), "imported draft replaced the blank project")
+        XCTAssertTrue(draft.waitForExistence(timeout: 20), "imported draft is open")
         sleep(2)
         app.tabBars.buttons["Feed"].tap()
         sleep(1)
         create.tap()
-        sleep(6) // entry check
-        XCTAssertFalse(untitled.exists, "unpublished draft resumes after Feed→Create")
+        sleep(6) // entry check (gbkStudio.shouldResume)
+        XCTAssertTrue(draft.exists, "unpublished draft resumes after Feed→Create")
         XCTAssertFalse(app.buttons["studio-new"].exists, "no duplicate native New (the studio has its own)")
-        web.descendants(matching: .any)["More"].firstMatch.tap()
-        let newSong = web.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'New song' OR label CONTAINS 'New project'")).firstMatch
-        XCTAssertTrue(newSong.waitForExistence(timeout: 10), "studio New in the ⋯ menu")
-        newSong.tap()
+        let newButton = web.buttons.matching(NSPredicate(format: "label CONTAINS 'New'")).firstMatch
+        XCTAssertTrue(newButton.waitForExistence(timeout: 10), "studio ＋ New in the header")
+        newButton.tap()
         let ok = app.alerts.buttons["OK"]
         if ok.waitForExistence(timeout: 5) { ok.tap() }
-        XCTAssertTrue(untitled.waitForExistence(timeout: 30), "New starts a blank Untitled project")
-        XCTAssertTrue(web.textViews["Describe a song or a change"].waitForExistence(timeout: 30), "composer input visible")
+        XCTAssertTrue(draft.waitForNonExistence(timeout: 30), "New starts a blank project")
+        XCTAssertTrue(web.textViews.firstMatch.waitForExistence(timeout: 30), "composer input visible")
         attach(app, "create-fresh")
     }
 
