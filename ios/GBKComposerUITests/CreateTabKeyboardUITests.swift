@@ -16,7 +16,8 @@ final class CreateTabKeyboardUITests: XCTestCase {
     /// New starts a blank project. Published-and-unedited → fresh is the web rule (gbkStudio, docs/social-api.md).
     func testDraftSurvivesFeedToCreateAndNewStartsFresh() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["-uiTestStudioMIDI"]
+        let title = "Draft \(UUID().uuidString.prefix(6))"
+        app.launchArguments += ["-uiTestStudioMIDI", "-uiTestMIDIName", "\(title).mid"]
         app.launch()
         let create = app.tabBars.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 90))
@@ -25,8 +26,8 @@ final class CreateTabKeyboardUITests: XCTestCase {
         guard web.textViews["Describe a song or a change"].waitForExistence(timeout: 60) else {
             throw XCTSkip("studio did not load from compose.grepawk.com")
         }
-        // The imported test MIDI's project is titled "Scanned sheet music" (an unpublished draft).
-        let draft = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Scanned sh'")).firstMatch
+        // Unique title: an unpublished draft that can't match a song another test published (web matches by title too).
+        let draft = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", String(title.prefix(8)))).firstMatch
         app.buttons["load-test-midi"].tap()
         let open = web.buttons["Open as new project"]
         if open.waitForExistence(timeout: 20) {

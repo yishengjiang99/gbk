@@ -68,9 +68,9 @@ final class ScanController: ObservableObject {
         }
     }
 
-    private func handOff(_ midi: Data) async throws {
+    private func handOff(_ midi: Data, fileName: String = StudioMIDIImport.fileName) async throws {
         guard let webView else { throw ScanError.studioNotReady }
-        let r = try? await webView.evaluateJavaScript(StudioMIDIImport.script(midi: midi)) as? String
+        let r = try? await webView.evaluateJavaScript(StudioMIDIImport.script(midi: midi, fileName: fileName)) as? String
         guard r == "dispatched" else { throw ScanError.studioNotReady }
         for _ in 0..<20 { // the chooser renders on the next React commit
             if (try? await webView.evaluateJavaScript(StudioMIDIImport.chooserVisibleScript)) as? Bool == true { return }
@@ -82,7 +82,12 @@ final class ScanController: ObservableObject {
     func cancel() { isPresented = false }
 
     /// UI tests (`-uiTestStudioMIDI`): hands a tiny C-major scale SMF to the studio without the 3-minute OMR run.
-    func loadTestMIDI() { Task { try? await handOff(Self.testSMF) } }
+    /// `-uiTestMIDIName <name.mid>` gives the imported project a unique title (no clash with songs other tests published).
+    func loadTestMIDI() {
+        let args = ProcessInfo.processInfo.arguments
+        let name = args.firstIndex(of: "-uiTestMIDIName").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? StudioMIDIImport.fileName
+        Task { try? await handOff(Self.testSMF, fileName: name) }
+    }
 
     nonisolated static var testSMF: Data {
         var trk: [UInt8] = [0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0x00, 0xC0, 0x00] // 120 bpm, piano
