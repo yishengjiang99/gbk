@@ -16,7 +16,7 @@ if (!(g as { __gbkBound?: boolean }).__gbkBound) {
   // project. Earlier projects stay in IndexedDB. The param is stripped so a later reload restores as usual.
   const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : null;
   const fresh = !shareRoute && !!q?.get("new") && q.get("new") !== "0";
-  if (fresh && typeof history !== "undefined") { q!.delete("new"); history.replaceState(history.state, "", `${location.pathname}${q!.size ? `?${q}` : ""}${location.hash}`); }
+  if (fresh && typeof history !== "undefined") { q!.delete("new"); history.replaceState(history.state, "", `${location.pathname}${q!.toString() ? `?${q}` : ""}${location.hash}`); }
   if (shareRoute || fresh) playerBridge.holdStartupLoads = true;
   if (typeof indexedDB !== "undefined" && (shareRoute || fresh)) enableAutosave(workstation);
   else if (typeof indexedDB !== "undefined") { enableAutosave(workstation); void restoreLatest(workstation).then((ok) => { if (ok) playerBridge.restored = true; }); }
