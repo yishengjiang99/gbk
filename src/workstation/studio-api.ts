@@ -55,10 +55,16 @@ export async function createPath(): Promise<string> {
   return shouldResume() ? "studio" : `studio?new=${Date.now()}`;
 }
 
-/** Start a blank project now. The current one is saved to IndexedDB first (Recent keeps it reachable). */
-export async function startNew(): Promise<void> {
+/** Persist the current project now (IndexedDB, plus the signed-in server autosave when eligible). */
+export async function flushSave(): Promise<void> {
   const p = workstation.project;
   if (p.tracks.length && isOwnProject(p) && !workstation.readOnlyReason) await midiFileStore.putProject({ id: p.id, schemaVersion: PROJECT_SCHEMA_VERSION, savedAt: Date.now(), project: p });
+  try { const { songAutosaver } = await import("../agent/autosave.ts"); await songAutosaver.flush(); } catch { /* offline / signed out */ }
+}
+
+/** Start a blank project now. The current one is saved to IndexedDB first (Recent keeps it reachable). */
+export async function startNew(): Promise<void> {
+  await flushSave();
   workstation.stop();
   workstation.load(emptyProject());
 }
@@ -87,6 +93,6 @@ if (typeof window !== "undefined") {
     void startNew();
   };
   window.addEventListener("popstate", onNav);
-  (window as unknown as { gbkStudio: object }).gbkStudio = { currentProject, shouldResume, createPath, startNew, recentProjects, openRecent, refreshPublished };
+  (window as unknown as { gbkStudio: object }).gbkStudio = { currentProject, shouldResume, createPath, flushSave, startNew, recentProjects, openRecent, refreshPublished };
   void refreshPublished();
 }
