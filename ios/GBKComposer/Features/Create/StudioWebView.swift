@@ -6,6 +6,10 @@ import AVFoundation
 /// (`POST /api/auth/web-code` → `/api/auth/web-code/redeem?return=/studio`); falls back to /studio on 404.
 struct StudioWebView: View {
     static let studioURL = URL(string: "https://compose.grepawk.com/studio")!
+    /// Each app launch starts the studio on a blank project (web: `/studio?new=<n>` skips the autosave restore;
+    /// earlier projects stay saved). Process-scoped, so tab switches and later reloads keep in-progress work.
+    static var freshOnNextLoad = true
+    static func studioPath(fresh: Bool) -> String { fresh ? "/studio?new=\(Int(Date().timeIntervalSince1970 * 1000))" : "/studio" }
     /// UI tests (`-uiTestHum`): a bundled page implementing the web side of the Hum bridge contract.
     static var humHarnessURL: URL? {
         ProcessInfo.processInfo.arguments.contains("-uiTestHum") ? Bundle.main.url(forResource: "hum-harness", withExtension: "html") : nil
@@ -16,6 +20,7 @@ struct StudioWebView: View {
     static var forcedScheme: ColorScheme? { ProcessInfo.processInfo.arguments.contains("-uiTestDark") ? .dark : nil }
     @StateObject private var scan = ScanController()
     @State private var publishRequest: PublishBridge.Request?
+    @State private var published = false
 
     var body: some View {
         // Composer input must always be visible (keyboard up or down, during playback). Keyboard handling:
@@ -49,12 +54,21 @@ struct StudioWebView: View {
         .sheet(item: $publishRequest) { r in
             NativePublishSheet(draft: PublishDraft(title: r.title, labels: Array(r.labels.prefix(PublishDraft.maxLabels)), tags: Array(r.tags.prefix(PublishDraft.maxTags))),
                                projectId: r.projectId, slug: r.slug, service: GuestPublishServices.make(webView: scan.webView),
+                               onPublished: { _ in published = true },
                                onClose: { publishRequest = nil })
+        }
+        // After a successful native publish, the studio opens a new blank project once the sheet closes.
+        .onChange(of: publishRequest == nil) { _, closed in
+            guard closed, published, Self.humHarnessURL == nil else { return }
+            published = false
+            url = URL(string: Self.studioPath(fresh: true), relativeTo: Self.studioURL)?.absoluteURL
         }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
-            let handoff = try? await AuthServices.current.webSessionURL(returnPath: "/studio")
-            url = (handoff ?? nil) ?? Self.studioURL
+            let path = Self.studioPath(fresh: Self.freshOnNextLoad)
+            Self.freshOnNextLoad = false
+            let handoff = try? await AuthServices.current.webSessionURL(returnPath: path)
+            url = (handoff ?? nil) ?? URL(string: path, relativeTo: Self.studioURL)!.absoluteURL
         }
     }
 }

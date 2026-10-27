@@ -8,6 +8,7 @@ struct NativePublishSheet: View {
     var slug: String? = nil
     var username: String = AnonymousIdentity.username
     var service: GuestPublishing
+    var onPublished: (PublishResult) -> Void = { _ in }
     var onClose: () -> Void
 
     @State private var tagText = ""
@@ -118,7 +119,7 @@ struct NativePublishSheet: View {
     private func publish() async {
         busy = true; error = nil
         defer { busy = false }
-        do { result = try await service.publish(draft, projectId: projectId, slug: slug, as: username) }
+        do { let r = try await service.publish(draft, projectId: projectId, slug: slug, as: username); result = r; onPublished(r) }
         catch let e as PublishError { self.error = e.message }
         catch { self.error = PublishError.failed("").message }
     }

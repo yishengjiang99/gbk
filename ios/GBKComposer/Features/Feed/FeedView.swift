@@ -118,6 +118,9 @@ struct FeedView: View {
             if let link = router.pending { await open(link) } // cold start: the link arrived before this view
         }
         .onChange(of: visibleSlug) { _, slug in playVisible(slug) }
+        // Section change (sort chip, label, #tag): the old section's song must not keep playing while the new one loads,
+        // and the new section starts fresh from its first card.
+        .onChange(of: model.query) { _, _ in player.stop(); ImpressionLogger.shared.end(); visibleSlug = nil }
         .onChange(of: model.items.map(\.slug)) { _, slugs in
             if let first = slugs.first, visibleSlug == nil || !slugs.contains(visibleSlug!) {
                 visibleSlug = first; playVisible(first)

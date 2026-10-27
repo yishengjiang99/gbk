@@ -25,6 +25,7 @@ struct UserProfileView: View {
     @StateObject private var model = ProfileModel()
     @State private var reportUser = false
     @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var router: DeepLinkRouter
 
     var body: some View {
         List {
@@ -45,10 +46,20 @@ struct UserProfileView: View {
             }
             Section("Songs") {
                 ForEach(model.songs) { s in
-                    VStack(alignment: .leading) {
-                        Text(s.title).font(.headline)
-                        Text((s.labels + s.tags.map { "#\($0)" }).joined(separator: " ")).font(.caption).foregroundStyle(Theme.textSecondary)
+                    // Same path as the /s/<slug> deep link: Feed tab, this song first, playing.
+                    Button { router.open(.share(slug: s.slug)) } label: {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(s.title).font(.headline).foregroundStyle(Theme.text)
+                                Text((s.labels + s.tags.map { "#\($0)" }).joined(separator: " ")).font(.caption).foregroundStyle(Theme.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "play.circle.fill").foregroundStyle(Theme.accent)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("profileSong-\(s.slug)")
                 }
                 if !model.done { ProgressView().task { await model.load(handle: handle, reset: false) } }
             }

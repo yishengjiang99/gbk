@@ -189,6 +189,18 @@ final class FeedPlayer: ObservableObject {
         isPlaying.toggle()
     }
 
+    /// Feed section changed: cancel any pending start and fade the current song out (58 ms), so the next
+    /// `play` starts fresh even for the same slug.
+    func stop() {
+        startTask?.cancel()
+        fadeTask?.cancel()
+        standby?.stop()
+        if let a = active { fadeOut(a); standby = a }
+        active = nil
+        currentSlug = nil
+        isPlaying = false
+    }
+
     func pause() {
         fadeTask?.cancel()
         active?.pause()

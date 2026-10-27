@@ -61,6 +61,11 @@ final class DeepLinkRouter: ObservableObject {
     @discardableResult
     func handle(_ url: URL) -> Bool {
         guard let link = DeepLink(url: url) else { return false }
+        open(link)
+        return true
+    }
+
+    func open(_ link: DeepLink) {
         switch link {
         case .user(let handle): feedPath = [handle]; pending = nil
         case .share, .tag, .feed: feedPath = []; pending = link
@@ -70,6 +75,5 @@ final class DeepLinkRouter: ObservableObject {
         case .share, .user, .tag, .feed: selectedTab = .feed
         case .inbox: selectedTab = .inbox
         }
-        return true
     }
 }
