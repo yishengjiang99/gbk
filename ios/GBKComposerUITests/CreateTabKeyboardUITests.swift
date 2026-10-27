@@ -12,8 +12,9 @@ final class CreateTabKeyboardUITests: XCTestCase {
     func testComposerAlwaysVisibleLight() throws { try run(dark: false) }
     func testComposerAlwaysVisibleDark() throws { try run(dark: true) }
 
-    /// Yisheng: tapping Create from another tab gives a fresh (Untitled) project; the old one stays autosaved.
-    func testFeedToCreateStartsEmptyProject() throws {
+    /// Yisheng: Create resumes an unpublished draft across tab switches; the native New button starts fresh.
+    /// (Published-and-unedited → fresh is decided by StudioWebView.statusScript against /api/shares?mine=1.)
+    func testDraftSurvivesFeedToCreateAndNewStartsFresh() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestStudioMIDI"]
         app.launch()
@@ -24,19 +25,22 @@ final class CreateTabKeyboardUITests: XCTestCase {
         guard web.textViews["Describe a song or a change"].waitForExistence(timeout: 60) else {
             throw XCTSkip("studio did not load from compose.grepawk.com")
         }
-        XCTAssertTrue(app.buttons["studio-new"].exists, "native New button next to Scan")
         let untitled = web.staticTexts["Untitled"]
         app.buttons["load-test-midi"].tap()
         let open = web.buttons["Open as new project"]
         if open.waitForExistence(timeout: 20) {
             for _ in 0..<3 where open.exists { open.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); sleep(2) }
         }
-        XCTAssertTrue(untitled.waitForNonExistence(timeout: 15), "imported project replaced the blank one")
-        sleep(2) // let the web autosave flush
+        XCTAssertTrue(untitled.waitForNonExistence(timeout: 15), "imported draft replaced the blank project")
+        sleep(2)
         app.tabBars.buttons["Feed"].tap()
         sleep(1)
         create.tap()
-        XCTAssertTrue(untitled.waitForExistence(timeout: 60), "Feed→Create shows a blank Untitled project")
+        sleep(6) // draft check + any (wrong) reload
+        XCTAssertFalse(untitled.exists, "unpublished draft resumes after Feed→Create")
+        XCTAssertTrue(app.buttons["studio-new"].exists, "native New button next to Scan")
+        app.buttons["studio-new"].tap()
+        XCTAssertTrue(untitled.waitForExistence(timeout: 60), "New starts a blank Untitled project")
         XCTAssertTrue(web.textViews["Describe a song or a change"].waitForExistence(timeout: 30), "composer input visible")
         attach(app, "create-fresh")
     }

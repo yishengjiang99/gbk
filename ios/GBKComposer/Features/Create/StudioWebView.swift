@@ -6,9 +6,9 @@ import AVFoundation
 /// (`POST /api/auth/web-code` → `/api/auth/web-code/redeem?return=/studio`); falls back to /studio on 404.
 struct StudioWebView: View {
     static let studioURL = URL(string: "https://compose.grepawk.com/studio")!
-    /// Each app launch starts the studio on a blank project (web: `/studio?new=<n>` skips the autosave restore;
-    /// earlier projects stay saved). Process-scoped, so tab switches and later reloads keep in-progress work.
-    static var freshOnNextLoad = true
+    /// Yisheng: start a new project only when there is no work-in-progress draft. The studio restores the latest
+    /// project; after each load and on every entry to Create, `freshNeeded` decides, and only then do we do a full
+    /// load of `/studio?new=<n>` (the web skips the restore; earlier projects stay saved).
     static func studioPath(fresh: Bool) -> String { fresh ? "/studio?new=\(Int(Date().timeIntervalSince1970 * 1000))" : "/studio" }
     /// UI tests (`-uiTestHum`): a bundled page implementing the web side of the Hum bridge contract.
     static var humHarnessURL: URL? {
@@ -33,7 +33,7 @@ struct StudioWebView: View {
         // Native Scan entry: a slim bar ABOVE the web view (stacked, not overlaid), so it can never cover the
         // web toolbar or the bottom composer input.
         VStack(spacing: 0) {
-            StudioNativeBar(onScan: { scan.start() }, onNew: { Task { await startFresh(force: true) } }, onTestMIDI: { scan.loadTestMIDI() },
+            StudioNativeBar(onScan: { scan.start() }, onNew: { Task { await startFresh() } }, onTestMIDI: { scan.loadTestMIDI() },
                             onTestFocus: { scan.webView?.evaluateJavaScript("window.dispatchEvent(new Event('gbk:focus-composer'))") })
             // The web view gets an explicit frame equal to the safe-area-bounded space, so it ends at the top of the
             // tab bar (iOS 26's floating glass bar otherwise lets it extend underneath, hiding web sheets' bottom
@@ -43,7 +43,10 @@ struct StudioWebView: View {
                     if let url {
                         // A publish request follows finished work in the Studio: refresh `/api/me`
                         // so the paywall watcher (#123) sees any eligibility flip promptly.
-                        WebView(url: url, scan: scan, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } })
+                        WebView(url: url, scan: scan, onLoad: { loaded in
+                            // App launch (or any full load that restored a project): same draft check.
+                            if Self.humHarnessURL == nil, loaded.query?.contains("new=") != true { Task { await freshIfNoDraft(waitForRestore: true) } }
+                        }, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } })
                             .accessibilityIdentifier("studio-webview")
                     } else { ProgressView().tint(Theme.accent) }
                 }
@@ -60,22 +63,16 @@ struct StudioWebView: View {
                                onPublished: { _ in published = true },
                                onClose: { publishRequest = nil })
         }
-        // After a successful native publish, the studio opens a new blank project once the sheet closes.
-        .onChange(of: publishRequest == nil) { _, closed in
-            guard closed, published, Self.humHarnessURL == nil else { return }
-            published = false
-            url = URL(string: Self.studioPath(fresh: true), relativeTo: Self.studioURL)?.absoluteURL
-        }
-        // Yisheng: tapping Create from another tab starts a blank project (full load of /studio?new=<n>). Sheets
-        // (publish, scan, MIDI import) don't change the tab, so returning from them never resets.
+        // Entering Create from another tab: resume a draft as is; start fresh only when the latest project was
+        // published (any route), is empty, or after a native publish. Sheets (publish, scan, MIDI import) don't change
+        // the tab, so returning from them never resets.
         .onChange(of: router.selectedTab) { old, new in
             if old == .create { leftAt = Date() }
-            if new == .create, old != .create, url != nil, Self.humHarnessURL == nil { Task { await startFresh(force: false) } }
+            if new == .create, old != .create, url != nil, Self.humHarnessURL == nil { Task { await freshIfNoDraft() } }
         }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
-            let path = Self.studioPath(fresh: Self.freshOnNextLoad)
-            Self.freshOnNextLoad = false
+            let path = Self.studioPath(fresh: false)
             let handoff = try? await AuthServices.current.webSessionURL(returnPath: path)
             url = (handoff ?? nil) ?? URL(string: path, relativeTo: Self.studioURL)!.absoluteURL
         }
@@ -83,19 +80,59 @@ struct StudioWebView: View {
 }
 
 extension StudioWebView {
-    /// Script the studio answers truthy while a composer run, hum recording or other busy step is in progress.
+    /// Truthy while a composer run, hum recording or other busy step is in progress.
     static let busyScript = "!!document.querySelector('[data-testid=studio-busy],[data-status=running],.ms-rec')"
 
-    /// Full reload into a new blank project. The current project stays saved in IndexedDB: we wait out the web
-    /// autosave debounce (800 ms) so the latest edits are flushed first.
-    @MainActor func startFresh(force: Bool) async {
+    /// "empty" | "published" | "draft" | "unknown" for the studio's current project. Published = a public share of this
+    /// project exists (native sheet, web Publish, or any earlier build: `GET /api/shares?mine=1`, matched by projectId)
+    /// and its saved content equals the local notes/tracks, i.e. no edits since publishing. Edited after publishing = draft.
+    static let statusScript = """
+    const w = globalThis.__gbkWorkstation; if (!w) return "unknown";
+    const t0 = Date.now();
+    while (waitForRestore && !w.project.notes.length && !w.project.tracks.length && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 150));
+    const p = w.project;
+    if (!p.notes.length && !p.tracks.length) return "empty";
+    if (p.meta && p.meta.sharedFrom) return "draft";
+    const fp = (q) => JSON.stringify([(q.tracks || []).length, (q.notes || []).map(n => [n.trackId, n.tick, n.duration, n.pitch, n.velocity]).sort()]);
+    try {
+      const r = await fetch("/api/shares?mine=1&limit=100", { credentials: "include" });
+      if (!r.ok) return "unknown";
+      const hits = ((await r.json()).shares || []).filter(s => s.public && s.projectId === p.id);
+      const mine = fp(p);
+      for (const s of hits) {
+        const d = await (await fetch("/api/shares/" + encodeURIComponent(s.slug), { credentials: "include" })).json();
+        if (d && d.project && fp(d.project) === mine) return "published";
+      }
+      return "draft";
+    } catch (e) { return "unknown"; }
+    """
+
+    @MainActor func freshIfNoDraft(waitForRestore: Bool = false) async {
         guard let web = scan.webView else { return }
-        if !force {
-            if web.microphoneCaptureState != .none { return } // hum recording
-            if (try? await web.evaluateJavaScript(Self.busyScript)) as? Bool == true { return } // composer run
+        if web.microphoneCaptureState != .none { return } // hum recording
+        if (try? await web.evaluateJavaScript(Self.busyScript)) as? Bool == true { return } // composer run
+        let afterPublish = published
+        published = false
+        if !afterPublish {
+            let status = (try? await web.callAsyncJavaScript(Self.statusScript, arguments: ["waitForRestore": waitForRestore], contentWorld: .page)) as? String
+            guard status == "empty" || status == "published" else { return } // draft (or unknown): resume as is
+            if status == "empty" { return } // already blank; nothing to reset
         }
-        let since = force ? 0 : Date().timeIntervalSince(leftAt ?? .distantPast)
-        if since < 1.2 { try? await Task.sleep(nanoseconds: UInt64((1.2 - since) * 1_000_000_000)) }
+        await startFresh()
+    }
+
+    /// Full reload into a new blank project. The current project is flushed first: `window.gbkStudio.flushSave()`
+    /// when the web exposes it, otherwise we wait out the web autosave debounce (800 ms).
+    @MainActor func startFresh() async {
+        guard let web = scan.webView else { return }
+        let flushed = (try? await web.callAsyncJavaScript(
+            "if (window.gbkStudio && typeof window.gbkStudio.flushSave === 'function') { await window.gbkStudio.flushSave(); return true; } return false;",
+            arguments: [:], contentWorld: .page)) as? Bool == true
+        if !flushed {
+            let since = Date().timeIntervalSince(leftAt ?? .distantPast)
+            let wait = max(0, 1.2 - min(since, 1.2))
+            try? await Task.sleep(nanoseconds: UInt64(max(wait, 0.9) * 1_000_000_000))
+        }
         url = URL(string: Self.studioPath(fresh: true), relativeTo: Self.studioURL)?.absoluteURL
     }
 }
@@ -143,6 +180,7 @@ struct StudioNativeBar: View {
 struct WebView: UIViewRepresentable {
     let url: URL
     var scan: ScanController? = nil
+    var onLoad: (@MainActor (URL) -> Void)? = nil
     var onPublish: (@MainActor (PublishBridge.Request) -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
@@ -152,6 +190,7 @@ struct WebView: UIViewRepresentable {
         HumBridge.install(on: config, bridge: context.coordinator.hum)
         PublishBridge.install(on: config, bridge: context.coordinator.publish)
         context.coordinator.publish.onPublish = onPublish
+        context.coordinator.onLoad = onLoad
         let midi = MIDIBridge.install(in: config) // Web MIDI polyfill backed by CoreMIDI (Core/MIDI, docs/ios/midi.md)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
@@ -174,6 +213,7 @@ struct WebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
         context.coordinator.publish.onPublish = onPublish
+        context.coordinator.onLoad = onLoad
         if uiView.url == nil || context.coordinator.loaded != url {
             context.coordinator.loaded = url
             Self.load(uiView, url)
@@ -188,6 +228,13 @@ struct WebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var loaded: URL?
+        var onLoad: (@MainActor (URL) -> Void)?
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard let u = webView.url, u.path.hasPrefix("/studio") else { return }
+            let f = onLoad
+            Task { @MainActor in f?(u) }
+        }
         let hum = HumBridge()
         let publish = PublishBridge()
         var midi: MIDIBridge?
