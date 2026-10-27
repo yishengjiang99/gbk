@@ -29,6 +29,8 @@ enum StoreCatalog {
     static let benefits = [
         ("sparkles", "10× the Studio composer-agent daily budget"),
         ("waveform", "120 server renders per hour, up to 10 minutes each"),
+        ("clock.arrow.circlepath", "Revision history: 100 snapshots kept per composition"),
+        ("tray.full", "Rendered files kept for a year; pieces up to 256 bars"),
         ("person.crop.circle.badge.checkmark", "Works without signing in — guests can buy too"),
     ]
 }

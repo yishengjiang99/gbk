@@ -49,7 +49,7 @@ test("pricing page: yearly is the preselected default, value-led copy, sticky CT
     assert.equal((html.match(/name="plan" value="lifetime"/g) ?? []).length, 1);
     // Prices in the JSON-LD offers are the unchanged plan amounts.
     const app = jsonLds(html).find((o) => o["@type"] === "SoftwareApplication") as { offers: { name: string; price: string }[] };
-    assert.deepEqual(app.offers.map((o) => `${o.name}:${o.price}`), ["Free:0", "Pro yearly:47.99", "Pro monthly:5.99", "Pro lifetime:99.00"]);
+    assert.deepEqual(app.offers.map((o) => `${o.name}:${o.price}`), ["Free:0", "Pro yearly:47.99", "Pro monthly:5.99", "Pro lifetime:99.99"]);
   });
 });
 

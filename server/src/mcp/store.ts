@@ -161,11 +161,22 @@ export class McpStore {
     } catch (e) { this.db.exec("ROLLBACK"); throw e; }
   }
 
-  /** Delete artifact bytes + rows older than the retention window. Returns how many were removed. */
-  pruneArtifacts(retentionDays: number): number {
+  /** Delete artifact bytes + rows older than the retention window. Returns how many were removed.
+   * Tier rule (#132): artifacts whose owner is Pro are kept for proRetentionDays instead. */
+  pruneArtifacts(retentionDays: number, proRetentionDays?: number, isProOwner?: (owner: string) => boolean): number {
     const rows = this.db.prepare("SELECT * FROM mcp_artifacts WHERE created_at <= ?").all(Date.now() - retentionDays * 86_400_000) as unknown as ArtifactRow[];
-    for (const row of rows) { rmSync(this.artifactAbsPath(row), { force: true }); this.db.prepare("DELETE FROM mcp_artifacts WHERE id=?").run(row.id); }
-    return rows.length;
+    let removed = 0;
+    for (const row of rows) {
+      if (proRetentionDays !== undefined && isProOwner?.(row.owner) && row.created_at > Date.now() - proRetentionDays * 86_400_000) continue;
+      rmSync(this.artifactAbsPath(row), { force: true }); this.db.prepare("DELETE FROM mcp_artifacts WHERE id=?").run(row.id); removed++;
+    }
+    return removed;
+  }
+
+  /** Keep only the newest `keep` revision snapshots of a composition (#132 tier history limit). */
+  pruneRevisions(compositionId: string, keep: number): number {
+    const r = this.db.prepare("DELETE FROM mcp_revisions WHERE composition_id=? AND revision NOT IN (SELECT revision FROM mcp_revisions WHERE composition_id=? ORDER BY revision DESC LIMIT ?)").run(compositionId, compositionId, keep);
+    return Number(r.changes);
   }
 
   // ---- compositions ------------------------------------------------------------

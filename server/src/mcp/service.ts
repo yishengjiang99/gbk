@@ -43,6 +43,9 @@ const RANGE = (a: Record<string, unknown>) => ({ unit: "bars", start: a.startBar
 
 export class CompositionService {
   private tools: ToolDef[] | null = null;
+  /** Unified ProStatus (#113) for an owner; set by app.ts once the entitlement sources exist.
+   * Drives the #132 tier limits (revision history kept, max bars). Guests never consult it. */
+  proOf: (owner: string) => boolean = () => false;
   constructor(private cfg: Config, private store: McpStore, private shares: ShareStore, private log: (o: object) => void = () => {}) {
     // Prime the SoundFont cache so canonical tools resolve instruments instead of warning "not loaded".
     try {
@@ -160,6 +163,14 @@ export class CompositionService {
       throw new McpError("QUOTA_EXCEEDED", "global guest storage capacity reached; retry later");
   }
 
+  /** Tier length limit (#132) on the resulting project for signed-in accounts. */
+  private checkAccountBars(owner: string, project: Project) {
+    if (isGuest(owner)) return;
+    const maxBars = this.proOf(owner) ? this.cfg.mcp.tierProMaxBars : this.cfg.mcp.tierFreeMaxBars;
+    if (tickToBarBeat(project, project.endTick).bar > maxBars + 1)
+      throw new McpError("QUOTA_EXCEEDED", `compositions are limited to ${maxBars} bars on your plan`);
+  }
+
   // ---- create ------------------------------------------------------------------------
   async create(owner: string, a: CreateCompositionArgs, signal: AbortSignal): Promise<{ row: CompositionRow; data: Record<string, unknown> }> {
     if (this.store.countCompositions(owner) >= this.cfg.mcp.maxCompositions) throw new McpError("QUOTA_EXCEEDED", `composition limit reached (${this.cfg.mcp.maxCompositions})`);
@@ -172,6 +183,10 @@ export class CompositionService {
     bars = Math.min(512, Math.max(1, bars ?? 32));
     if (isGuest(owner) && (bars > this.cfg.mcp.guestMaxBars || bars * num * 60 / tempo > this.cfg.mcp.guestMaxSeconds))
       throw new McpError("QUOTA_EXCEEDED", `guest compositions are limited to ${this.cfg.mcp.guestMaxBars} bars and ${this.cfg.mcp.guestMaxSeconds} seconds; sign in for longer pieces`);
+    if (!isGuest(owner)) {
+      const maxBars = this.proOf(owner) ? this.cfg.mcp.tierProMaxBars : this.cfg.mcp.tierFreeMaxBars;
+      if (bars > maxBars) throw new McpError("QUOTA_EXCEEDED", `compositions are limited to ${maxBars} bars on your plan`);
+    }
     const { c, tools } = this.controllerFor();
     const created = await this.call(tools, c, "gbk_create_project", {
       name: a.title.slice(0, 128), tempo, timeSignature: a.timeSignature ?? [4, 4], key: a.key,
@@ -242,6 +257,7 @@ export class CompositionService {
     for (const op of operations) {
       const label = await this.applyOp(tools, c, op, signal);
       this.checkGuestProject(owner, c.project);
+      this.checkAccountBars(owner, c.project);
       appliedOps.push({ type: op.type, ...label });
     }
     const after = c.project;
@@ -252,6 +268,9 @@ export class CompositionService {
     }
     const saved = this.store.saveRevision({ id: row.id, owner, title: after.name, projectJson: JSON.stringify(after), expectedRevision, newRevision: after.revision, summary: appliedOps.map((o) => String(o.type)).join(", ").slice(0, 200) || "edit" });
     if (!saved) { const cur = this.store.getComposition(row.id, owner); throw new McpError("PROJECT_CHANGED", "the composition changed while this edit was running; re-read and retry", { currentRevision: cur?.revision }); }
+    // Tier history limit (#132): signed-in accounts keep the newest N snapshots (guests keep
+    // their existing hard cap at edit time instead of pruning — their key is the only copy).
+    if (!isGuest(owner)) this.store.pruneRevisions(row.id, this.proOf(owner) ? this.cfg.mcp.tierProRevisions : this.cfg.mcp.tierFreeRevisions);
     // Untouched-material proof for the caller: note-level diff counts outside the edited ranges.
     const ranges = operations.filter((o) => typeof o.startBar === "number").map((o) => ({ start: barBeatToTick(after, o.startBar as number), end: barBeatToTick(after, (o.endBar as number) + 1) }));
     const outside = (p: Project) => p.notes.filter((n) => !ranges.some((r) => n.tick >= r.start && n.tick < r.end)).map((n) => `${n.trackId}:${n.tick}:${n.pitch}:${n.duration}:${n.velocity}`).sort().join("|");

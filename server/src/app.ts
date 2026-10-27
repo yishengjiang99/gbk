@@ -154,6 +154,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
       .catch((e) => app.log.warn({ evt: "rank_train_error", message: (e as Error).message })).finally(() => { training = false; }); }, 600_000); trainTimer.unref();
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));
+  mcpService.proOf = (u) => limits.pro(u);
   // MCP renders run in the user's connected Studio tab or the in-chat player; with no tab (Codex, guests, headless
   // clients) they run on the server in worker threads (SERVER_RENDER=0 turns that off).
   const serverPool = new ServerRenderPool(cfg, () => resolveSoundFontPath(cfg), (o) => app.log.info(o));
@@ -167,7 +168,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   await mcpRenders.start();
   if (process.env.NODE_ENV === "production") void serverPool.start(); // warm the workers + SoundFont at boot
   // Artifact expiry: bytes + rows past MCP_ARTIFACT_RETENTION_DAYS are deleted at startup and hourly.
-  const prune = () => { try { const n = mcpStore.pruneArtifacts(cfg.mcp.artifactRetentionDays); if (n) app.log.info({ evt: "mcp_artifacts_pruned", count: n }); } catch (e) { app.log.warn({ evt: "mcp_artifact_prune_failed", message: (e as Error).message }); } };
+  const prune = () => { try { const n = mcpStore.pruneArtifacts(cfg.mcp.artifactRetentionDays, cfg.mcp.tierProArtifactRetentionDays, (owner) => limits.pro(owner)); if (n) app.log.info({ evt: "mcp_artifacts_pruned", count: n }); } catch (e) { app.log.warn({ evt: "mcp_artifact_prune_failed", message: (e as Error).message }); } };
   // Guest MCP expiry: renders after MCP_GUEST_ARTIFACT_RETENTION_DAYS; unpublished projects untouched for
   // MCP_GUEST_PROJECT_TTL_DAYS. Startup + daily. Signed-in owners and public compositions are never touched.
   const pruneGuests = () => { try { const a = mcpStore.pruneGuestArtifacts(cfg.mcp.guestArtifactRetentionDays), c = mcpStore.pruneGuestCompositions(cfg.mcp.guestProjectTtlDays);

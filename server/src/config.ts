@@ -37,6 +37,10 @@ export interface Config {
     maxRendersPerDay: number; newAccountRendersPerDay: number; maxCompositions: number;
     /** Signed artifact download URLs live this long (seconds). */
     artifactUrlTtlSec: number; artifactRetentionDays: number;
+    /** Tier limits for signed-in accounts (#132; guests keep the guest* caps): revision snapshots
+     * kept per composition, render-file retention for Pro owners, max composition length in bars. */
+    tierFreeRevisions: number; tierProRevisions: number; tierProArtifactRetentionDays: number;
+    tierFreeMaxBars: number; tierProMaxBars: number;
     /** Hosts allowed to act as CIMD client_id documents (SSRF guard). */
     cimdHosts: string[];
     accessTokenTtlSec: number; refreshTokenTtlSec: number; authCodeTtlSec: number; consentTtlSec: number;
@@ -116,6 +120,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       maxCompositions: num(env.MCP_MAX_COMPOSITIONS_PER_USER, 500),
       artifactUrlTtlSec: num(env.MCP_ARTIFACT_URL_TTL_SEC, 900),
       artifactRetentionDays: num(env.MCP_ARTIFACT_RETENTION_DAYS, 30),
+      tierFreeRevisions: Math.max(1, Math.floor(num(env.TIER_FREE_REVISIONS, 10))),
+      tierProRevisions: Math.max(1, Math.floor(num(env.TIER_PRO_REVISIONS, 100))),
+      tierProArtifactRetentionDays: Math.max(1, Math.floor(num(env.TIER_PRO_ARTIFACT_RETENTION_DAYS, 365))),
+      tierFreeMaxBars: Math.max(1, Math.floor(num(env.TIER_FREE_MAX_BARS, 64))),
+      tierProMaxBars: Math.max(1, Math.floor(num(env.TIER_PRO_MAX_BARS, 256))),
       cimdHosts: list(env.MCP_OAUTH_CIMD_HOSTS).length ? list(env.MCP_OAUTH_CIMD_HOSTS) : ["chatgpt.com"],
       accessTokenTtlSec: num(env.MCP_ACCESS_TOKEN_TTL_SEC, 3600),
       refreshTokenTtlSec: num(env.MCP_REFRESH_TOKEN_TTL_SEC, 30 * 86400),

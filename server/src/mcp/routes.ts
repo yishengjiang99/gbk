@@ -163,7 +163,8 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
     const { id } = req.params as { id: string };
     const row = deps.store.getArtifactAny(id);
     if (!row) return reply.code(404).send({ code: "NOT_FOUND", message: "no such artifact" });
-    if (row.created_at <= Date.now() - cfg.mcp.artifactRetentionDays * 86_400_000) return reply.code(410).send({ code: "ARTIFACT_EXPIRED", message: "artifact retention period ended; render again" });
+    const retentionDays = deps.service.proOf(row.owner) ? cfg.mcp.tierProArtifactRetentionDays : cfg.mcp.artifactRetentionDays;
+    if (row.created_at <= Date.now() - retentionDays * 86_400_000) return reply.code(410).send({ code: "ARTIFACT_EXPIRED", message: "artifact retention period ended; render again" });
     const q = req.query as { exp?: string; sig?: string };
     const signed = verifyArtifactSignature(cfg, id, q.exp, q.sig);
     if (!signed) {

@@ -87,7 +87,7 @@ struct PaywallView: View {
         VStack(spacing: 6) {
             Text("Subscriptions renew automatically unless cancelled at least 24 hours before the end of the period. Manage or cancel in Settings › Apple ID › Subscriptions.")
             HStack(spacing: 16) {
-                Link("Terms", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                Link("Terms", destination: URL(string: "https://compose.grepawk.com/terms")!)
                 Link("Privacy", destination: URL(string: "https://compose.grepawk.com/privacy")!)
             }
             Link("Billing help: yisheng.jiang@gmail.com", destination: URL(string: "mailto:yisheng.jiang@gmail.com")!)

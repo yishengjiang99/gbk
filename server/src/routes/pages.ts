@@ -14,7 +14,7 @@ export const STARTER_PROMPTS = [
 export const SUPPORT_URL = "https://github.com/yishengjiang99/gbk/issues";
 export const SUPPORT_EMAIL = "yisheng.jiang@gmail.com";
 export const PAGE_PATHS = ["/chatgpt", "/privacy", "/terms", "/support"] as const;
-const UPDATED = "October 24, 2026";
+const UPDATED = "October 26, 2026";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -125,10 +125,13 @@ function privacy(cfg: Config): string {
 function terms(cfg: Config): string {
   return page(cfg, "/terms", "Terms of service · GBK Composer", "The terms for using GBK Composer, GBK Studio and the GBK Composer plugin.", `<h1>Terms of service</h1><p>Last updated ${UPDATED}.</p>
 <p>By using GBK Composer (the website, GBK Studio, and the GBK Composer plugin/MCP server) you agree to these terms.</p>
-<h2>The service</h2><p>GBK Composer is a free, experimental music-composition tool provided as is, without warranties. Features, daily usage limits and availability may change, and the service may be paused or discontinued at any time.</p>
+<h2>The service</h2><p>GBK Composer is a music-composition tool with a free tier and optional paid Pro plans. It is provided as is, without warranties. Features, daily usage limits and availability may change, and the service may be paused or discontinued at any time.</p>
 <h2>Your account</h2><p>You sign in with Google or GitHub and are responsible for activity under your account. Daily limits on AI usage and renders apply per account; do not try to bypass them or disrupt the service.</p><h2>Using the plugin without an account</h2><p>The plugin can create and edit compositions without an account. Each composition is controlled by a private access key returned to the calling app. You are responsible for keeping it; a lost key cannot be recovered. While you hold the key you can sign in and claim the composition into your GBK account; without the key we cannot move it to an account. Guest use has stricter limits (length, number of edits and requests, shared daily capacity) and may be paused or turned off at any time. Rendered files expire after 30 days. You can delete such a composition yourself with the plugin (the delete tool needs its private key), claim it into an account after signing in, or request deletion through support.</p>
 <h2>Your content</h2><p>You keep your rights to the music you create. You grant us the limited permission needed to store, process and display it to provide the service, and, for songs you choose to publish, to show them publicly. Do not publish content you do not have the right to share or that is unlawful or abusive; we may remove such content.</p>
 <h2>AI output</h2><p>Compositions are generated with algorithmic tools and an AI model. Output may be imperfect or resemble existing music; review it before relying on it.</p>
+<h2>Pro plans, billing and refunds</h2><p>Pro is sold on this website as a monthly or yearly subscription, or as a one-time lifetime purchase, and in the iOS app through Apple. Subscriptions renew automatically at the end of each billing period until you cancel. Subscription plans begin with a 7-day free trial; if you do not cancel before the trial ends, the first paid period is charged.</p>
+<p>You can cancel anytime. For web purchases, use the billing link in your Stripe receipt email or email support; for iOS purchases, cancel in your Apple subscriptions. Cancellation takes effect at the end of the current period — you keep Pro until then — and stops future charges.</p>
+<p>Refunds for web purchases: email <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> within 14 days of an initial purchase or of a renewal for a full refund of that payment; lifetime purchases are refundable in full within 30 days. After those windows we do not refund the current period. Purchases made through Apple are billed by Apple, and refund requests for them go through Apple's process (reportaproblem.apple.com) under Apple's policies; we cannot refund Apple purchases ourselves.</p>
 <h2>Limitation of liability</h2><p>To the extent permitted by law, we are not liable for indirect or consequential damages or for loss of data. Keep your own copies of important files.</p>
 <h2>Contact</h2><p>See <a href="/support">support</a>. See also the <a href="/privacy">privacy policy</a>.</p>`);
 }

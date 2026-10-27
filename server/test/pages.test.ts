@@ -12,6 +12,21 @@ async function setup() {
   return app;
 }
 
+test("/terms carries the Pro billing and refund policy (#125)", async () => {
+  const app = await setup();
+  try {
+    const r = await app.inject("/terms");
+    assert.equal(r.statusCode, 200);
+    assert.match(r.body, /Pro plans, billing and refunds/);
+    assert.match(r.body, /renew automatically/);
+    assert.match(r.body, /7-day free trial/);
+    assert.match(r.body, /within 14 days/);
+    assert.match(r.body, /lifetime purchases are refundable in full within 30 days/);
+    assert.match(r.body, /reportaproblem\.apple\.com/);
+    assert.doesNotMatch(r.body, /a free, experimental music-composition tool/);
+  } finally { await app.close(); }
+});
+
 test("/support lists the private billing email alongside the public GitHub channel", async () => {
   const app = await setup();
   try {
