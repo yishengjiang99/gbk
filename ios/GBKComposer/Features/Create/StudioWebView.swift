@@ -89,7 +89,7 @@ extension StudioWebView {
     const g = window.gbkStudio; if (!g) return "unavailable";
     if (waitForRestore) { while (!g.currentProject().hasContent && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 150)); }
     try { await g.refreshPublished(); } catch (e) {}
-    if (afterPublish || !g.shouldResume()) { await g.startNew(); return "new"; }
+    if (afterPublish || !g.shouldResume()) { try { await g.flushSave(); } catch (e) {} await g.startNew(); return "new"; }
     return "resume";
     """
 
