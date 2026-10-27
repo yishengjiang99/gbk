@@ -291,12 +291,16 @@ test("sign-in only on demand: no Sign in button signed out; gated actions open t
     await page.getByTestId("composer-input").fill("Gate resume prompt"); await page.getByTestId("composer-send").click();
     await signInViaSheet();
     await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
-    await (await studioReveal(page, "tab-composer")).click();
     await expect(page.getByText("Gate resume prompt").first()).toBeVisible({ timeout: 15_000 });
+    // The replayed prompt is a real compose request: let its run finish (it must not outlive this test and be
+    // adopted by the next tab of the same account). On desktop a finished run on a private song offers Publish by
+    // design (same as the fugue flow); the user dismisses it and the composer is usable again.
+    await expect(page.getByTestId("composer-stop")).toHaveCount(0, { timeout: 300_000 });
+    if (P === "chrome-no-webmcp") { const dlg = page.getByTestId("publish-dialog"); await expect(dlg).toBeVisible({ timeout: 30_000 }); await page.getByTestId("publish-cancel").click(); await expect(dlg).toHaveCount(0); }
+    await (await studioReveal(page, "tab-composer")).click();
     await expect(page.getByTestId("composer-input")).toHaveValue("");
-    // Stop the resumed run: it must not outlive this test and be adopted by the next tab of the same account.
-    const stop = page.getByTestId("composer-stop"); if (await stop.isVisible()) await stop.click();
-    await expect(stop).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId("composer-input")).toBeInViewport();
+    await page.getByTestId("composer-input").fill("still usable"); await expect(page.getByTestId("composer-input")).toHaveValue("still usable");
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
 
