@@ -38,6 +38,10 @@ final class CreateTabKeyboardUITests: XCTestCase {
         sleep(1)
         create.tap()
         sleep(6) // entry check (gbkStudio.shouldResume)
+        // Studio open is a paywall watch point (#123); earlier imports can make this guest eligible. Dismiss it.
+        let close = app.navigationBars.buttons["Close"]
+        if close.exists { close.tap(); sleep(1) }
+        attach(app, "create-after-switch")
         XCTAssertTrue(draft.exists, "unpublished draft resumes after Feed→Create")
         XCTAssertFalse(app.buttons["studio-new"].exists, "no duplicate native New (the studio has its own)")
         let newButton = web.buttons.matching(NSPredicate(format: "label CONTAINS 'New'")).firstMatch
