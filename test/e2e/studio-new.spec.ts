@@ -58,3 +58,23 @@ test("Create resumes an unpublished draft, starts fresh when the latest version 
   // No horizontal overflow at phone width with the New button in the header.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+// A public song with the same title (no projectId match) must not hide a newer, unpublished draft (e.g. a GBK iOS import).
+test("Create resumes a newer draft whose title matches an older public song; a title match no newer than the publish counts", async ({ page }) => {
+  const T = NAME + " reused"; let publishedAt = new Date(Date.now() - 3600_000).toISOString();
+  await page.route(/\/shares\?.*mine=1/, (r) => r.fulfill({ json: { shares: [{ slug: "e2e-reused", public: true, projectId: "someone-else", title: T, updatedAt: publishedAt }] } }));
+  await page.goto("studio"); await ws(page); await page.waitForFunction(() => !!(window as any).gbkStudio);
+  await page.evaluate(async (n) => { const c = (globalThis as any).__gbkWorkstation;
+    await c.createProject({ name: n, owner: "user", replaceCurrent: true });
+    c.edit([{ op: "addTrack", name: "Melody", channel: 0, id: "t_mel", program: 0 },
+      { op: "addNotes", notes: [{ trackId: "t_mel", channel: 0, tick: 0, duration: 440, pitch: 60, velocity: 90 }] }], { label: "seed" }); }, T);
+  const cp = () => page.evaluate(async () => { await (window as any).gbkStudio.refreshPublished(); return (window as any).gbkStudio.currentProject(); });
+  expect(await cp()).toMatchObject({ title: T, published: false, dirtySincePublish: false, hasContent: true });
+  expect(await page.evaluate(() => (window as any).gbkStudio.shouldResume())).toBe(true);
+  expect(await page.evaluate(() => (window as any).gbkStudio.createPath())).toBe("studio");
+  // Published (by title) after this project's last edit: done, so Create starts fresh.
+  publishedAt = new Date(Date.now() + 60_000).toISOString();
+  expect(await cp()).toMatchObject({ published: true, dirtySincePublish: false });
+  expect(await page.evaluate(() => (window as any).gbkStudio.createPath())).toMatch(/^studio\?new=\d+$/);
+  await page.evaluate(() => (window as any).gbkStudio.startNew()); // leave the test project out of the current slot
+});
