@@ -42,8 +42,14 @@ export function currentProject(): CurrentProject {
   const rev = marks()[p.id];
   let published = rev !== undefined; let dirty = published && p.revision > rev;
   if (!published && remote) {
-    const t = remote.byId.get(p.id) ?? remote.byTitle.get(p.name);
-    if (t !== undefined) { published = true; dirty = updatedAt != null && updatedAt > t + 2000; }
+    const byId = remote.byId.get(p.id);
+    if (byId !== undefined) { published = true; dirty = updatedAt != null && updatedAt > byId + 2000; }
+    else {
+      // A title match is weaker (a new import can share a published song's title): count it as published only when
+      // this project is known to be no newer than that publish; unknown or newer stays a draft and resumes.
+      const t = remote.byTitle.get(p.name);
+      if (t !== undefined && updatedAt != null && updatedAt <= t + 2000) published = true;
+    }
   }
   return { id: p.id, title: p.name, published, dirtySincePublish: dirty, hasContent, updatedAt };
 }
