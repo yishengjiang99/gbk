@@ -17,6 +17,9 @@ struct StudioWebView: View {
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var router: DeepLinkRouter
     @State private var url: URL?
+    /// Access token `url` was built for. `.task` restarts on every re-appear (each tab switch back to Create); only a
+    /// token change (sign-in / guest session) may rebuild the URL, otherwise the WKWebView reloads and drops the draft.
+    @State private var urlToken: String?
     /// UI tests (`-uiTestDark`): the app is locked to Light (Info.plist), so dark screenshots need an override.
     static var forcedScheme: ColorScheme? { ProcessInfo.processInfo.arguments.contains("-uiTestDark") ? .dark : nil }
     @StateObject private var scan = ScanController()
@@ -69,8 +72,12 @@ struct StudioWebView: View {
         }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
+            let token = auth.accessToken
+            if url != nil, urlToken == token { return } // tab re-entry: keep the live page (freshIfNoDraft decides)
             let path = Self.studioPath(fresh: false)
             let handoff = try? await AuthServices.current.webSessionURL(returnPath: path)
+            if Task.isCancelled { return }
+            urlToken = token
             url = (handoff ?? nil) ?? URL(string: path, relativeTo: Self.studioURL)!.absoluteURL
         }
     }

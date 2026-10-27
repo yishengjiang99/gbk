@@ -4,6 +4,7 @@
 
 Native SwiftUI client in `ios/` (XcodeGen, iOS 17). CI: `.github/workflows/ios.yml` (macOS, simulator build + unit tests, unsigned).
 CI trigger: `ios.yml` push/PR runs only on changes to `ios/**`, `ios.yml`, `ios-release.yml`, `src/native/**` (plus manual workflow_dispatch).
+Create tab (2026-10-27): switching back to Create no longer reloads the studio WKWebView (`.task` re-ran on every re-appear and fetched a fresh web-code URL, so the page reloaded and the unpublished draft was replaced by a blank project); the URL is rebuilt only when the access token changes.
 Server tests (GBK Social area): `server/test` pruned of brittle/redundant cases, 152 → 98 tests, ~49 s → ~21 s locally (2026-10-25).
 
 | Area | State |
