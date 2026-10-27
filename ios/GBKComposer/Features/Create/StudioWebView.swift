@@ -15,7 +15,10 @@ struct StudioWebView: View {
         ProcessInfo.processInfo.arguments.contains("-uiTestHum") ? Bundle.main.url(forResource: "hum-harness", withExtension: "html") : nil
     }
     @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var router: DeepLinkRouter
     @State private var url: URL?
+    /// When the user last left the Create tab (autosave is debounced 800 ms on the web; see persistence.ts).
+    @State private var leftAt: Date?
     /// UI tests (`-uiTestDark`): the app is locked to Light (Info.plist), so dark screenshots need an override.
     static var forcedScheme: ColorScheme? { ProcessInfo.processInfo.arguments.contains("-uiTestDark") ? .dark : nil }
     @StateObject private var scan = ScanController()
@@ -30,7 +33,7 @@ struct StudioWebView: View {
         // Native Scan entry: a slim bar ABOVE the web view (stacked, not overlaid), so it can never cover the
         // web toolbar or the bottom composer input.
         VStack(spacing: 0) {
-            StudioNativeBar(onScan: { scan.start() }, onTestMIDI: { scan.loadTestMIDI() },
+            StudioNativeBar(onScan: { scan.start() }, onNew: { Task { await startFresh(force: true) } }, onTestMIDI: { scan.loadTestMIDI() },
                             onTestFocus: { scan.webView?.evaluateJavaScript("window.dispatchEvent(new Event('gbk:focus-composer'))") })
             // The web view gets an explicit frame equal to the safe-area-bounded space, so it ends at the top of the
             // tab bar (iOS 26's floating glass bar otherwise lets it extend underneath, hiding web sheets' bottom
@@ -63,6 +66,12 @@ struct StudioWebView: View {
             published = false
             url = URL(string: Self.studioPath(fresh: true), relativeTo: Self.studioURL)?.absoluteURL
         }
+        // Yisheng: tapping Create from another tab starts a blank project (full load of /studio?new=<n>). Sheets
+        // (publish, scan, MIDI import) don't change the tab, so returning from them never resets.
+        .onChange(of: router.selectedTab) { old, new in
+            if old == .create { leftAt = Date() }
+            if new == .create, old != .create, url != nil, Self.humHarnessURL == nil { Task { await startFresh(force: false) } }
+        }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
             let path = Self.studioPath(fresh: Self.freshOnNextLoad)
@@ -73,10 +82,29 @@ struct StudioWebView: View {
     }
 }
 
+extension StudioWebView {
+    /// Script the studio answers truthy while a composer run, hum recording or other busy step is in progress.
+    static let busyScript = "!!document.querySelector('[data-testid=studio-busy],[data-status=running],.ms-rec')"
+
+    /// Full reload into a new blank project. The current project stays saved in IndexedDB: we wait out the web
+    /// autosave debounce (800 ms) so the latest edits are flushed first.
+    @MainActor func startFresh(force: Bool) async {
+        guard let web = scan.webView else { return }
+        if !force {
+            if web.microphoneCaptureState != .none { return } // hum recording
+            if (try? await web.evaluateJavaScript(Self.busyScript)) as? Bool == true { return } // composer run
+        }
+        let since = force ? 0 : Date().timeIntervalSince(leftAt ?? .distantPast)
+        if since < 1.2 { try? await Task.sleep(nanoseconds: UInt64((1.2 - since) * 1_000_000_000)) }
+        url = URL(string: Self.studioPath(fresh: true), relativeTo: Self.studioURL)?.absoluteURL
+    }
+}
+
 /// Native controls for the studio, stacked above the web view. Scan only: the web compact-head (title, play pill,
 /// ⋯) is the studio's header, so this bar carries no title or playback and stays one slim row.
 struct StudioNativeBar: View {
     var onScan: () -> Void
+    var onNew: () -> Void = {}
     var onTestMIDI: () -> Void = {}
     var onTestFocus: () -> Void = {}
     static let testMIDIEnabled = ProcessInfo.processInfo.arguments.contains("-uiTestStudioMIDI")
@@ -87,6 +115,14 @@ struct StudioNativeBar: View {
                 Button("Focus", action: onTestFocus).font(.caption).accessibilityIdentifier("test-focus-composer")
             }
             Spacer()
+            Button(action: onNew) {
+                Label("New", systemImage: "square.and.pencil")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .foregroundStyle(Theme.accent)
+                    .background(Theme.chip, in: Capsule())
+            }
+            .accessibilityIdentifier("studio-new")
             Button(action: onScan) {
                 Label("Scan sheet music", systemImage: "doc.viewfinder")
                     .font(.footnote.weight(.semibold))
