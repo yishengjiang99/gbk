@@ -6,6 +6,7 @@ import type { Project, Note } from "../workstation/model.ts";
 import { barBeatToTick, secToTick, tickToSec, tickToBarBeat } from "../workstation/timing.ts";
 import { generateCurve, type CurveShape } from "../workstation/curves.ts";
 import { serializeSmf } from "../workstation/smf.ts";
+import { estimateKey } from "../music/theory.ts";
 
 export type JsonSchema = Record<string, unknown>;
 /** Non-text MCP content (e.g. a small WAV as audio). Never JSON-stringified into a text result. */
@@ -94,10 +95,20 @@ export const CC_CAPS: Record<number, { name: string; audible: boolean; note?: st
 const NOTE_SCHEMA = obj({ trackId: str(), tick: int(0, 1e9), duration: int(1, 1e9), pitch: int(0, 127), velocity: int(1, 127), channel: int(0, 15, "defaults to the track channel") }, ["trackId", "tick", "duration", "pitch", "velocity"]);
 
 /** The gbk_get_project_summary payload. Also injected into a remix session's first run (#162), so the
- * agent knows what song it is looking at before its first tool call. */
+ * agent knows what song it is looking at before its first tool call. Key comes from meta.key when the
+ * project declares one; otherwise it is estimated from the notes and flagged estimated:true. */
 export function projectSummary(c: WorkstationController) {
   const p = c.project;
-  return { name: p.name, ppq: p.ppq, revision: p.revision, endTick: p.endTick, durationSec: +tickToSec(p, p.endTick).toFixed(3), bars: tickToBarBeat(p, p.endTick).bar, tempos: p.tempos.slice(0, 32), timeSigs: p.timeSigs.slice(0, 32), trackCount: p.tracks.length, noteCount: p.notes.length, ccCount: p.ccs.length, pendingProposals: c.getState().proposals.filter((x) => x.status === "pending").map((x) => ({ id: x.id, summary: x.summary })) };
+  const est = !p.meta?.key && p.notes.length ? estimateKey(p.notes) : null;
+  return { name: p.name, ppq: p.ppq, revision: p.revision, endTick: p.endTick, durationSec: +tickToSec(p, p.endTick).toFixed(3), bars: tickToBarBeat(p, p.endTick).bar, tempos: p.tempos.slice(0, 32), timeSigs: p.timeSigs.slice(0, 32), trackCount: p.tracks.length, noteCount: p.notes.length, ccCount: p.ccs.length, pendingProposals: c.getState().proposals.filter((x) => x.status === "pending").map((x) => ({ id: x.id, summary: x.summary })),
+    key: p.meta?.key ? { name: p.meta.key, estimated: false } : est ? { name: est.label, estimated: true } : null,
+    sections: p.meta?.sections ?? [],
+    tracks: p.tracks.map((t) => {
+      let noteCount = 0; let minPitch: number | null = null; let maxPitch: number | null = null;
+      for (const n of p.notes) { if (n.trackId !== t.id) continue; noteCount++; minPitch = minPitch === null ? n.pitch : Math.min(minPitch, n.pitch); maxPitch = maxPitch === null ? n.pitch : Math.max(maxPitch, n.pitch); }
+      const prog = p.programs.find((g) => g.trackId === t.id);
+      return { id: t.id, name: t.name, channel: t.channel, program: prog ? { program: prog.program, bankMsb: prog.bankMsb, bankLsb: prog.bankLsb } : null, isPercussion: t.channel === 9 || t.role === "percussion", noteCount, minPitch, maxPitch };
+    }) };
 }
 
 export function buildCoreTools(c: WorkstationController): ToolDef[] {
@@ -109,7 +120,7 @@ export function buildCoreTools(c: WorkstationController): ToolDef[] {
         effects: { reverb: "Freeverb-style stereo (8 combs + 4 allpasses), driven per voice by SF2 reverbEffectsSend (gen 16) + CC91; params via gbk_set_effects", chorus: "two quadrature-modulated delay lines, driven by chorusEffectsSend (gen 15) + CC93", offlineWav: true, deterministic: true },
         voiceEditing: { tools: ["gbk_get_voice_settings", "gbk_propose_voice_patch", "gbk_set_effects"], scope: "per track, optional key range; applied at note-on (realtime generators also update sounding notes)", midiExport: "additive overrides without key range export as SF2 NRPNs (CC99=120); absolute / key-ranged overrides and effects params are project-only" },
         unsupported: ["arbitrary JS/DOM/filesystem/network", "per-preset effects types / GS-XG effect macros", "SMPTE time division"], approval: "commit_proposal from an agent requires the user to press Accept in the GBK proposal panel" } }) },
-    { name: "gbk_get_project_summary", readOnly: true, description: "Project name, PPQ, tempo/meter maps, counts, revision, pending proposals.", inputSchema: obj({}), run: () => ({ data: summary() }) },
+    { name: "gbk_get_project_summary", readOnly: true, description: "Project summary: name, key (declared, or estimated and flagged), sections, per-track program/percussion/note counts/pitch ranges, PPQ, tempo/meter maps, counts, revision, pending proposals.", inputSchema: obj({}), run: () => ({ data: summary() }) },
     { name: "gbk_list_tracks", readOnly: true, description: "Tracks with stable ids, names, channels, mix defaults, note counts and program.", inputSchema: obj({}),
       run: () => ({ data: P().tracks.map((t) => ({ id: t.id, name: t.name, channel: t.channel, mix: t.mix, override: c.getState().overrides[t.id] ?? null, visible: t.visible, notes: P().notes.filter((n) => n.trackId === t.id).length, program: P().programs.find((g) => g.trackId === t.id) ?? null })) }) },
     { name: "gbk_get_notes", readOnly: true, description: "Notes filtered by range/tracks/pitch, paginated (max 500 per page).", inputSchema: obj({ range: RANGE, trackIds: { type: "array", items: str(), maxItems: 64 }, minPitch: int(0, 127), maxPitch: int(0, 127), offset: int(0, 1e7), limit: int(1, 500) }),
