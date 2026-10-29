@@ -418,3 +418,44 @@ test("social feed play button is accessible: aria-label Play/Pause + aria-presse
   expect(await inRoll()).toBe(true);
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
+
+test("social remix: the prompt carries the song - fork loads, A major remaps the fork, Original stays for A/B (#162)", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const title = `Remix E2E ${test.info().project.name} ${Date.now() % 100000}`;
+  const sh = await createShare(owner.request, oh, { title, project, public: true });
+  const promptText = "a stormy sea shanty in C major";
+  expect((await owner.request.patch(`/api/songs/${sh.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: promptText } })).ok()).toBeTruthy();
+  const wsState = () => page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; const p = c.project; return { name: p.name, key: p.meta?.key ?? null, forkOf: p.meta?.forkOf ?? null, owner: p.meta?.owner ?? null, pitches: p.notes.map((n: any) => n.pitch).sort((a: number, b: number) => a - b) }; });
+  try {
+    await apiLogin(page.request, base, "e2e-code-2");
+    await page.goto("/feed?sort=new");
+    const card = page.getByTestId("feed-card").filter({ hasText: title }).first();
+    await expect(card).toBeVisible();
+    await dismissLandingPaywall(page);
+    await card.getByTestId("card-remix").click();
+    // The fork - not an empty project - is what the fresh session opens, and the prompt rides along prefilled.
+    await expect(page.getByTestId("studio-title")).toHaveText(`${title} (fork)`, { timeout: 30_000 });
+    const loaded = await wsState();
+    expect(loaded.forkOf).toBe(sh.slug); expect(loaded.owner).toBe("user");
+    expect(loaded.pitches).toEqual((project as any).notes.map((n: any) => n.pitch).sort((a: number, b: number) => a - b));
+    await expect(page.getByTestId("composer-input")).toHaveValue(promptText);
+    await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
+    // Ask for the key change: the agent must READ the fork and TRANSFORM it (never create a new project).
+    await page.getByTestId("composer-input").fill("rewrite this in A major");
+    await page.getByTestId("composer-send").click();
+    // The fork is user-owned, so the remap arrives as a proposal: Accept it in the agent panel.
+    const accept = page.locator(".ws-accept").first();
+    await expect(accept).toBeVisible({ timeout: 120_000 });
+    await accept.click();
+    await expect(page.getByTestId("assistant-text").last()).toContainText("Rewrote it in A major", { timeout: 120_000 });
+    const after = await wsState();
+    expect(after.name).toBe(`${title} (fork)`); expect(after.forkOf).toBe(sh.slug);
+    expect(after.key).toBe("A major");
+    // C major -> A major is a pure -3 shift (degree map is identity major->major): every pitch moved, none created.
+    expect(after.pitches).toEqual((project as any).notes.map((n: any) => n.pitch - 3).sort((a: number, b: number) => a - b));
+    // A/B: the Original card is still there next to the new version.
+    await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
+    expect(await page.getByTestId("version-card").count()).toBeGreaterThanOrEqual(2);
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});

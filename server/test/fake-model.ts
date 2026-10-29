@@ -27,6 +27,14 @@ export function nextStep(msgs: Msg[]): { calls: Call[] } | { text: string } {
     if (steps === 1) return { calls: [{ name: "gbk_get_project_summary", args: {} }], gated: true } as never;
     return { text: `Resumed OK after ${resultsFor(turn, "gbk_get_project_summary").filter((x) => x.ok).length} summary read.` };
   }
+  if (userText.includes("a major")) { // e2e #162: remix of a C-major share - read, remap (proposal), commit on approval
+    switch (steps) {
+      case 0: return { calls: [{ name: "gbk_get_project_summary", args: {} }] };
+      case 1: { const bars = r("gbk_get_project_summary")?.data?.bars ?? 2; return { calls: [{ name: "gbk_transform_notes", args: { trackId: "*", range: { unit: "bars", start: 1, end: bars }, transform: "remap", targetKey: "A major" } }] }; }
+      case 2: return { calls: [{ name: "gbk_commit_proposal", args: { proposalId: r("gbk_transform_notes")?.data?.proposalId } }] };
+      default: { const t = resultFor(turn, "gbk_transform_notes"); const cm = resultFor(turn, "gbk_commit_proposal"); return { text: `Rewrote it in A major (remap ${t?.ok ? "ok" : "failed"}, commit ${cm?.ok ? "ok" : "failed"}).` }; }
+    }
+  }
   if (userText.includes("darker")) {
     switch (steps) {
       case 0: return { calls: [{ name: "gbk_list_tracks", args: {} }, { name: "gbk_get_project_summary", args: {} }] };
