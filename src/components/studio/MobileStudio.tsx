@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useWorkstation, workstation } from "../workstation/useWorkstation.ts";
 import { useAgentSession, type ChatItem } from "../../agent/useAgentSession.ts";
 import { songAutosaver } from "../../agent/autosave.ts";
+import { openShared } from "../../agent/share-client.ts";
+import { takeRemixHandoff, type RemixHandoff } from "../../agent/remix-handoff.ts";
 import { needSignIn, takePending } from "../auth/gate.ts";
 import { PianoRollEditor, type View } from "../workstation/PianoRollEditor.tsx";
 import { AutomationLane, type LaneKind } from "../workstation/AutomationLane.tsx";
@@ -74,7 +76,7 @@ export function MobileStudio(props: MobileStudioProps) {
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; });
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { const f = () => { const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
+  useEffect(() => { const f = () => { const h = takeRemixHandoff(); if (h) { void applyRemixRef.current(h); return; } const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const q = takePending("compose"); if (q && s.send(q.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   useEffect(() => { if (s.auth.authenticated && takePending("publish")) void doPublish(); }, [s.auth.authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -134,6 +136,31 @@ export function MobileStudio(props: MobileStudioProps) {
   // Remix landing when the Studio mounts after the flag was set (the focus event may already have fired):
   // start the fresh session once, then put back the draft the initializer loaded (newSong clears the input).
   useEffect(() => { if (!sessionStorage.getItem("gbk.composerFresh")) return; sessionStorage.removeItem("gbk.composerFresh"); const d = text; void (async () => { await newSongRef.current(); if (d) setText(d); })(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // #162: a remix handoff names the song, not just a prompt. Load the user's editable fork of it, start a
+  // FRESH agent session on that fork (never newProject() — that would empty the song back out), and prefill
+  // the original prompt. If the song cannot load, fall back to a prompt-only landing in a FRESH session
+  // (newSong, the #161 flow) with a toast — never on top of the previous chat.
+  const remixBusy = useRef(false);
+  const applyRemix = async (h: RemixHandoff) => {
+    if (remixBusy.current) return; remixBusy.current = true;
+    setSheet(null); stopPreview(); sessionStorage.removeItem("gbk.composerDraft");
+    try {
+      const info = await openShared(h.slug, true);
+      versionLog.recordOriginal(workstation.project);
+      s.reset();
+      s.setRemixOf({ slug: h.slug, title: info.title });
+      setText(h.prompt);
+      say(`Remixing “${info.title}” — your copy is loaded.`);
+    } catch (e) {
+      reportError(e, { where: "studio.remixLoad", slug: h.slug });
+      await newSongRef.current(); // #161: even when the song fails to load, the landing is a FRESH session, never the previous chat
+      setText(h.prompt);
+      say("Couldn't load that song, so the prompt is in the composer on its own.");
+    } finally { remixBusy.current = false; input.current?.focus(); }
+  };
+  const applyRemixRef = useRef(applyRemix); applyRemixRef.current = applyRemix;
+  // Remix landing when the Studio mounts after the handoff was written (the focus event may already have fired).
+  useEffect(() => { const h = takeRemixHandoff(); if (h) void applyRemixRef.current(h); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const exportWav = () => { setSheet(null); setBusy("Rendering WAV…"); props.exportWav().catch((e) => { reportError(e, { where: "studio.exportWav" }); say("Couldn't render the WAV. Please try again."); }).finally(() => setBusy("")); };
 
   // ---- + sheet: sheet music, MIDI file, MIDI keyboard ---------------------------------------------------------------
@@ -163,6 +190,7 @@ export function MobileStudio(props: MobileStudioProps) {
   // ---- render -------------------------------------------------------------------------------------------------------
   const title = p.tracks.length || p.name !== "Untitled" ? p.name : "New song";
   const latest = versions[versions.length - 1];
+  const original = versions.find((v) => v.label === "Original");
   const showCurrent = p.tracks.length > 0 && !running && (!latest || latest.revision !== p.revision);
   const loading = !t.audioReady && !t.playing;
   const ro = workstation.readOnlyReason; const from = p.meta?.sharedFrom;
@@ -184,6 +212,8 @@ export function MobileStudio(props: MobileStudioProps) {
           <h2>What should we make?</h2><p>Describe a song, hum a melody, or import sheet music.</p>
           <div className="ms-sug">{SUGGESTIONS.map((x) => <button key={x.text} data-testid="suggestion" onClick={() => send(x.text)}>{x.icon} {x.text}</button>)}</div>
         </div>}
+        {original && <VersionCard v={original} p={p} playing={original.revision === p.revision ? t.playing : preview?.n === original.n} pos={pos} total={total} current={original.revision === p.revision}
+          onPlay={() => playVersion(original, original.revision === p.revision)} onEdit={() => openEditor(original)} onPublish={() => void doPublish(original)} onRestore={() => restore(original)} />}
         {s.items.map((m) => <Message key={m.id} m={m} p={p} live={m.runId != null && m.runId === s.run?.runId} onRetry={(x) => send(x)}
           card={(v) => <VersionCard v={v} p={p} playing={v.revision === p.revision ? t.playing : preview?.n === v.n} pos={pos} total={total} current={v.revision === p.revision}
             onPlay={() => playVersion(v, v.revision === p.revision)} onEdit={() => openEditor(v)} onPublish={() => void doPublish(v)} onRestore={() => restore(v)} />} />)}
@@ -328,7 +358,7 @@ function Message({ m, p, live, onRetry, card }: { m: ChatItem; p: Project; live:
 function VersionCard({ v, p, current, playing, pos, total, onPlay, onEdit, onPublish, onRestore }: { v?: SongVersion; p: Project; current: boolean; playing: boolean; pos: number; total: number; onPlay: () => void; onEdit: () => void; onPublish: () => void; onRestore?: () => void }) {
   const song = v?.snapshot ?? p;
   const len = current ? total : songSeconds(song);
-  const label = `${p.name === "Untitled" ? "Song" : p.name}${v ? ` v${v.n}` : ""}`;
+  const label = `${p.name === "Untitled" ? "Song" : p.name}${v ? (v.label ? ` · ${v.label}` : ` v${v.n}`) : ""}`;
   return <div className="ms-song" data-testid="version-card" data-version={v?.n ?? "current"} data-current={current ? "1" : "0"}>
     <div className="ms-song-t">
       <button className="ms-btn ms-play" aria-label={playing ? `Pause ${label}` : `Play ${label}`} data-testid="version-play" onClick={onPlay}>{playing ? "❚❚" : "▶︎"}</button>

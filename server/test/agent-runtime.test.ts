@@ -153,3 +153,60 @@ test("a new message binds to the currently open project; a mid-run PROJECT_CHANG
   const s3 = setup([() => calls(tc("a", "gbk_list_tracks"))], {}, l3); await s3.go();
   assert.doesNotMatch(s3.conv.history.at(-1)!.text, /[A-Z_]{6,}|prj_/);
 });
+
+test("remix run (#162): context names the source song + summary once, reads target the open fork", async () => {
+  const link = new FakeLink(ALL);
+  const { rt, conv, model } = setup([() => calls(tc("c1", "gbk_get_project_summary")), () => reply("Transposed your fork."), () => reply("Done.")], {}, link);
+  const opts = { runId: "run_remix", user: "alice", model: "fake-model", conv, link, signal: new AbortController().signal };
+  const r = await rt.run({ ...opts, text: "rewrite this in A major", remixOf: { slug: "symphony-no-5-in-c-minor-5gm8vhzs", title: "Symphony No. 5 in C Minor", summary: { name: "Symphony No. 5 in C Minor (fork)", noteCount: 10882 } } });
+  assert.equal(r.status, "completed");
+  const firstUser = model.requests[0].messages.find((m) => m.role === "user") as { content: string };
+  assert.match(firstUser.content, /remix of shared song "Symphony No\. 5 in C Minor" \(symphony-no-5-in-c-minor-5gm8vhzs\)/);
+  assert.match(firstUser.content, /never create a project/);
+  assert.match(firstUser.content, /song summary \(data\): .*10882/);
+  assert.deepEqual(conv.remixOf, { slug: "symphony-no-5-in-c-minor-5gm8vhzs", title: "Symphony No. 5 in C Minor", projectId: "prj_1" });
+  // The read executed against the project open in the tab (the fork); nothing created a project.
+  assert.deepEqual(link.executed.map((e) => e.tool), ["gbk_get_project_summary"]);
+  assert.equal(link.executed[0].expect, "prj_1");
+  // A later run in the same conversation keeps the remix binding but does not repeat the summary.
+  const r2 = await rt.run({ ...opts, runId: "run_remix_2", text: "now make it brighter" });
+  assert.equal(r2.status, "completed");
+  const secondUser = model.requests[2].messages.filter((m) => m.role === "user").at(-1) as { content: string };
+  assert.match(secondUser.content, /remix of shared song/);
+  assert.doesNotMatch(secondUser.content, /song summary/);
+});
+
+test("remix session (#164 review 3): create/generate are not offered, a call is refused, consent is false, binding clears on song change", async () => {
+  const link = new FakeLink(ALL);
+  const { rt, conv, model } = setup([
+    () => calls(tc("c1", "gbk_get_project_summary")),
+    () => calls(tc("c2", "gbk_create_project", { name: "Sneaky" })), // the model tries anyway
+    () => reply("Understood, editing the fork instead."),
+    () => calls(tc("c3", "gbk_list_tracks")),
+    () => reply("Fresh start."),
+  ], {}, link);
+  const opts = { runId: "run_rx", user: "alice", model: "fake-model", conv, link, signal: new AbortController().signal };
+  const r = await rt.run({ ...opts, text: "rewrite this in A major", remixOf: { slug: "some-song-abc123", title: "Some Song" } });
+  assert.equal(r.status, "completed");
+  // Not offered while the binding is live; the follow-up tools still are.
+  const offered = model.requests[0].tools.map((t) => t.function.name);
+  assert.ok(!offered.includes("gbk_create_project") && !offered.includes("gbk_generate_arrangement"), "project-creating tools are not offered in a remix session");
+  assert.ok(offered.includes("gbk_transform_notes") && offered.includes("gbk_get_project_summary"));
+  // The one dispatched call carried consent.newProject = false.
+  assert.deepEqual(link.executed.map((e) => e.tool), ["gbk_get_project_summary"]);
+  assert.equal(link.executed[0].consent?.newProject, false);
+  // The create call never reached the browser; the model saw a refusal it can react to.
+  const refusal = JSON.parse((model.requests[2].messages.at(-1) as { content: string }).content);
+  assert.equal(refusal.ok, false); assert.equal(refusal.error.code, "REMIX_FOLLOW_UP_ONLY");
+  assert.deepEqual(conv.remixOf, { slug: "some-song-abc123", title: "Some Song", projectId: "prj_1" });
+  // The user opens a different song: the binding, the context claim, and the enforcement all end.
+  link.projectId = "prj_other";
+  const r2 = await rt.run({ ...opts, runId: "run_rx_2", text: "compose something new" });
+  assert.equal(r2.status, "completed");
+  assert.equal(conv.remixOf, null);
+  const user2 = model.requests[3].messages.filter((m) => m.role === "user").at(-1) as { content: string };
+  assert.doesNotMatch(user2.content, /remix of shared song/);
+  assert.ok(model.requests[3].tools.map((t) => t.function.name).includes("gbk_create_project"), "create is offered again once the binding clears");
+  assert.equal(link.executed.at(-1)!.tool, "gbk_list_tracks");
+  assert.equal(link.executed.at(-1)!.consent?.newProject, true);
+});

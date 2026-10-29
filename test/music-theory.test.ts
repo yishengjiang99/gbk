@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { transpose, invert, retrograde, scaleTime, sequence, fitRange, motion, parallelPerfects, estimateKey, counterpoint, analyze } from "../src/music/theory.ts";
+import { transpose, invert, retrograde, scaleTime, sequence, fitRange, motion, parallelPerfects, estimateKey, estimateChord, counterpoint, analyze } from "../src/music/theory.ts";
+import { FIFTH_ROWS } from "./support/fifth-opening.ts";
 import { WorkstationController } from "../src/workstation/controller.ts";
 import { buildAllTools } from "../src/webmcp/registry.ts";
 import { runTool } from "../src/webmcp/tools.ts";
@@ -29,6 +30,21 @@ test("motion + parallel fifths detection", () => {
 test("key estimate heuristic finds C major on a C scale", () => {
   const k = estimateKey(cScale);
   assert.equal(k.label, "C major"); assert.match(k.method, /heuristic/);
+});
+
+test("estimateKey anchors the tonic: the Fifth's opening (no declared key) reads C minor, not its relative major (#164 review 1)", () => {
+  // Verbatim opening of the real imported share (bars 1-8): profile correlation alone reads the
+  // pitch COLLECTION and calls this Eb major; the resting tones (the held Eb is C minor's b3, the
+  // passage arrives on C) anchor the tonic in C.
+  const ns = FIFTH_ROWS.map(([, tick, duration, pitch, velocity]) => ({ tick, pitch, duration, velocity }));
+  assert.equal(estimateKey(ns).label, "C minor");
+});
+
+test("estimateKey still reads a passage resting on the Eb tonic as Eb major (control)", () => {
+  const eb = [N(0, 63), N(480, 65), N(960, 67), N(1440, 68), N(1920, 70, 960), N(2880, 75, 1920)];
+  assert.equal(estimateKey(eb).label, "Eb major");
+  const am = [57, 59, 60, 62, 64, 65, 64, 62, 60, 59, 57].map((p, i) => N(i * 480, p));
+  assert.equal(estimateKey(am).label, "A minor");
 });
 
 test("counterpoint deterministic per seed, stays in register, consonant on strong beats, no parallels", () => {
@@ -63,4 +79,14 @@ test("tools: counterpoint + fugue section produce pending proposals without muta
   await call("gbk_commit_proposal", { proposalId: (fg.data as { proposalId: string }).proposalId });
   assert.ok(c.project.tracks.length >= 4);
   assert.ok(c.project.notes.some((n) => n.tick >= 2 * 1920));
+});
+
+test("estimateChord labels triads and sevenths, null on too little signal (#162)", () => {
+  assert.equal(estimateChord([0, 4, 7])?.label, "C major");
+  assert.equal(estimateChord([9, 0, 4])?.label, "A minor");
+  assert.equal(estimateChord([2, 5, 9])?.label, "D minor");
+  assert.equal(estimateChord([0, 4, 7, 10])?.label, "C dominant 7th");
+  assert.equal(estimateChord([7]), null);
+  assert.equal(estimateChord([0, 1]), null);
+  assert.equal(estimateChord([]), null);
 });

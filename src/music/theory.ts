@@ -46,7 +46,49 @@ export function parallelPerfects(upper: MNote[], lower: MNote[]): { tick: number
 const MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 const PCN = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-/** Heuristic key estimate (Krumhansl–Schmuckler, duration weighted). */
+/** Best-fit chord label for a pitch-class set (e.g. [0,4,7] -> "C major"), used by the score digest.
+ * Templates are scored by coverage minus foreign tones; null when fewer than 2 pitch classes or no fit. */
+export function estimateChord(pcs: number[]): { root: number; rootName: string; quality: string; label: string } | null {
+  const set = new Set(pcs.map((p) => ((p % 12) + 12) % 12));
+  if (set.size < 2) return null;
+  const templates: { quality: string; intervals: number[] }[] = [
+    { quality: "major", intervals: [0, 4, 7] }, { quality: "minor", intervals: [0, 3, 7] },
+    { quality: "diminished", intervals: [0, 3, 6] }, { quality: "augmented", intervals: [0, 4, 8] },
+    { quality: "dominant 7th", intervals: [0, 4, 7, 10] }, { quality: "major 7th", intervals: [0, 4, 7, 11] },
+    { quality: "minor 7th", intervals: [0, 3, 7, 10] }, { quality: "suspended 4th", intervals: [0, 5, 7] },
+    { quality: "suspended 2nd", intervals: [0, 2, 7] }, { quality: "power", intervals: [0, 7] },
+  ];
+  let best: { root: number; quality: string; score: number } | null = null;
+  for (let root = 0; root < 12; root++) for (const t of templates) {
+    const tones = new Set(t.intervals.map((i) => (root + i) % 12));
+    let hit = 0; for (const pc of set) if (tones.has(pc)) hit++;
+    if (hit < 3 && hit < tones.size) continue; // a 2-pc set inside a 7th template is not a chord; a complete power chord is
+    const score = hit * 2 - (set.size - hit) - (tones.size - hit) * 0.5;
+    if (!best || score > best.score) best = { root, quality: t.quality, score };
+  }
+  if (!best) return null;
+  return { root: best.root, rootName: PCN[best.root], quality: best.quality, label: `${PCN[best.root]} ${best.quality}` };
+}
+/** Resting-tone evidence for a candidate key: how well the tones a passage RESTS on — its longest
+ * notes plus its final arrival (lowest voice) — fit the candidate tonic. Profile correlation reads
+ * pitch COLLECTION, which leaves a minor key and its relative major nearly tied (a C-minor passage
+ * "estimates" as Eb major); but music comes to rest on tonic-triad tones and essentially never on
+ * the leading tone, so resting tones anchor the tonic where collection cannot. Returns [-0.5, 1]. */
+export function restingAnchor(ns: MNote[], tonic: number, mode: "major" | "minor"): number {
+  if (!ns.length) return 0;
+  const durs = ns.map((n) => n.duration).sort((a, b) => a - b);
+  const med = durs[Math.floor(durs.length / 2)] ?? 0;
+  const endMax = Math.max(...ns.map((n) => n.tick + n.duration));
+  const fin = ns.filter((n) => n.tick + n.duration === endMax).sort((a, b) => a.pitch - b.pitch)[0];
+  const tones: { pc: number; w: number }[] = [];
+  if (med > 0) for (const n of ns) if (n.duration >= 2 * med) tones.push({ pc: ((n.pitch % 12) + 12) % 12, w: n.duration });
+  if (fin) tones.push({ pc: ((fin.pitch % 12) + 12) % 12, w: fin.duration * 2 });
+  if (!tones.length) return 0;
+  const stab = (rel: number) => rel === 0 ? 1 : rel === 7 ? 0.7 : rel === (mode === "major" ? 4 : 3) ? 0.7 : rel === 11 ? -0.5 : [2, 5, 8, 9, 10].includes(rel) ? 0.25 : 0;
+  const tw = tones.reduce((a, t) => a + t.w, 0) || 1;
+  return tones.reduce((a, t) => a + t.w * stab((((t.pc - tonic) % 12) + 12) % 12), 0) / tw;
+}
+/** Heuristic key estimate (Krumhansl–Schmuckler, duration weighted, resting-tone anchored). */
 export function estimateKey(ns: MNote[]): { label: string; tonic: number; mode: "major" | "minor"; confidence: number; method: string } {
   const h = new Array(12).fill(0); for (const n of ns) h[((n.pitch % 12) + 12) % 12] += n.duration;
   const corr = (prof: number[], r: number) => {
@@ -55,9 +97,9 @@ export function estimateKey(ns: MNote[]): { label: string; tonic: number; mode: 
     let num = 0, dx = 0, dy = 0; for (let i = 0; i < 12; i++) { num += (x[i] - mx) * (y[i] - my); dx += (x[i] - mx) ** 2; dy += (y[i] - my) ** 2; }
     return dx && dy ? num / Math.sqrt(dx * dy) : 0;
   };
-  let best = { tonic: 0, mode: "major" as "major" | "minor", r: -2 };
-  for (let t = 0; t < 12; t++) for (const [mode, prof] of [["major", MAJOR], ["minor", MINOR]] as const) { const r = corr(prof as number[], t); if (r > best.r) best = { tonic: t, mode, r }; }
-  return { label: `${PCN[best.tonic]} ${best.mode}`, tonic: best.tonic, mode: best.mode, confidence: +best.r.toFixed(3), method: "heuristic: Krumhansl-Schmuckler profile correlation" };
+  let best = { tonic: 0, mode: "major" as "major" | "minor", r: -2, score: -Infinity };
+  for (let t = 0; t < 12; t++) for (const [mode, prof] of [["major", MAJOR], ["minor", MINOR]] as const) { const r = corr(prof as number[], t); const score = r + 0.3 * restingAnchor(ns, t, mode); if (score > best.score) best = { tonic: t, mode, r, score }; }
+  return { label: `${PCN[best.tonic]} ${best.mode}`, tonic: best.tonic, mode: best.mode, confidence: +best.r.toFixed(3), method: "heuristic: Krumhansl-Schmuckler profile correlation + resting-tone anchor" };
 }
 export function scalePcs(tonic: number, mode: "major" | "minor"): number[] {
   const steps = mode === "major" ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10, 11]; // minor incl. raised 7th

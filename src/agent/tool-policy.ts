@@ -14,6 +14,7 @@ export const COMPOSER_TOOL_POLICY: Record<string, ToolPolicy> = {
   // discovery / reads (parallel-safe)
   gbk_get_capabilities: { cls: "read" },
   gbk_get_project_summary: { cls: "read" },
+  gbk_get_score_digest: { cls: "read" },
   gbk_list_tracks: { cls: "read" },
   gbk_get_notes: { cls: "read" },
   gbk_get_cc_events: { cls: "read" },

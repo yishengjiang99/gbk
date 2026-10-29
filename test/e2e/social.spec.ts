@@ -15,6 +15,21 @@ async function dismissLandingPaywall(page: Page) {
   await expect(modal).toHaveCount(0);
 }
 
+/** The Studio title is a text element in MobileStudio but an <input> (ds-title) in DesktopStudio;
+ * assert against whichever rendering is mounted. */
+async function expectStudioTitle(page: Page, title: string) {
+  const el = page.getByTestId("studio-title");
+  await expect.poll(async () => {
+    const tag = await el.evaluate((e) => e.tagName).catch(() => "");
+    return tag === "INPUT" ? await el.inputValue().catch(() => "") : (await el.textContent().catch(() => "")) ?? "";
+  }, { timeout: 30_000 }).toBe(title);
+}
+/** DesktopStudio does not render version cards yet (the Original A/B card is mobile-only — #164 review
+ * follow-up), so version-card assertions apply only where the mobile Studio is mounted. */
+async function isMobileStudio(page: Page) {
+  return page.getByTestId("studio-title").evaluate((e) => e.tagName !== "INPUT").catch(() => true);
+}
+
 async function apiLogin(req: APIRequestContext, base: string, code: string) {
   const csrf = (await (await req.get("/api/session")).json()).csrf as string;
   const r = await req.post("/api/login", { headers: { origin: base, "x-gbk-csrf": csrf }, data: { code } }); expect(r.ok()).toBeTruthy();
@@ -417,4 +432,84 @@ test("social feed play button is accessible: aria-label Play/Pause + aria-presse
   await expect(b).toHaveAttribute("aria-label", was === "true" ? "Play" : "Pause");
   expect(await inRoll()).toBe(true);
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});
+
+test("social remix: the prompt carries the song - fork loads, A major remaps the fork, Original stays for A/B (#162)", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const title = `Remix E2E ${test.info().project.name} ${Date.now() % 100000}`;
+  const sh = await createShare(owner.request, oh, { title, project, public: true });
+  const promptText = "a stormy sea shanty in C major";
+  expect((await owner.request.patch(`/api/songs/${sh.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: promptText } })).ok()).toBeTruthy();
+  const wsState = () => page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation; const p = c.project; return { name: p.name, key: p.meta?.key ?? null, forkOf: p.meta?.forkOf ?? null, owner: p.meta?.owner ?? null, pitches: p.notes.map((n: any) => n.pitch).sort((a: number, b: number) => a - b) }; });
+  try {
+    await apiLogin(page.request, base, "e2e-code-2");
+    await page.goto("/feed?sort=new");
+    const card = page.getByTestId("feed-card").filter({ hasText: title }).first();
+    await expect(card).toBeVisible();
+    await dismissLandingPaywall(page);
+    await card.getByTestId("card-remix").click();
+    // The fork - not an empty project - is what the fresh session opens, and the prompt rides along prefilled.
+    await expectStudioTitle(page, `${title} (fork)`);
+    const loaded = await wsState();
+    expect(loaded.forkOf).toBe(sh.slug); expect(loaded.owner).toBe("user");
+    expect(loaded.pitches).toEqual((project as any).notes.map((n: any) => n.pitch).sort((a: number, b: number) => a - b));
+    await expect(page.getByTestId("composer-input")).toHaveValue(promptText);
+    if (await isMobileStudio(page)) await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
+    // Ask for the key change: the agent must READ the fork and TRANSFORM it (never create a new project).
+    await page.getByTestId("composer-input").fill("rewrite this in A major");
+    await page.getByTestId("composer-send").click();
+    // The fork is user-owned, so the remap arrives as a proposal: Accept it in the agent panel.
+    const accept = page.locator(".ws-accept").first();
+    await expect(accept).toBeVisible({ timeout: 120_000 });
+    await accept.click();
+    await expect(page.getByTestId("assistant-text").last()).toContainText("Rewrote it in A major", { timeout: 120_000 });
+    const after = await wsState();
+    expect(after.name).toBe(`${title} (fork)`); expect(after.forkOf).toBe(sh.slug);
+    expect(after.key).toBe("A major");
+    // C major -> A major is a pure -3 shift (degree map is identity major->major): every pitch moved, none created.
+    expect(after.pitches).toEqual((project as any).notes.map((n: any) => n.pitch - 3).sort((a: number, b: number) => a - b));
+    // A/B: the Original card is still there next to the new version (mobile Studio rendering).
+    if (await isMobileStudio(page)) {
+      await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
+      expect(await page.getByTestId("version-card").count()).toBeGreaterThanOrEqual(2);
+    }
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});
+
+test("social remix fallback: a share that fails to load still lands in a FRESH session (#164 review 2)", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const stamp = `${test.info().project.name} ${Date.now() % 100000}`;
+  const titleA = `Remix OK ${stamp}`; const titleB = `Remix Gone ${stamp}`;
+  const shA = await createShare(owner.request, oh, { title: titleA, project, public: true });
+  const shB = await createShare(owner.request, oh, { title: titleB, project, public: true });
+  const promptB = "a lullaby that cannot load";
+  expect((await owner.request.patch(`/api/songs/${shA.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: "a stormy sea shanty in C major" } })).ok()).toBeTruthy();
+  expect((await owner.request.patch(`/api/songs/${shB.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: promptB } })).ok()).toBeTruthy();
+  const wsState = () => page.evaluate(() => { const p = (globalThis as any).__gbkWorkstation.project; return { forkOf: p.meta?.forkOf ?? null, notes: p.notes.length }; });
+  try {
+    await apiLogin(page.request, base, "e2e-code-2");
+    await page.goto("/feed?sort=new");
+    await dismissLandingPaywall(page);
+    // Establish the previous session: remix A successfully, so A's fork is the live project.
+    const cardA = page.getByTestId("feed-card").filter({ hasText: titleA }).first();
+    await expect(cardA).toBeVisible();
+    await cardA.getByTestId("card-remix").click();
+    await expectStudioTitle(page, `${titleA} (fork)`);
+    expect((await wsState()).forkOf).toBe(shA.slug);
+    // Back to the feed; B is deleted server-side while its card is still on screen.
+    const back = page.getByTestId("studio-back");
+    if (await back.isVisible().catch(() => false)) await back.click(); else await page.getByTestId("nav-explore").click();
+    const cardB = page.getByTestId("feed-card").filter({ hasText: titleB }).first();
+    await expect(cardB).toBeVisible();
+    expect((await owner.request.delete(`/api/shares/${shB.slug}`, { headers: oh })).ok()).toBeTruthy();
+    await cardB.getByTestId("card-remix").click();
+    // The load fails (404): the landing must still be a FRESH session (#161) — a new empty project
+    // with B's prompt in the composer and the failure toast, NOT A's fork with the prompt pasted on top.
+    await expect(page.getByTestId("studio-toast")).toContainText("Couldn't load that song", { timeout: 30_000 });
+    await expect(page.getByTestId("composer-input")).toHaveValue(promptB);
+    const after = await wsState();
+    expect(after.forkOf).toBeNull(); expect(after.notes).toBe(0);
+  } finally { await owner.request.delete(`/api/shares/${shA.slug}`, { headers: oh }).catch(() => undefined); await owner.close(); }
 });

@@ -44,3 +44,16 @@ test("errors and steps are shown in plain words, never codes or tool names", () 
   assert.equal(plainStep("gbk_render_wav"), "Render wav");
   assert.equal(plainStep("writing the melody"), "Writing the melody");
 });
+
+test("recordOriginal pins the fork's loaded state as a labeled, restorable A/B anchor (#162 step 7)", () => {
+  const c = new WorkstationController(); const log = new VersionLog();
+  assert.equal(log.recordOriginal(c.project), null, "an empty song has no original");
+  addPiano(c, 60); addPiano(c, 63);
+  const orig = log.recordOriginal(c.project)!;
+  assert.equal(orig.label, "Original"); assert.equal(orig.n, 1);
+  assert.equal(log.recordOriginal(c.project)?.runId, "remix-original", "recorded once per project");
+  addPiano(c, 67); const v2 = log.record("r1", c.project)!;
+  assert.equal(v2.n, 2); assert.equal(v2.label, undefined, "agent versions keep the plain v<n> naming");
+  assert.ok(c.restoreSnapshot(orig.snapshot, "restore original"));
+  assert.deepEqual(c.project.notes.map((n) => n.pitch), [60, 63], "restoring the Original brings back exactly the fork's notes");
+});
