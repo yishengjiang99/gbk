@@ -15,6 +15,21 @@ async function dismissLandingPaywall(page: Page) {
   await expect(modal).toHaveCount(0);
 }
 
+/** The Studio title is a text element in MobileStudio but an <input> (ds-title) in DesktopStudio;
+ * assert against whichever rendering is mounted. */
+async function expectStudioTitle(page: Page, title: string) {
+  const el = page.getByTestId("studio-title");
+  await expect.poll(async () => {
+    const tag = await el.evaluate((e) => e.tagName).catch(() => "");
+    return tag === "INPUT" ? await el.inputValue().catch(() => "") : (await el.textContent().catch(() => "")) ?? "";
+  }, { timeout: 30_000 }).toBe(title);
+}
+/** DesktopStudio does not render version cards yet (the Original A/B card is mobile-only — #164 review
+ * follow-up), so version-card assertions apply only where the mobile Studio is mounted. */
+async function isMobileStudio(page: Page) {
+  return page.getByTestId("studio-title").evaluate((e) => e.tagName !== "INPUT").catch(() => true);
+}
+
 async function apiLogin(req: APIRequestContext, base: string, code: string) {
   const csrf = (await (await req.get("/api/session")).json()).csrf as string;
   const r = await req.post("/api/login", { headers: { origin: base, "x-gbk-csrf": csrf }, data: { code } }); expect(r.ok()).toBeTruthy();
@@ -435,12 +450,12 @@ test("social remix: the prompt carries the song - fork loads, A major remaps the
     await dismissLandingPaywall(page);
     await card.getByTestId("card-remix").click();
     // The fork - not an empty project - is what the fresh session opens, and the prompt rides along prefilled.
-    await expect(page.getByTestId("studio-title")).toHaveText(`${title} (fork)`, { timeout: 30_000 });
+    await expectStudioTitle(page, `${title} (fork)`);
     const loaded = await wsState();
     expect(loaded.forkOf).toBe(sh.slug); expect(loaded.owner).toBe("user");
     expect(loaded.pitches).toEqual((project as any).notes.map((n: any) => n.pitch).sort((a: number, b: number) => a - b));
     await expect(page.getByTestId("composer-input")).toHaveValue(promptText);
-    await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
+    if (await isMobileStudio(page)) await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
     // Ask for the key change: the agent must READ the fork and TRANSFORM it (never create a new project).
     await page.getByTestId("composer-input").fill("rewrite this in A major");
     await page.getByTestId("composer-send").click();
@@ -454,9 +469,11 @@ test("social remix: the prompt carries the song - fork loads, A major remaps the
     expect(after.key).toBe("A major");
     // C major -> A major is a pure -3 shift (degree map is identity major->major): every pitch moved, none created.
     expect(after.pitches).toEqual((project as any).notes.map((n: any) => n.pitch - 3).sort((a: number, b: number) => a - b));
-    // A/B: the Original card is still there next to the new version.
-    await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
-    expect(await page.getByTestId("version-card").count()).toBeGreaterThanOrEqual(2);
+    // A/B: the Original card is still there next to the new version (mobile Studio rendering).
+    if (await isMobileStudio(page)) {
+      await expect(page.getByTestId("version-card").filter({ hasText: "Original" })).toBeVisible();
+      expect(await page.getByTestId("version-card").count()).toBeGreaterThanOrEqual(2);
+    }
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
 
@@ -479,7 +496,7 @@ test("social remix fallback: a share that fails to load still lands in a FRESH s
     const cardA = page.getByTestId("feed-card").filter({ hasText: titleA }).first();
     await expect(cardA).toBeVisible();
     await cardA.getByTestId("card-remix").click();
-    await expect(page.getByTestId("studio-title")).toHaveText(`${titleA} (fork)`, { timeout: 30_000 });
+    await expectStudioTitle(page, `${titleA} (fork)`);
     expect((await wsState()).forkOf).toBe(shA.slug);
     // Back to the feed; B is deleted server-side while its card is still on screen.
     const back = page.getByTestId("studio-back");
