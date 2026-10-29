@@ -16,11 +16,11 @@ export const reply = (content: string): ModelResponse => ({ content, toolCalls: 
 export const calls = (...t: ToolCall[]): ModelResponse => ({ content: "", toolCalls: t, finishReason: "tool_calls", usage: { promptTokens: 100, completionTokens: 10 } });
 
 export class FakeLink implements BrowserLink {
-  sessionId = "bs_test"; projectId = "prj_1"; revision = 0; events: ServerMessage[] = []; executed: { tool: string; args: Record<string, unknown>; callId: string; expect: string | null }[] = [];
+  sessionId = "bs_test"; projectId = "prj_1"; revision = 0; events: ServerMessage[] = []; executed: { tool: string; args: Record<string, unknown>; callId: string; expect: string | null; consent: { newProject: boolean } | null }[] = [];
   allowedTools: Set<string>;
   reconnectTo: BrowserLink | null = null;
   constructor(tools: string[], public handler: (tool: string, args: Record<string, unknown>) => Promise<ToolResultEnvelope> | ToolResultEnvelope = (t) => ({ ok: true, projectId: this.projectId, revision: this.revision, data: { tool: t }, warnings: [] })) { this.allowedTools = new Set(tools); }
   emit(m: ServerMessage) { this.events.push(m); }
-  async callTool(_run: string, callId: string, tool: string, args: Record<string, unknown>, o: { expectProjectId: string | null }) { this.executed.push({ tool, args, callId, expect: o.expectProjectId }); return this.handler(tool, args); }
+  async callTool(_run: string, callId: string, tool: string, args: Record<string, unknown>, o: { expectProjectId: string | null; consent?: { newProject: boolean } }) { this.executed.push({ tool, args, callId, expect: o.expectProjectId, consent: o.consent ?? null }); return this.handler(tool, args); }
   async awaitReconnect() { return this.reconnectTo; }
 }

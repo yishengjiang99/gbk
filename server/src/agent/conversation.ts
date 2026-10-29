@@ -10,7 +10,7 @@ export interface Conversation {
   artifacts: ArtifactRef[]; recentEdits: string[];
   /** #162: set when this conversation is a remix of a shared song; the open project is the user's fork
    * of it. Null for ordinary conversations (and absent in conversations persisted before this field). */
-  remixOf: { slug: string; title: string } | null;
+  remixOf: { slug: string; title: string; projectId: string } | null;
 }
 export function newConversation(user: string): Conversation {
   const t = Date.now();

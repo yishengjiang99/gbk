@@ -29,7 +29,11 @@ export function useAgentSession() {
   const client = useRef<BridgeClient | null>(null);
   // #162: while a remix session is active, sends carry remixOf so the server binds the run to the fork.
   const remixRef = useRef<{ slug: string; title: string } | null>(null);
-  const setRemixOf = useCallback((v: { slug: string; title: string } | null) => { remixRef.current = v; }, []);
+  // #164 review 3: the label belongs to the fork that was open when it was set; opening a different
+  // song clears it, so later sends stop claiming a remix of a song that is no longer open.
+  const remixProjectRef = useRef<string | null>(null);
+  const setRemixOf = useCallback((v: { slug: string; title: string } | null) => { remixRef.current = v; remixProjectRef.current = v ? workstation.project.id : null; }, []);
+  useEffect(() => workstation.subscribe(() => { if (remixRef.current && workstation.project.id !== remixProjectRef.current) { remixRef.current = null; remixProjectRef.current = null; } }), []);
 
   const refreshAuth = useCallback(async () => {
     // A 5xx / unreachable server (e.g. mid-deploy) is not a logout: keep the last known sign-in state.
@@ -86,7 +90,7 @@ export function useAgentSession() {
     return true;
   }, [model]);
   const stop = useCallback(() => { const r = run?.runId ?? client.current?.activeRunId; if (r) client.current?.send({ type: "cancel_run", runId: r }); client.current?.cancelLocal(); }, [run]);
-  const reset = useCallback(() => { remixRef.current = null; client.current?.send({ type: "reset_conversation" }); setItems([]); }, []);
+  const reset = useCallback(() => { remixRef.current = null; remixProjectRef.current = null; client.current?.send({ type: "reset_conversation" }); setItems([]); }, []);
   const login = useCallback(async (code: string) => {
     const { status, body } = await api("/login", { method: "POST", body: JSON.stringify({ code }), csrf: auth.csrf });
     if (status !== 200) { setAuth((a) => ({ ...a, error: body.message ?? "login failed" })); return false; }
