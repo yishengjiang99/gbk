@@ -51,8 +51,10 @@ jobs:
 
   # Composer browser e2e (real server + fake model + Chromium). Report-only for now: 3 Studio specs
   # (share-link open, theme/landing) already fail on main as of 2026-10-24; make this required once they pass.
+  # Pinned to ubuntu-24.04: ubuntu-latest moved to 26.04, for which Playwright has no Chromium build
+  # (the job died at "playwright install" without running a spec, 2026-10-29).
   e2e-composer:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     continue-on-error: true
     permissions:
