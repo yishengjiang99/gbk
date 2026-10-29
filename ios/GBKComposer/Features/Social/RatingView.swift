@@ -16,6 +16,8 @@ struct RatingView: View {
                     auth.gate("Sign in to rate songs.", prompt: requestSignIn) { Task { await rate(star) } }
                 } label: {
                     Image(systemName: star <= (song.myRating ?? 0) ? "star.fill" : "star")
+                        // Web card: filled stars are gold.
+                        .foregroundStyle(star <= (song.myRating ?? 0) ? Color(red: 0.97, green: 0.71, blue: 0.0) : Theme.accent)
                 }
                 .buttonStyle(.plain)
                 .disabled(busy || song.isMine)

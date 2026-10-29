@@ -46,12 +46,41 @@ enum DeepLink: Equatable {
     }
 }
 
+/// A feed card asking the Studio (Create tab) to open a song, optionally as a fork.
+struct StudioSongRequest: Equatable {
+    let slug: String
+    let fork: Bool
+    let id = UUID()
+}
+
+/// A feed card asking the Studio to start a composer run from a shared prompt
+/// (the web card's "Remix this prompt").
+struct StudioPromptRequest: Equatable {
+    let text: String
+    let id = UUID()
+}
+
 @MainActor
 final class DeepLinkRouter: ObservableObject {
     @Published var selectedTab: AppTab = .feed
     @Published var pending: DeepLink?
     /// Handles pushed on the Feed tab's NavigationStack.
     @Published var feedPath: [String] = []
+    /// One-shot requests from feed cards to the Studio web view.
+    @Published var studioSong: StudioSongRequest?
+    @Published var studioPrompt: StudioPromptRequest?
+
+    /// Feed card "open" / fork buttons: switch to Create and load the song there.
+    func openInStudio(slug: String, fork: Bool) {
+        studioSong = StudioSongRequest(slug: slug, fork: fork)
+        selectedTab = .create
+    }
+
+    /// Feed card "Remix this prompt": switch to Create with the prompt as the composer draft.
+    func remixPrompt(_ text: String) {
+        studioPrompt = StudioPromptRequest(text: text)
+        selectedTab = .create
+    }
 
     /// UI tests: `-deepLink <url>` routes the URL at launch (same path as onOpenURL on cold start).
     func handleLaunchArguments(_ args: [String] = ProcessInfo.processInfo.arguments) {

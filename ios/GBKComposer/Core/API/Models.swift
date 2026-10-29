@@ -12,6 +12,8 @@ struct User: Codable, Hashable, Identifiable {
     let createdAt: Int64?
     /// Public Pro flag (#133): bare boolean from the server; no source or expiry is ever exposed.
     var pro: Bool? = nil
+    /// Public author badge (e.g. "AI artist"), shown next to the handle like the web card.
+    var badge: String? = nil
     var id: String { handle }
 }
 

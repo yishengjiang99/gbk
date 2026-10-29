@@ -81,7 +81,10 @@ struct FeedView: View {
                                          onRated: { model.update($0) },
                                          onComments: { commentsFor = song },
                                          onReport: { auth.gate("Sign in to report.", prompt: requestSignIn) { reportFor = song } },
-                                         onTag: { model.query.tag = $0; tagText = $0 })
+                                         onTag: { model.query.tag = $0; tagText = $0 },
+                                         onOpen: { router.openInStudio(slug: song.slug, fork: false) },
+                                         onFork: { router.openInStudio(slug: song.slug, fork: true) },
+                                         onRemixPrompt: { router.remixPrompt($0) })
                             .frame(width: geo.size.width, height: geo.size.height)
                             .id(song.slug)
                             .accessibilityElement(children: .contain)

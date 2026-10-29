@@ -100,16 +100,29 @@ function useAudio() {
   return { cur, fading, unlocked, start, toggle, stop, fadeOut, preload, host, viz, currentEl };
 }
 
-function FeedView({ me, filter, setFilter, onSheet, onOpen }: { me: Me | null; filter: { sort: string; label?: string; tag?: string }; setFilter: (f: { sort: string; label?: string; tag?: string }) => void; onSheet: (s: Sheet) => void; onOpen: (slug: string, fork: boolean) => void }) {
+function FeedView({ me, filter, setFilter, onSheet, onOpen, focusSlug }: { me: Me | null; filter: { sort: string; label?: string; tag?: string }; setFilter: (f: { sort: string; label?: string; tag?: string }) => void; onSheet: (s: Sheet) => void; onOpen: (slug: string, fork: boolean) => void; focusSlug?: string }) {
   const [items, setItems] = useState<Song[]>([]); const [cursor, setCursor] = useState<string | null>(null); const [done, setDone] = useState(false); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
   const [labels, setLabels] = useState<string[]>([]); const audio = useAudio(); const mv = useRef("unknown");
-  const key = `${filter.sort}|${filter.label ?? ""}|${filter.tag ?? ""}`; const live = useRef(key);
+  const key = `${filter.sort}|${filter.label ?? ""}|${filter.tag ?? ""}|${focusSlug ?? ""}`; const live = useRef(key);
+  // Share link (/s/<slug>): the shared song is pinned at the top of the feed, so it is the
+  // active card — it starts as soon as audio unlocks (the Tap to play pill targets it).
+  const focusDone = useRef<string | undefined>(undefined);
+  useEffect(() => { focusDone.current = undefined; }, [focusSlug]);
   useEffect(() => { void social.tags().then((t) => setLabels(t.labels.map((l) => l.label).filter((l) => l !== "wip").slice(0, 4))).catch(() => undefined); }, []);
   const load = useCallback(async (reset: boolean) => {
     setLoading(true); setErr("");
-    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key) return; setItems((p) => reset ? r.items : [...p, ...r.items.filter((x) => !p.some((y) => y.slug === x.slug))]); setCursor(r.next_cursor); setDone(!r.next_cursor); if (r.model_version) mv.current = r.model_version; }
+    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key) return;
+      let pageItems = r.items;
+      if (reset && focusSlug && focusDone.current !== focusSlug) {
+        focusDone.current = focusSlug;
+        if (!pageItems.some((x) => x.slug === focusSlug)) {
+          const s = await social.song(focusSlug).catch(() => null);
+          if (s && live.current === key) pageItems = [s, ...pageItems];
+        }
+      }
+      setItems((p) => reset ? pageItems : [...p, ...pageItems.filter((x) => !p.some((y) => y.slug === x.slug))]); setCursor(r.next_cursor); setDone(!r.next_cursor); if (r.model_version) mv.current = r.model_version; }
     catch (e) { setErr((e as Error).message); } finally { setLoading(false); }
-  }, [filter.sort, filter.label, filter.tag, cursor, key]);
+  }, [filter.sort, filter.label, filter.tag, cursor, key, focusSlug]);
   const feedEl = useRef<HTMLDivElement | null>(null); const [active, setActive] = useState(0); const [candidate, setCandidate] = useState(0);
   // Section switch (chip, #tag, Browse): fade the playing song out (58 ms), then start the new section at its first card.
   const focusFirst = useRef(false);
@@ -314,7 +327,7 @@ export function SocialApp({ route, onOpen }: { route: SocialRoute; onOpen: (slug
     <div className="so-app" data-testid="social-app">
       <header className="so-top"><a href="/" onClick={(e) => { e.preventDefault(); navigate(""); }}><b>gbk</b></a><span className="so-grow" />{me && <span className="so-dim" data-testid="me-handle">@{me.handle}</span>}</header>
       <main className="so-main" key={bump}>
-        {route.view === "feed" && <FeedView me={me} filter={filter} setFilter={setFilter} onSheet={setSheet} onOpen={onOpen} />}
+        {route.view === "feed" && <FeedView me={me} filter={filter} setFilter={setFilter} onSheet={setSheet} onOpen={onOpen} focusSlug={route.focus} />}
         {route.view === "profile" && <ProfileView handle={route.handle} me={me} onSheet={setSheet} setMe={setMe} />}
         {route.view === "inbox" && <div className="so-pad" data-testid="inbox-view"><h2>Inbox</h2>{me ? <p className="so-dim">Direct messages are coming in the next update. You'll be able to message any signed-in musician, and block, report or turn DMs off.</p> : <p className="so-dim">Messages appear here after you sign in. Tap Inbox to sign in.</p>}</div>}
         {route.view === "admin" && (me?.is_admin ? <AdminView /> : <div className="so-pad so-dim">Admins only.</div>)}

@@ -25,6 +25,13 @@ struct StudioWebView: View {
     @StateObject private var scan = ScanController()
     @State private var publishRequest: PublishBridge.Request?
     @State private var published = false
+    /// Feed-card requests waiting on the Studio page: a prompt to drop into the composer
+    /// and a song to open, both delivered once /studio has loaded (the auth handoff load
+    /// must finish first), plus the identity of the current open-this-song load (so the
+    /// web view lets that one /s/<slug> navigation through to the Studio).
+    @State private var pendingPrompt: String?
+    @State private var pendingSong: StudioSongRequest?
+    @State private var songLoadID: UUID?
 
     var body: some View {
         // Composer input must always be visible (keyboard up or down, during playback). Keyboard handling:
@@ -44,9 +51,18 @@ struct StudioWebView: View {
                     if let url {
                         // A publish request follows finished work in the Studio: refresh `/api/me`
                         // so the paywall watcher (#123) sees any eligibility flip promptly.
-                        WebView(url: url, scan: scan, onLoad: { loaded in
+                        WebView(url: url, scan: scan, songLoad: songLoadID, onLoad: { loaded in
+                            // A pending "Remix this prompt" takes this load: drop the prompt into the
+                            // composer (the web reads gbk.composerDraft on the focus event) instead of
+                            // the draft check.
+                            if let prompt = pendingPrompt {
+                                pendingPrompt = nil
+                                deliverPrompt(prompt)
+                            } else if let song = pendingSong {
+                                pendingSong = nil
+                                loadSong(song)
                             // App launch (or any full load that restored a project): same draft check.
-                            if Self.humHarnessURL == nil, loaded.query?.contains("new=") != true { Task { await freshIfNoDraft(waitForRestore: true) } }
+                            } else if Self.humHarnessURL == nil, loaded.query?.contains("new=") != true { Task { await freshIfNoDraft(waitForRestore: true) } }
                         }, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } },
                            onDeepLink: { router.open($0) })
                             .accessibilityIdentifier("studio-webview")
@@ -71,6 +87,15 @@ struct StudioWebView: View {
         .onChange(of: router.selectedTab) { old, new in
             if new == .create, old != .create, url != nil, Self.humHarnessURL == nil { Task { await freshIfNoDraft() } }
         }
+        // Feed card "open" / fork and "Remix this prompt" requests. onChange covers a
+        // mounted Studio; the .task below covers a request that arrived before the
+        // Studio was first mounted (onChange does not fire for the initial value).
+        .onChange(of: router.studioSong) { _, req in if let req { handleStudioSong(req) } }
+        .onChange(of: router.studioPrompt) { _, req in if let req { handleStudioPrompt(req) } }
+        .task {
+            if let req = router.studioSong { handleStudioSong(req) }
+            if let req = router.studioPrompt { handleStudioPrompt(req) }
+        }
         .task(id: auth.accessToken) {
             if let harness = Self.humHarnessURL { url = harness; return }
             let token = auth.accessToken
@@ -81,6 +106,49 @@ struct StudioWebView: View {
             urlToken = token
             url = (handoff ?? nil) ?? URL(string: path, relativeTo: Self.studioURL)!.absoluteURL
         }
+    }
+}
+
+extension StudioWebView {
+    /// Feed card "open" / fork: load the song's /s/<slug> page in the Studio — its web
+    /// share flow loads the song into the workstation (?fork=1 forks it). Queued behind
+    /// the auth handoff when the Studio has not loaded yet.
+    @MainActor func handleStudioSong(_ req: StudioSongRequest) {
+        router.studioSong = nil
+        if url == nil { pendingSong = req } else { loadSong(req) }
+    }
+
+    @MainActor func loadSong(_ req: StudioSongRequest) {
+        var comps = URLComponents(url: Self.studioURL, resolvingAgainstBaseURL: false)!
+        comps.path = "/s/\(req.slug)"
+        if req.fork { comps.queryItems = [URLQueryItem(name: "fork", value: "1")] }
+        songLoadID = req.id
+        url = comps.url
+    }
+
+    /// Feed card "Remix this prompt": same handoff the web card performs (sessionStorage
+    /// draft + focus event), delivered to the loaded Studio page, or queued for the
+    /// /studio load it triggers.
+    @MainActor func handleStudioPrompt(_ req: StudioPromptRequest) {
+        router.studioPrompt = nil
+        if let web = scan.webView, web.url?.path.hasPrefix("/studio") == true {
+            deliverPrompt(req.text)
+        } else {
+            pendingPrompt = req.text
+            if url?.path.hasPrefix("/studio") != true {
+                url = URL(string: Self.studioPath(fresh: false), relativeTo: Self.studioURL)!.absoluteURL
+            }
+        }
+    }
+
+    /// Mirror of the web card's `remix()`: stash the prompt (capped at 4,000 chars like the
+    /// web) in sessionStorage and fire the focus event the composer listens for.
+    @MainActor func deliverPrompt(_ text: String) {
+        guard let web = scan.webView else { return }
+        let capped = String(text.prefix(4000))
+        let json = (try? JSONSerialization.data(withJSONObject: [capped])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+        let js = "sessionStorage.setItem('gbk.focusComposer','1'); sessionStorage.setItem('gbk.composerDraft', \(json)[0]); window.dispatchEvent(new Event('gbk:focus-composer'));"
+        web.evaluateJavaScript(js)
     }
 }
 
@@ -147,6 +215,9 @@ struct StudioNativeBar: View {
 struct WebView: UIViewRepresentable {
     let url: URL
     var scan: ScanController? = nil
+    /// Identity of a deliberate open-this-song load: the coordinator lets that one
+    /// /s/<slug> main-frame navigation through instead of routing it to the feed.
+    var songLoad: UUID? = nil
     var onLoad: (@MainActor (URL) -> Void)? = nil
     var onPublish: (@MainActor (PublishBridge.Request) -> Void)? = nil
     /// Song pages (/s/<slug>) open the native feed card instead of loading inside the studio.
@@ -185,6 +256,10 @@ struct WebView: UIViewRepresentable {
         context.coordinator.publish.onPublish = onPublish
         context.coordinator.onLoad = onLoad
         context.coordinator.onDeepLink = onDeepLink
+        if let songLoad, songLoad != context.coordinator.seenSongLoad {
+            context.coordinator.seenSongLoad = songLoad
+            context.coordinator.allowSongPageOnce = true
+        }
         if uiView.url == nil || context.coordinator.loaded != url {
             context.coordinator.loaded = url
             Self.load(uiView, url)
@@ -201,6 +276,10 @@ struct WebView: UIViewRepresentable {
         var loaded: URL?
         var onLoad: (@MainActor (URL) -> Void)?
         var onDeepLink: (@MainActor (DeepLink) -> Void)?
+        /// Set when the app itself asked the Studio to open a song (feed card "open"/fork);
+        /// consumed by the next /s/<slug> navigation decision.
+        var allowSongPageOnce = false
+        var seenSongLoad: UUID?
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard let u = webView.url, u.path.hasPrefix("/studio") else { return }
@@ -299,6 +378,9 @@ struct WebView: UIViewRepresentable {
             if Self.isPurchaseLink(action.request.url) {
                 decisionHandler(.cancel)
                 Task { @MainActor in PurchaseStore.shared.presentPaywall(reason: "studio_link") }
+            } else if allowSongPageOnce, Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) != nil {
+                allowSongPageOnce = false
+                decisionHandler(.allow)
             } else if let onDeepLink, let link = Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) {
                 decisionHandler(.cancel)
                 Task { @MainActor in onDeepLink(link) }

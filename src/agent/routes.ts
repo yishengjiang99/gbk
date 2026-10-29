@@ -1,13 +1,15 @@
 // Tiny path router relative to the Vite base ("/" on compose.grepawk.com, "/gbk/" on GitHub Pages).
 export function base(): string { try { return (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? "/"; } catch { return "/"; } }
 export const appUrl = (path = "") => `${base()}${path.replace(/^\//, "")}`;
-export type SocialRoute = { view: "feed"; sort?: string; label?: string; tag?: string } | { view: "profile"; handle: string | null } | { view: "inbox" } | { view: "admin" };
+export type SocialRoute = { view: "feed"; sort?: string; label?: string; tag?: string; focus?: string } | { view: "profile"; handle: string | null } | { view: "inbox" } | { view: "admin" };
 export type Route = SocialRoute | { view: "studio" } | { view: "share"; slug: string; fork: boolean };
 export function parseRoute(pathname = location.pathname, search = location.search): Route {
   const b = base(); let rel = pathname.startsWith(b) ? pathname.slice(b.length) : pathname.replace(/^\//, "");
   rel = rel.replace(/\/$/, "");
   const m = /^s\/([a-z0-9][a-z0-9-]{3,127})$/.exec(rel);
-  if (m) return { view: "share", slug: m[1], fork: new URLSearchParams(search).get("fork") === "1" };
+  // A share link lands on the song's feed card (playing once audio unlocks), not in the
+  // Studio. Only an explicit fork (?fork=1, the card's Remix button) opens the editor.
+  if (m) return new URLSearchParams(search).get("fork") === "1" ? { view: "share", slug: m[1], fork: true } : { view: "feed", focus: m[1] };
   if (rel === "studio" || new URLSearchParams(search).has("player")) return { view: "studio" };
   const q = new URLSearchParams(search);
   if (rel === "" || rel === "explore" || rel === "feed") return { view: "feed", sort: q.get("sort") ?? undefined, label: q.get("label") ?? undefined };
