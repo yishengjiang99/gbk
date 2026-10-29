@@ -31,6 +31,53 @@ function keyOf(p: Project, k?: string) {
   if (p.meta?.key) { try { return parseKey(p.meta.key); } catch { /* free text */ } }
   const e = estimateKey(p.notes); return { label: e.label, tonic: e.tonic, mode: e.mode, sf: 0 };
 }
+
+const SCALE_STEPS: Record<"major" | "minor", number[]> = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
+/** Per-pitch-class offsets (indexed by pitch class RELATIVE to the source tonic) that re-voice the source
+ * scale as the target scale, degree by degree: minor -> major raises b3/b6/b7 (+1), major -> minor lowers
+ * 3/6/7 (-1). Pitch classes outside the source scale (e.g. the raised 7th of harmonic minor) keep offset 0,
+ * so existing leading tones are never shifted twice. */
+export function degreeMap(sourceMode: "major" | "minor", targetMode: "major" | "minor"): number[] {
+  const s = SCALE_STEPS[sourceMode], t = SCALE_STEPS[targetMode];
+  const m = new Array(12).fill(0);
+  s.forEach((pc, i) => { m[pc] = t[i] - pc; });
+  return m;
+}
+
+const isPercussionTrack = (t: Track) => t.channel === 9 || t.role === "percussion";
+
+/** transform:"remap" (#162 step 4): a degree-aware key change. Percussion tracks are always skipped (a
+ * transpose would remap drum SOUNDS). All target tracks are rewritten in ONE op batch - one proposal or
+ * one commit - and meta.key is set in the same batch when targetKey is given. */
+function remapNotes(c: WorkstationController, p: Project, a: Record<string, unknown>, r: { startTick: number; endTick: number }, signal: AbortSignal) {
+  const srcKey = keyOf(p);
+  let semi = (a.semitones as number) ?? 0;
+  let map = a.pitchClassMap ? [...(a.pitchClassMap as number[])] : null;
+  if (map && map.length !== 12) throw new WorkstationError("INVALID_ARGUMENT", "pitchClassMap needs exactly 12 entries (one per pitch class, relative to the source tonic)");
+  let targetLabel: string | null = null;
+  if (a.targetKey) {
+    const tk = parseKey(a.targetKey as string);
+    const d = (((tk.tonic - srcKey.tonic) % 12) + 12) % 12;
+    semi = d > 6 ? d - 12 : d; // prefer the short way round (C -> A is -3, not +9) so registers survive
+    if (!map) map = degreeMap(srcKey.mode, tk.mode);
+    targetLabel = tk.label;
+  }
+  if (!map) throw new WorkstationError("INVALID_ARGUMENT", "remap needs targetKey or pitchClassMap");
+  const targets = (a.trackId as string) === "*" ? p.tracks : [findTrack(p, a.trackId as string)];
+  const ops: Op[] = []; const skipped: string[] = []; let changed = 0;
+  for (const t of targets) {
+    if (isPercussionTrack(t)) { skipped.push(t.name); continue; }
+    const src = p.notes.filter((n) => n.trackId === t.id && n.tick >= r.startTick && n.tick < r.endTick);
+    if (!src.length) continue;
+    const mapped = src.map((n) => { const rel = (((n.pitch - srcKey.tonic) % 12) + 12) % 12; return { trackId: t.id, channel: t.channel, tick: n.tick, duration: n.duration, pitch: Math.max(0, Math.min(127, n.pitch + semi + (map[rel] ?? 0))), velocity: n.velocity }; });
+    ops.push({ op: "removeNotes", ids: src.map((n) => n.id) }, { op: "addNotes", notes: mapped });
+    changed += src.length;
+  }
+  if (!changed) throw new WorkstationError("INVALID_RANGE", "no remappable notes in range (percussion tracks are always skipped)");
+  if (targetLabel) ops.push({ op: "setMeta", key: targetLabel });
+  const out = applied(c, ops, targetLabel ? `remap to ${targetLabel} (${changed} notes)` : `remap notes (${changed} notes)`, signal, a.baseRevision as number | undefined, { sourceNotes: changed, resultNotes: changed, semitones: semi, ...(targetLabel ? { key: targetLabel } : {}) });
+  return { data: out.data, warnings: [...(out.warnings ?? []), ...(skipped.length ? [`skipped percussion track(s): ${skipped.join(", ")}`] : []), ...(!targetLabel ? ["meta.key not updated (no targetKey given)"] : [])] };
+}
 function gridFor(p: Project, startTick: number, endTick: number): BarGrid[] {
   return barGrid(p, 100000 > 0 ? Math.min(100000, Math.ceil(endTick / (p.ppq)) + 2) : 1).filter((g) => g.tick >= startTick && g.tick < endTick);
 }
@@ -111,10 +158,12 @@ export function buildArrangementTools(c: WorkstationController): ToolDef[] {
         return applied(c, [{ op: "addNotes", notes: ns.map((n) => ({ trackId: t.id, channel: t.channel, tick: n.tick, duration: n.duration, pitch: n.pitch, velocity: n.velocity })) }], `${a.kind} on ${t.name} (${ns.length} notes)`, signal, a.baseRevision as number | undefined, { notes: ns.length, key: key.label, progression: chords.slice(0, 32) });
       } },
     { name: "gbk_transform_notes", readOnly: false,
-      description: "Transform a track's notes in a range: transpose, invert (around axis pitch), retrograde, repeat / sequence (copies after the range, shifted by `semitones` per copy), quantize (grid in beats, strength), humanize (velocity ± amount, timing ± ticks, seeded), articulation (legato/detache/staccato/tenuto/marcato), phrase_dynamics (velocity arcs per `phraseBars`), variation (ornament/diminution/inversion).",
-      inputSchema: obj({ trackId: str(), range: BAR_RANGE, transform: { type: "string", enum: ["transpose", "invert", "retrograde", "repeat", "sequence", "quantize", "humanize", "articulation", "phrase_dynamics", "variation"] }, semitones: int(-48, 48), axis: int(0, 127), times: int(1, 64), grid: { type: "number", minimum: 0.0625, maximum: 4 }, strength: { type: "number", minimum: 0, maximum: 1 }, amount: int(0, 64), timing: int(0, 240), articulation: { type: "string", enum: ["legato", "detache", "staccato", "tenuto", "marcato"] }, variation: { type: "string", enum: ["ornament", "diminution", "inversion"] }, phraseBars: int(1, 64), seed: int(0, 2 ** 31), baseRevision: BASE_REV }, ["trackId", "range", "transform"]),
+      description: "Transform a track's notes in a range: transpose, invert (around axis pitch), retrograde, repeat / sequence (copies after the range, shifted by `semitones` per copy), quantize (grid in beats, strength), humanize (velocity ± amount, timing ± ticks, seeded), articulation (legato/detache/staccato/tenuto/marcato), phrase_dynamics (velocity arcs per `phraseBars`), variation (ornament/diminution/inversion), remap (degree-aware key change: pass `targetKey` e.g. \"A major\" - resolved against the project key to a transpose + per-degree pitch-class map - or `semitones` + a 12-entry `pitchClassMap` of offsets relative to the source tonic; trackId \"*\" remaps every non-percussion track as ONE change, percussion is always skipped, and meta.key is updated in the same change when targetKey is given).",
+      inputSchema: obj({ trackId: str(), range: BAR_RANGE, transform: { type: "string", enum: ["transpose", "invert", "retrograde", "repeat", "sequence", "quantize", "humanize", "articulation", "phrase_dynamics", "variation", "remap"] }, semitones: int(-48, 48), pitchClassMap: { type: "array", items: int(-2, 2), maxItems: 12, description: "remap only: 12 offsets (-2..+2), one per pitch class relative to the source tonic" }, targetKey: str(32, { description: "remap only: target key, e.g. \"A major\"; resolved against the project key" }), axis: int(0, 127), times: int(1, 64), grid: { type: "number", minimum: 0.0625, maximum: 4 }, strength: { type: "number", minimum: 0, maximum: 1 }, amount: int(0, 64), timing: int(0, 240), articulation: { type: "string", enum: ["legato", "detache", "staccato", "tenuto", "marcato"] }, variation: { type: "string", enum: ["ornament", "diminution", "inversion"] }, phraseBars: int(1, 64), seed: int(0, 2 ** 31), baseRevision: BASE_REV }, ["trackId", "range", "transform"]),
       run: (a, signal) => {
-        const p = P(); const t = findTrack(p, a.trackId as string); const r = rangeToTicks(p, a.range as never);
+        const p = P(); const r = rangeToTicks(p, a.range as never);
+        if (a.transform === "remap") return remapNotes(c, p, a, r, signal);
+        const t = findTrack(p, a.trackId as string);
         const src = p.notes.filter((n) => n.trackId === t.id && n.tick >= r.startTick && n.tick < r.endTick);
         if (!src.length) throw new WorkstationError("INVALID_RANGE", "no notes of that track in range");
         const R = rng((a.seed as number) ?? 1); const span = r.endTick - r.startTick;
