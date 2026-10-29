@@ -46,6 +46,29 @@ export function parallelPerfects(upper: MNote[], lower: MNote[]): { tick: number
 const MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 const PCN = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+/** Best-fit chord label for a pitch-class set (e.g. [0,4,7] -> "C major"), used by the score digest.
+ * Templates are scored by coverage minus foreign tones; null when fewer than 2 pitch classes or no fit. */
+export function estimateChord(pcs: number[]): { root: number; rootName: string; quality: string; label: string } | null {
+  const set = new Set(pcs.map((p) => ((p % 12) + 12) % 12));
+  if (set.size < 2) return null;
+  const templates: { quality: string; intervals: number[] }[] = [
+    { quality: "major", intervals: [0, 4, 7] }, { quality: "minor", intervals: [0, 3, 7] },
+    { quality: "diminished", intervals: [0, 3, 6] }, { quality: "augmented", intervals: [0, 4, 8] },
+    { quality: "dominant 7th", intervals: [0, 4, 7, 10] }, { quality: "major 7th", intervals: [0, 4, 7, 11] },
+    { quality: "minor 7th", intervals: [0, 3, 7, 10] }, { quality: "suspended 4th", intervals: [0, 5, 7] },
+    { quality: "suspended 2nd", intervals: [0, 2, 7] }, { quality: "power", intervals: [0, 7] },
+  ];
+  let best: { root: number; quality: string; score: number } | null = null;
+  for (let root = 0; root < 12; root++) for (const t of templates) {
+    const tones = new Set(t.intervals.map((i) => (root + i) % 12));
+    let hit = 0; for (const pc of set) if (tones.has(pc)) hit++;
+    if (hit < 3 && hit < tones.size) continue; // a 2-pc set inside a 7th template is not a chord; a complete power chord is
+    const score = hit * 2 - (set.size - hit) - (tones.size - hit) * 0.5;
+    if (!best || score > best.score) best = { root, quality: t.quality, score };
+  }
+  if (!best) return null;
+  return { root: best.root, rootName: PCN[best.root], quality: best.quality, label: `${PCN[best.root]} ${best.quality}` };
+}
 /** Heuristic key estimate (Krumhansl–Schmuckler, duration weighted). */
 export function estimateKey(ns: MNote[]): { label: string; tonic: number; mode: "major" | "minor"; confidence: number; method: string } {
   const h = new Array(12).fill(0); for (const n of ns) h[((n.pitch % 12) + 12) % 12] += n.duration;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { transpose, invert, retrograde, scaleTime, sequence, fitRange, motion, parallelPerfects, estimateKey, counterpoint, analyze } from "../src/music/theory.ts";
+import { transpose, invert, retrograde, scaleTime, sequence, fitRange, motion, parallelPerfects, estimateKey, estimateChord, counterpoint, analyze } from "../src/music/theory.ts";
 import { WorkstationController } from "../src/workstation/controller.ts";
 import { buildAllTools } from "../src/webmcp/registry.ts";
 import { runTool } from "../src/webmcp/tools.ts";
@@ -63,4 +63,14 @@ test("tools: counterpoint + fugue section produce pending proposals without muta
   await call("gbk_commit_proposal", { proposalId: (fg.data as { proposalId: string }).proposalId });
   assert.ok(c.project.tracks.length >= 4);
   assert.ok(c.project.notes.some((n) => n.tick >= 2 * 1920));
+});
+
+test("estimateChord labels triads and sevenths, null on too little signal (#162)", () => {
+  assert.equal(estimateChord([0, 4, 7])?.label, "C major");
+  assert.equal(estimateChord([9, 0, 4])?.label, "A minor");
+  assert.equal(estimateChord([2, 5, 9])?.label, "D minor");
+  assert.equal(estimateChord([0, 4, 7, 10])?.label, "C dominant 7th");
+  assert.equal(estimateChord([7]), null);
+  assert.equal(estimateChord([0, 1]), null);
+  assert.equal(estimateChord([]), null);
 });

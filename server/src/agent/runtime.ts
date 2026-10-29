@@ -31,7 +31,7 @@ const TASKS: Record<string, string> = {
   gbk_get_capabilities: "Checking workstation capabilities", gbk_create_project: "Creating project", gbk_create_track: "Creating tracks", gbk_generate_arrangement: "Generating arrangement",
   gbk_set_instrument: "Assigning instruments", gbk_generate_cc_curve: "Writing expression curves", gbk_set_effects: "Configuring effects", gbk_commit_proposal: "Applying change",
   gbk_render_wav: "Rendering WAV", gbk_get_render_artifact: "Verifying artifact", gbk_propose_voice_patch: "Shaping instrument sound", gbk_set_track_mix: "Adjusting mix",
-  gbk_list_tracks: "Reading tracks", gbk_get_project_summary: "Reading project", gbk_transform_notes: "Transforming notes", gbk_generate_part: "Writing a part", gbk_set_song_structure: "Planning sections", gbk_set_tempo_map: "Setting tempo",
+  gbk_list_tracks: "Reading tracks", gbk_get_project_summary: "Reading project", gbk_get_score_digest: "Reading the score digest", gbk_transform_notes: "Transforming notes", gbk_generate_part: "Writing a part", gbk_set_song_structure: "Planning sections", gbk_set_tempo_map: "Setting tempo",
 };
 export const taskFor = (tool: string) => TASKS[tool] ?? tool.replace(/^gbk_/, "").replace(/_/g, " ");
 
