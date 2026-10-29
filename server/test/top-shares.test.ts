@@ -5,7 +5,7 @@ import { startServer, login } from "./ws-helpers.ts";
 import { WorkstationController } from "../../src/workstation/controller.ts";
 import { buildAllTools } from "../../src/webmcp/registry.ts";
 import { runTool } from "../../src/webmcp/tools.ts";
-import { buildPreview } from "../../src/agent/piano-roll-preview.ts";
+import { buildPreview, PREVIEW_MAX_NOTES } from "../../src/agent/piano-roll-preview.ts";
 
 const H = (a: { cookie: string; csrf: string }) => ({ "content-type": "application/json", origin: "http://composer.test", "x-gbk-csrf": a.csrf, cookie: `${a.cookie}; gbk_csrf=${a.csrf}` });
 async function song(name: string) {
@@ -29,7 +29,7 @@ test("GET /api/shares/top: public only, ranked by forks then newest, light paylo
     const slugs = body.shares.map((x: { slug: string }) => x.slug);
     assert.equal(slugs[0], a.slug, "most-forked first"); assert.ok(!slugs.includes(b.slug), "private hidden");
     assert.ok(slugs.indexOf(c.slug) > 0);
-    for (const sh of body.shares) { assert.ok(sh.preview.notes.length > 0 && sh.preview.notes.length <= 240); assert.equal(sh.project, undefined); assert.equal(sh.wav, null); }
+    for (const sh of body.shares) { assert.ok(sh.preview.notes.length > 0 && sh.preview.notes.length <= PREVIEW_MAX_NOTES); assert.equal(sh.project, undefined); assert.equal(sh.wav, null); }
     assert.ok(JSON.stringify(body).length < 60_000);
     assert.equal((await (await fetch(`${s.base}/api/shares/top?limit=500`)).json()).shares.length <= 10, true);
   } finally { await s.app.close(); }
