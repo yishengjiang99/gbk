@@ -25,12 +25,26 @@ export async function getShare(slug: string): Promise<ShareInfo & { project: unk
 }
 export const mediaUrl = (slug: string, kind: "wav" | "midi" | "mp3") => `${apiBase()}/shares/${encodeURIComponent(slug)}/media/${kind}`;
 
+/** Checkpoint the current project before replacing it — best-effort only. The write goes to IndexedDB,
+ * which mobile Safari can stall indefinitely (e.g. another tab holding the database) or reject outright;
+ * neither may gate opening a song, so the wait is bounded and failures are swallowed (the autosaver
+ * still holds the user's work). */
+async function checkpointBeforeReplace(): Promise<void> {
+  if (!workstation.project.tracks.length && !workstation.project.notes.length) return;
+  const cp = workstation.host.checkpoint?.(workstation.project); // never overwrite the user's current work
+  if (!cp) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { await Promise.race([cp, new Promise<void>((res) => { timer = setTimeout(res, 3000); })]); }
+  catch { /* opening the song matters more than this courtesy save */ }
+  finally { clearTimeout(timer); }
+}
+
 /** Load a shared song as a NEW read-only local project (validated: shared data is untrusted). */
 export async function openShared(slug: string, fork = false): Promise<ShareInfo> {
   playerBridge.holdStartupLoads = true; // in-app navigation to a share: an in-flight player startup load must not win
   const s = await getShare(slug);
   const p = sanitizeSharedProject(s.project);
-  if (workstation.project.tracks.length || workstation.project.notes.length) await workstation.host.checkpoint?.(workstation.project); // never overwrite the user's current work
+  await checkpointBeforeReplace();
   workstation.loadShared({ ...p, name: s.title.slice(0, 120), meta: { ...(p.meta ?? {}), owner: "user", sharedFrom: { slug: s.slug, title: s.title, owner: s.owner, parentSlug: s.parent?.slug ?? null } } });
   if (fork) workstation.fork();
   return s;
@@ -77,7 +91,7 @@ export async function openOwn(slug: string): Promise<ShareInfo> {
   const s = await getShare(slug) as ShareInfo & { project: unknown; projectId?: string | null; mine?: boolean };
   if (!s.mine) return openShared(slug);
   const p = sanitizeSharedProject(s.project);
-  if (workstation.project.tracks.length || workstation.project.notes.length) await workstation.host.checkpoint?.(workstation.project);
+  await checkpointBeforeReplace();
   const id = s.projectId || p.id;
   const { songAutosaver } = await import("./autosave.ts");
   songAutosaver.adopt(id, s, p.revision);

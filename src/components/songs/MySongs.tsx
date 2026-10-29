@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { deleteShare, listShares, openOwn, setSharePublic, type SavedSong } from "../../agent/share-client.ts";
 import { songAutosaver } from "../../agent/autosave.ts";
 import { appUrl, navigate } from "../../agent/routes.ts";
+import { reportError } from "../../telemetry/error-reporter.ts";
 import { PublishDialog } from "./PublishDialog.tsx";
 
 /** The owner's songs (private auto-saves and published ones). Only rendered for a logged-in user; the API only returns their own. */
@@ -19,7 +20,7 @@ export function MySongs({ compact = false, refreshKey = 0 }: { compact?: boolean
           <b>{s.title}</b> <span className={s.public ? "pill pub" : "pill priv"} data-testid="my-song-status">{s.public ? "Public" : "Private"}</span>
           <span className="ws-dim"> {new Date(s.updatedAt ?? s.createdAt).toLocaleString()}</span>
           <span className="my-actions">
-            <button data-testid="my-open" onClick={async () => { await openOwn(s.slug); navigate("studio"); }}>Open</button>
+            <button data-testid="my-open" onClick={() => { void openOwn(s.slug).catch((e) => reportError(e, { where: "mysongs.open", slug: s.slug })); navigate("studio"); }}>Open</button>
             {s.public
               ? <button data-testid="my-unpublish" onClick={() => void setSharePublic(s.slug, false).then(refresh)}>Unpublish</button>
               : <button data-testid="my-publish" onClick={() => setPub(s)}>Publish</button>}
