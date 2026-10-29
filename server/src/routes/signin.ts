@@ -24,6 +24,13 @@ export function signinRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   const redirectUri = (p: ProviderName) => `${cfg.publicOrigin}/api/auth/${p}/callback`;
   const creds = (p: string) => (p === "github" ? cfg.auth.github : p === "google" ? cfg.auth.google : null);
   const stateCookie = (v: string, maxAge: number) => cookie(STATE_COOKIE, v, cfg, { maxAge }).replace("SameSite=Strict", "SameSite=Lax");
+  // Server-side copy of each issued state (single use, same 600s TTL as the cookie). The cookie stays the
+  // primary check, but in-app browsers (X/Instagram/…) hand the provider leg off to Safari, so the callback
+  // can arrive in a browser context that never received the state cookie (issue #159). When the cookie is
+  // absent, this record is the fallback: the state in the URL plus the server-held PKCE verifier still gate
+  // the exchange. A cookie that is present but does not match fails hard, exactly as before.
+  const pending = new Map<string, { verifier: string; ret: string; p: string; exp: number }>();
+  const sweepPending = () => { const t = Date.now(); for (const [k, v] of pending) if (v.exp <= t) pending.delete(k); };
 
   app.get("/api/auth/:provider", async (req, reply) => {
     const p = (req.params as { provider: string }).provider; const c = creds(p);
@@ -31,6 +38,7 @@ export function signinRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     if (!limiter.take(`signin:${req.ip}`)) return reply.code(429).send({ code: "RATE_LIMITED", message: "too many sign-in attempts; wait a minute" });
     const state = randomBytes(24).toString("base64url"); const verifier = randomBytes(32).toString("base64url");
     const ret = safeReturn((req.query as { return?: string }).return);
+    sweepPending(); pending.set(state, { verifier, ret, p, exp: Date.now() + 600_000 });
     reply.header("set-cookie", stateCookie(Buffer.from(JSON.stringify({ state, verifier, ret, p })).toString("base64url"), 600));
     const u = p === "github" ? new URL("https://github.com/login/oauth/authorize") : new URL("https://accounts.google.com/o/oauth2/v2/auth");
     u.searchParams.set("client_id", c.clientId); u.searchParams.set("redirect_uri", redirectUri(p as ProviderName)); u.searchParams.set("state", state);
@@ -53,15 +61,24 @@ export function signinRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     reply.header("set-cookie", stateCookie("", 0)); // single use
     const retry = `<p><a href="/api/auth/${esc(p)}">Try again</a> · <a href="/">Home</a></p>`;
     if (q.error) return page(reply, 400, "Sign-in cancelled", `<p>The provider returned: ${esc(String(q.error).slice(0, 100))}.</p>${retry}`);
-    if (!saved || saved.p !== p || !q.state || saved.state !== q.state || !q.code) return page(reply, 400, "Sign-in failed", "<p>The sign-in request expired or did not match. Please start again.</p>" + retry);
+    // Validate against the state cookie when one arrived; when none did (the flow crossed browser contexts,
+    // #159), fall back to the server-side record for the state in the URL. Either way the flow is consumed.
+    let flow: { verifier: string; ret: string } | null = null;
+    if (saved) {
+      if (saved.p === p && q.state && saved.state === q.state && q.code) { flow = { verifier: saved.verifier, ret: saved.ret }; pending.delete(q.state); }
+    } else if (q.state && q.code) {
+      const rec = pending.get(q.state); pending.delete(q.state);
+      if (rec && rec.p === p && rec.exp > Date.now()) flow = { verifier: rec.verifier, ret: rec.ret };
+    }
+    if (!flow || !q.code) return page(reply, 400, "Sign-in failed", "<p>The sign-in request expired or did not match. Please start again.</p>" + retry);
     let who: Identity;
-    try { who = p === "github" ? await github(c, q.code, redirectUri("github")) : await google(c, q.code, redirectUri("google"), saved.verifier); }
+    try { who = p === "github" ? await github(c, q.code, redirectUri("github")) : await google(c, q.code, redirectUri("google"), flow.verifier); }
     catch (e) { req.log.warn({ evt: "signin_failed", provider: p, err: (e as Error).message }); return page(reply, 502, "Sign-in failed", "<p>We could not verify your account with the provider.</p>" + retry); }
     const { account, created } = accounts.upsertOAuth(p as ProviderName, who.id, who.name, who.email);
     const s = sessions.create(account.id);
     reply.header("set-cookie", [stateCookie("", 0), cookie(COOKIE, sessions.cookieValue(s), cfg, { maxAge: sessions.maxAgeSec(s) }), cookie(CSRF_COOKIE, s.csrf, cfg, { httpOnly: false })]);
     req.log.info({ evt: "login", via: p, user: account.id, created });
-    return page(reply, 200, "Signed in", `<p>Signed in as ${esc(account.name)}. <a href="${esc(saved.ret)}">Continue</a></p>`, saved.ret);
+    return page(reply, 200, "Signed in", `<p>Signed in as ${esc(account.name)}. <a href="${esc(flow.ret)}">Continue</a></p>`, flow.ret);
   });
 
   async function github(c: { clientId: string; clientSecret: string }, code: string, redirect: string): Promise<Identity> {

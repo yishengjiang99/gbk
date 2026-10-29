@@ -62,6 +62,36 @@ test("Google sign-in (PKCE) when configured", async () => {
   } finally { await s.app.close(); }
 });
 
+test("Google sign-in completes without the state cookie when the server issued the state (cross-context callback, #159)", async () => {
+  const s = await start({ GOOGLE_CLIENT_ID: "gid", GOOGLE_CLIENT_SECRET: "gsec" });
+  try {
+    const go = await fetch(`${s.base}/api/auth/google`, { redirect: "manual" });
+    const st = new URL(go.headers.get("location")!).searchParams.get("state")!;
+    // The callback lands in a different browser context (Safari) that never received the state cookie.
+    const cb = await fetch(`${s.base}/api/auth/google/callback?code=c&state=${st}`);
+    assert.equal(cb.status, 200);
+    assert.match(await cb.text(), /url=\/studio/);
+    const ses = await (await fetch(`${s.base}/api/session`, { headers: { cookie: cookies(cb) } })).json();
+    assert.equal(ses.user, "g-1234567890");
+    // The issued state is single-use: replaying the same callback without the cookie is refused.
+    assert.equal((await fetch(`${s.base}/api/auth/google/callback?code=c&state=${st}`)).status, 400, "state replay");
+  } finally { await s.app.close(); }
+});
+
+test("cross-context fallback refuses unknown states and present-but-mismatched cookies (#159)", async () => {
+  const s = await start({ GOOGLE_CLIENT_ID: "gid", GOOGLE_CLIENT_SECRET: "gsec" });
+  try {
+    assert.equal((await fetch(`${s.base}/api/auth/google/callback?code=c&state=never-issued`)).status, 400, "unknown state, no cookie");
+    const go1 = await fetch(`${s.base}/api/auth/google`, { redirect: "manual" });
+    const st1 = new URL(go1.headers.get("location")!).searchParams.get("state")!;
+    const go2 = await fetch(`${s.base}/api/auth/google`, { redirect: "manual" });
+    // A browser holding flow 2's state cookie cannot complete flow 1 with it (present-but-mismatched fails hard).
+    assert.equal((await fetch(`${s.base}/api/auth/google/callback?code=c&state=${st1}`, { headers: { cookie: cookies(go2) } })).status, 400, "mismatched cookie");
+    // Flow 1 is still completable from its own (cookie-less) callback context afterwards.
+    assert.equal((await fetch(`${s.base}/api/auth/google/callback?code=c&state=${st1}`)).status, 200);
+  } finally { await s.app.close(); }
+});
+
 test("open redirects are refused", () => {
   for (const r of ["https://evil.example", "//evil.example", "/\\evil", 5, undefined]) assert.equal(safeReturn(r), "/studio");
   assert.equal(safeReturn("/s/song-abc"), "/s/song-abc");
