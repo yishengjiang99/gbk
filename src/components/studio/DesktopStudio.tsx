@@ -257,7 +257,8 @@ export function DesktopStudio(props: DesktopStudioProps) {
   useEffect(() => { if (!sessionStorage.getItem("gbk.composerFresh")) return; sessionStorage.removeItem("gbk.composerFresh"); const d = text; void (async () => { await newSongRef.current(); if (d) setText(d); })(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // #162: a remix handoff names the song, not just a prompt. Load the user's editable fork of it, start a
   // FRESH agent session on that fork (never newProject() — that would empty the song back out), and prefill
-  // the original prompt. If the song cannot load, fall back to the prompt-only landing with a toast.
+  // the original prompt. If the song cannot load, fall back to a prompt-only landing in a FRESH session
+  // (newSong, the #161 flow) with a toast — never on top of the previous chat.
   const remixBusy = useRef(false);
   const applyRemix = async (h: RemixHandoff) => {
     if (remixBusy.current) return; remixBusy.current = true;
@@ -271,6 +272,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
       say(`Remixing “${info.title}” — your copy is loaded.`);
     } catch (e) {
       reportError(e, { where: "desktop.remixLoad", slug: h.slug });
+      await newSongRef.current(); // #161: even when the song fails to load, the landing is a FRESH session, never the previous chat
       setText(h.prompt);
       say("Couldn't load that song, so the prompt is in the composer on its own.");
     } finally { remixBusy.current = false; input.current?.focus(); }

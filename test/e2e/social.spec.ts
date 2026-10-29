@@ -459,3 +459,40 @@ test("social remix: the prompt carries the song - fork loads, A major remaps the
     expect(await page.getByTestId("version-card").count()).toBeGreaterThanOrEqual(2);
   } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
 });
+
+test("social remix fallback: a share that fails to load still lands in a FRESH session (#164 review 2)", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const stamp = `${test.info().project.name} ${Date.now() % 100000}`;
+  const titleA = `Remix OK ${stamp}`; const titleB = `Remix Gone ${stamp}`;
+  const shA = await createShare(owner.request, oh, { title: titleA, project, public: true });
+  const shB = await createShare(owner.request, oh, { title: titleB, project, public: true });
+  const promptB = "a lullaby that cannot load";
+  expect((await owner.request.patch(`/api/songs/${shA.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: "a stormy sea shanty in C major" } })).ok()).toBeTruthy();
+  expect((await owner.request.patch(`/api/songs/${shB.slug}/meta`, { headers: oh, data: { prompt_shared: true, prompt_text: promptB } })).ok()).toBeTruthy();
+  const wsState = () => page.evaluate(() => { const p = (globalThis as any).__gbkWorkstation.project; return { forkOf: p.meta?.forkOf ?? null, notes: p.notes.length }; });
+  try {
+    await apiLogin(page.request, base, "e2e-code-2");
+    await page.goto("/feed?sort=new");
+    await dismissLandingPaywall(page);
+    // Establish the previous session: remix A successfully, so A's fork is the live project.
+    const cardA = page.getByTestId("feed-card").filter({ hasText: titleA }).first();
+    await expect(cardA).toBeVisible();
+    await cardA.getByTestId("card-remix").click();
+    await expect(page.getByTestId("studio-title")).toHaveText(`${titleA} (fork)`, { timeout: 30_000 });
+    expect((await wsState()).forkOf).toBe(shA.slug);
+    // Back to the feed; B is deleted server-side while its card is still on screen.
+    const back = page.getByTestId("studio-back");
+    if (await back.isVisible().catch(() => false)) await back.click(); else await page.getByTestId("nav-explore").click();
+    const cardB = page.getByTestId("feed-card").filter({ hasText: titleB }).first();
+    await expect(cardB).toBeVisible();
+    expect((await owner.request.delete(`/api/shares/${shB.slug}`, { headers: oh })).ok()).toBeTruthy();
+    await cardB.getByTestId("card-remix").click();
+    // The load fails (404): the landing must still be a FRESH session (#161) — a new empty project
+    // with B's prompt in the composer and the failure toast, NOT A's fork with the prompt pasted on top.
+    await expect(page.getByTestId("studio-toast")).toContainText("Couldn't load that song", { timeout: 30_000 });
+    await expect(page.getByTestId("composer-input")).toHaveValue(promptB);
+    const after = await wsState();
+    expect(after.forkOf).toBeNull(); expect(after.notes).toBe(0);
+  } finally { await owner.request.delete(`/api/shares/${shA.slug}`, { headers: oh }).catch(() => undefined); await owner.close(); }
+});
