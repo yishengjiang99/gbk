@@ -16,8 +16,9 @@ struct FeedCardView: View {
     var onOpen: () -> Void = {}
     /// Fork this song into the Studio (web card's fork button).
     var onFork: () -> Void = {}
-    /// "Remix this prompt": hand the shared prompt to the Studio composer.
-    var onRemixPrompt: (String) -> Void = { _ in }
+    /// "Remix this prompt": hand the song (slug + shared prompt) to the Studio, which
+    /// opens a fork of the song in a fresh composer session.
+    var onRemixPrompt: (String, String) -> Void = { _, _ in }
 
     private var isPlaying: Bool { playback?.isPlaying ?? false }
     @EnvironmentObject private var auth: AuthStore
@@ -152,7 +153,7 @@ struct FeedCardView: View {
                         .font(.subheadline).foregroundStyle(Theme.text)
                         .lineLimit(2)
                     Spacer(minLength: 0)
-                    Button("Remix this prompt") { onRemixPrompt(prompt) }
+                    Button("Remix this prompt") { onRemixPrompt(song.slug, prompt) }
                         .font(.subheadline.weight(.semibold))
                         .buttonStyle(.bordered)
                         .tint(Theme.accent)

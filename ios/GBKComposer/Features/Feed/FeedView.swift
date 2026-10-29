@@ -84,7 +84,7 @@ struct FeedView: View {
                                          onTag: { model.query.tag = $0; tagText = $0 },
                                          onOpen: { router.openInStudio(slug: song.slug, fork: false) },
                                          onFork: { router.openInStudio(slug: song.slug, fork: true) },
-                                         onRemixPrompt: { router.remixPrompt($0) })
+                                         onRemixPrompt: { slug, prompt in router.remixPrompt(slug: slug, prompt: prompt) })
                             .frame(width: geo.size.width, height: geo.size.height)
                             .id(song.slug)
                             .accessibilityElement(children: .contain)

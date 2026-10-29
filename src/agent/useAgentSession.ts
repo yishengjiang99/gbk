@@ -26,6 +26,9 @@ export function useAgentSession() {
   const [info, setInfo] = useState<{ model: string; models: string[]; provider: string; llmConfigured: boolean; rejectedTools: string[] } | null>(null);
   const [model, setModel] = useState<string>("");
   const client = useRef<BridgeClient | null>(null);
+  // #162: while a remix session is active, sends carry remixOf so the server binds the run to the fork.
+  const remixRef = useRef<{ slug: string; title: string } | null>(null);
+  const setRemixOf = useCallback((v: { slug: string; title: string } | null) => { remixRef.current = v; }, []);
 
   const refreshAuth = useCallback(async () => {
     // A 5xx / unreachable server (e.g. mid-deploy) is not a logout: keep the last known sign-in state.
@@ -79,7 +82,7 @@ export function useAgentSession() {
     return true;
   }, [model]);
   const stop = useCallback(() => { const r = run?.runId ?? client.current?.activeRunId; if (r) client.current?.send({ type: "cancel_run", runId: r }); client.current?.cancelLocal(); }, [run]);
-  const reset = useCallback(() => { client.current?.send({ type: "reset_conversation" }); setItems([]); }, []);
+  const reset = useCallback(() => { remixRef.current = null; client.current?.send({ type: "reset_conversation" }); setItems([]); }, []);
   const login = useCallback(async (code: string) => {
     const { status, body } = await api("/login", { method: "POST", body: JSON.stringify({ code }), csrf: auth.csrf });
     if (status !== 200) { setAuth((a) => ({ ...a, error: body.message ?? "login failed" })); return false; }
@@ -88,7 +91,7 @@ export function useAgentSession() {
   const logout = useCallback(async () => { await api("/logout", { method: "POST", body: "{}", csrf: auth.csrf }); client.current?.close(); await refreshAuth(); }, [auth.csrf, refreshAuth]);
   const reconnect = useCallback(() => { client.current?.close(); const c = client.current; if (c) { c.maxReconnects = 8; c.connect(); } }, []);
 
-  return { auth, conn, items, run, usage, info, model, setModel, send, stop, reset, login, logout, reconnect, refreshAuth };
+  return { auth, conn, items, run, usage, info, model, setModel, send, stop, reset, setRemixOf, login, logout, reconnect, refreshAuth };
 }
 
 function dedupe(a: ArtifactRef[]) { const s = new Set<string>(); return a.filter((x) => !s.has(x.artifactId) && !!s.add(x.artifactId)); }

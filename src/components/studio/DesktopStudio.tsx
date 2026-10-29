@@ -8,6 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useWorkstation, workstation } from "../workstation/useWorkstation.ts";
 import { useAgentSession, type ChatItem } from "../../agent/useAgentSession.ts";
 import { songAutosaver } from "../../agent/autosave.ts";
+import { openShared } from "../../agent/share-client.ts";
+import { takeRemixHandoff, type RemixHandoff } from "../../agent/remix-handoff.ts";
 import { publishPromptGate } from "../../agent/paywall.ts";
 import { needSignIn, takePending } from "../auth/gate.ts";
 import { PianoRollEditor, ROLL_KEY_W, rollDark, type RollTool, type View } from "../workstation/PianoRollEditor.tsx";
@@ -212,7 +214,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; });
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { const f = () => { const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
+  useEffect(() => { const f = () => { const h = takeRemixHandoff(); if (h) { void applyRemixRef.current(h); return; } const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const x = takePending("compose"); if (x && s.send(x.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   useEffect(() => { if (s.auth.authenticated && takePending("publish")) void doPublish(); }, [s.auth.authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -253,6 +255,28 @@ export function DesktopStudio(props: DesktopStudioProps) {
   // Remix landing when the Studio mounts after the flag was set (the focus event may already have fired):
   // start the fresh session once, then put back the draft the initializer loaded (newSong clears the input).
   useEffect(() => { if (!sessionStorage.getItem("gbk.composerFresh")) return; sessionStorage.removeItem("gbk.composerFresh"); const d = text; void (async () => { await newSongRef.current(); if (d) setText(d); })(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // #162: a remix handoff names the song, not just a prompt. Load the user's editable fork of it, start a
+  // FRESH agent session on that fork (never newProject() — that would empty the song back out), and prefill
+  // the original prompt. If the song cannot load, fall back to the prompt-only landing with a toast.
+  const remixBusy = useRef(false);
+  const applyRemix = async (h: RemixHandoff) => {
+    if (remixBusy.current) return; remixBusy.current = true;
+    setMenu(null); sessionStorage.removeItem("gbk.composerDraft");
+    try {
+      const info = await openShared(h.slug, true);
+      s.reset();
+      s.setRemixOf({ slug: h.slug, title: info.title });
+      setText(h.prompt);
+      say(`Remixing “${info.title}” — your copy is loaded.`);
+    } catch (e) {
+      reportError(e, { where: "desktop.remixLoad", slug: h.slug });
+      setText(h.prompt);
+      say("Couldn't load that song, so the prompt is in the composer on its own.");
+    } finally { remixBusy.current = false; input.current?.focus(); }
+  };
+  const applyRemixRef = useRef(applyRemix); applyRemixRef.current = applyRemix;
+  // Remix landing when the Studio mounts after the handoff was written (the focus event may already have fired).
+  useEffect(() => { const h = takeRemixHandoff(); if (h) void applyRemixRef.current(h); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- import ----------------------------------------------------------------------------------------------------------
   const imgIn = useRef<HTMLInputElement>(null); const midiIn = useRef<HTMLInputElement>(null);

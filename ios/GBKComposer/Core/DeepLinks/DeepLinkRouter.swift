@@ -53,9 +53,12 @@ struct StudioSongRequest: Equatable {
     let id = UUID()
 }
 
-/// A feed card asking the Studio to start a composer run from a shared prompt
-/// (the web card's "Remix this prompt").
+/// A feed card asking the Studio to remix a shared song: the Studio loads the user's
+/// fork of the song in a fresh composer session with the shared prompt prefilled
+/// (the web card's "Remix this prompt", #162). The slug is what lets the Studio open
+/// the song itself, not just the prompt text.
 struct StudioPromptRequest: Equatable {
+    let slug: String
     let text: String
     let id = UUID()
 }
@@ -76,9 +79,10 @@ final class DeepLinkRouter: ObservableObject {
         selectedTab = .create
     }
 
-    /// Feed card "Remix this prompt": switch to Create with the prompt as the composer draft.
-    func remixPrompt(_ text: String) {
-        studioPrompt = StudioPromptRequest(text: text)
+    /// Feed card "Remix this prompt": switch to Create; the Studio loads a fork of the
+    /// song in a fresh session with the prompt prefilled.
+    func remixPrompt(slug: String, prompt: String) {
+        studioPrompt = StudioPromptRequest(slug: slug, text: prompt)
         selectedTab = .create
     }
 

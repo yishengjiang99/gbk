@@ -25,11 +25,11 @@ struct StudioWebView: View {
     @StateObject private var scan = ScanController()
     @State private var publishRequest: PublishBridge.Request?
     @State private var published = false
-    /// Feed-card requests waiting on the Studio page: a prompt to drop into the composer
-    /// and a song to open, both delivered once /studio has loaded (the auth handoff load
-    /// must finish first), plus the identity of the current open-this-song load (so the
-    /// web view lets that one /s/<slug> navigation through to the Studio).
-    @State private var pendingPrompt: String?
+    /// Feed-card requests waiting on the Studio page: a remix (song slug + prompt) to hand
+    /// to the composer and a song to open, both delivered once /studio has loaded (the auth
+    /// handoff load must finish first), plus the identity of the current open-this-song
+    /// load (so the web view lets that one /s/<slug> navigation through to the Studio).
+    @State private var pendingPrompt: StudioPromptRequest?
     @State private var pendingSong: StudioSongRequest?
     @State private var songLoadID: UUID?
     /// Set by the publish sheet on success; consumed when the sheet dismisses.
@@ -54,12 +54,12 @@ struct StudioWebView: View {
                         // A publish request follows finished work in the Studio: refresh `/api/me`
                         // so the paywall watcher (#123) sees any eligibility flip promptly.
                         WebView(url: url, scan: scan, songLoad: songLoadID, onLoad: { loaded in
-                            // A pending "Remix this prompt" takes this load: drop the prompt into the
-                            // composer (the web reads gbk.composerDraft on the focus event) instead of
-                            // the draft check.
+                            // A pending "Remix this prompt" takes this load: hand the song slug +
+                            // prompt to the page (the web reads gbk.composerRemix on the focus
+                            // event and loads a fork of the song) instead of the draft check.
                             if let prompt = pendingPrompt {
                                 pendingPrompt = nil
-                                deliverPrompt(prompt)
+                                deliverRemix(prompt)
                             } else if let song = pendingSong {
                                 pendingSong = nil
                                 loadSong(song)
@@ -137,27 +137,29 @@ extension StudioWebView {
     }
 
     /// Feed card "Remix this prompt": same handoff the web card performs (sessionStorage
-    /// draft + focus event), delivered to the loaded Studio page, or queued for the
-    /// /studio load it triggers.
+    /// remix payload + focus event), delivered to the loaded Studio page, or queued for
+    /// the /studio load it triggers.
     @MainActor func handleStudioPrompt(_ req: StudioPromptRequest) {
         router.studioPrompt = nil
         if let web = scan.webView, web.url?.path.hasPrefix("/studio") == true {
-            deliverPrompt(req.text)
+            deliverRemix(req)
         } else {
-            pendingPrompt = req.text
+            pendingPrompt = req
             if url?.path.hasPrefix("/studio") != true {
                 url = URL(string: Self.studioPath(fresh: false), relativeTo: Self.studioURL)!.absoluteURL
             }
         }
     }
 
-    /// Mirror of the web card's `remix()`: stash the prompt (capped at 4,000 chars like the
-    /// web) in sessionStorage and fire the focus event the composer listens for.
-    @MainActor func deliverPrompt(_ text: String) {
+    /// Mirror of the web card's `remix()`: stash {slug, prompt} (prompt capped at 4,000
+    /// chars like the web) as gbk.composerRemix in sessionStorage and fire the focus
+    /// event the composer listens for. The web side loads a fork of the song from the
+    /// slug; without it the remix would land in an empty project (#162).
+    @MainActor func deliverRemix(_ req: StudioPromptRequest) {
         guard let web = scan.webView else { return }
-        let capped = String(text.prefix(4000))
-        let json = (try? JSONSerialization.data(withJSONObject: [capped])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
-        let js = "sessionStorage.setItem('gbk.focusComposer','1'); sessionStorage.setItem('gbk.composerFresh','1'); sessionStorage.setItem('gbk.composerDraft', \(json)[0]); window.dispatchEvent(new Event('gbk:focus-composer'));"
+        let payload: [String: String] = ["slug": req.slug, "prompt": String(req.text.prefix(4000))]
+        let json = (try? JSONSerialization.data(withJSONObject: [payload])).flatMap { String(data: $0, encoding: .utf8) } ?? "[{}]"
+        let js = "sessionStorage.setItem('gbk.focusComposer','1'); sessionStorage.setItem('gbk.composerRemix', JSON.stringify(\(json)[0])); window.dispatchEvent(new Event('gbk:focus-composer'));"
         web.evaluateJavaScript(js)
     }
 }
