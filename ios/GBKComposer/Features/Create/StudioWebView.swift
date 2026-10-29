@@ -32,6 +32,8 @@ struct StudioWebView: View {
     @State private var pendingPrompt: String?
     @State private var pendingSong: StudioSongRequest?
     @State private var songLoadID: UUID?
+    /// Set by the publish sheet on success; consumed when the sheet dismisses.
+    @State private var lastPublished: PublishResult?
 
     var body: some View {
         // Composer input must always be visible (keyboard up or down, during playback). Keyboard handling:
@@ -75,10 +77,18 @@ struct StudioWebView: View {
         .background(Theme.background.ignoresSafeArea())
         .preferredColorScheme(Self.forcedScheme)
         .sheet(isPresented: $scan.isPresented) { ScanSheetView(controller: scan) }
-        .sheet(item: $publishRequest) { r in
+        .sheet(item: $publishRequest, onDismiss: {
+            // Visual confirmation: a successful publish lands on the song's feed card
+            // (focused and playing) instead of dropping back into the Studio, where
+            // nothing showed the publish had worked.
+            if let r = lastPublished {
+                lastPublished = nil
+                router.open(.share(slug: r.slug))
+            }
+        }) { r in
             NativePublishSheet(draft: PublishDraft(title: r.title, labels: Array(r.labels.prefix(PublishDraft.maxLabels)), tags: Array(r.tags.prefix(PublishDraft.maxTags))),
                                projectId: r.projectId, slug: r.slug, service: GuestPublishServices.make(webView: scan.webView),
-                               onPublished: { _ in published = true },
+                               onPublished: { res in published = true; lastPublished = res },
                                onClose: { publishRequest = nil })
         }
         // Entering Create from another tab: resume a draft as is; start fresh only when the latest project was
