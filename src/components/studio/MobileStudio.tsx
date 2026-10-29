@@ -145,6 +145,7 @@ export function MobileStudio(props: MobileStudioProps) {
     setSheet(null); stopPreview(); sessionStorage.removeItem("gbk.composerDraft");
     try {
       const info = await openShared(h.slug, true);
+      versionLog.recordOriginal(workstation.project);
       s.reset();
       s.setRemixOf({ slug: h.slug, title: info.title });
       setText(h.prompt);
@@ -187,6 +188,7 @@ export function MobileStudio(props: MobileStudioProps) {
   // ---- render -------------------------------------------------------------------------------------------------------
   const title = p.tracks.length || p.name !== "Untitled" ? p.name : "New song";
   const latest = versions[versions.length - 1];
+  const original = versions.find((v) => v.label === "Original");
   const showCurrent = p.tracks.length > 0 && !running && (!latest || latest.revision !== p.revision);
   const loading = !t.audioReady && !t.playing;
   const ro = workstation.readOnlyReason; const from = p.meta?.sharedFrom;
@@ -208,6 +210,8 @@ export function MobileStudio(props: MobileStudioProps) {
           <h2>What should we make?</h2><p>Describe a song, hum a melody, or import sheet music.</p>
           <div className="ms-sug">{SUGGESTIONS.map((x) => <button key={x.text} data-testid="suggestion" onClick={() => send(x.text)}>{x.icon} {x.text}</button>)}</div>
         </div>}
+        {original && <VersionCard v={original} p={p} playing={original.revision === p.revision ? t.playing : preview?.n === original.n} pos={pos} total={total} current={original.revision === p.revision}
+          onPlay={() => playVersion(original, original.revision === p.revision)} onEdit={() => openEditor(original)} onPublish={() => void doPublish(original)} onRestore={() => restore(original)} />}
         {s.items.map((m) => <Message key={m.id} m={m} p={p} live={m.runId != null && m.runId === s.run?.runId} onRetry={(x) => send(x)}
           card={(v) => <VersionCard v={v} p={p} playing={v.revision === p.revision ? t.playing : preview?.n === v.n} pos={pos} total={total} current={v.revision === p.revision}
             onPlay={() => playVersion(v, v.revision === p.revision)} onEdit={() => openEditor(v)} onPublish={() => void doPublish(v)} onRestore={() => restore(v)} />} />)}
@@ -352,7 +356,7 @@ function Message({ m, p, live, onRetry, card }: { m: ChatItem; p: Project; live:
 function VersionCard({ v, p, current, playing, pos, total, onPlay, onEdit, onPublish, onRestore }: { v?: SongVersion; p: Project; current: boolean; playing: boolean; pos: number; total: number; onPlay: () => void; onEdit: () => void; onPublish: () => void; onRestore?: () => void }) {
   const song = v?.snapshot ?? p;
   const len = current ? total : songSeconds(song);
-  const label = `${p.name === "Untitled" ? "Song" : p.name}${v ? ` v${v.n}` : ""}`;
+  const label = `${p.name === "Untitled" ? "Song" : p.name}${v ? (v.label ? ` · ${v.label}` : ` v${v.n}`) : ""}`;
   return <div className="ms-song" data-testid="version-card" data-version={v?.n ?? "current"} data-current={current ? "1" : "0"}>
     <div className="ms-song-t">
       <button className="ms-btn ms-play" aria-label={playing ? `Pause ${label}` : `Play ${label}`} data-testid="version-play" onClick={onPlay}>{playing ? "❚❚" : "▶︎"}</button>

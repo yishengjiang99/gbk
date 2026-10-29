@@ -2,7 +2,7 @@
 import { cloneProject, computeEndTick, type Project } from "../../workstation/model.ts";
 import { tickToSec } from "../../workstation/timing.ts";
 
-export interface SongVersion { n: number; runId: string; revision: number; snapshot: Project; at: number }
+export interface SongVersion { n: number; runId: string; revision: number; snapshot: Project; at: number; label?: string }
 
 /** One list of versions per project: every composer reply that changed the song adds v1, v2, ... */
 export class VersionLog {
@@ -17,6 +17,16 @@ export class VersionLog {
     const last = xs[xs.length - 1];
     if (last && last.revision === project.revision) return null;
     const v: SongVersion = { n: xs.length + 1, runId, revision: project.revision, snapshot: cloneProject(project), at };
+    this.byProject.set(project.id, [...xs, v]); for (const f of this.subs) f();
+    return v;
+  }
+  /** Pin the just-loaded remix fork as the "Original" version (#162 step 7): the A/B anchor the session
+   * starts from - playable and restorable like any version, before any agent reply exists. Recorded once. */
+  recordOriginal(project: Project, at = Date.now()): SongVersion | null {
+    const xs = this.list(project.id);
+    const existing = xs.find((v) => v.runId === "remix-original"); if (existing) return existing;
+    if (!project.tracks.length) return null;
+    const v: SongVersion = { n: xs.length + 1, runId: "remix-original", label: "Original", revision: project.revision, snapshot: cloneProject(project), at };
     this.byProject.set(project.id, [...xs, v]); for (const f of this.subs) f();
     return v;
   }

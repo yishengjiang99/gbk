@@ -44,7 +44,7 @@ import { Metronome } from "../../audio/metronome.ts";
 import { sfChoice } from "../../audio/sf-choice.ts";
 import { deploymentBase } from "../../audio/soundfont-loader.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
-import { friendlyError } from "./studio-logic.ts";
+import { friendlyError, versionLog } from "./studio-logic.ts";
 import "./desktop-studio.css";
 
 export interface DesktopStudioProps {
@@ -264,6 +264,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
     setMenu(null); sessionStorage.removeItem("gbk.composerDraft");
     try {
       const info = await openShared(h.slug, true);
+      versionLog.recordOriginal(workstation.project);
       s.reset();
       s.setRemixOf({ slug: h.slug, title: info.title });
       setText(h.prompt);
