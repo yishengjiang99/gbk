@@ -141,6 +141,12 @@ export class AgentHub {
       if (!this.slots.acquire(conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "a run is already in progress; stop it or wait" });
     }
     const model = typeof m.model === "string" && m.model ? m.model : this.cfg.llm.model;
+    // #162: a remix session names its source song; keep only bounded, plain-data fields.
+    const rawRemix = m.remixOf;
+    const remixJson = rawRemix?.summary ? JSON.stringify(rawRemix.summary) : "";
+    const remixOf = rawRemix && typeof rawRemix.slug === "string" && typeof rawRemix.title === "string"
+      ? { slug: rawRemix.slug.slice(0, 100), title: rawRemix.title.slice(0, 120), ...(remixJson && remixJson.length <= 8192 ? { summary: rawRemix.summary } : {}) }
+      : undefined;
     const runId = rid("run"); const abort = new AbortController();
     let finished!: () => void; const done = new Promise<void>((ok) => { finished = ok; });
     const link = new RunLink(runId, conn, this.cfg.agent.reconnectGraceMs, () => this.registry.get(conn.user));
@@ -149,7 +155,7 @@ export class AgentHub {
     conn.emit({ type: "run_started", runId, clientMessageId: String(m.clientMessageId ?? "").slice(0, 60), text: text.slice(0, 200) });
     const t0 = Date.now();
     try {
-      const r = await this.runtime.run({ runId, user: conn.user, text, model, conv, link, signal: abort.signal, log: this.log });
+      const r = await this.runtime.run({ runId, user: conn.user, text, model, conv, link, signal: abort.signal, log: this.log, remixOf });
       this.log({ evt: "run_end", user: conn.user, runId, status: r.status, code: r.code, steps: r.steps, ms: Date.now() - t0 });
     } catch (e) {
       this.log({ evt: "run_crash", runId, err: (e as Error).message });

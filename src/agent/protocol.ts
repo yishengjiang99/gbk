@@ -10,7 +10,7 @@ export interface ArtifactRef { artifactId: string; kind: "wav" | "midi"; filenam
 // browser -> server
 export type ClientMessage =
   | { type: "hello"; protocol: number; tabId: string; manifest: { hash: string; tools: ManifestTool[] }; projectId: string; revision: number; resumeRunId?: string }
-  | { type: "user_message"; clientMessageId: string; text: string; model?: string }
+  | { type: "user_message"; clientMessageId: string; text: string; model?: string; remixOf?: { slug: string; title: string; summary?: Record<string, unknown> } }
   | { type: "tool_result"; sessionId: string; runId: string; callId: string; result: ToolResultEnvelope }
   | { type: "tool_progress"; sessionId: string; runId: string; callId: string; progress: number; detail?: string }
   | { type: "project_state"; projectId: string; revision: number }

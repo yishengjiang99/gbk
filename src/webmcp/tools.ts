@@ -93,12 +93,16 @@ export const CC_CAPS: Record<number, { name: string; audible: boolean; note?: st
 
 const NOTE_SCHEMA = obj({ trackId: str(), tick: int(0, 1e9), duration: int(1, 1e9), pitch: int(0, 127), velocity: int(1, 127), channel: int(0, 15, "defaults to the track channel") }, ["trackId", "tick", "duration", "pitch", "velocity"]);
 
+/** The gbk_get_project_summary payload. Also injected into a remix session's first run (#162), so the
+ * agent knows what song it is looking at before its first tool call. */
+export function projectSummary(c: WorkstationController) {
+  const p = c.project;
+  return { name: p.name, ppq: p.ppq, revision: p.revision, endTick: p.endTick, durationSec: +tickToSec(p, p.endTick).toFixed(3), bars: tickToBarBeat(p, p.endTick).bar, tempos: p.tempos.slice(0, 32), timeSigs: p.timeSigs.slice(0, 32), trackCount: p.tracks.length, noteCount: p.notes.length, ccCount: p.ccs.length, pendingProposals: c.getState().proposals.filter((x) => x.status === "pending").map((x) => ({ id: x.id, summary: x.summary })) };
+}
+
 export function buildCoreTools(c: WorkstationController): ToolDef[] {
   const P = () => c.project;
-  const summary = () => {
-    const p = P();
-    return { name: p.name, ppq: p.ppq, revision: p.revision, endTick: p.endTick, durationSec: +tickToSec(p, p.endTick).toFixed(3), bars: tickToBarBeat(p, p.endTick).bar, tempos: p.tempos.slice(0, 32), timeSigs: p.timeSigs.slice(0, 32), trackCount: p.tracks.length, noteCount: p.notes.length, ccCount: p.ccs.length, pendingProposals: c.getState().proposals.filter((x) => x.status === "pending").map((x) => ({ id: x.id, summary: x.summary })) };
-  };
+  const summary = () => projectSummary(c);
   return [
     { name: "gbk_get_capabilities", readOnly: true, description: "What this GBK build can and cannot do (implemented tools, audible vs stored-only CCs, audio readiness).", inputSchema: obj({}),
       run: () => ({ data: { audioReady: c.getState().transport.audioReady, controllers: CC_CAPS, otherControllers: "CC 0-127 are preserved, scheduled and exported; unlisted CCs only matter if the SoundFont preset maps them", pitchBend: "14-bit, audible (default range 2 semitones, RPN0 supported)", pressure: "channel + poly pressure routed to SF2 modulators",

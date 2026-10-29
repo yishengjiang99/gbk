@@ -3,6 +3,7 @@
 import { friendlyError } from "./friendly-error.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { workstation } from "../workstation/instance.ts";
+import { projectSummary } from "../webmcp/tools.ts";
 import { BridgeClient, apiBase, type ConnState } from "./bridge-client.ts";
 import type { ArtifactRef, HistoryItem, ServerMessage, UsageInfo } from "./protocol.ts";
 
@@ -77,7 +78,10 @@ export function useAgentSession() {
   const send = useCallback((text: string) => {
     const t = text.trim(); if (!t || !client.current) return false;
     const id = `u_${Date.now()}`;
-    if (!client.current.send({ type: "user_message", clientMessageId: id, text: t, ...(model ? { model } : {}) })) return false;
+    // #162: a remix session's sends name the source song and carry the fork's current summary, so the
+    // server can bind the run to the fork and tell the agent what it is looking at.
+    const remix = remixRef.current;
+    if (!client.current.send({ type: "user_message", clientMessageId: id, text: t, ...(model ? { model } : {}), ...(remix ? { remixOf: { slug: remix.slug, title: remix.title, summary: projectSummary(workstation) } } : {}) })) return false;
     setItems((xs) => [...xs, { id, role: "user", text: t }]);
     return true;
   }, [model]);

@@ -153,3 +153,25 @@ test("a new message binds to the currently open project; a mid-run PROJECT_CHANG
   const s3 = setup([() => calls(tc("a", "gbk_list_tracks"))], {}, l3); await s3.go();
   assert.doesNotMatch(s3.conv.history.at(-1)!.text, /[A-Z_]{6,}|prj_/);
 });
+
+test("remix run (#162): context names the source song + summary once, reads target the open fork", async () => {
+  const link = new FakeLink(ALL);
+  const { rt, conv, model } = setup([() => calls(tc("c1", "gbk_get_project_summary")), () => reply("Transposed your fork."), () => reply("Done.")], {}, link);
+  const opts = { runId: "run_remix", user: "alice", model: "fake-model", conv, link, signal: new AbortController().signal };
+  const r = await rt.run({ ...opts, text: "rewrite this in A major", remixOf: { slug: "symphony-no-5-in-c-minor-5gm8vhzs", title: "Symphony No. 5 in C Minor", summary: { name: "Symphony No. 5 in C Minor (fork)", noteCount: 10882 } } });
+  assert.equal(r.status, "completed");
+  const firstUser = model.requests[0].messages.find((m) => m.role === "user") as { content: string };
+  assert.match(firstUser.content, /remix of shared song "Symphony No\. 5 in C Minor" \(symphony-no-5-in-c-minor-5gm8vhzs\)/);
+  assert.match(firstUser.content, /never create a project/);
+  assert.match(firstUser.content, /song summary \(data\): .*10882/);
+  assert.deepEqual(conv.remixOf, { slug: "symphony-no-5-in-c-minor-5gm8vhzs", title: "Symphony No. 5 in C Minor" });
+  // The read executed against the project open in the tab (the fork); nothing created a project.
+  assert.deepEqual(link.executed.map((e) => e.tool), ["gbk_get_project_summary"]);
+  assert.equal(link.executed[0].expect, "prj_1");
+  // A later run in the same conversation keeps the remix binding but does not repeat the summary.
+  const r2 = await rt.run({ ...opts, runId: "run_remix_2", text: "now make it brighter" });
+  assert.equal(r2.status, "completed");
+  const secondUser = model.requests[2].messages.filter((m) => m.role === "user").at(-1) as { content: string };
+  assert.match(secondUser.content, /remix of shared song/);
+  assert.doesNotMatch(secondUser.content, /song summary/);
+});
