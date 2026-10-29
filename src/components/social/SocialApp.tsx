@@ -14,8 +14,8 @@ import type { SocialRoute } from "../../agent/routes.ts";
 import { needSignIn, takePending } from "../auth/gate.ts";
 
 type Sheet = null | { kind: "comments"; song: Song; draft?: string } | { kind: "browse" } | { kind: "report"; what: "song" | "comment" | "user"; target: string; label: string };
-/** Opens the Studio with the Composer prefilled (never auto-run). */
-export const remix = (prompt: string) => { sessionStorage.setItem("gbk.focusComposer", "1"); sessionStorage.setItem("gbk.composerDraft", prompt.slice(0, 4000)); navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50); };
+/** Opens the Studio in a FRESH chat session with the Composer prefilled (never auto-run). */
+export const remix = (prompt: string) => { sessionStorage.setItem("gbk.focusComposer", "1"); sessionStorage.setItem("gbk.composerFresh", "1"); sessionStorage.setItem("gbk.composerDraft", prompt.slice(0, 4000)); navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50); };
 const ago = (t: number) => { const s = (Date.now() - t) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
 
 function Stars({ song, me, onChange }: { song: Song; me: Me | null; onChange: (s: Song) => void }) {

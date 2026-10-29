@@ -157,7 +157,7 @@ extension StudioWebView {
         guard let web = scan.webView else { return }
         let capped = String(text.prefix(4000))
         let json = (try? JSONSerialization.data(withJSONObject: [capped])).flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
-        let js = "sessionStorage.setItem('gbk.focusComposer','1'); sessionStorage.setItem('gbk.composerDraft', \(json)[0]); window.dispatchEvent(new Event('gbk:focus-composer'));"
+        let js = "sessionStorage.setItem('gbk.focusComposer','1'); sessionStorage.setItem('gbk.composerFresh','1'); sessionStorage.setItem('gbk.composerDraft', \(json)[0]); window.dispatchEvent(new Event('gbk:focus-composer'));"
         web.evaluateJavaScript(js)
     }
 }

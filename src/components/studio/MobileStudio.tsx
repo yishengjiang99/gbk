@@ -74,7 +74,7 @@ export function MobileStudio(props: MobileStudioProps) {
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; });
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { const f = () => { const d = sessionStorage.getItem("gbk.composerDraft"); if (d) { sessionStorage.removeItem("gbk.composerDraft"); setText(d); } input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
+  useEffect(() => { const f = () => { const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const q = takePending("compose"); if (q && s.send(q.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   useEffect(() => { if (s.auth.authenticated && takePending("publish")) void doPublish(); }, [s.auth.authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -130,6 +130,10 @@ export function MobileStudio(props: MobileStudioProps) {
   };
   const openEditor = (v: SongVersion | null = null) => { if (makeCurrent(v)) { setTab("Tracks"); setSheet("editor"); } };
   const newSong = async () => { setSheet(null); stopPreview(); if (await props.newProject()) { if (s.auth.authenticated) s.reset(); setText(""); } };
+  const newSongRef = useRef(newSong); newSongRef.current = newSong;
+  // Remix landing when the Studio mounts after the flag was set (the focus event may already have fired):
+  // start the fresh session once, then put back the draft the initializer loaded (newSong clears the input).
+  useEffect(() => { if (!sessionStorage.getItem("gbk.composerFresh")) return; sessionStorage.removeItem("gbk.composerFresh"); const d = text; void (async () => { await newSongRef.current(); if (d) setText(d); })(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const exportWav = () => { setSheet(null); setBusy("Rendering WAV…"); props.exportWav().catch((e) => { reportError(e, { where: "studio.exportWav" }); say("Couldn't render the WAV. Please try again."); }).finally(() => setBusy("")); };
 
   // ---- + sheet: sheet music, MIDI file, MIDI keyboard ---------------------------------------------------------------
