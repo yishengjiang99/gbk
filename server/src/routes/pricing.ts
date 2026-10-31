@@ -22,6 +22,8 @@ export interface PricingConfig {
   xPixelId: string; xEventPurchase: string; xEventTrial: string; redditPixelId: string;
 }
 const on = (v: string | undefined, dflt: boolean) => (v === undefined || v.trim() === "" ? dflt : !["0", "false", "off", "no"].includes(v.trim().toLowerCase()));
+/** JSON for inline <script>: escapes <, >, & and U+2028/9 so no value can close the tag. */
+export const jsStr = (v: unknown) => JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 const idOk = (v: string | undefined) => (/^[A-Za-z0-9_-]{1,64}$/.test((v ?? "").trim()) ? v!.trim() : "");
 export function pricingConfig(env: Record<string, string | undefined> = process.env): PricingConfig {
   const origin = (env.COMPOSE_CHECKOUT_ORIGIN ?? "https://grepawk.com").trim().replace(/\/+$/, "");
@@ -86,8 +88,8 @@ ${(opts.jsonLd ?? []).map(ld).join("\n")}${opts.head ?? ""}
 export function pixelHead(p: PricingConfig): string {
   if (!p.adsEnabled || (!p.xPixelId && !p.redditPixelId)) return "";
   return `<script>(function(){var n=navigator;if(n.globalPrivacyControl||n.doNotTrack==="1"||window.doNotTrack==="1")return;
-${p.xPixelId ? `!function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments);},s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');twq('config',${JSON.stringify(p.xPixelId)});` : ""}
-${p.redditPixelId ? `!function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js",t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);rdt('init',${JSON.stringify(p.redditPixelId)});rdt('track','PageVisit');` : ""}
+${p.xPixelId ? `!function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments);},s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');twq('config',${jsStr(p.xPixelId)});` : ""}
+${p.redditPixelId ? `!function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js",t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);rdt('init',${jsStr(p.redditPixelId)});rdt('track','PageVisit');` : ""}
 })();</script>`;
 }
 
@@ -143,9 +145,9 @@ function plansBody(cfg: Config): string {
 }
 
 function thanksBody(p: PricingConfig): string {
-  const fire = p.adsEnabled ? `<script>(function(){var n=navigator;if(n.globalPrivacyControl||n.doNotTrack==="1")return;var c;try{c=JSON.parse(localStorage.getItem("gbk_checkout")||"null")}catch(e){}
+  const fire = p.adsEnabled && (p.xPixelId || p.redditPixelId) ? `<script>(function(){var n=navigator;if(n.globalPrivacyControl||n.doNotTrack==="1")return;var c;try{c=JSON.parse(localStorage.getItem("gbk_checkout")||"null")}catch(e){}
 var q=new URLSearchParams(location.search),plan=q.get("plan")||(c&&c.plan)||"";if(!c||!c.id||c.fired)return;var trial=plan!=="lifetime",value=trial?0:99.99;
-${p.xPixelId ? `var xe=trial?${JSON.stringify(p.xEventTrial)}:${JSON.stringify(p.xEventPurchase)};if(window.twq&&xe)twq("event",xe,{conversion_id:c.id,value:value,currency:"USD"});` : ""}
+${p.xPixelId ? `var xe=trial?${jsStr(p.xEventTrial)}:${jsStr(p.xEventPurchase)};if(window.twq&&xe)twq("event",xe,{conversion_id:c.id,value:value,currency:"USD"});` : ""}
 ${p.redditPixelId ? `if(window.rdt)rdt("track",trial?"Custom":"Purchase",trial?{customEventName:"StartTrial",conversionId:c.id}:{conversionId:c.id,value:value,currency:"USD"});` : ""}
 c.fired=1;localStorage.setItem("gbk_checkout",JSON.stringify(c))})();</script>` : "";
   return `<h1>Thanks, you're Pro</h1><p class="lead">Your receipt is on its way from Stripe.</p>
