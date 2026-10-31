@@ -1,17 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <title>GBK Composer</title>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FFFDF7"/><stop offset="1" stop-color="#FFEFD2"/>
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <!-- piano-roll note bars -->
-  <rect x="72"  y="300" width="150" height="44" rx="22" fill="#2EC4B6"/>
-  <rect x="112" y="372" width="200" height="44" rx="22" fill="#FF6B6B"/>
-  <rect x="72"  y="228" width="96"  height="44" rx="22" fill="#FFB627"/>
-  <!-- eighth note -->
-  <rect x="318" y="96" width="36" height="290" rx="10" fill="#3A2E9E"/>
-  <path d="M354 96 C 400 116, 446 150, 438 214 C 432 186, 404 168, 354 160 Z" fill="#3A2E9E"/>
-  <ellipse cx="292" cy="384" rx="70" ry="54" transform="rotate(-22 292 384)" fill="#3A2E9E"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><title>GBK Composer</title><defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#FFFDF7"/><stop offset="1" stop-color="#FFEFD2"/></linearGradient></defs><rect width="512" height="512" fill="url(#bg)" rx="112"/><rect width="150" height="44" x="72" y="300" fill="#2EC4B6" rx="22"/><rect width="200" height="44" x="112" y="372" fill="#FF6B6B" rx="22"/><rect width="96" height="44" x="72" y="228" fill="#FFB627" rx="22"/><rect width="36" height="290" x="318" y="96" fill="#3A2E9E" rx="10"/><path fill="#3A2E9E" d="M354 96 C 400 116, 446 150, 438 214 C 432 186, 404 168, 354 160 Z"/><ellipse cx="292" cy="384" fill="#3A2E9E" rx="70" ry="54" transform="rotate(-22 292 384)"/></svg>
