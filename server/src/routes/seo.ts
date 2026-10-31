@@ -14,6 +14,12 @@ export const SITEMAP_CHUNK = 45_000;
 export const STATIC_PATHS = ["/", "/feed", "/explore", ...PAGE_PATHS, "/chatgpt/gallery", "/pricing", "/plans"];
 export const xmlEsc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]!);
 const htmlEsc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+/** Smart App Banner app-argument: origin + the request path and query (fallback: the page URL). Commas are
+ *  percent-encoded because they separate apple-itunes-app fields; the caller HTML-escapes. */
+export const bannerArg = (origin: string, reqUrl: string | undefined, fallback: string) => {
+  const u = reqUrl && reqUrl.startsWith("/") && !reqUrl.startsWith("//") ? `${origin}${reqUrl}` : fallback;
+  return u.replace(/,/g, "%2C");
+};
 const iso = (ms: number | null | undefined) => (ms ? new Date(Number(ms)).toISOString() : null);
 
 interface Entry { loc: string; lastmod: string | null }
@@ -64,7 +70,7 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
   };
   const ogDir = opts.ogDir ?? join(cfg.dataDir, "og-cache");
   interface Meta { title: string; description: string; url: string; index: boolean; type?: string; image?: string; extraHead?: string; jsonLd?: object; body?: string }
-  const render = (reply: FastifyReply, m: Meta) => {
+  const render = (reply: FastifyReply, m: Meta, req?: FastifyRequest) => {
     const base = loadShell();
     if (!base) return reply.code(503).send("shell unavailable");
     const t = htmlEsc(m.title), d = htmlEsc(m.description), u = htmlEsc(m.url);
@@ -76,6 +82,8 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
       .replace(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${d}" />`)
       .replace(/<meta name="twitter:title"[^>]*>/, `<meta name="twitter:title" content="${t}" />`)
       .replace(/<meta name="twitter:description"[^>]*>/, `<meta name="twitter:description" content="${d}" />`)
+      // Smart App Banner "OPEN" hands app-argument to the app: the full URL of this page (query kept, e.g. ?edit=1).
+      .replace(/(<meta name="apple-itunes-app" content="[^"]*?app-argument=)[^"]*"/, (_, pre: string) => `${pre}${htmlEsc(bannerArg(origin, req?.url, m.url))}"`)
       .replace(/<link rel="canonical"[^>]*>\s*/g, "").replace(/<meta property="og:url"[^>]*>\s*/g, "");
     if (m.image) {
       const img = htmlEsc(m.image);
@@ -109,7 +117,7 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
   app.get("/s/:slug", async (req, reply) => {
     const slug = (req.params as { slug: string }).slug;
     const r = song(slug);
-    if (!r) return render(reply, generic(`${origin}/s/${encodeURIComponent(slug)}`));
+    if (!r) return render(reply, generic(`${origin}/s/${encodeURIComponent(slug)}`), req);
     const url = `${origin}/s/${encodeURIComponent(r.slug)}`, labels = labelsOf(r.labels), tags = (tagsQ.all(r.id) as { tag: string }[]).map((x) => x.tag);
     const artist = r.display_name ?? "GBK Composer", artistUrl = r.handle ? `${origin}/u/${encodeURIComponent(r.handle)}` : null;
     const by = r.display_name ? ` by ${r.display_name}` : "";
@@ -130,7 +138,7 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
 <dl>${labels.length ? `<dt>Genre</dt><dd>${htmlEsc(labels.join(", "))}</dd>` : ""}${tags.length ? `<dt>Tags</dt><dd>${tags.map((x) => `#${htmlEsc(x)}`).join(" ")}</dd>` : ""}${secs ? `<dt>Duration</dt><dd><time datetime="${isoDuration(secs)}">${clock(secs)}</time></dd>` : ""}<dt>Published</dt><dd><time datetime="${published.toISOString()}">${published.toISOString().slice(0, 10)}</time></dd></dl>
 ${prompt ? `<h2>Prompt</h2><blockquote>${htmlEsc(prompt)}</blockquote>` : ""}<p>${a(`/s/${encodeURIComponent(r.slug)}`, "Listen and remix in GBK Composer")}</p>
 ${more.length ? `<h2>More by ${htmlEsc(artist)}</h2><ul>${more.map((x) => `<li>${a(`/s/${encodeURIComponent(x.slug)}`, x.title)}</li>`).join("")}</ul>` : ""}`;
-    return render(reply, { title: `${r.title}${by} · GBK Composer`, description: desc, url, index: true, type: "music.song", image, extraHead, jsonLd, body });
+    return render(reply, { title: `${r.title}${by} · GBK Composer`, description: desc, url, index: true, type: "music.song", image, extraHead, jsonLd, body }, req);
   });
 
   const profQ = db.prepare(`SELECT p.user_id, p.handle, p.display_name, p.bio, p.badge, (SELECT COUNT(*) FROM shares s WHERE s.owner = p.user_id AND s.public = 1) AS n FROM profiles p WHERE p.handle = ?`);
@@ -138,7 +146,7 @@ ${more.length ? `<h2>More by ${htmlEsc(artist)}</h2><ul>${more.map((x) => `<li>$
     const h = String((req.params as { handle: string }).handle).toLowerCase().slice(0, 40);
     const p = profQ.get(h) as { user_id: string; handle: string; display_name: string; bio: string | null; badge: string | null; n: number } | undefined;
     const url = `${origin}/u/${encodeURIComponent(h)}`;
-    if (!p || (!Number(p.n) && p.badge !== "AI artist")) return render(reply, generic(url));
+    if (!p || (!Number(p.n) && p.badge !== "AI artist")) return render(reply, generic(url), req);
     const n = Number(p.n), songs = byOwnerQ.all(p.user_id, 100) as { slug: string; title: string; labels: string; created_at: number; published_at: number | null }[];
     const desc = (p.bio ? `${p.bio} ` : "") + `${n} public song${n === 1 ? "" : "s"} by ${p.display_name}${p.badge ? ` (${p.badge})` : ""} on GBK Composer.`;
     const latest = songs[0] ? `${origin}/og/s/${encodeURIComponent(songs[0].slug)}.png` : undefined;
@@ -147,7 +155,7 @@ ${more.length ? `<h2>More by ${htmlEsc(artist)}</h2><ul>${more.map((x) => `<li>$
     const body = `<h1>${htmlEsc(p.display_name)}${opts.proOf?.(p.user_id) ? ` <span class="pro">Pro</span>` : ""}</h1><p class="by">@${htmlEsc(p.handle)}${p.badge ? ` · ${htmlEsc(p.badge)}` : ""}</p>${p.bio ? `<p>${htmlEsc(p.bio)}</p>` : ""}
 <h2>${n} public song${n === 1 ? "" : "s"}</h2><ul>${songs.map((x) => { const l = labelsOf(x.labels); return `<li><a href="/s/${encodeURIComponent(x.slug)}">${htmlEsc(x.title)}</a>${l.length ? ` <span>${htmlEsc(l.join(", "))}</span>` : ""}</li>`; }).join("")}</ul>`;
     return render(reply, { title: `${p.display_name} (@${p.handle}) · GBK Composer`, description: desc.slice(0, 300), url, index: true, type: "profile", image: latest, jsonLd, body,
-      extraHead: `    <meta property="profile:username" content="${htmlEsc(p.handle)}" />\n` });
+      extraHead: `    <meta property="profile:username" content="${htmlEsc(p.handle)}" />\n` }, req);
   });
 }
 

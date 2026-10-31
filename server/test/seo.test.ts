@@ -10,7 +10,7 @@ import { SocialStore } from "../src/persistence/social.ts";
 import { seoRoutes, xmlEsc, isoDuration, durationSeconds } from "../src/routes/seo.ts";
 import type { Config } from "../src/config.ts";
 
-const SHELL = `<!doctype html><html><head><title>Generic</title><meta name="description" content="generic" /><meta property="og:type" content="website" /><meta property="og:title" content="g" /><meta property="og:description" content="g" /><meta name="twitter:title" content="g" /><meta name="twitter:description" content="g" /><meta property="og:image" content="https://x/cover.jpg" /><meta name="twitter:image" content="https://x/cover.jpg" /><script type="application/ld+json">{"@type":"SoftwareApplication"}</script></head><body><div id="root"></div></body></html>`;
+const SHELL = `<!doctype html><html><head><meta name="apple-itunes-app" content="app-id=123, app-argument=https://compose.test/" /><title>Generic</title><meta name="description" content="generic" /><meta property="og:type" content="website" /><meta property="og:title" content="g" /><meta property="og:description" content="g" /><meta name="twitter:title" content="g" /><meta name="twitter:description" content="g" /><meta property="og:image" content="https://x/cover.jpg" /><meta name="twitter:image" content="https://x/cover.jpg" /><script type="application/ld+json">{"@type":"SoftwareApplication"}</script></head><body><div id="root"></div></body></html>`;
 
 async function setup(chunk?: number) {
   const shares = new ShareStore(":memory:"); const social = new SocialStore(shares.database);
@@ -96,4 +96,16 @@ test("song page: per-song og image, og:audio, musician, crawlable body and valid
 test("ISO 8601 durations", () => {
   assert.equal(isoDuration(4), "PT4S"); assert.equal(isoDuration(125.4), "PT2M5S"); assert.equal(isoDuration(3600), "PT1H"); assert.equal(isoDuration(0), "PT1S");
   assert.equal(durationSeconds(JSON.stringify({ durationSeconds: 61 }), "{}"), 61);
+});
+
+test("Smart App Banner app-argument is the current page URL on /s and /u, escaped", async () => {
+  const { app, shares, social } = await setup();
+  social.ensureProfile("u1", "Alice"); const h = social.profile("u1")!.handle;
+  const pub = shares.create({ owner: "u1", title: "Song", projectJson: proj, public: true });
+  const arg = (b: string) => /<meta name="apple-itunes-app" content="app-id=123, app-argument=([^"]*)"/.exec(b)?.[1];
+  assert.equal(arg((await app.inject(`/s/${pub.slug}`)).body), `https://compose.test/s/${pub.slug}`);
+  assert.equal(arg((await app.inject(`/s/${pub.slug}?edit=1&x=a,b`)).body), `https://compose.test/s/${pub.slug}?edit=1&amp;x=a%2Cb`);
+  assert.equal(arg((await app.inject(`/u/${h}`)).body), `https://compose.test/u/${h}`);
+  const evil = (await app.inject(`/s/${pub.slug}?q=%22%3E%3Cscript%3E`)).body;
+  assert.ok(!/app-argument=[^"]*<script/.test(evil)); assert.equal((evil.match(/apple-itunes-app/g) ?? []).length, 1);
 });

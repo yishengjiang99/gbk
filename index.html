@@ -8,6 +8,9 @@
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
       referrerpolicy="no-referrer"
     />
+    <!-- iOS Smart App Banner: app-argument is the page's own URL (server-rendered for /s, /u; set below for static routes like /studio; kept current on SPA navigation by src/smart-app-banner.ts). -->
+    <meta name="apple-itunes-app" content="app-id=6826906431, app-argument=https://compose.grepawk.com/" />
+    <script>(function(){var m=document.querySelector('meta[name="apple-itunes-app"]');if(m)m.setAttribute("content",m.getAttribute("content").replace(/app-argument=.*$/,"app-argument="+location.href.replace(/,/g,"%2C")));})()</script>
     <title>GBK Composer: describe music, get editable MIDI</title>
     <meta name="description" content="GBK Composer writes real, editable MIDI from a chat prompt. Revise one passage at a time, play it with a SoundFont engine, and download MIDI and WAV. Free, in ChatGPT or GBK Studio." />
     <meta property="og:type" content="website" />
