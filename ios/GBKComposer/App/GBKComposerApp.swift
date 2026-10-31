@@ -21,6 +21,9 @@ struct GBKComposerApp: App {
                 .onOpenURL { router.handle($0) }
                 .task { PurchaseStore.shared.start() }
                 .task { if !Self.isUnitTestHost { PaywallTriggerWatcher.shared.start() } }
+                // Background homr model warmup for Scan (Music Reader parity): detached inside
+                // `start()`, never on the main thread; a scan arriving mid-warmup attaches to it.
+                .task { if !Self.isUnitTestHost { ScanModelWarmup.shared.start() } }
                 .onAppear { router.handleLaunchArguments() }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL { router.handle(url) }
@@ -29,7 +32,13 @@ struct GBKComposerApp: App {
         .onChange(of: scenePhase) { _, phase in
             // Foreground is a paywall watch point (#123): work in the web Studio (another app, a
             // browser) may have flipped eligibility, so refresh `/api/me` for the watcher.
-            if phase == .active { Task { await PushManager.shared.refresh(); await auth.loadMe() } }
+            if phase == .active {
+                Task { await PushManager.shared.refresh(); await auth.loadMe() }
+                // Silent Scan model re-warm kick (GBK addition; Music Reader has none): no-op
+                // when ready or already warming, restarts after failure or a memory-warning
+                // release, so a later scan doesn't pay the cold load.
+                if !Self.isUnitTestHost { ScanModelWarmup.shared.startOnForeground() }
+            }
             if phase == .background { BillingEventLogger.shared.suspend() }
         }
     }

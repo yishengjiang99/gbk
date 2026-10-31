@@ -34,6 +34,54 @@ public struct PageParseResult: Sendable {
     public var timings: [StageTiming]
 }
 
+/// Warmup load progress 0...1, called from the loading thread (`PageInferenceSession.load`).
+public typealias PageLoadProgressHandler = @Sendable (Double) -> Void
+
+/// Step weights for `PageInferenceSession.load` progress (sum 1). Session creation is serialized
+/// and the encoder creates dominate (~32 s of the ~40 s nominal first load, as in the app's
+/// ModelWarmup), so the encoder steps carry 0.90 of the bar, split evenly across staff slots.
+public enum PageLoadProgress {
+    public static let vocabularyWeight = 0.02
+    public static let segnetWeight = 0.03
+    public static let encoderWeightTotal = 0.90
+    public static let decoderWeightTotal = 0.04
+    public static let staffSessionWeightTotal = 0.01
+    /// UserDefaults key for the self-calibrating first-encoder-create estimate (ms) the load
+    /// ticker interpolates against; smoothed by `load` after each timed first create.
+    public static let expectedEncoderCreateDefaultsKey = "gbk.omr.warmup.expectedEncoderCreateMs"
+    public static let nominalEncoderCreateMs = 32_000.0
+
+    /// Ordered step weights: vocabulary, segnet, then per staff slot encoder / decoder / staff
+    /// session init. Sums to 1 for any slot count.
+    public static func weights(staffSlots: Int) -> [Double] {
+        let slots = max(1, staffSlots)
+        var w = [vocabularyWeight, segnetWeight]
+        for _ in 0..<slots {
+            w += [encoderWeightTotal / Double(slots), decoderWeightTotal / Double(slots),
+                  staffSessionWeightTotal / Double(slots)]
+        }
+        return w
+    }
+}
+
+/// Forwards only increasing fractions (clamped to 0...1) to `handler`; thread-safe. Load steps
+/// and the encoder ticker race through here, so a late tick can never move the bar backward.
+final class MonotonicPageLoadProgress: @unchecked Sendable {
+    private let handler: PageLoadProgressHandler
+    private let lock = NSLock()
+    private var last = -1.0
+    init(_ handler: @escaping PageLoadProgressHandler) { self.handler = handler }
+    var current: Double { lock.lock(); defer { lock.unlock() }; return max(last, 0) }
+    func emit(_ fraction: Double) {
+        let f = min(max(fraction, 0), 1)
+        lock.lock()
+        guard f > last else { lock.unlock(); return }
+        last = f
+        lock.unlock()
+        handler(f)
+    }
+}
+
 /// Loaded page-path models: SegNet (fp16), encoder (fp16), decoder (fp32, CPU). Create once and reuse; a parse
 /// is not reentrant across calls (serialize `parsePage`), but **within** one parse staff encode/decode may run
 /// in parallel up to `maxStaffConcurrency` when a staff pool is available.
@@ -291,26 +339,82 @@ extension PageInferenceSession {
     ///   `<AppSupport>/coreml-cache/<sha256>/`), nil (default) = no cache. Cache key = SHA-256 of the model
     ///   file. Used only for the CoreML attempt, not the CPU fallback; ignored on Linux. See
     ///   `ORTCSession.init(modelURL:provider:cacheDirectory:cacheKey:)` for what the folder owner must handle.
+    /// - Parameter progress: optional warmup progress (weighted step fractions, monotonic,
+    ///   0...1; see `PageLoadProgress`). Default nil — existing callers are unchanged. During the
+    ///   FIRST encoder create (the long step) a 0.5 s ticker interpolates the fraction through
+    ///   that step's weight against the self-calibrating expected create time; the ticker never
+    ///   completes the step itself.
     public static func load(
         modelsDirectory: URL? = nil,
         bundle: Bundle? = nil,
         segnetCacheDirectory: URL? = nil,
-        encoderCacheDirectory: URL? = nil
+        encoderCacheDirectory: URL? = nil,
+        progress: PageLoadProgressHandler? = nil
     ) throws -> PageInferenceSession {
         let dir = try PageModels.resolveDirectory(modelsDirectory, bundle: bundle)
         let files = try PageModels.files(in: dir)
+        let slots = Self.recommendedStaffConcurrency
+        let emitter = progress.map { MonotonicPageLoadProgress($0) }
+        let weights = PageLoadProgress.weights(staffSlots: slots)
+        var completedWeight = 0.0
+        var weightIndex = 0
+        func advance() {
+            guard let emitter, weightIndex < weights.count else { return }
+            completedWeight += weights[weightIndex]
+            weightIndex += 1
+            emitter.emit(completedWeight)
+        }
         let vocab = try TokenizerLoader.loadVocabulary(bundle: nil)
+        advance() // vocabulary load
         _ = segnetCacheDirectory // intentionally unused: SegNet (NeuralNetwork) has no CoreML cache
         let seg = try PageModels.acceleratedSegNet(files.segnet)
-        let slots = Self.recommendedStaffConcurrency
+        advance() // segnet create
         // Serialize session creation (CoreML cache is not safe for concurrent creators of the same key).
         var pool: [StaffInferenceSession] = []
         pool.reserveCapacity(slots)
-        for _ in 0..<slots {
-            let enc = try PageModels.accelerated(files.encoder, cacheDirectory: encoderCacheDirectory)
+        for slot in 0..<slots {
+            // The first encoder create is ~90% of the load and tens of seconds of silence: tick
+            // the fraction toward the end of its weight every 0.5 s instead of stalling.
+            var ticker: Task<Void, Never>?
+            if slot == 0, let emitter {
+                let base = completedWeight
+                let stepWeight = weights[weightIndex]
+                var expectedMs = UserDefaults.standard.double(forKey: PageLoadProgress.expectedEncoderCreateDefaultsKey)
+                if expectedMs <= 0 { expectedMs = PageLoadProgress.nominalEncoderCreateMs }
+                let stepT0 = DispatchTime.now()
+                ticker = Task.detached {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        guard !Task.isCancelled else { break }
+                        let stepMs = Double(DispatchTime.now().uptimeNanoseconds - stepT0.uptimeNanoseconds) / 1_000_000
+                        emitter.emit(base + stepWeight * min(stepMs / expectedMs, 0.97))
+                    }
+                }
+            }
+            let encT0 = DispatchTime.now()
+            let enc: ORTCSession
+            do {
+                enc = try PageModels.accelerated(files.encoder, cacheDirectory: encoderCacheDirectory)
+            } catch {
+                ticker?.cancel()
+                throw error
+            }
+            ticker?.cancel()
+            if slot == 0 {
+                // Self-calibrating ticker estimate for the next load (smoothed, as in ModelWarmup).
+                let createMs = Double(DispatchTime.now().uptimeNanoseconds - encT0.uptimeNanoseconds) / 1_000_000
+                let ud = UserDefaults.standard
+                let prev = ud.double(forKey: PageLoadProgress.expectedEncoderCreateDefaultsKey)
+                ud.set(prev > 0 ? 0.7 * prev + 0.3 * createMs : createMs,
+                       forKey: PageLoadProgress.expectedEncoderCreateDefaultsKey)
+            }
+            advance() // encoder create (this slot)
             let dec = try ORTCSession(modelURL: files.decoder, provider: .cpu)
+            advance() // decoder create (this slot)
             pool.append(try StaffInferenceSession(encoder: enc, decoder: dec, vocabulary: vocab))
+            advance() // staff session init (this slot)
         }
+        emitter?.emit(1)
         return PageInferenceSession(
             segnet: SegNetSession(backend: seg),
             staffPool: pool,
@@ -534,23 +638,55 @@ public extension OMRHomrIOS {
     static func defaultPageSession() throws -> PageInferenceSession {
         try PageSessionCache.shared.get()
     }
+
+    /// Warms the shared page session (loads the pinned models into `PageSessionCache`) without
+    /// parsing, reporting weighted load progress. Returns the cached session when already warm.
+    static func warmUpPageSession(progress: PageLoadProgressHandler? = nil) throws -> PageInferenceSession {
+        try PageSessionCache.shared.warmUp(progress: progress)
+    }
+
+    /// Drops the shared page session so its ORT / CoreML memory can be freed (memory warning).
+    /// The next `get()` / parse lazily loads it again.
+    static func releasePageSession() {
+        PageSessionCache.shared.release()
+    }
 }
 
-final class PageSessionCache: @unchecked Sendable {
-    static let shared = PageSessionCache()
+/// Cache for the shared page session. `get()` keeps its lazy load-on-first-use behavior for any
+/// caller that bypasses the app warmup; `warmUp(progress:)` is the same load, driven early
+/// (app launch / foreground) with progress; `release()` clears the cache (memory warning).
+public final class PageSessionCache: @unchecked Sendable {
+    public static let shared = PageSessionCache()
     private let lock = NSLock()
     private var session: PageInferenceSession?
 
-    func get() throws -> PageInferenceSession {
+    public func get() throws -> PageInferenceSession { try get(progress: nil) }
+
+    /// Loads (or returns) the shared session, forwarding `PageInferenceSession.load` progress.
+    public func warmUp(progress: PageLoadProgressHandler? = nil) throws -> PageInferenceSession {
+        try get(progress: progress)
+    }
+
+    func get(progress: PageLoadProgressHandler?) throws -> PageInferenceSession {
         lock.lock()
         defer { lock.unlock() }
-        if let session { return session }
+        if let session {
+            progress?(1)
+            return session
+        }
         #if canImport(CONNXRuntime) || canImport(CONNXRuntimeApple)
-        let s = try PageInferenceSession.load()
+        let s = try PageInferenceSession.load(progress: progress)
         session = s
         return s
         #else
         throw OMRError.sessionNotConfigured("no ONNX Runtime linked (Linux: scripts/fetch-ort, docs/ORT-LINUX.md)")
         #endif
+    }
+
+    /// Clears the cached session (a parse in flight keeps its own reference and finishes).
+    public func release() {
+        lock.lock()
+        session = nil
+        lock.unlock()
     }
 }

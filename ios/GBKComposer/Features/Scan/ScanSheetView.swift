@@ -14,29 +14,14 @@ struct ScanSheetView: View {
     @State private var photoItems: [PhotosPickerItem] = []
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 18) {
-                switch controller.phase {
-                case .choose: choose
-                case .working:
-                    Spacer()
-                    ProgressView().controlSize(.large).tint(Theme.accent)
-                    Text("Reading the sheet music…").foregroundStyle(Theme.textSecondary)
-                    Spacer()
-                case .done(let tracks, let notes):
-                    Spacer()
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 48)).foregroundStyle(Theme.accent)
-                    Text("Added \(tracks) track\(tracks == 1 ? "" : "s") · \(notes) notes").foregroundStyle(Theme.text)
-                    Spacer()
-                case .error(let e): errorView(e)
-                }
+        Group {
+            if case .working = controller.phase {
+                // Music Reader parity: dark reading screen with its own Cancel pill — no
+                // navigation title / toolbar in this state (see ScanWorkingView).
+                ScanWorkingView(page: controller.scanningPage, state: controller.workingState) { controller.cancel() }
+            } else {
+                sheetBody
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("Scan sheet music")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { controller.cancel() } } }
         }
         .fullScreenCover(isPresented: $showCamera) {
             DocumentCamera { images in
@@ -62,6 +47,30 @@ struct ScanSheetView: View {
                 photoItems = []
                 if pages.isEmpty { controller.fail(.unreadableInput("the selected photo couldn't be opened")) } else { controller.recognize(pages) }
             }
+        }
+    }
+
+    /// The light GBK sheet for the non-working phases (choose / done / error), unchanged.
+    private var sheetBody: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                switch controller.phase {
+                case .choose: choose
+                case .working: EmptyView() // unreachable: `body` routes .working to ScanWorkingView
+                case .done(let tracks, let notes):
+                    Spacer()
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 48)).foregroundStyle(Theme.accent)
+                    Text("Added \(tracks) track\(tracks == 1 ? "" : "s") · \(notes) notes").foregroundStyle(Theme.text)
+                    Spacer()
+                case .error(let e): errorView(e)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle("Scan sheet music")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { controller.cancel() } } }
         }
     }
 
@@ -119,6 +128,142 @@ struct ScanSheetView: View {
         if let doc = PDFDocument(url: url) { return PDFPages.render(doc) }
         if let data = try? Data(contentsOf: url), let img = UIImage(data: data), let p = SheetPage(uiImage: img) { return [p] }
         return []
+    }
+}
+
+/// The `.working` state, at layout parity with Music Reader's `ReadingView`: dark full-bleed
+/// background, Cancel pill, the scanned page with an animated scan-line sweep, and a bottom
+/// progress card. The accent is GBK's own `Theme.accent` instead of Music Reader's coral.
+/// Colors are set explicitly (white on near-black) because the app is locked to Light
+/// (Info.plist), so nothing here may rely on the color scheme.
+///
+/// Copy mirrors ReadingView, adapted to what GBK actually knows: while warming, a real
+/// determinate fraction + ETA from `ScanModelWarmup` ("Warming up… x%"); while reading, the
+/// homr parse emits no progress, so the bar is indeterminate and no percentage is shown.
+struct ScanWorkingView: View {
+    /// The first scanned page, when one was retained.
+    let page: CGImage?
+    let state: ScanController.WorkingState
+    var onCancel: () -> Void
+
+    /// "Warming up… 42%" (real warmup fraction) / "Reading the sheet music…" (no parse % exists).
+    static func title(state: ScanController.WorkingState) -> String {
+        switch state {
+        case .warming(let fraction, _, _):
+            return "Warming up… \(Int((min(max(fraction, 0), 1) * 100).rounded(.down)))%"
+        case .reading:
+            return "Reading the sheet music…"
+        }
+    }
+
+    /// Subtitle under the bar; while warming up shows the ticking ETA when known.
+    static func subtitle(state: ScanController.WorkingState) -> String {
+        switch state {
+        case .warming(_, let etaSeconds, let isRewarm):
+            if isRewarm {
+                if let eta = etaSeconds, eta > 1 {
+                    return "About \(Int(eta.rounded())) seconds left · reloading the music models"
+                }
+                return "Reloading the music models on your iPhone"
+            }
+            if let eta = etaSeconds, eta > 1 {
+                return "About \(Int(eta.rounded())) seconds left · one-time setup"
+            }
+            return "One-time setup — loading the music models on your iPhone"
+        case .reading:
+            return "This usually takes a few seconds"
+        }
+    }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweep = false
+
+    var body: some View {
+        ZStack {
+            Color(white: 0.07).ignoresSafeArea()
+            VStack(spacing: 20) {
+                HStack {
+                    Button("Cancel", action: onCancel)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.white.opacity(0.14), in: Capsule())
+                        .accessibilityIdentifier("reading.cancel")
+                    Spacer()
+                }
+                pageView
+                Spacer(minLength: 0)
+                card
+            }
+            .padding(20)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { sweep = true }
+        }
+    }
+
+    @ViewBuilder
+    private var pageView: some View {
+        if let page {
+            Image(uiImage: UIImage(cgImage: page))
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    GeometryReader { geo in
+                        LinearGradient(colors: [Theme.accent.opacity(0), Theme.accent.opacity(0.35), Theme.accent.opacity(0)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .frame(height: 60)
+                            .overlay(Rectangle().fill(Theme.accent).frame(height: 2))
+                            .offset(y: sweep ? geo.size.height - 30 : -30)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .allowsHitTesting(false)
+                }
+                .frame(maxHeight: 440)
+                .accessibilityHidden(true)
+        } else {
+            // No retained page (defensive: recognize() always sets one) — a plain dark
+            // placeholder in the page area, keeping the card layout identical.
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.white.opacity(0.08))
+                .frame(maxWidth: .infinity)
+                .frame(height: 240)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(Self.title(state: state))
+                    .font(.title3.weight(.bold))
+                    .monospacedDigit()
+                    .accessibilityIdentifier("reading.percent")
+                Group {
+                    if case .warming(let fraction, _, _) = state {
+                        ProgressView(value: min(max(fraction, 0), 1))
+                            .animation(.easeOut(duration: 0.25), value: fraction)
+                    } else {
+                        ProgressView()
+                    }
+                }
+                .progressViewStyle(.linear)
+                .tint(Theme.accent)
+                Text(Self.subtitle(state: state))
+                    .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+            }
+            Label("Read on your iPhone. No internet needed.", systemImage: "lock.fill")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .foregroundStyle(.white)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("reading.progress")
     }
 }
 

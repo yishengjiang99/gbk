@@ -34,22 +34,54 @@ enum StudioMIDIImport {
 final class ScanController: ObservableObject {
     enum Phase: Equatable { case choose, working, error(ScanError), done(tracks: Int, notes: Int) }
 
+    /// Sub-state of `.working`: blocked on the model warmup (determinate, from
+    /// `ScanModelWarmup`) vs actually reading the page (indeterminate — the homr parse emits
+    /// no progress, so no fraction is ever invented for it).
+    enum WorkingState: Equatable {
+        case warming(fraction: Double, etaSeconds: Double?, isRewarm: Bool)
+        case reading
+    }
+
     @Published var isPresented = false
     @Published var phase: Phase = .choose
+    @Published var workingState: WorkingState = .reading
+    /// First scanned page, retained so the working view can show the photo (Music Reader
+    /// parity). Set in `recognize` — every entry point (camera, PhotosPicker, PDF/file,
+    /// fixture) already funnels through there.
+    @Published var scanningPage: CGImage?
     weak var webView: WKWebView?
     let recognizer: SheetRecognizer
+    let warmup: ScanModelWarmup
     /// Last SMF handed to the studio (tests).
     private(set) var lastMIDI: Data?
 
-    init(recognizer: SheetRecognizer = HomrSheetRecognizer()) { self.recognizer = recognizer }
+    init(recognizer: SheetRecognizer = HomrSheetRecognizer(), warmup: ScanModelWarmup? = nil) {
+        self.recognizer = recognizer
+        // Resolved inside the @MainActor init so nonisolated call sites (SwiftUI views) never
+        // touch the main-actor singleton in a default-argument expression.
+        self.warmup = warmup ?? .shared
+    }
 
     func start() { phase = .choose; isPresented = true }
     func fail(_ e: ScanError) { phase = .error(e) }
 
     func recognize(_ pages: [SheetPage]) {
         guard !pages.isEmpty else { return }
+        scanningPage = pages.first?.image
+        // Attach to an in-flight / re-warm warmup (bus replays the current fraction at once);
+        // when already warm — or never warmed, which a scan must not start — go straight to
+        // reading and the recognizer's lazy load does the work, as before.
+        let isRewarm = warmup.hasWarmedOnce
+        let attached = warmup.attachProgressIfNeeded { [weak self] p in
+            Task { @MainActor in self?.applyWarmupProgress(p) }
+        }
+        workingState = attached ? .warming(fraction: 0, etaSeconds: nil, isRewarm: isRewarm) : .reading
         phase = .working
         Task {
+            if attached {
+                await warmup.waitUntilReady()
+                if case .working = phase { workingState = .reading }
+            }
             do {
                 let score = try await recognizer.recognize(pages: pages)
                 guard score.noteCount > 0 else { throw ScanError.nothingRecognized }
@@ -66,6 +98,14 @@ final class ScanController: ObservableObject {
                 phase = .error(.failed(error.localizedDescription))
             }
         }
+    }
+
+    /// Warmup bus updates (already hopped to the main actor by the attach closure). Only
+    /// applied while still in the warming sub-state; fractions are monotonic within it.
+    private func applyWarmupProgress(_ p: ScanWarmupProgress) {
+        guard case .working = phase, case .warming(let fraction, _, let isRewarm) = workingState else { return }
+        workingState = .warming(fraction: max(fraction, min(max(p.fraction, 0), 1)),
+                                etaSeconds: p.etaSeconds, isRewarm: isRewarm)
     }
 
     private func handOff(_ midi: Data) async throws {
