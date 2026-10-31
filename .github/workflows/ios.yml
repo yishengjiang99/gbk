@@ -87,9 +87,12 @@ jobs:
           xcrun simctl boot "$IPAD" || true
           xcrun simctl bootstatus "$IPAD" -b
           xcrun simctl install "$IPAD" "$APP"
-          xcrun simctl launch "$IPAD" com.grepawk.moviefone
-          sleep 25
+          xcrun simctl launch --console-pty "$IPAD" com.grepawk.moviefone > ipad-console.log 2>&1 &
+          sleep 30
           xcrun simctl io "$IPAD" screenshot snapshots/feed-ipad-portrait.png
+          echo "--- console"; tail -60 ipad-console.log || true
+          echo "--- running?"; xcrun simctl spawn "$IPAD" launchctl list | grep -i moviefone || echo "not running"
+          echo "--- crashes"; ls -t ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i -E "GBK|moviefone" | head -3 | while read f; do head -80 ~/Library/Logs/DiagnosticReports/"$f"; done
       - name: Upload snapshots
         if: always()
         uses: actions/upload-artifact@v4
