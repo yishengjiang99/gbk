@@ -14,7 +14,7 @@ export interface PaywallPlan { id: string; name: string; price: string; per: str
 export const PAYWALL_PLANS: PaywallPlan[] = [
   { id: "pro_yearly", name: "Pro yearly", price: "$47.99", per: "/year", note: "$4/month billed yearly · save 33% vs monthly", trial: true },
   { id: "pro_monthly", name: "Pro monthly", price: "$5.99", per: "/month", note: "Cancel anytime", trial: true },
-  { id: "lifetime", name: "Pro lifetime", price: "$99", per: "", note: "One payment, no subscription", trial: false },
+  { id: "lifetime", name: "Pro lifetime", price: "$99.99", per: "", note: "One payment, no subscription", trial: false },
 ];
 export const DEFAULT_PLAN = "pro_yearly";
 

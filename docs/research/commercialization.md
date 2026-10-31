@@ -75,7 +75,7 @@ Positioning: GBK is the only one of these that **lives inside ChatGPT/MCP client
 
 ### Recommended pricing
 - **Free** (unchanged, the default for everyone, including all ChatGPT use within today's limits).
-- **Pro $6/month or $48/year**, 7-day free trial; **Pro lifetime $99** one-time.
+- **Pro $6/month or $48/year**, 7-day free trial; **Pro lifetime $99.99** one-time.
 - Pro = signed-in account with: 10× the Studio composer-agent daily budget (2M vs 200k tokens, i.e. today's `AGENT_DAILY_TOKEN_BUDGET` vs new-account budget), 120 server renders/hour up to 600 s (vs 30/h, 300 s).
 - Why this price: under Suno Pro ($8) and Hookpad ($7.99), well under AIVA Standard (€11), because GBK's paid value is narrower (limits, not features) and the main channel (ChatGPT) can't upsell. Lifetime at ~2 years of yearly mirrors Hookpad's lifetime option; **risk**: lifetime buyers keep consuming Studio tokens forever, so cap lifetime sales (e.g. first 200, assumption) or drop it if token cost per Pro user exceeds ~$2/month (assumption).
 - Honest expectation: conversion will be low while the plugin can't mention Pro. Treat paid ads as a test of whether **web/Studio** users pay.
