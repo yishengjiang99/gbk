@@ -32,7 +32,7 @@ struct NativeStudioView: View {
         VStack(spacing: 0) {
             TransportBar(store: model.store)
             Divider()
-            TrackList(project: model.store.project)
+            TrackList(store: model.store)
             ProposalPanel(store: model.store, errorText: $errorText)
             Divider()
             Picker("View", selection: $showRoll) {
@@ -66,22 +66,36 @@ private struct TransportBar: View {
 }
 
 private struct TrackList: View {
-    let project: Project
+    @ObservedObject var store: WorkstationStore
+    @State private var editing: String?
     var body: some View {
-        if !project.tracks.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack {
-                    ForEach(project.tracks, id: \.id) { t in
-                        let n = project.notes.filter { $0.trackId == t.id }.count
+        let project = store.project
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack {
+                ForEach(project.tracks, id: \.id) { t in
+                    let n = project.notes.filter { $0.trackId == t.id }.count
+                    Button { editing = t.id } label: {
                         Text("\(t.name) · \(n)")
                             .font(.caption).padding(.horizontal, 10).padding(.vertical, 6)
                             .background(.thinMaterial, in: Capsule())
-                    }
-                }.padding(.horizontal)
-            }.padding(.vertical, 6)
+                            .opacity(t.mix.mute ? 0.45 : 1)
+                    }.buttonStyle(.plain)
+                }
+                Menu {
+                    Button("Add instrument track") { _ = TrackActions.addTrack(store) }
+                    Button("Add drum track") { _ = TrackActions.addTrack(store, drums: true) }
+                } label: { Image(systemName: "plus.circle").font(.title3) }
+                    .accessibilityIdentifier("studio-add-track")
+            }.padding(.horizontal)
+        }
+        .padding(.vertical, 6)
+        .sheet(item: Binding(get: { editing.map(TrackSelection.init) }, set: { editing = $0?.id })) { sel in
+            TrackSheet(store: store, trackId: sel.id).presentationDetents([.medium, .large])
         }
     }
 }
+
+private struct TrackSelection: Identifiable { let id: String }
 
 private struct ProposalPanel: View {
     @ObservedObject var store: WorkstationStore
