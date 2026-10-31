@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build-test:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60 # build ~7 + test ~21 + iPad screenshot ~13 + uploads/post ~8 min
     defaults:
       run:
         working-directory: ios
@@ -70,6 +70,7 @@ jobs:
       - name: iPad feed screenshot
         if: always()
         continue-on-error: true
+        timeout-minutes: 15 # best-effort: a slow second simulator must not eat the job's time budget
         run: |
           APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*Debug-iphonesimulator/GBKComposer.app' -maxdepth 6 | head -1)
           IPAD=$(xcrun simctl list devices available -j | python3 -c '
