@@ -118,9 +118,9 @@ export class BridgeClient {
       case "session_ready": this.sessionId = m.sessionId; this.onState("connected"); break;
       case "session_reconnected": if (!m.resumed && m.runId === this.activeRunId) { this.activeRunId = null; this.calls.clear(); this.bridge.cancel(); } break;
       case "ping": this.send({ type: "pong", t: m.t }); return;
-      case "run_started": this.activeRunId = m.runId; this.calls.clear(); this.c.supersedePendingProposals(); break;
+      case "run_started": this.activeRunId = m.runId; this.calls.clear(); this.c.supersedePendingProposals(); this.c.setActiveRun?.(m.runId); break;
       // A finished/failed/cancelled run never leaves browser work behind (e.g. an in-page render after Stop).
-      case "run_completed": case "run_failed": if (!this.activeRunId || m.runId === this.activeRunId) { this.activeRunId = null; this.calls.clear(); this.bridge.cancel(); } break;
+      case "run_completed": case "run_failed": if (!this.activeRunId || m.runId === this.activeRunId) { this.activeRunId = null; this.calls.clear(); this.bridge.cancel(); this.c.setActiveRun?.(null); } break;
       case "cancel_call": this.bridge.cancel(m.callId); break;
       case "tool_call": {
         const known = this.calls.get(m.callId);

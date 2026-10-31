@@ -17,7 +17,13 @@ export interface Proposal {
   range: { startTick: number; endTick: number }; trackIds: string[]; ops: Op[]; summary: string;
   validation: { ok: boolean; warnings: string[] }; status: ProposalStatus;
   original: Project; candidate: Project; // refs: original = snapshot at baseRevision
+  /** #168: the agent run that created it (proposals of one run are reviewed together as one change set). */
+  runId?: string;
+  /** #168: set when the proposal was committed as part of a batch ("Accept all"). */
+  batchId?: string;
 }
+/** #168: a run-level change set — the run's still-pending proposals, reviewable with one Accept/Reject. */
+export interface ProposalBatch { runId: string; proposals: Proposal[] }
 export interface TransportState { playing: boolean; positionTick: number; audioReady: boolean; starting?: boolean; /** SoundFont download progress (0..1, null unknown) while not ready. */ sf2Progress?: number | null }
 export interface TransportDriver {
   play(fromTick: number): Promise<void> | void; /** Synchronous audio unlock, called inside the user gesture. */ unlock?(): void; pause(): void; stop(): void; seek(tick: number): void;
@@ -298,11 +304,79 @@ export class WorkstationController {
       id: `prop_${++this.seq}_${original.revision}`, projectId: original.id, baseRevision: original.revision, createdAt: Date.now(), source: opts.source ?? "user",
       range: { startTick: ticks.length ? Math.min(...ticks) : 0, endTick: ticks.length ? Math.max(...ticks) : 0 }, trackIds: [...tracks], ops,
       summary: opts.summary ? `${opts.summary.slice(0, 300)} — ${summarizeOps(ops)}` : summarizeOps(ops), validation: { ok: true, warnings }, status: "pending", original, candidate,
+      ...((opts.source ?? "user") === "agent" && this.activeRunId ? { runId: this.activeRunId } : {}),
     };
     this.set({ proposals: [...this.state.proposals, p] });
     this.log(p.source, `propose ${p.id}`, true, p.summary);
     return p;
   }
+  /** #168: the agent run in flight (set by the bridge on run_started, cleared when it ends). Agent proposals
+   *  created while it is set carry its runId, which is what groups them into one change set. */
+  activeRunId: string | null = null;
+  setActiveRun(runId: string | null) { this.activeRunId = runId ? String(runId).slice(0, 80) : null; }
+
+  /** #168: pending agent proposals grouped by run, oldest first. Only groups of 2+ are batches; a single
+   *  proposal keeps the per-proposal Accept/Reject. Members are always at the current revision (a commit
+   *  marks everything older stale), so they apply on top of each other in creation order. */
+  pendingBatches(): ProposalBatch[] {
+    const by = new Map<string, Proposal[]>();
+    for (const p of this.state.proposals) {
+      if (p.status !== "pending" || !p.runId || p.baseRevision !== this.project.revision) continue;
+      const g = by.get(p.runId); if (g) g.push(p); else by.set(p.runId, [p]);
+    }
+    return [...by].filter(([, ps]) => ps.length >= 2).map(([runId, proposals]) => ({ runId, proposals }));
+  }
+  private batchMembers(runId: string): Proposal[] {
+    this.expirePendingProposals();
+    const ps = this.state.proposals.filter((p) => p.runId === runId && p.status === "pending" && p.baseRevision === this.project.revision);
+    if (!ps.length) throw new WorkstationError("INVALID_ARGUMENT", `no pending proposals for run ${runId}`);
+    return ps;
+  }
+  /** #168: the combined change set as one Proposal-shaped view (for the piano-roll overlay, diff and A/B).
+   *  Not stored in state. Throws BATCH_CONFLICT when the members cannot be applied together. */
+  batchView(runId: string): Proposal {
+    const ps = this.batchMembers(runId);
+    const ops = ps.flatMap((p) => p.ops);
+    let candidate: Project;
+    try { candidate = applyOps(this.project, ops); }
+    catch (e) { throw new WorkstationError("BATCH_CONFLICT", `these changes conflict and cannot be applied together: ${(e as Error).message.slice(0, 160)}`); }
+    const tracks = new Set(ps.flatMap((p) => p.trackIds));
+    return {
+      id: `batch:${runId}`, projectId: this.project.id, baseRevision: this.project.revision, createdAt: Math.min(...ps.map((p) => p.createdAt)), source: "agent",
+      range: { startTick: Math.min(...ps.map((p) => p.range.startTick)), endTick: Math.max(...ps.map((p) => p.range.endTick)) }, trackIds: [...tracks], ops,
+      summary: `${ps.length} changes: ${ps.map((p) => p.summary).join("; ").slice(0, 600)}`,
+      validation: { ok: ps.every((p) => p.validation.ok), warnings: ps.flatMap((p) => p.validation.warnings) }, status: "pending", original: this.project, candidate, runId,
+    };
+  }
+  /** #168 "Accept all": every pending proposal of the run applied in creation order as ONE undo step (one
+   *  Undo reverts the whole change set). All-or-nothing: a conflict commits nothing. User action only. */
+  commitBatch(runId: string): { revision: number; committed: string[] } {
+    this.assertWritable();
+    const ps = this.batchMembers(runId);
+    const v = this.batchView(runId);
+    const ids = new Set(ps.map((p) => p.id)); const batchId = `batch_${++this.seq}`;
+    this.commitProject(v.candidate, `accept ${ps.length} agent changes: ${ps.map((p) => p.summary).join("; ").slice(0, 200)}`, "agent");
+    this.set({ proposals: this.state.proposals.map((p) => ids.has(p.id) ? { ...p, status: "committed" as const, batchId } : p) });
+    this.log("user", `commit batch (${ps.length})`, true, [...ids].join(", "));
+    return { revision: this.project.revision, committed: [...ids] };
+  }
+  /** #168 "Reject all": discard every pending proposal of the run. */
+  discardBatch(runId: string): string[] {
+    const ps = this.batchMembers(runId); const ids = new Set(ps.map((p) => p.id));
+    this.set({ proposals: this.state.proposals.map((p) => ids.has(p.id) ? { ...p, status: "discarded" as const } : p) });
+    this.log("user", `discard batch (${ps.length})`, true, [...ids].join(", "));
+    return [...ids];
+  }
+  async previewBatch(runId: string, variant: "A" | "B", signal?: AbortSignal) {
+    const v = this.batchView(runId);
+    const d = await this.readyDriver();
+    if (!d.preview) throw new WorkstationError("UNSUPPORTED", "preview not supported by this driver");
+    this.set({ previewing: `${v.id}:${variant}` });
+    try { await d.preview(variant === "A" ? v.original : v.candidate, v.range.startTick, v.range.endTick, signal); }
+    finally { this.set({ previewing: null }); }
+    if (signal?.aborted) throw new WorkstationError("OPERATION_CANCELLED", "preview cancelled");
+  }
+
   getProposal(id: string): Proposal {
     const p = this.state.proposals.find((x) => x.id === id);
     if (!p) throw new WorkstationError("INVALID_ARGUMENT", `unknown proposal ${id}`);
@@ -354,6 +428,8 @@ export class WorkstationController {
   async commitProposal(id: string, opts: { source: "user" | "agent"; signal?: AbortSignal }): Promise<{ revision: number }> {
     this.expirePendingProposals();
     const p = this.getProposal(id);
+    // #168: already accepted as part of a batch -> the agent's later commit is a no-op success.
+    if (p.status === "committed" && p.batchId) return { revision: this.project.revision };
     if (p.status !== "pending") throw new WorkstationError(p.status === "stale" ? "STALE_REVISION" : p.status === "expired" ? "PROPOSAL_EXPIRED" : "INVALID_ARGUMENT", `proposal is ${p.status}`);
     this.checkRev(p.baseRevision);
     if (opts.source === "agent" && this.autonomousAllowed(p.projectId)) {
@@ -362,6 +438,8 @@ export class WorkstationController {
       const ok = await this.awaitApproval(p);
       if (opts.signal?.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
       if (this.state.proposals.find((x) => x.id === id)?.status === "expired") throw new WorkstationError("PROPOSAL_EXPIRED", `proposal ${id} expired before it was approved`);
+      const now = this.state.proposals.find((x) => x.id === id);
+      if (ok && now?.status === "committed" && now.batchId) return { revision: this.project.revision }; // accepted via "Accept all"
       if (!ok) throw new WorkstationError("USER_APPROVAL_REQUIRED", "User declined the proposal.");
       this.checkRev(p.baseRevision);
     }

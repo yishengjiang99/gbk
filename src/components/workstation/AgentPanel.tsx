@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Proposal, WorkstationState } from "../../workstation/controller.ts";
+import type { Proposal, ProposalBatch, WorkstationState } from "../../workstation/controller.ts";
 import { diffNotes, diffSummary } from "../../workstation/diff.ts";
 import { workstation } from "./useWorkstation.ts";
 import { agentToolsMode, getModelContext, registerWebMcpTools, unregisterWebMcpTools } from "../../webmcp/adapter.ts";
@@ -63,6 +63,23 @@ export function AgentPanel({ state, focusProposal, setFocus }: { state: Workstat
     if (approval && approval.p.id === p.id) { approval.resolve(true); if (approvalRef.current?.p.id === p.id) approvalRef.current = null; setApproval(null); return; }
     try { await workstation.commitProposal(p.id, { source: "user" }); } catch (e) { alert((e as Error).message); }
   };
+  // #168: proposals from one agent run collapse into one change set with a single Accept all / Reject all.
+  const batches = useMemo<ProposalBatch[]>(() => workstation.pendingBatches(), [state.proposals, state.project.revision]);
+  const batchIds = new Set(batches.flatMap((b) => b.proposals.map((p) => p.id)));
+  const releaseApproval = (ids: Set<string>, ok: boolean) => {
+    if (approval && ids.has(approval.p.id)) { approval.resolve(ok); if (approvalRef.current?.p.id === approval.p.id) approvalRef.current = null; setApproval(null); }
+  };
+  const acceptAll = (b: ProposalBatch) => {
+    const ids = new Set(b.proposals.map((p) => p.id));
+    try { workstation.commitBatch(b.runId); } catch (e) { alert((e as Error).message); return; }
+    releaseApproval(ids, true); setFocus(null);
+  };
+  const rejectAll = (b: ProposalBatch) => {
+    const ids = new Set(b.proposals.map((p) => p.id));
+    releaseApproval(ids, false);
+    try { workstation.discardBatch(b.runId); } catch (e) { alert((e as Error).message); }
+    setFocus(null);
+  };
   const reject = (p: Proposal) => {
     if (approval && approval.p.id === p.id) { approval.resolve(false); if (approvalRef.current?.p.id === p.id) approvalRef.current = null; setApproval(null); }
     workstation.discardProposal(p.id, "user");
@@ -91,14 +108,37 @@ export function AgentPanel({ state, focusProposal, setFocus }: { state: Workstat
       </div>
       <h4>Proposals ({pending.length} pending)</h4>
       {approval && <div className="ws-approval" role="alertdialog" aria-label="Agent requests approval">Agent asks to commit <b>{approval.p.id}</b>. Review the overlay, then Accept or Reject.</div>}
+      {batches.map((b) => {
+        const fid = `batch:${b.runId}`; const focused = focusProposal?.id === fid;
+        const tracks = new Set(b.proposals.flatMap((p) => p.trackIds)).size;
+        return (
+          <section key={b.runId} className={`ws-batch${focused ? " focus" : ""}`} aria-label={`Change set: ${b.proposals.length} proposed changes`} data-testid="proposal-batch">
+            <div className="ws-batch-head">
+              <b>{b.proposals.length} changes from this agent run</b>
+              <span className="ws-dim">{tracks} track{tracks === 1 ? "" : "s"}{focused && diff ? ` · ${diffSummary(diff, ccDelta)}` : ""}</span>
+            </div>
+            <ol className="ws-batch-list">
+              {b.proposals.map((p) => <li key={p.id}><span className="ws-batch-id">{p.id}</span> {p.summary}{p.validation.warnings.map((w, i) => <div key={i} className="ws-warn">⚠ {w}</div>)}</li>)}
+            </ol>
+            <div className="ws-batch-actions">
+              <button onClick={() => setFocus(focused ? null : fid)} aria-pressed={focused} data-testid="batch-review">{focused ? "Hide overlay" : "Review all"}</button>
+              <button onClick={() => void workstation.previewBatch(b.runId, "A").catch((e) => alert(e.message))} aria-label="Preview before (A)">A</button>
+              <button onClick={() => void workstation.previewBatch(b.runId, "B").catch((e) => alert(e.message))} aria-label="Preview after (B)">B</button>
+              <button className="ws-accept" onClick={() => acceptAll(b)} data-testid="batch-accept">Accept all ({b.proposals.length})</button>
+              <button className="ws-reject" onClick={() => rejectAll(b)} data-testid="batch-reject">Reject all</button>
+            </div>
+            <p className="ws-dim ws-batch-note">Accept all applies them as one step: one Undo reverts the whole set.</p>
+          </section>
+        );
+      })}
       <ul className="ws-proposals">
         {state.proposals.slice(-8).reverse().map((p) => (
           <li key={p.id} className={`${p.status} ${focusProposal?.id === p.id ? "focus" : ""}`} data-testid={`proposal-${p.id}`}>
-            <button className="ws-link" onClick={() => setFocus(p.id)}>{p.id}</button> <span className="ws-status">{p.status}</span>
+            <button className="ws-link" onClick={() => setFocus(p.id)}>{p.id}</button> <span className="ws-status">{p.status}{batchIds.has(p.id) ? " · in change set" : p.batchId ? " · batch" : ""}</span>
             <div className="ws-dim">{p.summary}</div>
             {focusProposal?.id === p.id && diff && <div className="ws-dim">{diffSummary(diff, ccDelta)}</div>}
             {p.validation.warnings.map((w, i) => <div key={i} className="ws-warn">⚠ {w}</div>)}
-            {p.status === "pending" && (
+            {p.status === "pending" && !batchIds.has(p.id) && (
               <div className="ws-row">
                 <button onClick={() => void workstation.previewProposal(p.id, "A").catch((e) => alert(e.message))}>A</button>
                 <button onClick={() => void workstation.previewProposal(p.id, "B").catch((e) => alert(e.message))}>B</button>
