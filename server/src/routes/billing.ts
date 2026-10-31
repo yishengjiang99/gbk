@@ -18,6 +18,10 @@
 //        "value_cents": 4799,                         // purchase/renewal/refund amount, when known
 //        "surface": "pricing", "platform": "web",     // optional, defaults pricing/web
 //        "detail": "stripe event id" }                // optional, free-form, truncated
+//    Ad attribution fields (#130, optional; only used for purchase/trial_start when X/Reddit CAPI is configured):
+//      "event_id": "gc-…" (the Buy form's event_id = browser pixel conversion id), "twclid", "rdt_cid",
+//      "email" (hashed with SHA-256 here, never stored or logged) or "email_sha256", "currency": "USD",
+//      "ads_opt_out": "1" (the buyer's browser sent GPC/DNT -> nothing is sent to X or Reddit).
 //    Mapping on the finalcut side: checkout.session created by /api/compose/checkout -> checkout_start;
 //    checkout.session.completed / invoice.paid (first) -> purchase (or trial_start when the subscription
 //    starts in trial); invoice.paid (later cycles) -> renewal (trial_convert for the first paid invoice
@@ -36,6 +40,7 @@ import { RateLimiter } from "../security/rate-limit.ts";
 import type { FunnelStore, BillingEvent } from "../persistence/funnel.ts";
 import type { BillingLog, BillingRecorder, BillingDims } from "../persistence/billing.ts";
 import { currentSession } from "./agent.ts";
+import type { AdsConversions } from "../ads/conversions.ts";
 
 const CLIENT_EVENTS: readonly string[] = ["paywall_view", "paywall_dismiss", "plan_select", "checkout_start", "restore"];
 const STRIPE_EVENTS: readonly string[] = ["checkout_start", "purchase", "trial_start", "trial_convert", "renewal", "cancel", "refund"];
@@ -56,7 +61,7 @@ const listOf = (body: unknown): Record<string, unknown>[] => {
 };
 
 export function billingRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore,
-  d: { funnel: FunnelStore; billing: BillingRecorder; log: BillingLog }) {
+  d: { funnel: FunnelStore; billing: BillingRecorder; log: BillingLog; ads?: AdsConversions }) {
   const lim = new RateLimiter(30), ipLim = new RateLimiter(120), hookLim = new RateLimiter(300);
   const admin = (req: FastifyRequest, reply: FastifyReply) => {
     const s = currentSession(req, sessions);
@@ -91,6 +96,12 @@ export function billingRoutes(app: FastifyInstance, cfg: Config, sessions: Sessi
       d.billing.record(e.event as BillingEvent, { ...dimsOf(e),
         account: typeof e.account === "string" ? e.account : null,
         provider: "stripe", surface: typeof e.surface === "string" ? e.surface : "pricing", platform: typeof e.platform === "string" ? e.platform : "web" });
+      // #130: server-side ad conversion (X + Reddit CAPI). No-op unless configured; never awaited by the hop.
+      if (d.ads?.active && (e.event === "purchase" || e.event === "trial_start")) {
+        const str = (k: string) => (typeof e[k] === "string" ? (e[k] as string) : undefined);
+        void d.ads.send({ event: e.event, conversionId: str("event_id") ?? "", valueCents: typeof e.value_cents === "number" ? e.value_cents : null, currency: str("currency")?.toUpperCase(),
+          twclid: str("twclid"), rdtCid: str("rdt_cid"), email: str("email"), emailSha256: str("email_sha256"), optOut: e.ads_opt_out === "1" || e.ads_opt_out === true || e.ads_opt_out === 1 });
+      }
       accepted++;
     }
     return { ok: true, accepted };

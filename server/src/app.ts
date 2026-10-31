@@ -32,6 +32,7 @@ import { FunnelStore } from "./persistence/funnel.ts";
 import { BillingLog, BillingRecorder } from "./persistence/billing.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
 import { billingRoutes } from "./routes/billing.ts";
+import { AdsConversions, adsConfig } from "./ads/conversions.ts";
 import { galleryRoutes } from "./routes/gallery.ts";
 import { McpStore } from "./mcp/store.ts";
 import { CompositionService } from "./mcp/service.ts";
@@ -136,7 +137,10 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits,
     { usage, billing, aiLimit: (u) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens, renderLimit: (u) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders });
   eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers, billing);
-  billingRoutes(app, cfg, sessions, { funnel, billing, log: billingLog });
+  // #130: server-side X/Reddit conversions, off unless the pixel ids + API credentials are in env (same env as /pricing pixels).
+  const ads = new AdsConversions(adsConfig(process.env), { fetch: deps.fetch, log: (o) => app.log.warn(o) });
+  app.log.info({ evt: "ads_capi", ...ads.status() });
+  billingRoutes(app, cfg, sessions, { funnel, billing, log: billingLog, ads });
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
     const s = currentSession(req, sessions); const row = shares.bySlug((req.params as { slug: string }).slug);

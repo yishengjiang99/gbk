@@ -51,6 +51,14 @@ Off switch for everything: `COMPOSE_ADS_ENABLED=0` in `/etc/gbk-composer.env` (p
 - [ ] Events Manager → Reddit Pixel (manual/code) → copy the id from `rdt('init','…')`. Don't set up Purchase/StartTrial in the no-code Event Setup Tool (the thanks page fires them with a dedupe id; doing both double-counts).
 - [ ] `/etc/gbk-composer.env`: `COMPOSE_REDDIT_PIXEL_ID=…`; finalcut `.env`: `COMPOSE_REDDIT_PIXEL_ID=…` (`REDDIT_CAPI_TOKEN` is shared with music). Restart both.
 
+### Server-side conversions from gbk (#130)
+gbk itself can now send the X and Reddit Conversions API events from the billing hop (`server/src/ads/conversions.ts`), so
+finalcut only has to forward `event_id`, `twclid`, `rdt_cid` and the buyer's email (hashed in gbk) on `purchase` / `trial_start`.
+In `/etc/gbk-composer.env`: `X_ADS_CONSUMER_KEY`, `X_ADS_CONSUMER_SECRET`, `X_ADS_ACCESS_TOKEN`, `X_ADS_ACCESS_TOKEN_SECRET`,
+`REDDIT_CAPI_TOKEN` (plus the pixel/event ids above). Turn on the server-side send in ONE service only (gbk or finalcut);
+the shared conversion id dedupes browser + server, but two servers would still double-send. Boot log line `ads_capi`
+shows `{x, reddit}` true/false (no ids or secrets).
+
 ## 4. Verify (before launch)
 - [ ] Open `https://compose.grepawk.com/pricing?utm_source=test&twclid=test123&rdt_cid=test456`, ad blockers and GPC off: X Pixel Helper shows the pixel; Reddit Pixel Helper shows `PageVisit`.
 - [ ] With checkout on: start a trial; on `/pricing/thanks` X "Start trial" and Reddit Custom "StartTrial" fire. Stripe session metadata has `product=compose`, `event_id`, `utm_source=test`, `twclid`, `rdt_cid`. finalcut logs show no `[ads] … CAPI` warnings. Cancel the trial.
