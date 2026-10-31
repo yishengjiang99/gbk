@@ -3,7 +3,7 @@ import Foundation
 /// Ordered, exact JSON value used across the native Studio: project wire format, bridge frames,
 /// tool arguments/results. Integers stay integers (ticks and MIDI values must never round-trip
 /// through a Double), mirroring the web model's plain-object JSON.
-enum JSONValue: Equatable, Sendable {
+enum JSONValue: Sendable {
     case null
     case bool(Bool)
     case int(Int64)
@@ -141,6 +141,25 @@ enum JSONValue: Equatable, Sendable {
             let sorted = pairs.sorted { $0.0 < $1.0 }
             return "{" + sorted.map { "\(Self.escape($0.0)):\($0.1.canonical)" }.joined(separator: ",") + "}"
         default: return serialized
+        }
+    }
+}
+
+extension JSONValue: Equatable {
+    // Manual conformance: [(String, JSONValue)] cannot synthesize == (tuples are not Equatable).
+    // Strictly case-wise — .int(1) != .double(1.0) — matching this type's exactness contract.
+    static func == (a: JSONValue, b: JSONValue) -> Bool {
+        switch (a, b) {
+        case (.null, .null): return true
+        case (.bool(let x), .bool(let y)): return x == y
+        case (.int(let x), .int(let y)): return x == y
+        case (.double(let x), .double(let y)): return x == y
+        case (.string(let x), .string(let y)): return x == y
+        case (.array(let x), .array(let y)): return x == y
+        case (.object(let x), .object(let y)):
+            guard x.count == y.count else { return false }
+            return zip(x, y).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+        default: return false
         }
     }
 }

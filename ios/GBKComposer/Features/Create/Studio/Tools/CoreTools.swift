@@ -44,7 +44,7 @@ func setCCOps(trackId: String, channel: Int, controller: Int, range: TickRange, 
 func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
     let P = { store.project }
     return [
-        GBKTool(name: "gbk_get_capabilities", description: "What this GBK build can and cannot do (implemented tools, audible vs stored-only CCs, audio readiness).", inputSchema: schemaObj([:]), readOnly: true) { _ in
+        GBKTool(name: "gbk_get_capabilities", description: "What this GBK build can and cannot do (implemented tools, audible vs stored-only CCs, audio readiness).", inputSchema: schemaObj([]), readOnly: true) { _ in
             ToolRunOut(data: jsonObj([
                 ("audioReady", .bool(store.transport.audioReady)),
                 ("controllers", ccCapsJSON),
@@ -65,7 +65,7 @@ func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
                 ("approval", .string("commit_proposal from an agent requires the user to press Accept in the GBK proposal panel")),
             ]))
         },
-        GBKTool(name: "gbk_get_project_summary", description: "Project summary: name, key (declared, or estimated and flagged), sections, per-track program/percussion/note counts/pitch ranges, PPQ, tempo/meter maps, counts, revision, pending proposals.", inputSchema: schemaObj([:]), readOnly: true) { _ in
+        GBKTool(name: "gbk_get_project_summary", description: "Project summary: name, key (declared, or estimated and flagged), sections, per-track program/percussion/note counts/pitch ranges, PPQ, tempo/meter maps, counts, revision, pending proposals.", inputSchema: schemaObj([]), readOnly: true) { _ in
             ToolRunOut(data: projectSummaryJSON(store))
         },
         GBKTool(name: "gbk_get_score_digest", description: "Compact score digest (#162 tier 2): per track, one entry per non-empty bar (pitch classes present, pitch range, note count, mean velocity) plus a per-bar chord estimate from all tracks. Read this BEFORE gbk_get_notes for interpretive work - a whole symphony digests to a few hundred entries instead of ~55 paged note calls.", inputSchema: schemaObj([
@@ -116,7 +116,7 @@ func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
                 ("tracks", .array(outTracks)),
             ]), warnings: truncated ? ["digest truncated at 1000 bar entries - narrow the range or trackIds"] : [])
         },
-        GBKTool(name: "gbk_list_tracks", description: "Tracks with stable ids, names, channels, mix defaults, note counts and program.", inputSchema: schemaObj([:]), readOnly: true) { _ in
+        GBKTool(name: "gbk_list_tracks", description: "Tracks with stable ids, names, channels, mix defaults, note counts and program.", inputSchema: schemaObj([]), readOnly: true) { _ in
             let p = P()
             return ToolRunOut(data: .array(p.tracks.map { t in
                 jsonObj([
@@ -168,7 +168,7 @@ func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
                 ("events", .array(inR.prefix(a.argInt("limit") ?? 500).map { $0.json })),
             ]))
         },
-        GBKTool(name: "gbk_get_selection", description: "Current selection and loop (shared with the UI).", inputSchema: schemaObj([:]), readOnly: true) { _ in
+        GBKTool(name: "gbk_get_selection", description: "Current selection and loop (shared with the UI).", inputSchema: schemaObj([]), readOnly: true) { _ in
             let p = P()
             return ToolRunOut(data: .object([
                 ("selection", .object([
@@ -182,7 +182,7 @@ func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
                 ])),
             ]))
         },
-        GBKTool(name: "gbk_get_transport", description: "Playback state and position (ticks, seconds, bar/beat).", inputSchema: schemaObj([:]), readOnly: true) { _ in
+        GBKTool(name: "gbk_get_transport", description: "Playback state and position (ticks, seconds, bar/beat).", inputSchema: schemaObj([]), readOnly: true) { _ in
             let p = P(); let t = store.transport
             let bb = tickToBarBeat(p, t.positionTick)
             var pairs: [(String, JSONValue)] = [
@@ -400,10 +400,10 @@ func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
             try store.discardProposal(a.argStr("proposalId")!, source: "agent")
             return ToolRunOut(data: .object([("discarded", .string(a.argStr("proposalId")!))]))
         },
-        GBKTool(name: "gbk_undo", description: "Undo the agent's own last edit. The history is shared with the user: if the newest edit is the user's, this refuses with NOT_AGENT_EDIT instead of reverting their work.", inputSchema: schemaObj([:]), readOnly: false) { _ in
+        GBKTool(name: "gbk_undo", description: "Undo the agent's own last edit. The history is shared with the user: if the newest edit is the user's, this refuses with NOT_AGENT_EDIT instead of reverting their work.", inputSchema: schemaObj([]), readOnly: false) { _ in
             ToolRunOut(data: .object([("undone", .bool(try store.agentUndo()))]))
         },
-        GBKTool(name: "gbk_redo", description: "Redo an agent edit previously undone with gbk_undo. Refuses with NOT_AGENT_EDIT when the next redo entry is the user's edit.", inputSchema: schemaObj([:]), readOnly: false) { _ in
+        GBKTool(name: "gbk_redo", description: "Redo an agent edit previously undone with gbk_undo. Refuses with NOT_AGENT_EDIT when the next redo entry is the user's edit.", inputSchema: schemaObj([]), readOnly: false) { _ in
             ToolRunOut(data: .object([("redone", .bool(try store.agentRedo()))]))
         },
         GBKTool(name: "gbk_prepare_midi_export", description: "Build a Standard MIDI File (tempo/meter, timed CC, bend/pressure, programs, raw events) and offer it as a browser-local download.", inputSchema: schemaObj([

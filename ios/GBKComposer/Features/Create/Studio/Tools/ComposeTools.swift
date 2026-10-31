@@ -142,7 +142,7 @@ func buildComposeTools(_ store: WorkstationStore) -> [GBKTool] {
             }
             return ToolRunOut(data: data, warnings: r.warnings)
         },
-        GBKTool(name: "gbk_get_composition_session", description: "The autonomous session (if any): which project it covers, expiry, and whether edits on the current project apply without approval.", inputSchema: schemaObj([:]), readOnly: true) { _ in
+        GBKTool(name: "gbk_get_composition_session", description: "The autonomous session (if any): which project it covers, expiry, and whether edits on the current project apply without approval.", inputSchema: schemaObj([]), readOnly: true) { _ in
             let p = P()
             return ToolRunOut(data: jsonObj([
                 ("session", sessionJSON(store.currentSession())),
