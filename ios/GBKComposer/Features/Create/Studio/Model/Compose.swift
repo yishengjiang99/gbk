@@ -210,7 +210,8 @@ func humanizeNotes(_ ns: [MNote], r: Rand, velocity: Int = 6, timing: Int = 0) -
     }
 }
 func articulateNotes(_ ns: [MNote], kind: String) -> [MNote] {
-    let f = ["legato": 1.02, "detache": 0.88, "staccato": 0.45, "tenuto": 1.0, "marcato": 0.75][kind] ?? 1
+    let factors: [String: Double] = ["legato": 1.02, "detache": 0.88, "staccato": 0.45, "tenuto": 1.0, "marcato": 0.75]
+    let f = factors[kind] ?? 1
     let accent = kind == "marcato" ? 12 : 0
     return ns.map { MNote(tick: $0.tick, duration: max(1, jsRound(Double($0.duration) * f)), pitch: $0.pitch, velocity: min(127, $0.velocity + accent)) }
 }
@@ -276,13 +277,15 @@ func baroqueVoices(key: KeyInfo, totalTicks: Int, ppq: Int, voices: Int, complex
     }
     var shift = pcNorm(key.tonic - bachKeyPc[src]!)
     if shift > 6 { shift -= 12 }
-    let g = generateBachMidi(key: src, voices: voices, complexity: complexity, seed: seed, length: "short", tempo: 100, attempts: 1)
+    let g = generateBachMidi(key: src, length: "short", voices: voices, complexity: complexity, tempo: 100, seed: seed, attempts: 1)
     let piece = g.piece
     let spanBeats = piece.notes.map { $0.startBeat + $0.durBeat }.max() ?? 0
     func toNotes(beatOffset: Double, semis: Int, fromBeat: Double = 0) -> [(voice: Int, note: MNote)] {
         piece.notes.filter { $0.startBeat >= fromBeat }.map { n in
-            (n.voice, MNote(tick: jsRound((n.startBeat - fromBeat + beatOffset) * Double(ppq)),
-                            duration: max(1, jsRound(n.durBeat * Double(ppq))), pitch: n.midi + shift + semis, velocity: 80))
+            let tick: Int = jsRound((n.startBeat - fromBeat + beatOffset) * Double(ppq))
+            let duration: Int = max(1, jsRound(n.durBeat * Double(ppq)))
+            let note = MNote(tick: tick, duration: duration, pitch: n.midi + shift + semis, velocity: 80)
+            return (voice: n.voice, note: note)
         }
     }
     var all: [(voice: Int, note: MNote)] = []
