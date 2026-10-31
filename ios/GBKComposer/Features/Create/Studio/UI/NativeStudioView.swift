@@ -100,6 +100,15 @@ private struct TrackSelection: Identifiable { let id: String }
 private struct ProposalPanel: View {
     @ObservedObject var store: WorkstationStore
     @Binding var errorText: String?
+    @State private var previewTask: Task<Void, Never>?
+    private func preview(_ id: String, _ variant: String) {
+        let key = "\(id):\(variant)"
+        if store.previewing == key { previewTask?.cancel(); store.stop(); return }
+        previewTask?.cancel()
+        previewTask = Task {
+            do { try await store.previewProposal(id, variant: variant) } catch { if !Task.isCancelled { errorText = error.localizedDescription } }
+        }
+    }
     var body: some View {
         let pending = store.proposals.filter { $0.status == "pending" }
         if !pending.isEmpty || errorText != nil {
@@ -111,6 +120,12 @@ private struct ProposalPanel: View {
                             Text(p.source == "agent" ? "Proposed by assistant" : "Proposed edit").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
+                        ForEach(["A", "B"], id: \.self) { v in
+                            let on = store.previewing == "\(p.id):\(v)"
+                            Button { preview(p.id, v) } label: { Image(systemName: on ? "stop.fill" : "play.fill"); Text(v) }
+                                .buttonStyle(.bordered).tint(on ? .red : .accentColor)
+                                .accessibilityLabel(v == "A" ? "Preview original" : "Preview proposal")
+                        }
                         Button("Reject") { try? store.discardProposal(p.id) }.buttonStyle(.bordered)
                         Button("Accept") {
                             Task { do { _ = try await store.commitProposal(p.id, source: "user") } catch { errorText = error.localizedDescription } }
