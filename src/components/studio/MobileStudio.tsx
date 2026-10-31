@@ -244,7 +244,7 @@ export function MobileStudio(props: MobileStudioProps) {
       {sheet === "songs" && <SheetBox id="songs" label="My songs"><MySongs compact /></SheetBox>}
       {sheet === "settings" && <SheetBox id="settings" label="Settings" title="Settings">
         {s.auth.authenticated
-          ? <ComposerSettings open info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} onLogout={() => void s.logout()} onReset={s.reset} />
+          ? <ComposerSettings open info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} pro={!!s.auth.pro} onLogout={() => void s.logout()} onReset={s.reset} />
           : <p className="ms-mut" data-testid="settings-guest">You're browsing as a guest. You'll be asked to sign in when you compose or publish.</p>}
         <p className="ms-mut">Theme follows your device (light or dark).</p>
       </SheetBox>}

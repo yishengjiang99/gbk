@@ -543,7 +543,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
       </SidePanel>
       <SidePanel open={panel === "settings"} title="Settings" testId="panel-settings" onClose={() => setPanel(null)}>
         {s.auth.authenticated
-          ? <ComposerSettings open info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} onLogout={() => void s.logout()} onReset={s.reset} />
+          ? <ComposerSettings open info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} pro={!!s.auth.pro} onLogout={() => void s.logout()} onReset={s.reset} />
           : <p className="ds-small" data-testid="settings-guest">You're browsing as a guest. You'll be asked to sign in when you compose or publish.</p>}
         <p className="ds-small">Theme follows your device (light or dark).</p>
       </SidePanel>
