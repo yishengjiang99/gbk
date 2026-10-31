@@ -57,7 +57,7 @@ func bars(_ p: Project, upToTick: Int = .max) -> [BarSpan] {
 
 /// 1-based bar, 0-based beat within the bar -> tick.
 func barBeatToTick(_ p: Project, bar: Int, beat: Double = 0) -> Int {
-    let bs = bars(p, upToTick: .max)
+    let bs = bars(p, upToTick: max(1, bar) * p.ppq * 32) // generous bound so bars past the project end extrapolate (timing.ts)
     let b = bs[min(max(bar - 1, 0), bs.count - 1)]
     return b.startTick + Int((beat * ticksPerBeat(p, atTick: b.startTick)).rounded())
 }

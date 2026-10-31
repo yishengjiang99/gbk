@@ -37,7 +37,9 @@ private func intIn(_ v: Int, _ lo: Int, _ hi: Int, _ name: String) throws {
 /// Validates a batch; returns advisory warnings. Throws ToolArgError like the TS WorkstationError.
 func validateProjectOps(_ p: Project, _ ops: [ProjectOp]) throws -> [String] {
     var warnings: [String] = []
-    let trackIds = Set(p.tracks.map { $0.id })
+    let existingTrackIds = Set(p.tracks.map { $0.id })
+    var trackIds = existingTrackIds
+    for case .addTrack(let t, _) in ops { trackIds.insert(t.id) } // ids added earlier in the same batch are valid targets (ops.ts)
     func knownTrack(_ id: String) throws {
         if !trackIds.contains(id) { throw ToolArgError("INVALID_ARGUMENT", "unknown track \(id)") }
     }
@@ -87,7 +89,7 @@ func validateProjectOps(_ p: Project, _ ops: [ProjectOp]) throws -> [String] {
             if let v = patch.expression { try intIn(v, 0, 127, "expression") }
             if let n = patch.name, n.isEmpty { throw ToolArgError("INVALID_ARGUMENT", "track name must not be empty") }
         case .addTrack(let t, _):
-            if trackIds.contains(t.id) { throw ToolArgError("INVALID_ARGUMENT", "track id \(t.id) already exists") }
+            if existingTrackIds.contains(t.id) { throw ToolArgError("INVALID_ARGUMENT", "track id \(t.id) already exists") }
             try intIn(t.channel, 0, 15, "channel")
         case .setTempoMap(let map):
             if map.isEmpty || map.count > 1024 { throw ToolArgError("INVALID_RANGE", "tempo map must have 1..1024 events") }

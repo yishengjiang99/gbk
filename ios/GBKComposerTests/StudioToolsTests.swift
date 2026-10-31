@@ -28,7 +28,7 @@ final class StudioToolsTests: XCTestCase {
         XCTAssertTrue((unknown["error"]?["message"]?.stringValue ?? "").contains("unexpected property bogus"))
 
         let mix = tool(store, "gbk_set_track_mix")
-        let missing = await runTool(store, mix, .object([:]))
+        let missing = await runTool(store, mix, .object([]))
         XCTAssertEqual(missing["error"]?["code"]?.stringValue, "INVALID_ARGUMENT")
         XCTAssertTrue((missing["error"]?["message"]?.stringValue ?? "").contains("missing trackId"))
 
@@ -38,12 +38,12 @@ final class StudioToolsTests: XCTestCase {
 
     func testSummaryAndTracksOnEmptyProject() async {
         let store = WorkstationStore()
-        let r = await runTool(store, tool(store, "gbk_get_project_summary"), .object([:]))
+        let r = await runTool(store, tool(store, "gbk_get_project_summary"), .object([]))
         XCTAssertEqual(r["ok"]?.boolValue, true)
         XCTAssertEqual(r["projectId"]?.stringValue, store.project.id)
         XCTAssertEqual(r["data"]?["noteCount"]?.intValue, 0)
         XCTAssertEqual(r["data"]?["trackCount"]?.intValue, 0)
-        let caps = await runTool(store, tool(store, "gbk_get_capabilities"), .object([:]))
+        let caps = await runTool(store, tool(store, "gbk_get_capabilities"), .object([]))
         XCTAssertEqual(caps["data"]?["controllers"]?["91"]?["audible"]?.boolValue, true)
     }
 
@@ -71,7 +71,7 @@ final class StudioToolsTests: XCTestCase {
         XCTAssertEqual(part["ok"]?.boolValue, true, String(describing: part["error"]))
         XCTAssertGreaterThan(store.project.notes.count, 0, "melody generated real notes")
 
-        let digest = await runTool(store, tool(store, "gbk_get_score_digest"), .object([:]))
+        let digest = await runTool(store, tool(store, "gbk_get_score_digest"), .object([]))
         XCTAssertEqual(digest["ok"]?.boolValue, true)
         XCTAssertFalse((digest["data"]?["chords"]?.objectValue ?? []).isEmpty, "digest estimates per-bar chords")
     }
@@ -97,7 +97,7 @@ final class StudioToolsTests: XCTestCase {
         XCTAssertEqual(commit["ok"]?.boolValue, true, String(describing: commit["error"]))
         XCTAssertEqual(store.project.notes.count, 1, "commit applied the note after approval")
 
-        let undo = await runTool(store, tool(store, "gbk_undo"), .object([:]))
+        let undo = await runTool(store, tool(store, "gbk_undo"), .object([]))
         XCTAssertEqual(undo["ok"]?.boolValue, true)
         XCTAssertEqual(store.project.notes.count, 0, "agent undo reverts its own committed proposal")
     }

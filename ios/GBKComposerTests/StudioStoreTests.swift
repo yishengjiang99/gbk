@@ -100,7 +100,7 @@ final class StudioStoreTests: XCTestCase {
         let created = try await s.createProject(CreateProjectOptions(name: "Agent Piece", owner: "agent", purpose: "test"))
         XCTAssertEqual(created.project.meta?.owner, "agent")
         XCTAssertTrue(s.autonomousAllowed())
-        let a1 = try s.agentApply([.addTrack(GTrack(id: "t1", name: "Piano", channel: 0, color: "#fff", mix: .default, visible: true, role: nil))], label: "track")
+        let a1 = try s.agentApply([.addTrack(GTrack(id: "t1", name: "Piano", channel: 0, color: "#fff", mix: .default, visible: true, role: nil), index: nil)], label: "track")
         guard case .committed(_, _) = a1 else { XCTFail("expected direct commit in session"); return }
         let a2 = try s.agentApply([.addNotes([note("n1")])], label: "notes")
         guard case .committed(_, _) = a2 else { XCTFail("expected direct commit in session"); return }
