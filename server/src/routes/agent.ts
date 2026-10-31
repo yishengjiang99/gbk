@@ -35,7 +35,10 @@ export function agentRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const acct = s && accounts ? accounts.get(s.user) : null;
     if (s && limits) await limits.refresh(s.user);
     const lim = s && limits ? limits.for(s.user) : null;
-    return { authenticated: !!s, user: s?.user ?? null, name: acct?.name ?? s?.user ?? null, provider: acct?.provider ?? null, csrf, enabled: cfg.enabled,
+    // Paid entitlement only (Apple IAP or Stripe, matched by verified account email). Unlike limits.pro this is
+    // false for admins without a purchase, so the web header/settings badge means "paying customer".
+    const proSource = s && limits ? limits.proSource(s.user) : null;
+    return { authenticated: !!s, user: s?.user ?? null, name: acct?.name ?? s?.user ?? null, provider: acct?.provider ?? null, csrf, enabled: cfg.enabled, pro: !!proSource, pro_source: proSource,
       providers: authProviders(cfg), loginAvailable: cfg.security.accessCodes.length > 0, reviewerLogin: reviewerLoginEnabled(cfg), apple: !!cfg.signin2?.appleServicesId, sms: !!(cfg.signin2?.twilio && cfg.signin2?.turnstileSecret),
       limits: lim ? { pro: lim.pro, newAccount: lim.newAccount, dailyTokens: lim.dailyTokens, dailyRenders: lim.dailyRenders, usedTokensToday: ledger?.snapshot(s!.user).dayTokens ?? null } : null };
   });

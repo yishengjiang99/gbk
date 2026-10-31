@@ -70,7 +70,7 @@ export function ComposerPanel({ project, readOnly, dock = false }: { project: Pr
             onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
           {nativeHum() ? <NativeHumButton /> : compactStudio() && <WebHumButton />}<button type="submit" data-testid="composer-send" disabled={busy || !text.trim() || s.conn.state !== "connected"}>Send</button>
         </form>
-        <ComposerSettings info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} onLogout={() => void s.logout()} onReset={s.reset} />
+        <ComposerSettings info={s.info} model={s.model} setModel={s.setModel} usage={s.usage} user={s.auth.name ?? s.auth.user} pro={!!s.auth.pro} onLogout={() => void s.logout()} onReset={s.reset} />
       </>)}
       <SharePanel project={project} readOnly={readOnly} authenticated={s.auth.authenticated} publishRequest={publishReq} />
     </aside>
