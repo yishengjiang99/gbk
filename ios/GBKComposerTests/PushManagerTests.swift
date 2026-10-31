@@ -57,7 +57,8 @@ final class PushManagerTests: XCTestCase {
         let center = FakeCenter(status: .authorized)
         var registers = 0
         let push = makeManager(center: center, register: { registers += 1 })
-        XCTAssertTrue(await push.enable())
+        let ok = await push.enable()
+        XCTAssertTrue(ok)
         XCTAssertEqual(center.requestCount, 0)
         XCTAssertEqual(registers, 1)
     }
@@ -78,7 +79,8 @@ final class PushManagerTests: XCTestCase {
         center.grantOnRequest = false
         var registers = 0
         let push = makeManager(center: center, register: { registers += 1 })
-        XCTAssertFalse(await push.enable())
+        let ok = await push.enable()
+        XCTAssertFalse(ok)
         XCTAssertFalse(push.enabledInApp)
         XCTAssertEqual(registers, 0)
     }
