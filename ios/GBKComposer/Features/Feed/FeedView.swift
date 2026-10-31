@@ -41,10 +41,14 @@ final class FeedViewModel: ObservableObject {
         }
     }
 
-    /// Deep link: put `slug` at the top of the feed (fetching `GET /api/songs/:slug` when it isn't loaded yet).
-    /// Returns false when the song can't be found or has no audio.
+    /// Deep link: always pin `slug` as card 0 and drop its duplicate below (same as web 42adb71), fetching
+    /// `GET /api/songs/:slug` only when it isn't loaded yet. Returns false when the song can't be found or has no audio.
     func focus(slug: String, fetch: (String) async throws -> Song = { try await APIClient.shared.send(Endpoints.song($0), as: Song.self) }) async -> Bool {
-        if items.contains(where: { $0.slug == slug }) { return true }
+        if let i = items.firstIndex(where: { $0.slug == slug }) {
+            let song = items.remove(at: i)
+            items.insert(song, at: 0)
+            return true
+        }
         guard let song = try? await fetch(slug), song.midiURL != nil else { return false }
         items.removeAll { $0.slug == song.slug }
         items.insert(song, at: 0)

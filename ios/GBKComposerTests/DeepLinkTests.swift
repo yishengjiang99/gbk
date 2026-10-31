@@ -61,6 +61,14 @@ final class DeepLinkTests: XCTestCase {
         // Already loaded: no second fetch.
         _ = await model.focus(slug: song.slug) { fetched.append($0); return song }
         XCTAssertEqual(fetched.count, 1)
+        // Already loaded but not first (web 42adb71): pinned to card 0 with no duplicate, no fetch.
+        let other = try APIClient.makeDecoder().decode(Song.self, from: Data(json.replacingOccurrences(of: song.slug, with: "other-song-x1").utf8))
+        _ = await model.focus(slug: other.slug) { fetched.append($0); return other }
+        XCTAssertEqual(model.items.map(\.slug), [other.slug, song.slug])
+        let pinned = await model.focus(slug: song.slug) { fetched.append($0); return song }
+        XCTAssertTrue(pinned)
+        XCTAssertEqual(model.items.map(\.slug), [song.slug, other.slug])
+        XCTAssertEqual(fetched.count, 2)
     }
 
     func testShareURLRoundTripsAndStudioDivertsSongPages() {
