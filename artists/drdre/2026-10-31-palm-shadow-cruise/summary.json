@@ -1,0 +1,145 @@
+{
+ "name": "Palm Shadow Cruise",
+ "ppq": 480,
+ "revision": 17,
+ "endTick": 99800,
+ "durationSec": 132.713,
+ "bars": 52,
+ "tempos": [
+  {
+   "tick": 0,
+   "microPerQuarter": 638298
+  }
+ ],
+ "timeSigs": [
+  {
+   "tick": 0,
+   "numerator": 4,
+   "denominator": 4
+  }
+ ],
+ "trackCount": 5,
+ "noteCount": 2251,
+ "ccCount": 0,
+ "pendingProposals": [],
+ "key": {
+  "name": "B minor",
+  "estimated": false
+ },
+ "sections": [
+  {
+   "name": "Intro",
+   "startBar": 1,
+   "bars": 4,
+   "energy": 0.3
+  },
+  {
+   "name": "Verse 1",
+   "startBar": 5,
+   "bars": 16,
+   "energy": 0.6
+  },
+  {
+   "name": "Hook",
+   "startBar": 21,
+   "bars": 8,
+   "energy": 0.85
+  },
+  {
+   "name": "Break",
+   "startBar": 29,
+   "bars": 4,
+   "energy": 0.45
+  },
+  {
+   "name": "Verse 2",
+   "startBar": 33,
+   "bars": 8,
+   "energy": 0.65
+  },
+  {
+   "name": "Hook 2",
+   "startBar": 41,
+   "bars": 8,
+   "energy": 0.9
+  },
+  {
+   "name": "Outro",
+   "startBar": 49,
+   "bars": 4,
+   "energy": 0.35
+  }
+ ],
+ "tracks": [
+  {
+   "id": "trk_mvwlceq33dos4",
+   "name": "Square Lead",
+   "channel": 0,
+   "program": {
+    "program": 80,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 97,
+   "minPitch": 71,
+   "maxPitch": 90
+  },
+  {
+   "id": "trk_mvwlceqp5blxa",
+   "name": "Clavinet",
+   "channel": 1,
+   "program": {
+    "program": 7,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 693,
+   "minPitch": 62,
+   "maxPitch": 73
+  },
+  {
+   "id": "trk_mvwlcer87kvoo",
+   "name": "Warm Pad",
+   "channel": 2,
+   "program": {
+    "program": 89,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 160,
+   "minPitch": 59,
+   "maxPitch": 73
+  },
+  {
+   "id": "trk_mvwlcerk97x1t",
+   "name": "Synth Bass",
+   "channel": 3,
+   "program": {
+    "program": 38,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 287,
+   "minPitch": 28,
+   "maxPitch": 52
+  },
+  {
+   "id": "trk_mvwlcerwbg4ws",
+   "name": "808/909 Kit",
+   "channel": 9,
+   "program": {
+    "program": 25,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": true,
+   "noteCount": 1014,
+   "minPitch": 36,
+   "maxPitch": 70
+  }
+ ]
+}
