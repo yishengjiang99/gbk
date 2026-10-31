@@ -55,6 +55,10 @@ func runTool(_ store: WorkstationStore, _ tool: GBKTool, _ args: JSONValue) asyn
         store.log("agent", tool.name, false, "INTERNAL_ERROR: \(e.message)")
         return envelope(ok: false, data: nil, warnings: [], error: .object([("code", .string("INTERNAL_ERROR")), ("message", .string(e.message))]), content: nil)
     } catch {
+        if Task.isCancelled {
+            store.log("agent", tool.name, false, "OPERATION_CANCELLED: cancelled")
+            return envelope(ok: false, data: nil, warnings: [], error: .object([("code", .string("OPERATION_CANCELLED")), ("message", .string("cancelled"))]), content: nil)
+        }
         let message = String(describing: error)
         store.log("agent", tool.name, false, "INTERNAL_ERROR: \(message)")
         return envelope(ok: false, data: nil, warnings: [], error: .object([("code", .string("INTERNAL_ERROR")), ("message", .string(message))]), content: nil)

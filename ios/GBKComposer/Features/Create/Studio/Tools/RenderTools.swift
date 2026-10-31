@@ -262,6 +262,12 @@ final class RenderJobStore: @unchecked Sendable {
         return j
     }
 
+    /// Newest still-running job for a project (bridge render-progress reporting).
+    func latestActive(projectId: String) -> RenderJob? {
+        lock.lock(); defer { lock.unlock() }
+        return jobs.values.filter { $0.projectId == projectId && !$0.isDone }.max { $0.id < $1.id }
+    }
+
     func wait(_ id: String, timeoutMs: Double) async -> RenderJob {
         let job = try! get(id)
         let deadline = nowMs() + timeoutMs
