@@ -48,4 +48,25 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.url?.path, "/api/iap/apple")
     }
+
+    @MainActor
+    func testProStatusSourceAndGatedPaywallSkipsPro() {
+        let stripe = Me(id: "a", handle: "h", displayName: nil, avatarUrl: nil, songCount: nil, ratingAvg: nil, createdAt: nil,
+                        dmPolicy: nil, handleChanged: nil, isAdmin: nil, provider: nil, isGuest: nil,
+                        pro: true, proSource: "stripe", proExpiresAt: 4_102_444_800_000)
+        let s = ProStatus.resolve(localPro: false, localExpiry: nil, me: stripe)
+        XCTAssertEqual(s.source, .stripe)
+        XCTAssertEqual(s.renews, Date(timeIntervalSince1970: 4_102_444_800))
+        var lifetime = stripe; lifetime.proExpiresAt = nil
+        XCTAssertEqual(ProStatus.resolve(localPro: false, localExpiry: nil, me: lifetime).source, .lifetime)
+        XCTAssertEqual(ProStatus.resolve(localPro: true, localExpiry: Date(timeIntervalSince1970: 1), me: nil).source, .apple)
+
+        let store = PurchaseStore(verifier: MockIAPVerifier(), accountId: { nil }, serverPro: { true }, serverMe: { stripe })
+        store.recompute()
+        store.presentPaywall(reason: "studio_link")
+        XCTAssertFalse(store.showPaywall)
+        store.presentPaywall(reason: "profile")
+        XCTAssertTrue(store.showPaywall)
+        XCTAssertEqual(store.proStatus?.source, .stripe)
+    }
 }

@@ -557,3 +557,28 @@ test("paywall modal: landing right after sign-in, dismiss cooldown silences comp
   expect(body.plan).toBe("pro_monthly"); expect(body.surface).toBe("studio"); expect(body.platform).toBe("web"); expect(body.reason).toBe("ai_limit");
   await expect(page).toHaveURL(/\/pricing\?plan=pro_monthly/, { timeout: 20_000 });
 });
+
+test("mobile composer view: a just-loaded song's card has no Publish until it is edited; the input auto-grows and shrinks", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio");
+  const input = page.getByTestId("composer-input");
+  await expect(input).toHaveAttribute("rows", "3"); // empty chat: the first message starts at 3 lines
+  const h0 = await input.evaluate((e) => e.getBoundingClientRect().height);
+  await input.fill(Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"));
+  const grown = await input.evaluate((e) => ({ h: e.getBoundingClientRect().height, sh: e.scrollHeight, oy: getComputedStyle(e).overflowY }));
+  expect(grown.h).toBeGreaterThan(h0); expect(grown.h).toBeLessThanOrEqual(844 * 0.4 + 1); expect(grown.sh).toBeGreaterThan(grown.h); expect(grown.oy).toBe("auto");
+  await input.fill("");
+  expect(await input.evaluate((e) => e.getBoundingClientRect().height)).toBeLessThanOrEqual(h0 + 1);
+  // A loaded song (imported MIDI = a freshly opened project, like a remix fork): Play + Open editor only.
+  await page.getByTestId("midi-file-input").setInputFiles(new URL("../fixtures/import-test.mid", import.meta.url).pathname);
+  await page.getByTestId("midi-import-new").click();
+  const card = page.locator("[data-testid=version-card][data-version=current]");
+  await expect(card).toBeVisible();
+  await expect(card.getByTestId("version-play")).toBeVisible(); await expect(card.getByTestId("version-open-editor")).toBeVisible();
+  await expect(card.getByTestId("version-publish")).toHaveCount(0);
+  await expect(input).toHaveAttribute("rows", "1");
+  await page.evaluate(() => { const c = (globalThis as any).__gbkWorkstation;
+    c.edit([{ op: "addNotes", notes: [{ trackId: c.project.tracks[0].id, channel: 0, tick: 0, duration: 240, pitch: 72, velocity: 90 }] }], { label: "e2e edit" }); });
+  await expect(card.getByTestId("version-publish")).toBeVisible();
+});

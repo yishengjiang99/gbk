@@ -31,7 +31,7 @@ import type { Project } from "../../workstation/model.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import type { SavedSong } from "../../agent/share-client.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
-import { autoGrowTextarea, fmtTime, friendlyError, plainStep, songSeconds, trackChips, versionLog, type SongVersion } from "./studio-logic.ts";
+import { autoGrowTextarea, phoneComposerMaxPx, fmtTime, friendlyError, plainStep, songSeconds, trackChips, versionLog, type SongVersion } from "./studio-logic.ts";
 import "./mobile-studio.css";
 import { RecentProjects } from "./RecentProjects.tsx";
 import { startNew } from "../../workstation/studio-api.ts";
@@ -76,8 +76,6 @@ export function MobileStudio(props: MobileStudioProps) {
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; });
   const input = useRef<HTMLTextAreaElement>(null);
-  // Auto-grow: the composer stretches to fit multi-line text, including programmatic setText (draft prefill).
-  useEffect(() => { autoGrowTextarea(input.current); }, [text]);
   useEffect(() => { const f = () => { if (remixLandingRef.current()) return; const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const q = takePending("compose"); if (q && s.send(q.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
@@ -91,8 +89,6 @@ export function MobileStudio(props: MobileStudioProps) {
     if (running) return;
     if (s.send(v)) setText(""); else say("Couldn't send that. Check your connection and try again.");
   };
-  // Input height follows its content (1-5 lines), so the bar never covers the chat.
-  useEffect(() => { const el = input.current; if (!el) return; el.style.height = "auto"; el.style.height = `${Math.min(120, Math.max(44, el.scrollHeight + 2))}px`; }, [text]);
 
   // ---- layout: sheets sit above the input bar --------------------------------------------------------------------
   const root = useRef<HTMLDivElement>(null); const foot = useRef<HTMLElement>(null); const chat = useRef<HTMLDivElement>(null);
@@ -100,6 +96,13 @@ export function MobileStudio(props: MobileStudioProps) {
     const ro = new ResizeObserver(() => r.style.setProperty("--ms-foot", `${f.offsetHeight}px`)); ro.observe(f); r.style.setProperty("--ms-foot", `${f.offsetHeight}px`); return () => ro.disconnect(); }, []);
   useEffect(() => { const c = chat.current; if (c) c.scrollTop = c.scrollHeight; }, [s.items, running, versionLog.list(p.id).length]);
   useEffect(() => { const on = () => { setTab("Agent"); setSheet("editor"); }; addEventListener("gbk-approval-request", on); return () => removeEventListener("gbk-approval-request", on); }, []);
+
+  // Revision the open project had when it loaded (new id = a different song/fork just opened).
+  const loaded = useRef({ id: p.id, rev: p.revision });
+  if (loaded.current.id !== p.id) loaded.current = { id: p.id, rev: p.revision };
+  const emptyChat = !s.items.length && !p.tracks.length;
+  // Auto-grow: about 6 lines (<= 40vh), then scroll inside; shrinks back after send. Empty chat starts at 3 lines.
+  useEffect(() => { autoGrowTextarea(input.current, phoneComposerMaxPx(window.innerHeight)); }, [text, emptyChat]);
 
   // ---- playback --------------------------------------------------------------------------------------------------
   const versions = versionLog.list(p.id);
@@ -144,6 +147,7 @@ export function MobileStudio(props: MobileStudioProps) {
   // normal session on the open project. Runs on the focus event, and once on mount in case the event
   // already fired (fresh page load with the marker set).
   const remixLanding = (): boolean => {
+    loaded.current = { id: workstation.project.id, rev: workstation.project.revision };
     if (!sessionStorage.getItem("gbk.remixSlug")) return false;
     sessionStorage.removeItem("gbk.remixSlug");
     setSheet(null); stopPreview();
@@ -188,6 +192,10 @@ export function MobileStudio(props: MobileStudioProps) {
   const showCurrent = p.tracks.length > 0 && !running && (!latest || latest.revision !== p.revision);
   const loading = !t.audioReady && !t.playing;
   const ro = workstation.readOnlyReason; const from = p.meta?.sharedFrom;
+  // Publish on the "latest edits" card only when there is something new to publish: edits since the song (or remix
+  // fork) loaded, or edits after a composer run. A freshly loaded song shows just Play and Open editor.
+  const base = original?.revision ?? loaded.current.rev;
+  const currentPublishable = versions.some((v) => v.runId !== "remix-original") || p.revision !== base;
   return (
     <div className="ms" ref={root} data-testid="workstation" data-compact="1" data-sheet={sheet ?? ""}>
       <header className="ms-head" data-testid="compact-head">
@@ -207,11 +215,11 @@ export function MobileStudio(props: MobileStudioProps) {
           <div className="ms-sug">{SUGGESTIONS.map((x) => <button key={x.text} data-testid="suggestion" onClick={() => send(x.text)}>{x.icon} {x.text}</button>)}</div>
         </div>}
         {original && <VersionCard v={original} p={p} playing={original.revision === p.revision ? t.playing : preview?.n === original.n} pos={pos} total={total} current={original.revision === p.revision}
-          onPlay={() => playVersion(original, original.revision === p.revision)} onEdit={() => openEditor(original)} onPublish={() => void doPublish(original)} onRestore={() => restore(original)} />}
+          onPlay={() => playVersion(original, original.revision === p.revision)} onEdit={() => openEditor(original)} onRestore={() => restore(original)} />}
         {s.items.map((m) => <Message key={m.id} m={m} p={p} live={m.runId != null && m.runId === s.run?.runId} onRetry={(x) => send(x)}
           card={(v) => <VersionCard v={v} p={p} playing={v.revision === p.revision ? t.playing : preview?.n === v.n} pos={pos} total={total} current={v.revision === p.revision}
             onPlay={() => playVersion(v, v.revision === p.revision)} onEdit={() => openEditor(v)} onPublish={() => void doPublish(v)} onRestore={() => restore(v)} />} />)}
-        {showCurrent && <VersionCard p={p} playing={t.playing} pos={pos} total={total} current onPlay={playCurrent} onEdit={() => openEditor()} onPublish={() => void doPublish()} />}
+        {showCurrent && <VersionCard p={p} playing={t.playing} pos={pos} total={total} current onPlay={playCurrent} onEdit={() => openEditor()} onPublish={currentPublishable ? () => void doPublish() : undefined} />}
         {s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ms-note" data-testid="conn-note">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ms-btn ms-small" onClick={s.reconnect}>Try again</button>}</div>}
       </main>
 
@@ -298,7 +306,7 @@ export function MobileStudio(props: MobileStudioProps) {
         {toast && <div className="ms-toast" role="status" data-testid="studio-toast">{toast.text}{toast.undo && <button className="ms-btn ms-small" data-testid="toast-undo" onClick={() => { workstation.undo(); setToast(null); }}>Undo</button>}</div>}
         <form className="ms-bar" onSubmit={(e) => { e.preventDefault(); send(); }}>
           <button type="button" className="ms-btn" aria-label="Add" data-testid="plus-btn" aria-expanded={sheet === "plus"} onClick={() => setSheet(sheet === "plus" ? null : "plus")}>＋</button>
-          <textarea ref={input} data-testid="composer-input" rows={1} maxLength={12000} value={text} aria-label="Describe a song or a change"
+          <textarea ref={input} data-testid="composer-input" rows={emptyChat ? 3 : 1} maxLength={12000} value={text} aria-label="Describe a song or a change"
             placeholder={running ? "Composing… keep typing" : ro ? "Make a copy to change this song…" : p.tracks.length ? "Describe a change…" : "Describe a song…"}
             onChange={(e) => { setText(e.target.value); if (!s.auth.authenticated) sessionStorage.setItem("gbk.composerDraft", e.target.value); }}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
@@ -349,7 +357,7 @@ function Message({ m, p, live, onRetry, card }: { m: ChatItem; p: Project; live:
   </div>;
 }
 
-function VersionCard({ v, p, current, playing, pos, total, onPlay, onEdit, onPublish, onRestore }: { v?: SongVersion; p: Project; current: boolean; playing: boolean; pos: number; total: number; onPlay: () => void; onEdit: () => void; onPublish: () => void; onRestore?: () => void }) {
+function VersionCard({ v, p, current, playing, pos, total, onPlay, onEdit, onPublish, onRestore }: { v?: SongVersion; p: Project; current: boolean; playing: boolean; pos: number; total: number; onPlay: () => void; onEdit: () => void; onPublish?: () => void; onRestore?: () => void }) {
   const song = v?.snapshot ?? p;
   const len = current ? total : songSeconds(song);
   const label = `${p.name === "Untitled" ? "Song" : p.name}${v ? (v.label ? ` · ${v.label}` : ` v${v.n}`) : ""}`;
@@ -363,7 +371,7 @@ function VersionCard({ v, p, current, playing, pos, total, onPlay, onEdit, onPub
     <div className="ms-chips">{trackChips(song).map((c) => <span key={c} className="ms-chip">{c}</span>)}</div>
     <div className="ms-acts">
       <button data-testid="version-open-editor" onClick={onEdit}>Open editor</button>
-      <button className="pri" data-testid="version-publish" onClick={onPublish}>Publish</button>
+      {onPublish && <button className="pri" data-testid="version-publish" onClick={onPublish}>Publish</button>}
     </div>
     {!current && onRestore && <button className="ms-link ms-restore" data-testid="version-restore" onClick={onRestore}>Restore this version</button>}
   </div>;

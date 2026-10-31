@@ -63,16 +63,18 @@ export function plainStep(task: string): string {
 /** Composer textarea auto-grow cap: the input stretches with multi-line text (typed or prefilled)
  * up to this height, then scrolls internally. ~9 lines at phone sizes, ~45% of a short viewport. */
 export const COMPOSER_MAX_HEIGHT_PX = 200;
+/** Phone composer cap: about 6 lines (16px/1.35 text + 22px padding), never more than 40% of the viewport. */
+export const phoneComposerMaxPx = (viewportH: number) => Math.round(Math.min(6 * 16 * 1.35 + 24, viewportH * 0.4));
 
 /** Resize a composer textarea to fit its content: reset to auto, then pin to the content height
  * (capped). Driven from an effect on the text state so programmatic setText (draft prefill, the
  * remix landing) grows it too, not just keystrokes. Enter/send behaviour is untouched. */
-export function autoGrowTextarea(el: { scrollHeight: number; style: { height: string; overflowY: string } } | null): void {
+export function autoGrowTextarea(el: { scrollHeight: number; style: { height: string; overflowY: string } } | null, maxPx = COMPOSER_MAX_HEIGHT_PX): void {
   if (!el) return;
   el.style.height = "auto";
   const h = el.scrollHeight;
-  el.style.height = `${Math.min(h, COMPOSER_MAX_HEIGHT_PX)}px`;
-  el.style.overflowY = h > COMPOSER_MAX_HEIGHT_PX ? "auto" : "hidden";
+  el.style.height = `${Math.min(h, maxPx)}px`;
+  el.style.overflowY = h > maxPx ? "auto" : "hidden";
 }
 
 /** Short instrument chips for a song card: one per track, de-duplicated. */

@@ -12,6 +12,10 @@ final class PurchaseStore: ObservableObject {
     @Published private(set) var isPro = false
     @Published private(set) var purchasing: String?
     @Published var message: String?
+    /// Where Pro comes from and when it renews; nil when not Pro. Drives the "You're Pro" card.
+    @Published private(set) var proStatus: ProStatus?
+    /// Products didn't load (network / StoreKit); the paywall shows an error with Retry, not a dead button.
+    @Published private(set) var productsFailed = false
     /// Drives the app-wide paywall sheet (RootTabView).
     @Published var showPaywall = false
     /// Why the paywall was opened (the `paywall_view` event's `reason`, #119); set by presentPaywall.
@@ -21,14 +25,18 @@ final class PurchaseStore: ObservableObject {
     private let verifier: IAPVerifying
     private let accountId: @MainActor () -> String?
     private let serverPro: @MainActor () -> Bool
+    private let serverMe: @MainActor () -> Me?
     private let billing: BillingEventLogger
     private var localPro = false
+    private var localExpiry: Date?
     private var meSub: AnyCancellable?
 
     init(verifier: IAPVerifying = IAPVerificationServices.current,
          accountId: @escaping @MainActor () -> String? = { AuthStore.shared.me?.id },
          serverPro: @escaping @MainActor () -> Bool = { AuthStore.shared.me?.hasActivePro() ?? false },
+         serverMe: @escaping @MainActor () -> Me? = { AuthStore.shared.me },
          billing: BillingEventLogger = .shared) {
+        self.serverMe = serverMe
         self.verifier = verifier
         self.accountId = accountId
         self.serverPro = serverPro
@@ -36,10 +44,17 @@ final class PurchaseStore: ObservableObject {
     }
 
     /// Open the paywall sheet, remembering why so the view event can carry the reason (#119).
-    func presentPaywall(reason: String) { paywallReason = reason; showPaywall = true }
+    /// Pro users never get the paywall from gated actions; only the Profile Pro button opens it (as the status card).
+    func presentPaywall(reason: String) {
+        guard !isPro || reason == "profile" else { return }
+        paywallReason = reason; showPaywall = true
+    }
 
     /// Pro = StoreKit entitlement on this device OR server `/api/me` `pro` (Stripe or Apple, any device).
-    func recompute() { isPro = localPro || serverPro() }
+    func recompute() {
+        isPro = localPro || serverPro()
+        proStatus = isPro ? ProStatus.resolve(localPro: localPro, localExpiry: localExpiry, me: serverMe()) : nil
+    }
 
     var appAccountToken: UUID { AppAccountToken.resolve(accountId: accountId()) }
 
@@ -59,7 +74,8 @@ final class PurchaseStore: ObservableObject {
         do {
             let list = try await Product.products(for: StoreCatalog.ids)
             products = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
-        } catch { message = "Couldn't load prices." }
+            productsFailed = list.isEmpty
+        } catch { productsFailed = true }
     }
 
     func buy(_ item: StoreCatalog.Item) async {
@@ -98,12 +114,15 @@ final class PurchaseStore: ObservableObject {
 
     func refreshEntitlements(resubmit: Bool = false) async {
         var pro = false
+        var expiry: Date?
         for await result in Transaction.currentEntitlements {
             guard case .verified(let t) = result, StoreCatalog.ids.contains(t.productID), t.revocationDate == nil else { continue }
             pro = true
+            if let e = t.expirationDate { expiry = max(expiry ?? e, e) }
             if resubmit { _ = try? await verifier.submit(signedTransaction: result.jwsRepresentation, appAccountToken: appAccountToken) }
         }
         localPro = pro
+        localExpiry = expiry
         recompute()
     }
 
@@ -119,5 +138,23 @@ final class PurchaseStore: ObservableObject {
             message = "Purchased. We'll finish activating Pro shortly."
         }
         await refreshEntitlements()
+    }
+}
+
+/// Where an active Pro entitlement comes from, for the paywall's "You're Pro" card.
+struct ProStatus: Equatable {
+    enum Source: Equatable { case apple, stripe, lifetime }
+    let source: Source
+    /// Next renewal / expiry; nil for lifetime.
+    let renews: Date?
+
+    /// Server `/api/me` `pro_source` / `pro_expires_at` win (they cover every device); else this device's StoreKit.
+    static func resolve(localPro: Bool, localExpiry: Date?, me: Me?) -> ProStatus {
+        if let me, me.hasActivePro() {
+            let renews = me.proExpiresAt.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+            if renews == nil { return ProStatus(source: .lifetime, renews: nil) }
+            return ProStatus(source: me.proSource == "stripe" ? .stripe : .apple, renews: renews)
+        }
+        return localExpiry.map { ProStatus(source: .apple, renews: $0) } ?? ProStatus(source: .lifetime, renews: nil)
     }
 }

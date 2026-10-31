@@ -20,8 +20,14 @@ struct PaywallView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    VStack(spacing: 10) { ForEach(StoreCatalog.all) { option($0) } }
-                    buyButton
+                    if let status = store.proStatus, store.isPro {
+                        proCard(status)
+                    } else if store.productsFailed {
+                        productsError
+                    } else {
+                        VStack(spacing: 10) { ForEach(StoreCatalog.all) { option($0) } }
+                        buyButton
+                    }
                     if let m = store.message { Text(m).font(.footnote).foregroundStyle(Theme.textSecondary) }
                     footer
                 }
@@ -80,7 +86,58 @@ struct PaywallView: View {
         .buttonStyle(.borderedProminent)
         .tint(Theme.accent)
         .foregroundStyle(Theme.onAccent)
-        .disabled(store.purchasing != nil || store.isPro)
+        .disabled(store.purchasing != nil)
+    }
+
+    /// Pro users see their plan, not a greyed-out purchase list.
+    private func proCard(_ status: ProStatus) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("You're Pro", systemImage: "checkmark.seal.fill").font(.headline).foregroundStyle(Theme.accent)
+            Text(Self.sourceText(status.source)).foregroundStyle(Theme.text)
+            if let d = status.renews {
+                Text("Renews \(d.formatted(date: .abbreviated, time: .omitted))").font(.subheadline).foregroundStyle(Theme.textSecondary)
+            }
+            if status.source != .lifetime {
+                Button("Manage subscription") { manage(status.source) }
+                    .buttonStyle(.bordered).tint(Theme.accent)
+                    .accessibilityIdentifier("manageSubscription")
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
+        .accessibilityIdentifier("proStatusCard")
+    }
+
+    static func sourceText(_ s: ProStatus.Source) -> String {
+        switch s {
+        case .apple: return "Subscribed through Apple"
+        case .stripe: return "Subscribed on the web (Stripe)"
+        case .lifetime: return "Lifetime Pro"
+        }
+    }
+
+    private func manage(_ source: ProStatus.Source) {
+        if source == .stripe {
+            UIApplication.shared.open(URL(string: "https://compose.grepawk.com/plans")!)
+            return
+        }
+        Task {
+            guard let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else { return }
+            try? await AppStore.showManageSubscriptions(in: scene)
+        }
+    }
+
+    private var productsError: some View {
+        VStack(spacing: 10) {
+            Text("Couldn't load plans from the App Store.").foregroundStyle(Theme.text)
+            Button { Task { await store.loadProducts() } } label: {
+                Text("Retry").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
+            }
+            .buttonStyle(.borderedProminent).tint(Theme.accent).foregroundStyle(Theme.onAccent)
+            .accessibilityIdentifier("paywallRetry")
+        }
     }
 
     private var footer: some View {
