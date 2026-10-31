@@ -21,7 +21,7 @@ Off switch for everything: `COMPOSE_ADS_ENABLED=0` in `/etc/gbk-composer.env` (p
 - [ ] Check the ChatGPT listing status. While it says "coming soon", ad copy must point to Studio / the MCP URL, not "Install in ChatGPT".
 
 ## 1. Stripe (only when you turn checkout on)
-- [ ] Stripe dashboard (live) → Product catalog → **"GBK Composer Pro"**: recurring **$5.99/month** and **$47.99/year** (created: prod_VVXeK2j4Dq3rOX); one-time **$99** (lifetime). Don't add a trial on the price; the server adds 7 days.
+- [ ] Stripe dashboard (live) → Product catalog → **"GBK Composer Pro"**: recurring **$5.99/month** and **$47.99/year** (created: prod_VVXeK2j4Dq3rOX); one-time **$99.99** (lifetime, price_1UVND54OymfcnKESIgTy5Oc2). Don't add a trial on the price; the server adds 7 days.
 - [ ] Webhooks: the existing `https://grepawk.com/api/stripe-webhook` endpoint already covers compose (needs `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, same as music).
 - [ ] finalcut `.env` (`/home/finalcut/apps/pages/finalcut/.env`), then `systemctl restart finalcut`:
   ```

@@ -84,7 +84,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: GBKComposer/Resources/GBKComposer.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
   GBKComposerTests:
     type: bundle.unit-test
     platform: iOS

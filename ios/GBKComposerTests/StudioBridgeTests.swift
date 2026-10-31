@@ -20,6 +20,9 @@ final class StudioBridgeTests: XCTestCase {
         let store = WorkstationStore()
         let ex = ToolExecutor(store: store)
         let args: JSONValue = .object([("name", .string("Violin")), ("program", .int(40)), ("role", .string("melody"))])
+        // An agent-owned project opens an autonomous session, so the track commits directly.
+        let created = await exec(ex, runId: "run_0", callId: "call_0", tool: "gbk_create_project", args: .object([("name", .string("Dedupe"))]), consent: true)
+        XCTAssertEqual(created["ok"]?.boolValue, true, String(describing: created["error"]))
         let first = await exec(ex, tool: "gbk_create_track", args: args)
         XCTAssertEqual(first["ok"]?.boolValue, true, String(describing: first["error"]))
         XCTAssertEqual(store.project.tracks.count, 1)
