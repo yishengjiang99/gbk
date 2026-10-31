@@ -94,8 +94,7 @@ export const CC_CAPS: Record<number, { name: string; audible: boolean; note?: st
 
 const NOTE_SCHEMA = obj({ trackId: str(), tick: int(0, 1e9), duration: int(1, 1e9), pitch: int(0, 127), velocity: int(1, 127), channel: int(0, 15, "defaults to the track channel") }, ["trackId", "tick", "duration", "pitch", "velocity"]);
 
-/** The gbk_get_project_summary payload. Also injected into a remix session's first run (#162), so the
- * agent knows what song it is looking at before its first tool call. Key comes from meta.key when the
+/** The gbk_get_project_summary payload. Key comes from meta.key when the
  * project declares one; otherwise it is estimated from the notes and flagged estimated:true. */
 export function projectSummary(c: WorkstationController) {
   const p = c.project;

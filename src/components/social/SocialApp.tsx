@@ -12,13 +12,13 @@ import { MySongs } from "../songs/MySongs.tsx";
 import { navigate } from "../../agent/routes.ts";
 import type { SocialRoute } from "../../agent/routes.ts";
 import { needSignIn, takePending } from "../auth/gate.ts";
-import { setRemixHandoff } from "../../agent/remix-handoff.ts";
 
 type Sheet = null | { kind: "comments"; song: Song; draft?: string } | { kind: "browse" } | { kind: "report"; what: "song" | "comment" | "user"; target: string; label: string };
-/** Opens the Studio in a FRESH chat session whose open project is the user's editable fork of this song,
- * with the original prompt prefilled (never auto-run). If the song fails to load, the Studio falls back to
- * the prompt-only landing (#162). */
-export const remix = (slug: string, prompt: string) => { sessionStorage.setItem("gbk.focusComposer", "1"); setRemixHandoff({ slug, prompt }); sessionStorage.setItem("gbk.composerDraft", prompt.slice(0, 4000)); navigate("studio"); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50); };
+/** Remix is a chat entry point, nothing more: navigate to the song's fork route (the share route opens
+ * the user's editable fork, exactly like the card's fork button) and let the Studio landing start a
+ * FRESH conversation with the original prompt prefilled (never auto-run). The slug travels as the bare
+ * gbk.remixSlug value; the prompt travels as the ordinary composer draft. */
+export const remix = (slug: string, prompt: string) => { sessionStorage.setItem("gbk.focusComposer", "1"); sessionStorage.setItem("gbk.remixSlug", slug); sessionStorage.setItem("gbk.composerDraft", prompt.slice(0, 4000)); navigate(`s/${slug}?fork=1`); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50); };
 const ago = (t: number) => { const s = (Date.now() - t) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
 
 function Stars({ song, me, onChange }: { song: Song; me: Me | null; onChange: (s: Song) => void }) {

@@ -3,7 +3,6 @@
 import { friendlyError } from "./friendly-error.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { workstation } from "../workstation/instance.ts";
-import { projectSummary } from "../webmcp/tools.ts";
 import { BridgeClient, apiBase, type ConnState } from "./bridge-client.ts";
 import type { ArtifactRef, HistoryItem, ServerMessage, UsageInfo } from "./protocol.ts";
 
@@ -27,13 +26,10 @@ export function useAgentSession() {
   const [info, setInfo] = useState<{ model: string; models: string[]; provider: string; llmConfigured: boolean; rejectedTools: string[] } | null>(null);
   const [model, setModel] = useState<string>("");
   const client = useRef<BridgeClient | null>(null);
-  // #162: while a remix session is active, sends carry remixOf so the server binds the run to the fork.
-  const remixRef = useRef<{ slug: string; title: string } | null>(null);
-  // #164 review 3: the label belongs to the fork that was open when it was set; opening a different
-  // song clears it, so later sends stop claiming a remix of a song that is no longer open.
-  const remixProjectRef = useRef<string | null>(null);
-  const setRemixOf = useCallback((v: { slug: string; title: string } | null) => { remixRef.current = v; remixProjectRef.current = v ? workstation.project.id : null; }, []);
-  useEffect(() => workstation.subscribe(() => { if (remixRef.current && workstation.project.id !== remixProjectRef.current) { remixRef.current = null; remixProjectRef.current = null; } }), []);
+  // A reset requested while no live socket could take it (client not created yet, or the socket is down
+  // between reconnects) is owed, not dropped: it is re-sent at the first opportunity and the stale
+  // history in that session_ready is not adopted (see reset() and the session_ready case).
+  const pendingReset = useRef(false);
 
   const refreshAuth = useCallback(async () => {
     // A 5xx / unreachable server (e.g. mid-deploy) is not a logout: keep the last known sign-in state.
@@ -53,6 +49,13 @@ export function useAgentSession() {
       case "session_ready":
         setInfo({ model: m.model, models: m.models, provider: m.provider, llmConfigured: m.llmConfigured, rejectedTools: m.rejectedTools });
         setModel((x) => x || m.model);
+        if (pendingReset.current) {
+          // This frame's history predates an undelivered reset: deliver the reset now (the socket is
+          // live) and keep the chat empty instead of adopting the old conversation.
+          pendingReset.current = false;
+          client.current?.send({ type: "reset_conversation" });
+          break;
+        }
         setItems((xs) => xs.length ? xs : m.history.map((h: HistoryItem, i) => ({ id: `h${i}`, role: h.role, text: h.text, artifacts: h.artifacts })));
         break;
       case "run_started": setRun({ runId: m.runId, task: "Thinking", step: 0, maxSteps: 0 }); patchLastAssistant(m.runId, (x) => x); break;
@@ -75,6 +78,9 @@ export function useAgentSession() {
     if (!auth.authenticated) return;
     const c = new BridgeClient(workstation, onEvent, (state, detail) => { setConn({ state, detail }); if (state === "unauthorized") void refreshAuth(); });
     client.current = c; c.connect();
+    // A reset requested before this client existed is queued by the bridge ahead of hello, so the
+    // session it opens already starts from the fresh conversation.
+    if (pendingReset.current && c.send({ type: "reset_conversation" })) pendingReset.current = false;
     (globalThis as { __gbkComposer?: unknown }).__gbkComposer = { client: c }; // test/diagnostic handle (read-only use)
     return () => { c.close(); client.current = null; };
   }, [auth.authenticated, onEvent, refreshAuth]);
@@ -82,15 +88,18 @@ export function useAgentSession() {
   const send = useCallback((text: string) => {
     const t = text.trim(); if (!t || !client.current) return false;
     const id = `u_${Date.now()}`;
-    // #162: a remix session's sends name the source song and carry the fork's current summary, so the
-    // server can bind the run to the fork and tell the agent what it is looking at.
-    const remix = remixRef.current;
-    if (!client.current.send({ type: "user_message", clientMessageId: id, text: t, ...(model ? { model } : {}), ...(remix ? { mode: "remix" as const, remixOf: { slug: remix.slug, title: remix.title, summary: projectSummary(workstation) } } : {}) })) return false;
+    if (!client.current.send({ type: "user_message", clientMessageId: id, text: t, ...(model ? { model } : {}) })) return false;
     setItems((xs) => [...xs, { id, role: "user", text: t }]);
     return true;
   }, [model]);
   const stop = useCallback(() => { const r = run?.runId ?? client.current?.activeRunId; if (r) client.current?.send({ type: "cancel_run", runId: r }); client.current?.cancelLocal(); }, [run]);
-  const reset = useCallback(() => { remixRef.current = null; remixProjectRef.current = null; client.current?.send({ type: "reset_conversation" }); setItems([]); }, []);
+  const reset = useCallback(() => {
+    // With a live or connecting socket the bridge delivers this (queued ahead of hello if need be).
+    // Anything else owes the reset: pendingReset makes the next session_ready deliver it instead of
+    // restoring the old conversation into the just-cleared chat.
+    if (!client.current || !client.current.send({ type: "reset_conversation" })) pendingReset.current = true;
+    setItems([]);
+  }, []);
   const login = useCallback(async (code: string) => {
     const { status, body } = await api("/login", { method: "POST", body: JSON.stringify({ code }), csrf: auth.csrf });
     if (status !== 200) { setAuth((a) => ({ ...a, error: body.message ?? "login failed" })); return false; }
@@ -99,7 +108,7 @@ export function useAgentSession() {
   const logout = useCallback(async () => { await api("/logout", { method: "POST", body: "{}", csrf: auth.csrf }); client.current?.close(); await refreshAuth(); }, [auth.csrf, refreshAuth]);
   const reconnect = useCallback(() => { client.current?.close(); const c = client.current; if (c) { c.maxReconnects = 8; c.connect(); } }, []);
 
-  return { auth, conn, items, run, usage, info, model, setModel, send, stop, reset, setRemixOf, login, logout, reconnect, refreshAuth };
+  return { auth, conn, items, run, usage, info, model, setModel, send, stop, reset, login, logout, reconnect, refreshAuth };
 }
 
 function dedupe(a: ArtifactRef[]) { const s = new Set<string>(); return a.filter((x) => !s.has(x.artifactId) && !!s.add(x.artifactId)); }

@@ -3,9 +3,6 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024; // bounded message size in both directions
 
 export interface ManifestTool { name: string; description: string; inputSchema: Record<string, unknown>; readOnly: boolean; cls: "read" | "mutate" | "render" }
-/** #163 #3: run intent. The UI sets it when the entry point knows (remix handoff -> "remix"); when it is
- * absent the server derives it from the conversation binding. "new" is the only mode with project consent. */
-export type AgentMode = "new" | "edit" | "remix";
 export interface ToolResultEnvelope { ok: boolean; projectId: string; revision: number; data?: unknown; warnings: string[]; error?: { code: string; message: string; details?: unknown } }
 export interface UsageInfo { promptTokens: number; completionTokens: number; totalTokens: number; costUsd: number; dayTokens: number; dayCostUsd: number }
 export interface ArtifactRef { artifactId: string; kind: "wav" | "midi"; filename?: string; bytes?: number; durationSeconds?: number; sha256?: string; mimeType?: string }
@@ -13,7 +10,7 @@ export interface ArtifactRef { artifactId: string; kind: "wav" | "midi"; filenam
 // browser -> server
 export type ClientMessage =
   | { type: "hello"; protocol: number; tabId: string; manifest: { hash: string; tools: ManifestTool[] }; projectId: string; revision: number; resumeRunId?: string }
-  | { type: "user_message"; clientMessageId: string; text: string; model?: string; mode?: AgentMode; remixOf?: { slug: string; title: string; summary?: Record<string, unknown> } }
+  | { type: "user_message"; clientMessageId: string; text: string; model?: string }
   | { type: "tool_result"; sessionId: string; runId: string; callId: string; result: ToolResultEnvelope }
   | { type: "tool_progress"; sessionId: string; runId: string; callId: string; progress: number; detail?: string }
   | { type: "project_state"; projectId: string; revision: number }
