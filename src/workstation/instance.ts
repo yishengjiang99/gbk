@@ -1,3 +1,4 @@
+import { parseRoute } from "../agent/routes.ts";
 import { WorkstationController } from "./controller.ts";
 import { bindController, playerBridge } from "./player-bridge.ts";
 import { enableAutosave, restoreLatest } from "./persistence.ts";
@@ -11,7 +12,8 @@ if (!(g as { __gbkBound?: boolean }).__gbkBound) {
   bindController(workstation);
   if (typeof window !== "undefined") installHumBridge(workstation); // iOS native Hum (docs/social/hum-bridge.md)
   // Opening a shared song (/s/<slug>): skip the autosave restore and the player's startup song so the share wins.
-  const shareRoute = typeof location !== "undefined" && /\/s\/[A-Za-z0-9_-]+\/?$/.test(location.pathname);
+  // Only the studio share route (/s/<slug>?edit=1 or ?fork=1) counts; a bare /s/<slug> is the feed card.
+  const shareRoute = typeof location !== "undefined" && parseRoute().view === "share";
   // /studio?new=<n> (iOS app: each launch and after a native publish): start blank instead of restoring the latest
   // project. Earlier projects stay in IndexedDB. The param is stripped so a later reload restores as usual.
   const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : null;

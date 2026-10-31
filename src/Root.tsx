@@ -49,7 +49,7 @@ export default function Root() {
   useEffect(() => { document.documentElement.classList.toggle("studio-fit", !explore); return () => document.documentElement.classList.remove("studio-fit"); }, [explore]);
   return (
     <>
-      {explore && <SocialApp route={route as import("./agent/routes.ts").SocialRoute} onOpen={(slug, fork) => navigate(`s/${slug}${fork ? "?fork=1" : ""}`)} />}
+      {explore && <SocialApp route={route as import("./agent/routes.ts").SocialRoute} onOpen={(slug, fork) => navigate(`s/${slug}?${fork ? "fork=1" : "edit=1"}`)} />}
       {/* While the player modal is open the workstation is inert + hidden from the a11y tree (proper modal semantics). */}
       <div hidden={explore || undefined} aria-hidden={playerOpen || undefined} ref={(el) => { if (el) { if (playerOpen) el.setAttribute("inert", ""); else el.removeAttribute("inert"); } }}>
         {shareErr && <div className="cmp-error" role="alert">{shareErr}</div>}

@@ -43,6 +43,7 @@ export async function restoreLatest(c: WorkstationController): Promise<boolean> 
   const p = rec ? migrateProject(rec.project) : null;
   if (!p) return false;
   const cur = c.project;
+  if (cur.meta?.sharedFrom) return false; // a shared song opened in the studio always wins over the autosave restore
   // Only replace an empty or untouched (revision 0) import of the same song; never clobber edits made this session.
   // An agent-composed project (created from scratch, not tied to a player song) wins over the player's untouched
   // startup re-open of its last playlist song, otherwise a reload would silently replace the composition.

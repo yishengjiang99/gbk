@@ -131,7 +131,8 @@ extension StudioWebView {
     @MainActor func loadSong(_ req: StudioSongRequest) {
         var comps = URLComponents(url: Self.studioURL, resolvingAgainstBaseURL: false)!
         comps.path = "/s/\(req.slug)"
-        if req.fork { comps.queryItems = [URLQueryItem(name: "fork", value: "1")] }
+        // A bare /s/<slug> is the web feed card; the studio share route needs ?edit=1 (read-only) or ?fork=1.
+        comps.queryItems = [req.fork ? URLQueryItem(name: "fork", value: "1") : URLQueryItem(name: "edit", value: "1")]
         songLoadID = req.id
         url = comps.url
     }

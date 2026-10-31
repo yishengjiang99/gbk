@@ -8,8 +8,8 @@ export function parseRoute(pathname = location.pathname, search = location.searc
   rel = rel.replace(/\/$/, "");
   const m = /^s\/([a-z0-9][a-z0-9-]{3,127})$/.exec(rel);
   // A share link lands on the song's feed card (playing once audio unlocks), not in the
-  // Studio. Only an explicit fork (?fork=1, the card's Remix button) opens the editor.
-  if (m) return new URLSearchParams(search).get("fork") === "1" ? { view: "share", slug: m[1], fork: true } : { view: "feed", focus: m[1] };
+  // Studio. The editor opens only on an explicit studio route: ?edit=1 (the card's "open", read-only) or ?fork=1 (Remix).
+  if (m) { const q = new URLSearchParams(search); const fork = q.get("fork") === "1"; return fork || q.get("edit") === "1" ? { view: "share", slug: m[1], fork } : { view: "feed", focus: m[1] }; }
   if (rel === "studio" || new URLSearchParams(search).has("player")) return { view: "studio" };
   const q = new URLSearchParams(search);
   if (rel === "" || rel === "explore" || rel === "feed") return { view: "feed", sort: q.get("sort") ?? undefined, label: q.get("label") ?? undefined };

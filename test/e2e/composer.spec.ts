@@ -132,7 +132,11 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await expect(v2.getByTestId("feed-card").first()).toContainText("Midnight Fugue in D Minor (dark cello)");
   expect(await v2.getByTestId("my-songs").count()).toBe(0); // logged out: no My songs
   await expect(v2.getByTestId("feed-card").first().getByTestId("card-play")).toBeVisible(); // shared audio preview
-  await v2.goto(new URL(link!).pathname);
+  await v2.goto(new URL(link!).pathname); // the share link lands on the song's feed card; its "open" goes to the studio
+  const pinned = v2.locator(`[data-testid="feed-card"][data-slug="${new URL(link!).pathname.split("/").pop()}"]`);
+  await expect(pinned).toBeVisible({ timeout: 30_000 });
+  await pinned.getByTestId("card-open").click();
+  await expect(v2).toHaveURL(/\/s\/[a-z0-9-]+\?edit=1$/);
   await expect(v2.getByTestId("readonly-banner")).toBeVisible({ timeout: 30_000 });
   const shared = await ws(v2);
   expect(shared.readOnly).toBeTruthy(); expect(shared.notes).toBe(after.notes); expect(shared.id).not.toBe(after.id);
@@ -181,7 +185,7 @@ test("read-only share: piano-roll tap does not throw or report an error; Play wo
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }); const p = await ctx.newPage();
   const errors: string[] = []; p.on("pageerror", (e) => errors.push(e.message));
   const reports: string[] = []; p.on("request", (r) => { if (/client-?errors?/i.test(r.url())) reports.push(r.url()); });
-  await p.goto(`/s/${slug}`);
+  await p.goto(`/s/${slug}?edit=1`);
   await expect.poll(async () => (await ws(p)).readOnly, { timeout: 20_000 }).toBeTruthy();
   const before = await ws(p);
   if (await p.getByTestId("plus-btn").count()) await p.getByTestId("version-open-editor").last().click(); // phone studio: the roll is in the editor sheet
@@ -220,7 +224,7 @@ test("share link always opens the shared song (startup default/restore must not 
   for (const warm of [false, true]) {
     const ctx = await browser.newContext(); const p = await ctx.newPage();
     if (warm) { await p.goto("/studio"); await expect(p.getByTestId("workstation")).toBeVisible(); await p.waitForTimeout(3_000); } // whatever the studio starts with (empty or a default song) is loaded + autosaved first
-    await p.goto(`/s/${slug}`);
+    await p.goto(`/s/${slug}?edit=1`);
     await expect.poll(async () => (await ws(p)).name, { timeout: 20_000 }).toBe("Midnight Invention");
     await p.waitForTimeout(10_000); // give the player's startup song load every chance to clobber it
     const st = await ws(p);
