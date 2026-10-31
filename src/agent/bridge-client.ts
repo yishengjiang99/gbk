@@ -32,6 +32,11 @@ export class BridgeClient {
   /** Tool calls of the active run, by callId: executing (no result yet) or finished. The server replays outstanding
    *  calls after a reconnect; a replay is answered from here instead of running the tool twice. */
   private calls = new Map<string, { runId: string; result?: ClientMessage & { type: "tool_result" } }>();
+  /** Messages sent while the socket is still CONNECTING, flushed FIFO on open ahead of hello. Lives on the
+   *  instance, so it survives reconnect attempts. Capped: past the cap send() fails again rather than queueing
+   *  without bound. */
+  private outbox: ClientMessage[] = [];
+  private static OUTBOX_CAP = 50;
 
   constructor(private c: WorkstationController, private onEvent: (m: ServerMessage) => void, private onState: (s: ConnState, detail?: string) => void, bridge?: BrowserToolBridge) {
     this.bridge = bridge ?? new BrowserToolBridge(c);
@@ -66,6 +71,10 @@ export class BridgeClient {
     const ws = new WebSocket(url); this.ws = ws;
     ws.onopen = () => {
       this.attempts = 0; this.lastSeen = Date.now();
+      // Flush the outbox BEFORE hello: sends attempted while CONNECTING (e.g. reset_conversation from a
+      // landing) must reach the server ahead of the session hello starts, in the order they were made.
+      const queued = this.outbox; this.outbox = [];
+      for (const q of queued) this.send(q);
       const p = this.c.project;
       this.send({ type: "hello", protocol: PROTOCOL_VERSION, tabId: this.tabId, manifest: this.bridge.manifest, projectId: p.id, revision: p.revision, ...(this.activeRunId ? { resumeRunId: this.activeRunId } : {}) });
       // Heartbeat: ping every 20s (server answers pong); resume() replaces a socket silent past STALE_MS when the tab comes back.
@@ -97,8 +106,11 @@ export class BridgeClient {
   get connected() { return this.ws?.readyState === 1; }
 
   send(m: ClientMessage): boolean {
-    if (!this.ws || this.ws.readyState !== 1) return false;
-    this.ws.send(JSON.stringify(m)); return true;
+    if (this.ws && this.ws.readyState === 1) { this.ws.send(JSON.stringify(m)); return true; }
+    // Still CONNECTING: queue instead of dropping (flushed FIFO on open, ahead of hello). Past the cap the
+    // send fails as before rather than queueing without bound. No socket at all also fails, queueing nothing.
+    if (this.ws && this.ws.readyState === 0 && this.outbox.length < BridgeClient.OUTBOX_CAP) { this.outbox.push(m); return true; }
+    return false;
   }
 
   private async handle(m: ServerMessage) {

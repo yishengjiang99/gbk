@@ -28,3 +28,28 @@ test("bridge client: reconnects on visibilitychange/pageshow when the socket die
   listeners.visibilitychange.forEach((f) => f()); assert.equal(FakeWS.all.length, 3);
   c.close();
 });
+
+test("bridge client: sends while CONNECTING are queued and flushed FIFO ahead of hello; no socket fails", () => {
+  const g = globalThis as Record<string, unknown>;
+  g.WebSocket = FakeWS; g.location = { protocol: "https:", host: "x" };
+  g.document = { visibilityState: "visible", addEventListener: () => undefined, removeEventListener: () => undefined };
+  g.window = { addEventListener: () => undefined, removeEventListener: () => undefined };
+  const ctrl = { project: { id: "prj_1", revision: 0 }, subscribe: () => () => undefined } as never;
+  const c = new BridgeClient(ctrl, () => undefined, () => undefined, { manifest: [], cancel: () => undefined } as never);
+  // No socket at all: the send fails and queues nothing.
+  assert.equal(c.send({ type: "reset_conversation" }), false);
+  c.connect();
+  const ws = FakeWS.all[FakeWS.all.length - 1]!;
+  assert.equal(ws.readyState, 0);
+  // While CONNECTING the sends are accepted into the outbox; nothing reaches the wire yet.
+  assert.equal(c.send({ type: "reset_conversation" }), true);
+  assert.equal(c.send({ type: "ping", t: 1 }), true);
+  assert.deepEqual(ws.sent, []);
+  ws.open();
+  const types = ws.sent.map((s) => (JSON.parse(s) as { type: string }).type);
+  assert.deepEqual(types, ["reset_conversation", "ping", "hello"], "the queue flushes in order, ahead of hello");
+  // Once open, sends go straight out.
+  assert.equal(c.send({ type: "ping", t: 2 }), true);
+  assert.equal((JSON.parse(ws.sent[ws.sent.length - 1]!) as { type: string }).type, "ping");
+  c.close();
+});
