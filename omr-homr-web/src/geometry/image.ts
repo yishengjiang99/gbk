@@ -777,6 +777,120 @@ export function resize(src: GrayImage, w: number, h: number, opts: ResizeOptions
   return dst;
 }
 
+/** Pillow `bicubic_filter` (a = -0.5), support 2. */
+function bicubicFilter(xIn: number): number {
+  const a = -0.5;
+  const x = xIn < 0 ? -xIn : xIn;
+  if (x < 1.0) {
+    const t0 = (a + 2.0) * x - (a + 3.0);
+    const t1 = t0 * x;
+    const t2 = t1 * x;
+    return t2 + 1;
+  }
+  if (x < 2.0) {
+    const t0 = (x - 5) * x + 8;
+    const t1 = t0 * x - 4;
+    return t1 * a;
+  }
+  return 0.0;
+}
+
+interface ResampleCoeffs {
+  ksize: number;
+  /** (xmin, tapCount) per output sample. */
+  bounds: Int32Array;
+  /** Normalized weights, outSize * ksize (float; Pillow quantizes to fixed
+   * point, which changes results by < 1 gray level). */
+  kk: Float64Array;
+}
+
+/** Pillow `precompute_coeffs` + `normalize_coeffs` for BICUBIC. */
+function bicubicCoeffs(inSize: number, outSize: number): ResampleCoeffs {
+  const scale = inSize / outSize;
+  const filterscale = Math.max(scale, 1.0);
+  const support = 2.0 * filterscale;
+  const ksize = Math.ceil(support) * 2 + 1;
+  const bounds = new Int32Array(outSize * 2);
+  const kk = new Float64Array(outSize * ksize);
+  const invFilterscale = 1.0 / filterscale;
+  for (let xx = 0; xx < outSize; xx++) {
+    const center = (xx + 0.5) * scale;
+    // C (int) casts truncate toward zero, like Pillow's C code.
+    let xmin = Math.trunc(center - support + 0.5);
+    if (xmin < 0) xmin = 0;
+    let xmax = Math.trunc(center + support + 0.5);
+    if (xmax > inSize) xmax = inSize;
+    xmax -= xmin;
+    let ww = 0;
+    for (let x = 0; x < xmax; x++) {
+      const wv = bicubicFilter((x + xmin - center + 0.5) * invFilterscale);
+      kk[xx * ksize + x] = wv;
+      ww += wv;
+    }
+    if (ww !== 0) {
+      for (let x = 0; x < xmax; x++) kk[xx * ksize + x] /= ww;
+    }
+    bounds[xx * 2] = xmin;
+    bounds[xx * 2 + 1] = xmax;
+  }
+  return { ksize, bounds, kk };
+}
+
+function clip8(v: number): number {
+  const r = Math.round(v);
+  return r < 0 ? 0 : r > 255 ? 255 : r;
+}
+
+/**
+ * Resize with Pillow's BICUBIC resampling — what homr's `resize_image`
+ * (PIL `Image.resize` default) does to the page, and what Music Reader's
+ * PagePreprocess ports bit-exactly (fixed-point coefficients). This float
+ * version differs from Pillow by < 1 gray level per pixel; the previous
+ * nearest-neighbor resize aliased thin staff lines and noteheads before
+ * SegNet ever saw them. Two passes (horizontal into a uint8 temp, then
+ * vertical), rounding/clipping after each pass like Pillow.
+ */
+export function resizeBicubic(src: GrayImage, w: number, h: number): GrayImage {
+  if (w === src.width && h === src.height) return src.clone();
+  const clipRow = (read: (x: number, y: number) => number, y: number, coeffs: ResampleCoeffs, out: Uint8Array, outOffset: number): void => {
+    for (let xx = 0; xx < w; xx++) {
+      const xmin = coeffs.bounds[xx * 2];
+      const xmax = coeffs.bounds[xx * 2 + 1];
+      const kb = xx * coeffs.ksize;
+      let ss = 0;
+      for (let x = 0; x < xmax; x++) ss += read(x + xmin, y) * coeffs.kk[kb + x];
+      out[outOffset + xx] = clip8(ss);
+    }
+  };
+  // Horizontal pass (only the source rows the vertical pass can touch are
+  // materialized, like Pillow; here all rows for simplicity — pages are
+  // ~1920 wide after this resize, so the temp is one page at most).
+  let temp: GrayImage;
+  if (w !== src.width) {
+    const ch = bicubicCoeffs(src.width, w);
+    temp = GrayImage.zeros(w, src.height);
+    for (let y = 0; y < src.height; y++) {
+      clipRow((x) => src.data[y * src.width + x], y, ch, temp.data, y * w);
+    }
+  } else {
+    temp = src;
+  }
+  if (h === src.height) return temp === src ? temp.clone() : temp;
+  const cv = bicubicCoeffs(src.height, h);
+  const dst = GrayImage.zeros(w, h);
+  for (let yy = 0; yy < h; yy++) {
+    const ymin = cv.bounds[yy * 2];
+    const ymax = cv.bounds[yy * 2 + 1];
+    const kb = yy * cv.ksize;
+    for (let xx = 0; xx < w; xx++) {
+      let ss = 0;
+      for (let y = 0; y < ymax; y++) ss += temp.data[(y + ymin) * w + xx] * cv.kk[kb + y];
+      dst.data[yy * w + xx] = clip8(ss);
+    }
+  }
+  return dst;
+}
+
 /**
  * Crop the rectangle (x, y, w, h), clipping to the image bounds
  * (like numpy slicing).

@@ -4,7 +4,7 @@
  * and staff_parsing.py (parse_staffs, _ensure_same_number_of_staffs).
  *
  * Stage order mirrors the Python exactly:
- *   1. autocrop -> resize to 1920 wide (nearest) -> grayscale -> CLAHE
+ *   1. autocrop -> resize to 1920 wide (PIL bicubic) -> grayscale -> CLAHE
  *   2. SegNet tiled inference -> six-class label map -> binary masks
  *   3. noise filtering (image_noise_limit=50) -> make_lines_stronger on staff
  *   4. symbol boxes (noteheads, staff fragments, clefs/keys, stems/rests,
@@ -24,7 +24,7 @@ import {
   GrayImage,
   clahe,
   crop,
-  resize,
+  resizeBicubic,
 } from "./geometry/image.ts";
 import {
   BoundingEllipse,
@@ -32,7 +32,7 @@ import {
   createBoundingEllipses,
   createRotatedBoundingBoxes,
 } from "./geometry/boxes.ts";
-import { SegNetMasks, SEGNET_WINDOW, masksFromLabels, runSegNet } from "./geometry/segnet.ts";
+import { SegNetMasks, masksFromLabels, runSegNet } from "./geometry/segnet.ts";
 import {
   NoteheadWithStem,
   addNotesToStaffs,
@@ -114,10 +114,21 @@ function toGrayscale(
   return img;
 }
 
+/** Python `round()` on a float64: round half to even. */
+function roundHalfEven(x: number): number {
+  const f = Math.floor(x);
+  const diff = x - f;
+  if (diff > 0.5) return f + 1;
+  if (diff < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}
+
 /**
- * Autocrop -> resize to 1920 wide (nearest, like homr's PIL resize) ->
- * grayscale -> CLAHE. Direct port of load_and_preprocess_predictions'
- * image preparation.
+ * Autocrop -> resize to 1920 wide (PIL bicubic, like homr's resize_image;
+ * Music Reader's PagePreprocess ports the same filter) -> grayscale ->
+ * CLAHE. Direct port of load_and_preprocess_predictions' image preparation.
+ * homr resizes the color page and converts after; resizing the gray page is
+ * equivalent up to clipping/rounding because the filter is linear.
  */
 export function preprocessPageImage(
   pixels: Uint8Array | Uint8ClampedArray,
@@ -131,8 +142,9 @@ export function preprocessPageImage(
     image = crop(image, box.x, box.y, box.width, box.height);
   }
   if (image.width !== 1920) {
-    const targetH = Math.round((image.height * 1920) / image.width);
-    image = resize(image, 1920, targetH, { interpolation: "nearest" });
+    // homr calc_target_image_size: round(h * 1920 / w), Python round-half-even.
+    const targetH = roundHalfEven((image.height * 1920) / image.width);
+    image = resizeBicubic(image, 1920, targetH);
   }
   const preprocessed = clahe(image, 1.0, 8, 8);
   return {
@@ -153,10 +165,11 @@ export async function extractPagePredictions(
   inputFloat16 = false,
 ): Promise<SegNetMasks> {
   onProgress?.("segnet inference");
-  // homr's inference defaults step to windowSize / 2 (160): overlapping
-  // tiles, averaged and truncated on stitch.
+  // homr calls extract() with step_size = windowSize (320): tiles abut, and
+  // only the clamped last row/column overlaps. Music Reader locks the same
+  // stepSize = 320. (This port previously used windowSize / 2 = 160: 4x the
+  // tiles, and seam averaging where the reference has none.)
   const labels = await runSegNet(segnet, preprocessed, {
-    stepSize: SEGNET_WINDOW / 2,
     inputFloat16,
     onProgress: onProgress ? (done, total) => onProgress(`segnet tile ${done}/${total}`) : undefined,
   });
