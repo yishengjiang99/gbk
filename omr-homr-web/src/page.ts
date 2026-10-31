@@ -287,12 +287,38 @@ function findPeriodicCore(flatStaffs: Staff[]): [number, number, number] | null 
 }
 
 /**
- * Normalizes per-system staff counts. Direct port of
- * _ensure_same_number_of_staffs.
+ * Normalizes per-system staff counts. Port of homr's
+ * _ensure_same_number_of_staffs plus Music Reader's (omr-sheet-cam 40ef803)
+ * defensive split.
  */
 export function ensureSameNumberOfStaffs(staffs: MultiStaff[]): MultiStaff[] {
   const rowLengths = new Set(staffs.map((ms) => ms.staffs.length));
-  if (rowLengths.size === 1 && [...rowLengths][0] > 1) return staffs;
+  if (rowLengths.size === 1 && [...rowLengths][0] > 1) {
+    // A single row of 4+ unpaired staffs means brace detection chained them
+    // via false positives (e.g. bar lines) but found no real braces to pair.
+    // Split into consecutive pairs (piano systems) and mark grandstaff so
+    // hands split and systems sequence instead of stacking. Guarded to the
+    // single-row case — that is the chaining failure mode; several uniform
+    // rows are taken as real systems. (Music Reader's version keys on the
+    // first row whenever the uniform length qualifies.)
+    const only = [...rowLengths][0];
+    if (
+      staffs.length === 1 &&
+      only >= 4 &&
+      only % 2 === 0 &&
+      staffs[0].staffs.every((s) => !s.isGrandstaff)
+    ) {
+      const flat = staffs[0].staffs;
+      const rows: MultiStaff[] = [];
+      for (let i = 0; i < only; i += 2) {
+        flat[i].isGrandstaff = true;
+        flat[i + 1].isGrandstaff = true;
+        rows.push(new MultiStaff([flat[i], flat[i + 1]], []));
+      }
+      return rows;
+    }
+    return staffs;
+  }
   const flatStaffs = flattenStaffs(staffs);
   const core = findPeriodicCore(flatStaffs);
   if (core !== null) {
@@ -302,6 +328,31 @@ export function ensureSameNumberOfStaffs(staffs: MultiStaff[]): MultiStaff[] {
   const result: MultiStaff[] = [];
   for (const staff of staffs) result.push(...staff.breakApart());
   return result.sort((a, b) => a.staffs[0].minY - b.staffs[0].minY);
+}
+
+/**
+ * Music Reader (omr-sheet-cam #5, BraceDetection.splitStackedGrandStaffSystems):
+ * when every staff on the page is a grand staff but brace detection chained
+ * several systems into one row, the row would otherwise decode as several
+ * *voices* that all start at tick 0 (the systems sound simultaneously and
+ * playback order is wrong). Break each grand staff into its own row, sorted
+ * by minY, so the page becomes one voice whose systems play in sequence.
+ * (The layout regions are unaffected: they are computed from the same set of
+ * staffs, only the row grouping changes.)
+ */
+export function splitStackedGrandStaffSystems(rows: MultiStaff[]): MultiStaff[] {
+  const all = flattenStaffs(rows);
+  if (
+    all.length === 0 ||
+    !all.every((s) => s.isGrandstaff) ||
+    !rows.some((ms) => ms.staffs.length > 1)
+  ) {
+    return rows;
+  }
+  return all
+    .map((s, i) => [s, i] as const)
+    .sort((a, b) => a[0].minY - b[0].minY || a[1] - b[1])
+    .map(([s]) => new MultiStaff([s], []));
 }
 
 // ---------------------------------------------------------------------------
@@ -346,7 +397,7 @@ export async function parseStaffs(
   transcriber: StaffTranscriber = defaultStaffTranscriber,
   onProgress?: (stage: string) => void,
 ): Promise<ParsedVoice[]> {
-  const systems = ensureSameNumberOfStaffs(multiStaffs);
+  const systems = splitStackedGrandStaffSystems(ensureSameNumberOfStaffs(multiStaffs));
   if (systems.length === 0) return [];
   const numberOfVoices = systems[0].staffs.length;
   const regions = new StaffRegions(systems);
