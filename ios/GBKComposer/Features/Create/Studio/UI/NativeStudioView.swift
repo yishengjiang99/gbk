@@ -26,6 +26,7 @@ struct NativeStudioView: View {
     @StateObject private var model = NativeStudioModel()
     @State private var draft = ""
     @State private var errorText: String?
+    @State private var showRoll = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,7 +35,10 @@ struct NativeStudioView: View {
             TrackList(project: model.store.project)
             ProposalPanel(store: model.store, errorText: $errorText)
             Divider()
-            ChatTranscript(session: model.session)
+            Picker("View", selection: $showRoll) {
+                Text("Chat").tag(false); Text("Piano roll").tag(true)
+            }.pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 6)
+            if showRoll { PianoRollView(store: model.store) } else { ChatTranscript(session: model.session) }
             Composer(draft: $draft, running: model.session.run != nil,
                      send: { if model.session.send(draft) { draft = "" } },
                      stop: { model.session.stop() })
