@@ -15,19 +15,19 @@ struct ArrangementTrackResult: Equatable, Sendable { var trackId: String; var na
 struct ArrangementResult {
     var ops: [ProjectOp]; var perTrack: [ArrangementTrackResult]
     var metrics: (parallelPerfects: Int, voiceCrossings: Int, repeatedNoteRatio: Double)
-    var analysis: [String]; var sections: [Section]; var totalNotes: Int; var totalCcs: Int; var durationSec: Double
+    var analysis: [String]; var sections: [ProjectSection]; var totalNotes: Int; var totalCcs: Int; var durationSec: Double
 }
 
-func defaultSections(_ bars: Int) -> [Section] {
-    if bars < 8 { return [Section(name: "Theme", startBar: 1, bars: bars, energy: 0.6)] }
+func defaultSections(_ bars: Int) -> [ProjectSection] {
+    if bars < 8 { return [ProjectSection(name: "Theme", startBar: 1, bars: bars, energy: 0.6)] }
     let intro = max(2, jsRound(Double(bars) / 6 / 2) * 2), coda = max(2, jsRound(Double(bars) / 6 / 2) * 2)
     let mid = bars - intro - coda
     let theme = jsRound(Double(mid) / 2 / 2) * 2
     return [
-        Section(name: "Introduction", startBar: 1, bars: intro, energy: 0.35),
-        Section(name: "Theme", startBar: 1 + intro, bars: theme, energy: 0.65),
-        Section(name: "Development", startBar: 1 + intro + theme, bars: mid - theme, energy: 0.9),
-        Section(name: "Coda", startBar: 1 + intro + mid, bars: coda, energy: 0.5),
+        ProjectSection(name: "Introduction", startBar: 1, bars: intro, energy: 0.35),
+        ProjectSection(name: "Theme", startBar: 1 + intro, bars: theme, energy: 0.65),
+        ProjectSection(name: "Development", startBar: 1 + intro + theme, bars: mid - theme, energy: 0.9),
+        ProjectSection(name: "Coda", startBar: 1 + intro + mid, bars: coda, energy: 0.5),
     ]
 }
 

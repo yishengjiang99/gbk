@@ -36,10 +36,10 @@ struct GTrack: Equatable, Sendable {
     var id: String; var name: String; var channel: Int; var color: String; var mix: TrackMix; var visible: Bool; var role: String?
 }
 /// Semantic arrangement section (1-based bars, inclusive start, `bars` long).
-struct Section: Equatable, Sendable { var name: String; var startBar: Int; var bars: Int; var energy: Double? }
+struct ProjectSection: Equatable, Sendable { var name: String; var startBar: Int; var bars: Int; var energy: Double? }
 struct SharedFrom: Equatable, Sendable { var slug: String; var title: String; var owner: String; var parentSlug: String? }
 struct ProjectMeta: Equatable, Sendable {
-    var key: String?; var sections: [Section]?; var descriptors: [String: String]?
+    var key: String?; var sections: [ProjectSection]?; var descriptors: [String: String]?
     var owner: String? // "user" | "agent"
     var createdAt: Double?; var style: String?; var seed: Int?
     var sharedFrom: SharedFrom?
@@ -244,7 +244,7 @@ extension RawEvent {
         self.init(id: id, trackId: t, tick: json["tick"]?.intValue ?? 0, bytes: json["bytes"]?.arrayValue?.compactMap { $0.intValue } ?? [], kind: json["kind"]?.stringValue ?? "other")
     }
 }
-extension Section {
+extension ProjectSection {
     var json: JSONValue {
         var o: [(String, JSONValue)] = [("name", .string(name)), ("startBar", .int(Int64(startBar))), ("bars", .int(Int64(bars)))]
         if let energy { o.append(("energy", .number(energy))) }
@@ -276,7 +276,7 @@ extension ProjectMeta {
     init?(json: JSONValue) {
         self.init()
         key = json["key"]?.stringValue
-        sections = json["sections"]?.arrayValue?.compactMap(Section.init(json:))
+        sections = json["sections"]?.arrayValue?.compactMap(ProjectSection.init(json:))
         if let d = json["descriptors"]?.objectValue { descriptors = Dictionary(uniqueKeysWithValues: d.compactMap { kv in kv.1.stringValue.map { (kv.0, $0) } }) }
         owner = json["owner"]?.stringValue
         createdAt = json["createdAt"]?.doubleValue

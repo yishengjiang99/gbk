@@ -126,7 +126,7 @@ func buildComposeTools(_ store: WorkstationStore) -> [GBKTool] {
             ("baseRevision", schemaInt(0, 9007199254740991)),
         ], required: ["sections"]), readOnly: false) { a in
             let secs = (a.argArr("sections") ?? []).map {
-                Section(name: $0.argStr("name")!, startBar: $0.argInt("startBar")!, bars: $0.argInt("bars")!, energy: $0.argDbl("energy"))
+                ProjectSection(name: $0.argStr("name")!, startBar: $0.argInt("startBar")!, bars: $0.argInt("bars")!, energy: $0.argDbl("energy"))
             }
             let r = try appliedResult(store, [.setSections(secs)], label: "song structure (\(secs.count) sections)", baseRevision: a.argInt("baseRevision"))
             let p = store.project

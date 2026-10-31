@@ -64,7 +64,7 @@ final class StudioModelTests: XCTestCase {
             .setCC(trackId: t.id, controller: 7, points: [CCEvent(id: "c1", trackId: t.id, channel: 0, controller: 7, tick: 0, value: 88)], mode: "replace"),
         ])
         src.meta = ProjectMeta(key: "G major")
-        src.meta?.sections = [Section(name: "Verse", startBar: 1, bars: 4)]
+        src.meta?.sections = [ProjectSection(name: "Verse", startBar: 1, bars: 4)]
         let data = serializeSmf(src)
         let back = try parseSmf(data, name: "Test")
         XCTAssertEqual(back.ppq, 480)
@@ -124,7 +124,7 @@ final class StudioModelTests: XCTestCase {
         let (p, t) = makeProject()
         var src = p
         src.sound = SoundSettings(tracks: [t.id: [VoiceOverride(gen: 8, mode: "add", value: -600)]], effects: nil)
-        src.meta = ProjectMeta(key: "A minor", sections: [Section(name: "Intro", startBar: 1, bars: 2, energy: 0.5)], owner: "agent")
+        src.meta = ProjectMeta(key: "A minor", sections: [ProjectSection(name: "Intro", startBar: 1, bars: 2, energy: 0.5)], owner: "agent")
         let back = Project(json: src.json)
         XCTAssertEqual(back, src)
     }

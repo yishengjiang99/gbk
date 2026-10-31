@@ -23,7 +23,7 @@ enum ProjectOp: Sendable {
     case addTrack(GTrack, index: Int?)
     case setTempoMap([TempoEvent])
     case setTimeSigMap([TimeSigEvent])
-    case setSections([Section]?)
+    case setSections([ProjectSection]?)
     case setMeta(ProjectMeta?)
     case setProgram(trackId: String, program: Int, bankMsb: Int, bankLsb: Int, tick: Int)
     case setVoicePatch(trackId: String, overrides: [VoiceOverride], merge: Bool)
