@@ -141,6 +141,28 @@ final class CrossfadeTests: XCTestCase {
         XCTAssertEqual(FeedPlayer.fadeOutGain(2), 0, accuracy: 1e-6)
         XCTAssertGreaterThanOrEqual(FeedPlayer.fadeOutGain(0.3), FeedPlayer.fadeOutGain(0.6))
     }
+
+    /// #138: a fade that completes normally, still current and still outgoing, stops its player.
+    func testFadeEpilogueRunsForCompletedCurrentFade() {
+        XCTAssertTrue(FeedPlayer.shouldStopAfterFade(isCancelled: false, generation: 3, currentGeneration: 3, isActivePlayer: false))
+    }
+
+    /// #138: the reported race — song B's fade is cancelled when song C reuses B's player
+    /// instance. The cancelled fade must not stop / zero-gain the new song's player.
+    func testFadeEpilogueSkippedWhenCancelled() {
+        XCTAssertFalse(FeedPlayer.shouldStopAfterFade(isCancelled: true, generation: 3, currentGeneration: 3, isActivePlayer: false))
+    }
+
+    /// #138: a fade superseded by a newer generation must not run its epilogue, even if
+    /// its own task was somehow not cancelled.
+    func testFadeEpilogueSkippedWhenSuperseded() {
+        XCTAssertFalse(FeedPlayer.shouldStopAfterFade(isCancelled: false, generation: 3, currentGeneration: 4, isActivePlayer: false))
+    }
+
+    /// #138: a fade whose player has become the active player again must never stop it.
+    func testFadeEpilogueSkippedWhenPlayerIsActiveAgain() {
+        XCTAssertFalse(FeedPlayer.shouldStopAfterFade(isCancelled: false, generation: 3, currentGeneration: 3, isActivePlayer: true))
+    }
 }
 
 /// Stubs URLSession responses by path.

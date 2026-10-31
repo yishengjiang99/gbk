@@ -29,6 +29,9 @@ final class FeedPlayer: ObservableObject {
     private var midiCache: [String: Data] = [:]
     private var midiLoads: [String: Task<Data?, Never>] = [:]
     private var fadeTask: Task<Void, Never>?
+    /// Monotonic fade token (#138). Bumped whenever a fade is cancelled or a new
+    /// fade starts, so a superseded fade task can tell it no longer owns its player.
+    private var fadeGeneration = 0
     private var startTask: Task<Void, Never>?
     var onStart: ((String) -> Void)?
     let analyzer = SpectrumAnalyzer()
@@ -38,6 +41,14 @@ final class FeedPlayer: ObservableObject {
 
     nonisolated static func fadeOutGain(_ t: Double) -> Float {
         Float(cos(min(max(t, 0), 1) * .pi / 2))
+    }
+    /// Whether a fade that has left its loop may run its stop / zero-gain epilogue (#138).
+    /// A cancelled fade, a fade from a superseded generation, or a fade whose player is
+    /// the active player again must never stop that player: on a rapid song switch the
+    /// outgoing instance is reused as the incoming player, and a stale epilogue would
+    /// silence the new song while `isPlaying == true`.
+    nonisolated static func shouldStopAfterFade(isCancelled: Bool, generation: Int, currentGeneration: Int, isActivePlayer: Bool) -> Bool {
+        !isCancelled && generation == currentGeneration && !isActivePlayer
     }
     nonisolated static let incomingGain: Float = 1
     /// Web live playback's fixed headroom gain (GBK Social, 2026-10-25). Applied as the SF2 master gain.
@@ -109,7 +120,7 @@ final class FeedPlayer: ObservableObject {
         installTap(on: incoming, scope: scope, slug: slug, requested: requested)
         AudioSessionController.shared.start()
         if isPlaying { incoming.play() }
-        fadeTask?.cancel()
+        cancelFade()
         if let outgoing, outgoing !== incoming { fadeOut(outgoing) }
         standby = outgoing
         active = incoming
@@ -147,16 +158,45 @@ final class FeedPlayer: ObservableObject {
 
     private func removeTap(_ p: SF2MIDIPlayer) { p.engine.mainMixerNode.removeTap(onBus: 0) }
 
+    /// Cancel the in-flight fade (if any) and invalidate its generation, so its task can
+    /// neither keep writing `fadeGain` nor run its stop epilogue (#138). Callers that
+    /// cancel a fade without starting a new one (`stop()`, `pause()`) stop the fading
+    /// standby player explicitly themselves, so a skipped epilogue never leaks playback.
+    private func cancelFade() {
+        fadeTask?.cancel()
+        fadeTask = nil
+        fadeGeneration += 1
+    }
+
     private func fadeOut(_ outgoing: SF2MIDIPlayer) {
         removeTap(outgoing)
-        fadeTask = Task { @MainActor in
+        cancelFade()
+        let generation = fadeGeneration
+        fadeTask = Task { @MainActor [weak self] in
             let start = Date()
             while !Task.isCancelled {
+                // Superseded while fading (newer fade started, or this player was
+                // cancelled for reuse as the next song's player): stop touching it.
+                if let self, self.fadeGeneration != generation { return }
                 let t = Date().timeIntervalSince(start) / Self.crossfadeDuration
                 outgoing.fadeGain = Self.fadeOutGain(t)
                 if t >= 1 { break }
                 try? await Task.sleep(nanoseconds: UInt64(Self.fadeStep * 1_000_000_000))
             }
+            // #138: cancellation only exits the loop above — without this guard the
+            // epilogue still runs, and on a rapid switch `outgoing` may already be the
+            // player for the new song. Stopping / zero-gaining it here silences that
+            // song while `isPlaying == true`, and the next tap then only "pauses" it.
+            guard let self else {
+                // FeedPlayer is gone, so this player cannot have been reused: a
+                // completed, non-cancelled fade may still stop it.
+                if !Task.isCancelled { outgoing.stop(); outgoing.fadeGain = 0 }
+                return
+            }
+            guard Self.shouldStopAfterFade(isCancelled: Task.isCancelled,
+                                           generation: generation,
+                                           currentGeneration: self.fadeGeneration,
+                                           isActivePlayer: self.active === outgoing) else { return }
             outgoing.stop()
             outgoing.fadeGain = 0
         }
@@ -193,7 +233,7 @@ final class FeedPlayer: ObservableObject {
     /// `play` starts fresh even for the same slug.
     func stop() {
         startTask?.cancel()
-        fadeTask?.cancel()
+        cancelFade()
         standby?.stop()
         if let a = active { fadeOut(a); standby = a }
         active = nil
@@ -202,7 +242,7 @@ final class FeedPlayer: ObservableObject {
     }
 
     func pause() {
-        fadeTask?.cancel()
+        cancelFade()
         active?.pause()
         standby?.stop()
         isPlaying = false
