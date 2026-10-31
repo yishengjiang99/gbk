@@ -2,7 +2,8 @@ import XCTest
 
 /// Publish from the studio in the app: native sheet (title, labels ≤3, tags ≤10, share-prompt toggle), no sign-in
 /// (guests publish as the device's two-word username; service mocked until GBK Social's guest-publish contract).
-/// Also: the studio web view ends above the tab bar, so no web sheet or the composer is covered.
+/// Also: the studio web view ends above the tab bar, so no web sheet or the composer is covered; after publishing
+/// the app lands on the Feed tab and Create comes back with the composer.
 final class StudioPublishUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
@@ -61,7 +62,12 @@ final class StudioPublishUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["publish-done"].waitForExistence(timeout: 10), "published (mock guest service)")
         attach(app, "studio-native-publish-done-\(mode)")
         app.buttons["publish-cancel"].tap()
-        XCTAssertTrue(input.waitForExistence(timeout: 5) && input.isHittable, "composer visible after publish")
+        // A successful publish lands on the song's feed card (b987c3f), then Create opens a fresh project.
+        let feed = app.tabBars.buttons["Feed"]
+        let onFeed = expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: feed)
+        wait(for: [onFeed], timeout: 10)
+        create.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 20) && input.isHittable, "composer visible back in Create after publish")
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {
