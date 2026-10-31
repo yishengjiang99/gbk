@@ -1,29 +1,49 @@
 import Foundation
 import OMRHomrIOS
 
-/// omr-homr-ios (port of liebharc/homr, AGPL-3.0): page -> SMF (one track per staff) -> Score.
-/// Pages are appended one after another (page 2 starts at the end of page 1).
-struct HomrSheetRecognizer: SheetRecognizer {
-    func recognize(pages: [SheetPage]) async throws -> Score {
-        try await Task.detached(priority: .userInitiated) { try Self.recognizeSync(pages: pages) }.value
+/// omr-homr-ios (port of liebharc/homr, AGPL-3.0) through `NativeScanEngine`: the package's
+/// cached page session (warmed at launch by `ScanModelWarmup`), one parse at a time, pages
+/// fed gray8 or RGBX like Music Reader feeds them. Each page's SMF (one track per staff) is
+/// read back into a Score; pages are appended one after another (page 2 starts at the end of
+/// page 1). A page that fails classification is skipped; the scan fails only when no page
+/// produced notes, or immediately when the recognizer itself is unavailable (no models).
+struct HomrSheetRecognizer: SheetRecognizer, ScanSummaryProviding {
+    var engine: NativeScanEngine
+    private let summaryBox = ScanSummaryBox()
+
+    init(engine: NativeScanEngine = .shared) {
+        self.engine = engine
     }
 
-    static func recognizeSync(pages: [SheetPage]) throws -> Score {
+    var lastScanSummary: ScanRunSummary? { summaryBox.get() }
+
+    func recognize(pages: [SheetPage]) async throws -> Score {
+        let t0 = DispatchTime.now()
+        func elapsed() -> Double {
+            Double(DispatchTime.now().uptimeNanoseconds - t0.uptimeNanoseconds) / 1_000_000
+        }
+        var summary = ScanRunSummary()
         var merged = Score(parts: [])
         var offset = 0.0
-        var lastError: Error?
+        var lastFailure: ScanFailure?
         for page in pages {
-            let g = page.gray8()
-            let result: ParseSheetMusicResult
-            do {
-                result = try OMRHomrIOS.parseSheetMusicWithLayout(gray8: g.data, width: g.width, height: g.height)
-            } catch let e as OMRError {
-                if case .modelsNotBundled(let m) = e { throw ScanError.recognizerUnavailable("recognition models are not installed (\(m))") }
-                if case .sessionNotConfigured(let m) = e { throw ScanError.recognizerUnavailable(m) }
-                lastError = e; continue
-            } catch { lastError = error; continue } // e.g. no staff on this page
-            guard result.staffCount > 0, !result.midi.isEmpty else { continue }
-            let s = try SMFReader.score(from: result.midi)
+            let out: ScanPageOutput
+            switch await engine.parse(page: page) {
+            case .failure(let failure):
+                if case .recognizerUnavailable = failure.scanError {
+                    // No models / no session: later pages would fail the same way.
+                    summary.failureReason = failure.reasonCode
+                    summary.totalMs = elapsed()
+                    summaryBox.set(summary)
+                    throw failure.scanError
+                }
+                lastFailure = failure
+                continue
+            case .success(let parsed):
+                out = parsed
+            }
+            summary.add(out)
+            let s = try SMFReader.score(from: out.result.midi)
             merged.tempo = merged.tempo ?? s.tempo
             merged.key = merged.key ?? s.key
             merged.timeSig = merged.timeSig ?? s.timeSig
@@ -35,12 +55,17 @@ struct HomrSheetRecognizer: SheetRecognizer {
             }
             offset = end
         }
+        summary.totalMs = elapsed()
         if merged.noteCount == 0 {
-            if let lastError, pages.count == 1, !(String(describing: lastError).lowercased().contains("staff")) {
-                throw ScanError.failed(String(describing: lastError))
-            }
-            throw ScanError.nothingRecognized
+            // A single page surfaces its own classified failure; several pages that all
+            // failed read as "nothing recognized", with the last reason kept for telemetry.
+            let failure = (pages.count == 1 ? lastFailure : nil)
+                ?? ScanFailure(scanError: .nothingRecognized, reasonCode: lastFailure?.reasonCode ?? "no_notes")
+            summary.failureReason = failure.reasonCode
+            summaryBox.set(summary)
+            throw failure.scanError
         }
+        summaryBox.set(summary)
         return merged
     }
 }

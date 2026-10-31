@@ -60,6 +60,15 @@ protocol SheetRecognizer: Sendable {
     func recognize(pages: [SheetPage]) async throws -> Score
 }
 
+/// One page rendered as R, G, B, X bytes (`bytesPerRow == 4 * width`), for the native
+/// pipeline's color preprocessing.
+struct RGBXPage: Sendable {
+    var data: Data
+    var width: Int
+    var height: Int
+    var bytesPerRow: Int { width * 4 }
+}
+
 extension SheetPage {
     /// Upright 8-bit gray pixels, row-major, no padding (what OMRHomrIOS takes).
     func gray8(maxSide: Int = 3000) -> (data: Data, width: Int, height: Int) {
@@ -75,6 +84,34 @@ extension SheetPage {
             ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
         }
         return (Data(px), w, h)
+    }
+
+    /// Color rendering of the page (same max-side cap as `gray8`), so the native pipeline
+    /// preprocesses in color like homr — Music Reader's rule: monochrome pages stay gray8
+    /// (returns nil), color pages become RGBX rendered in their own RGB space (or DeviceRGB),
+    /// white-backed, R/G/B/X byte order. A failed render also returns nil; the engine then
+    /// falls back to `gray8`.
+    func rgbx(maxSide: Int = 3000) -> RGBXPage? {
+        guard image.colorSpace?.model != .monochrome else { return nil }
+        let scale = min(1, Double(maxSide) / Double(max(image.width, image.height)))
+        let w = max(1, Int(Double(image.width) * scale)), h = max(1, Int(Double(image.height) * scale))
+        let space = image.colorSpace?.model == .rgb && image.colorSpace != nil
+            ? image.colorSpace! : CGColorSpaceCreateDeviceRGB()
+        var px = Data(count: w * h * 4)
+        let ok = px.withUnsafeMutableBytes { buf -> Bool in
+            guard let base = buf.baseAddress,
+                  let ctx = CGContext(data: base, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: space,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                                          | CGBitmapInfo.byteOrder32Big.rawValue),
+                  ctx.bytesPerRow == w * 4 else { return false }
+            ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            ctx.interpolationQuality = .high
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        return ok ? RGBXPage(data: px, width: w, height: h) : nil
     }
 
     /// Bakes EXIF orientation in so the page is upright.
