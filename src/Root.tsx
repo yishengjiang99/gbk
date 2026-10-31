@@ -10,6 +10,7 @@ import "./components/social/social.css";
 import { parseRoute, navigate, appUrl, type Route } from "./agent/routes.ts";
 import { apiBase } from "./agent/bridge-client.ts";
 import { openShared } from "./agent/share-client.ts";
+import { beginShareOpen, settleShareOpen } from "./agent/share-open.ts";
 import { reportError } from "./telemetry/error-reporter.ts";
 
 /** Is the Composer server (same-origin /api) present? Not on the GitHub Pages build: then GBK behaves as before. */
@@ -34,7 +35,8 @@ export default function Root() {
   useEffect(() => {
     if (route.view !== "share") return;
     setShareErr("");
-    void openShared(route.slug, route.fork).then((sh) => { setShareTitle(sh.title); if (sh.slug && sh.slug !== route.slug) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); setShareErr(`Could not open shared song: ${(e as Error).message}`); });
+    beginShareOpen(route.slug);
+    void openShared(route.slug, route.fork).then((sh) => { setShareTitle(sh.title); if (sh.slug && sh.slug !== route.slug && location.pathname.includes("/s/")) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); settleShareOpen(route.slug, { ok: true, title: sh.title }); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); if (!settleShareOpen(route.slug, { ok: false, error: e })) setShareErr(`Could not open shared song: ${(e as Error).message}`); });
   }, [route]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && playerOpen) setPlayerOpen(false); };
