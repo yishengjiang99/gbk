@@ -49,7 +49,12 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const [focusId, setFocusId] = useState<string | null>(null);
   const [lanes, setLanes] = useState<LaneKind[]>([11, 1]);
   const pending = state.proposals.filter((x) => x.status === "pending");
-  const focus = state.proposals.find((x) => x.id === focusId && x.status === "pending") ?? pending[pending.length - 1] ?? null;
+  // #168: a "batch:<runId>" focus shows the whole run's change set as one overlay.
+  const batchFocus = useMemo(() => {
+    if (!focusId?.startsWith("batch:")) return null;
+    try { return workstation.batchView(focusId.slice(6)); } catch { return null; }
+  }, [focusId, state.proposals, state.project.revision]);
+  const focus = batchFocus ?? state.proposals.find((x) => x.id === focusId && x.status === "pending") ?? pending[pending.length - 1] ?? null;
   const setFocus = useCallback((id: string | null) => setFocusId(id), []);
   // One selection for everything (track list, piano roll, lanes, Sound panel, Keys panel): workstation.selection.
   const trackForLanes = p.tracks.find((t) => t.id === selectedTrackId(p));
