@@ -29,7 +29,7 @@ import type { Project } from "../../workstation/model.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import type { SavedSong } from "../../agent/share-client.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
-import { fmtTime, friendlyError, plainStep, songSeconds, trackChips, versionLog, type SongVersion } from "./studio-logic.ts";
+import { autoGrowTextarea, fmtTime, friendlyError, plainStep, songSeconds, trackChips, versionLog, type SongVersion } from "./studio-logic.ts";
 import "./mobile-studio.css";
 import { RecentProjects } from "./RecentProjects.tsx";
 import { startNew } from "../../workstation/studio-api.ts";
@@ -74,6 +74,8 @@ export function MobileStudio(props: MobileStudioProps) {
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; });
   const input = useRef<HTMLTextAreaElement>(null);
+  // Auto-grow: the composer stretches to fit multi-line text, including programmatic setText (draft prefill).
+  useEffect(() => { autoGrowTextarea(input.current); }, [text]);
   useEffect(() => { const f = () => { if (remixLandingRef.current()) return; const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const q = takePending("compose"); if (q && s.send(q.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);

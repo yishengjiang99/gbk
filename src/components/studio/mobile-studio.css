@@ -57,7 +57,7 @@ html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
 .ms-foot { flex: none; position: relative; z-index: 6; border-top: 1px solid var(--ms-line); background: var(--ms-bg); padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 6px; }
 .ms-bar { display: flex; gap: 8px; align-items: flex-end; min-width: 0; }
 .ms-bar textarea::placeholder { color: var(--ms-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ms-bar textarea { flex: 1 1 auto; min-width: 0; font: 16px/1.35 -apple-system, system-ui, sans-serif; min-height: 44px; max-height: 120px; border-radius: 22px; border: 1px solid var(--ms-line);
+.ms-bar textarea { flex: 1 1 auto; min-width: 0; font: 16px/1.35 -apple-system, system-ui, sans-serif; min-height: 44px; max-height: 200px; border-radius: 22px; border: 1px solid var(--ms-line);
   background: var(--ms-card); color: var(--ms-fg); padding: 11px 16px; resize: none; outline-color: var(--ms-acc); }
 .ms-send, .ms-stop { background: var(--ms-acc); color: var(--ms-acc-fg); }
 .ms-rec { display: flex; align-items: center; gap: 10px; min-height: 40px; border-radius: 20px; background: var(--ms-rec-bg); color: var(--ms-rec-fg); padding: 0 6px 0 14px; font-weight: 600; font-size: 14px; }

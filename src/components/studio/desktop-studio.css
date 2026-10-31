@@ -113,7 +113,7 @@ html:has(.ds), html:has(.ds) body { background: #ffffff; overflow: hidden; }
 .ds-err { color: var(--rec); }
 .ds-toast { position: absolute; left: 0; right: 0; bottom: 50px; margin: 0 auto; width: max-content; max-width: 100%; background: rgba(17,17,17,.92); color: #fff; padding: 6px 12px; border-radius: 8px; z-index: 5; pointer-events: none; }
 .ds-ain { display: flex; gap: 6px; flex: none; align-items: stretch; }
-.ds-ain textarea { flex: 1 1 0; min-width: 0; height: 38px; resize: none; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); line-height: 22px; overflow: hidden; }
+.ds-ain textarea { flex: 1 1 0; min-width: 0; height: 38px; max-height: 200px; resize: none; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); line-height: 22px; overflow: hidden; }
 .ds-ain .ds-btn { min-height: 38px; }
 .ds-auto { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; }
 .ds-autobar { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; min-width: 0; flex: none; }

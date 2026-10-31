@@ -42,7 +42,7 @@ import { Metronome } from "../../audio/metronome.ts";
 import { sfChoice } from "../../audio/sf-choice.ts";
 import { deploymentBase } from "../../audio/soundfont-loader.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
-import { friendlyError, versionLog } from "./studio-logic.ts";
+import { autoGrowTextarea, friendlyError, versionLog } from "./studio-logic.ts";
 import "./desktop-studio.css";
 
 export interface DesktopStudioProps {
@@ -212,6 +212,8 @@ export function DesktopStudio(props: DesktopStudioProps) {
   }, [s.run, s.items]);
   const [text, setText] = useState(() => { const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft"); return d; });
   const input = useRef<HTMLTextAreaElement>(null);
+  // Auto-grow: the composer stretches to fit multi-line text, including programmatic setText (draft prefill).
+  useEffect(() => { autoGrowTextarea(input.current); }, [text]);
   useEffect(() => { const f = () => { if (remixLandingRef.current()) return; const d = sessionStorage.getItem("gbk.composerDraft"); if (d) sessionStorage.removeItem("gbk.composerDraft"); if (sessionStorage.getItem("gbk.composerFresh")) { sessionStorage.removeItem("gbk.composerFresh"); void (async () => { await newSongRef.current(); if (d) setText(d); input.current?.focus(); })(); return; } if (d) setText(d); input.current?.focus(); }; window.addEventListener("gbk:focus-composer", f); return () => window.removeEventListener("gbk:focus-composer", f); }, []);
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const x = takePending("compose"); if (x && s.send(x.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
