@@ -42,6 +42,7 @@ import { Metronome } from "../../audio/metronome.ts";
 import { sfChoice } from "../../audio/sf-choice.ts";
 import { deploymentBase } from "../../audio/soundfont-loader.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
+import { waitShareOpen } from "../../agent/share-open.ts";
 import { autoGrowTextarea, friendlyError, versionLog } from "./studio-logic.ts";
 import "./desktop-studio.css";
 
@@ -260,13 +261,27 @@ export function DesktopStudio(props: DesktopStudioProps) {
   // prefilled from the ordinary composer draft. No remix mode, no binding: the chat that follows is a
   // normal session on the open project. Runs on the focus event, and once on mount in case the event
   // already fired (fresh page load with the marker set).
+  // #162/#164: wait for the share route's open of the fork. Loaded: record the Original (A/B), start a FRESH
+  // conversation on it. Failed: still a FRESH session (#161: newSong, never the previous chat) with a toast.
+  // Either way the prompt is prefilled (never run) and the URL becomes the plain Studio.
   const remixLanding = (): boolean => {
-    if (!sessionStorage.getItem("gbk.remixSlug")) return false;
+    const slug = sessionStorage.getItem("gbk.remixSlug");
+    if (!slug) return false;
     sessionStorage.removeItem("gbk.remixSlug");
     setMenu(null);
-    s.reset();
-    const d = sessionStorage.getItem("gbk.composerDraft");
-    if (d) { sessionStorage.removeItem("gbk.composerDraft"); setText(d); }
+    const d = sessionStorage.getItem("gbk.composerDraft") ?? ""; sessionStorage.removeItem("gbk.composerDraft");
+    if (d) setText(d);
+    void waitShareOpen(slug).then((info) => {
+      versionLog.recordOriginal(workstation.project);
+      s.reset();
+      if (d) setText(d);
+      say(`Remixing “${info.title}” — your copy is loaded.`);
+    }, async (e) => {
+      reportError(e, { where: "studio.remixLoad", slug });
+      await newSongRef.current();
+      if (d) setText(d);
+      say("Couldn't load that song, so the prompt is in the composer on its own.");
+    }).finally(() => { history.replaceState(null, "", appUrl("studio")); input.current?.focus(); });
     input.current?.focus();
     return true;
   };
