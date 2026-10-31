@@ -141,6 +141,8 @@ export class AgentHub {
       if (!this.slots.acquire(conn.user)) return conn.emit({ type: "error", code: "RUN_ACTIVE", message: "a run is already in progress; stop it or wait" });
     }
     const model = typeof m.model === "string" && m.model ? m.model : this.cfg.llm.model;
+    // #163 #3: explicit run intent from the UI entry point (bounded to the enum; anything else = derive).
+    const mode = m.mode === "new" || m.mode === "edit" || m.mode === "remix" ? m.mode : undefined;
     // #162: a remix session names its source song; keep only bounded, plain-data fields.
     const rawRemix = m.remixOf;
     const remixJson = rawRemix?.summary ? JSON.stringify(rawRemix.summary) : "";
@@ -155,7 +157,7 @@ export class AgentHub {
     conn.emit({ type: "run_started", runId, clientMessageId: String(m.clientMessageId ?? "").slice(0, 60), text: text.slice(0, 200) });
     const t0 = Date.now();
     try {
-      const r = await this.runtime.run({ runId, user: conn.user, text, model, conv, link, signal: abort.signal, log: this.log, remixOf });
+      const r = await this.runtime.run({ runId, user: conn.user, text, model, conv, link, signal: abort.signal, log: this.log, remixOf, mode, onCheckpoint: () => this.convs.save(conv) });
       this.log({ evt: "run_end", user: conn.user, runId, status: r.status, code: r.code, steps: r.steps, ms: Date.now() - t0 });
     } catch (e) {
       this.log({ evt: "run_crash", runId, err: (e as Error).message });

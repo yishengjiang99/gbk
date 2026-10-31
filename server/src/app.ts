@@ -11,6 +11,7 @@ import { AccountLimits, UsageLedger } from "./agent/limits.ts";
 import { AccountStore } from "./persistence/accounts.ts";
 import { signinRoutes } from "./routes/signin.ts";
 import { AgentRuntime } from "./agent/runtime.ts";
+import { RunTraceStore } from "./agent/trace.ts";
 import { createModelClient, type ModelClient } from "./agent/model-client.ts";
 import { ConversationStore } from "./persistence/conversations.ts";
 import { ShareStore } from "./persistence/shares.ts";
@@ -68,6 +69,9 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const ledger = new UsageLedger(cfg, deps.now, accounts, limits);
   const model = deps.model ?? createModelClient(cfg.llm.apiStyle, { baseUrl: cfg.llm.baseUrl, apiKey: cfg.llm.apiKey, timeoutMs: cfg.llm.requestTimeoutMs, maxRetries: cfg.llm.maxRetries, stream: cfg.llm.stream, log: (o) => app.log.warn(o) });
   const runtime = new AgentRuntime(cfg, model, catalog, ledger);
+  // #163 #11: persisted per-run traces (JSONL per day) for evals / failure analysis.
+  const traceStore = new RunTraceStore(persistEarly ? cfg.dataDir : null);
+  runtime.onTrace = (t) => traceStore.write(t);
   const persist = deps.persist !== false;
   const convs = new ConversationStore(persist ? cfg.dataDir : null);
   const shares = new ShareStore(persist ? join(cfg.dataDir, "shares.sqlite") : ":memory:");

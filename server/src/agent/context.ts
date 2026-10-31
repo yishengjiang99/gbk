@@ -1,6 +1,20 @@
 // Context management: token estimates, compact tool results, and compaction of old turns (deterministic summary,
 // no extra model call) so the request stays under AGENT_MAX_CONTEXT_TOKENS while keeping the user's intent.
 import type { ChatMessage } from "./model-client.ts";
+import type { WorkingMemory } from "./conversation.ts";
+
+/** #163 #7: the structured working memory as bounded summary lines (data, not prose). */
+export function workingMemoryLines(wm: WorkingMemory | undefined): string[] {
+  if (!wm) return [];
+  const lines: string[] = [];
+  if (wm.key) lines.push(`- key: ${wm.key}`);
+  if (wm.tempoBpm) lines.push(`- tempo: ${wm.tempoBpm} BPM`);
+  if (wm.sections.length) lines.push(`- sections: ${wm.sections.map((s) => `${s.name}@${s.startBar}+${s.bars}`).join(", ").slice(0, 400)}`);
+  if (wm.tracks.length) lines.push(`- tracks: ${wm.tracks.map((t) => `${t.id}=${t.name}${t.isPercussion ? " (percussion)" : ""}`).join(", ").slice(0, 600)}`);
+  for (const d of wm.decisions.slice(-8)) lines.push(`- decision: ${d.slice(0, 160)}`);
+  if (wm.pendingProposals.length) lines.push(`- pending proposals: ${wm.pendingProposals.join(", ")}`);
+  return lines;
+}
 
 export const estimateTokens = (s: string) => Math.ceil(s.length / 3.6);
 export const messageTokens = (m: ChatMessage) => estimateTokens(JSON.stringify(m)) + 4;
@@ -18,8 +32,10 @@ export function compactToolResult(result: unknown, maxChars: number): string {
   return s;
 }
 
-/** Keep system + the newest turns; fold older turns into one summary message. Tool call/result pairs stay intact. */
-export function compactMessages(msgs: ChatMessage[], maxTokens: number): { messages: ChatMessage[]; compacted: boolean } {
+/** Keep system + the newest turns; fold older turns into one summary message. Tool call/result pairs stay intact.
+ * The working memory (#163 #7) rides in the summary so decisions survive compaction even though tool
+ * results themselves are dropped. */
+export function compactMessages(msgs: ChatMessage[], maxTokens: number, wm?: WorkingMemory): { messages: ChatMessage[]; compacted: boolean } {
   const total = msgs.reduce((s, m) => s + messageTokens(m), 0);
   if (total <= maxTokens) return { messages: msgs, compacted: false };
   const [sys, ...rest] = msgs;
@@ -45,7 +61,8 @@ export function compactMessages(msgs: ChatMessage[], maxTokens: number): { messa
     const m = kept[i];
     if (m.role === "tool" && m.content.length > 400) kept = kept.map((x, j) => j === i ? { ...m, content: JSON.stringify({ note: "older tool result elided to save context; call the read tool again if needed", head: m.content.slice(0, 300) }) } : x);
   }
-  const summary: ChatMessage = { role: "user", content: `[Conversation summary of earlier turns, written by the server - context only]\n${(lines.slice(-30).join("\n") || "- (earlier tool activity)").slice(-2400)}` };
+  const wmLines = workingMemoryLines(wm);
+  const summary: ChatMessage = { role: "user", content: `[Conversation summary of earlier turns, written by the server - context only]\n${(lines.slice(-30).join("\n") || "- (earlier tool activity)").slice(-2400)}${wmLines.length ? `\n[Working memory - data]\n${wmLines.join("\n")}` : ""}` };
   const ack: ChatMessage = { role: "assistant", content: "Understood; continuing from the current project state." };
   return { messages: old.length ? [sys, summary, ack, ...kept] : [sys, ...kept], compacted: true };
 }

@@ -8,7 +8,8 @@ export type ChatMessage =
   | { role: "tool"; tool_call_id: string; content: string };
 export interface ToolSchema { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }
 export interface ModelRequest { model: string; messages: ChatMessage[]; tools: ToolSchema[]; maxTokens: number; signal: AbortSignal; onText?: (t: string) => void; parallelToolCalls?: boolean }
-export interface ModelUsage { promptTokens: number; completionTokens: number }
+export interface ModelUsage { promptTokens: number; completionTokens: number; /** #163 #12: prompt tokens served from the provider's prompt cache (priced separately when reported). */
+  cachedPromptTokens?: number }
 export interface ModelResponse { content: string; toolCalls: ToolCall[]; finishReason: string; usage: ModelUsage | null }
 export interface ModelClient { readonly name: string; complete(r: ModelRequest): Promise<ModelResponse> }
 
@@ -100,11 +101,11 @@ export class ChatCompletionsClient extends HttpModelClient {
     const body: Record<string, unknown> = { model: r.model, messages: r.messages, max_tokens: r.maxTokens, ...(r.tools.length ? { tools: r.tools, tool_choice: "auto", ...(r.parallelToolCalls === false ? { parallel_tool_calls: false } : {}) } : {}) };
     if (!this.o.stream) {
       const res = await this.post("/chat/completions", body, r.signal);
-      const j = await res.json() as { choices?: { message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+      const j = await res.json() as { choices?: { message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } };
       const ch = j.choices?.[0];
       if (!ch?.message) throw new ProviderError("PROVIDER_INCOMPATIBLE", "provider response has no choices[0].message");
       if (ch.message.content) r.onText?.(ch.message.content);
-      return { content: ch.message.content ?? "", toolCalls: (ch.message.tool_calls ?? []).map((t, i) => ({ id: t.id || `call_idx_${i}`, type: "function", function: { name: t.function?.name ?? "", arguments: t.function?.arguments || "{}" } })), finishReason: ch.finish_reason ?? "stop", usage: j.usage ? { promptTokens: j.usage.prompt_tokens ?? 0, completionTokens: j.usage.completion_tokens ?? 0 } : null };
+      return { content: ch.message.content ?? "", toolCalls: (ch.message.tool_calls ?? []).map((t, i) => ({ id: t.id || `call_idx_${i}`, type: "function", function: { name: t.function?.name ?? "", arguments: t.function?.arguments || "{}" } })), finishReason: ch.finish_reason ?? "stop", usage: j.usage ? { promptTokens: j.usage.prompt_tokens ?? 0, completionTokens: j.usage.completion_tokens ?? 0, cachedPromptTokens: j.usage.prompt_tokens_details?.cached_tokens ?? 0 } : null };
     }
     const res = await this.post("/chat/completions", { ...body, stream: true, stream_options: { include_usage: true } }, r.signal);
     if (!res.body) throw new ProviderError("PROVIDER_INCOMPATIBLE", "provider returned no stream body");
@@ -112,10 +113,10 @@ export class ChatCompletionsClient extends HttpModelClient {
     for await (const data of sseLines(res.body)) {
       if (r.signal.aborted) throw new ProviderError("OPERATION_CANCELLED", "cancelled");
       if (!data || data === "[DONE]") continue;
-      let j: { choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }; finish_reason?: string | null }[]; usage?: { prompt_tokens?: number; completion_tokens?: number }; error?: { message?: string } };
+      let j: { choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }; finish_reason?: string | null }[]; usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } }; error?: { message?: string } };
       try { j = JSON.parse(data); } catch { continue; }
       if (j.error) throw new ProviderError("PROVIDER_ERROR", `provider stream error: ${String(j.error.message ?? "").slice(0, 200)}`);
-      if (j.usage) usage = { promptTokens: j.usage.prompt_tokens ?? 0, completionTokens: j.usage.completion_tokens ?? 0 };
+      if (j.usage) usage = { promptTokens: j.usage.prompt_tokens ?? 0, completionTokens: j.usage.completion_tokens ?? 0, cachedPromptTokens: j.usage.prompt_tokens_details?.cached_tokens ?? 0 };
       const ch = j.choices?.[0]; if (!ch) continue;
       if (ch.delta?.content) { content += ch.delta.content; r.onText?.(ch.delta.content); }
       for (const tc of ch.delta?.tool_calls ?? []) asm.push(tc);
@@ -138,14 +139,14 @@ export class ResponsesClient extends HttpModelClient {
       else input.push({ type: "function_call_output", call_id: m.tool_call_id, output: m.content });
     }
     const res = await this.post("/responses", { model: r.model, instructions, input, max_output_tokens: r.maxTokens, tools: r.tools.map((t) => ({ type: "function", name: t.function.name, description: t.function.description, parameters: t.function.parameters })), tool_choice: "auto" }, r.signal);
-    const j = await res.json() as { output?: { type: string; content?: { type: string; text?: string }[]; call_id?: string; name?: string; arguments?: string }[]; usage?: { input_tokens?: number; output_tokens?: number } };
+    const j = await res.json() as { output?: { type: string; content?: { type: string; text?: string }[]; call_id?: string; name?: string; arguments?: string }[]; usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } } };
     let content = ""; const toolCalls: ToolCall[] = [];
     for (const o of j.output ?? []) {
       if (o.type === "message") for (const c of o.content ?? []) if (c.text) content += c.text;
       if (o.type === "function_call") toolCalls.push({ id: o.call_id ?? `call_${toolCalls.length}`, type: "function", function: { name: o.name ?? "", arguments: o.arguments ?? "{}" } });
     }
     if (content) r.onText?.(content);
-    return { content, toolCalls, finishReason: toolCalls.length ? "tool_calls" : "stop", usage: j.usage ? { promptTokens: j.usage.input_tokens ?? 0, completionTokens: j.usage.output_tokens ?? 0 } : null };
+    return { content, toolCalls, finishReason: toolCalls.length ? "tool_calls" : "stop", usage: j.usage ? { promptTokens: j.usage.input_tokens ?? 0, completionTokens: j.usage.output_tokens ?? 0, cachedPromptTokens: j.usage.input_tokens_details?.cached_tokens ?? 0 } : null };
   }
 }
 

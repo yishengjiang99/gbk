@@ -61,7 +61,9 @@ export interface CreateProjectOptions {
 }
 export type ApprovalHandler = (p: Proposal) => Promise<boolean>;
 
-interface HistoryEntry { label: string; before: Project; after: Project }
+interface HistoryEntry { label: string; before: Project; after: Project; /** Who made the edit (#163 #8): the
+   * agent may only undo/redo its OWN entries - an agent undo must never revert the user's work. */
+  source?: "user" | "agent" }
 
 export class WorkstationController {
   private state: WorkstationState;
@@ -189,11 +191,11 @@ export class WorkstationController {
     const p: Project = { ...cloneProject(src), id: newSharedId(), revision: 0, name: src.name.endsWith("(fork)") ? src.name : `${src.name} (fork)`, meta: { ...(src.meta ?? {}), owner: "user", sharedFrom: undefined, ...(slug ? { forkOf: slug } : {}) } };
     this.readOnlyReason = null; this.load(p); this.log("user", `fork${slug ? ` of ${slug}` : ""}`, true); return p;
   }
-  private commitProject(next: Project, label: string) {
+  private commitProject(next: Project, label: string, source: "user" | "agent" = "user") {
     this.assertWritable();
     const before = this.state.project;
     next.revision = before.revision + 1;
-    this.undoStack.push({ label, before, after: next });
+    this.undoStack.push({ label, before, after: next, source });
     if (this.undoStack.length > this.maxHistory) this.undoStack.shift();
     this.redoStack = [];
     this.set({ project: next, proposals: this.markStale(next.revision) });
@@ -204,7 +206,7 @@ export class WorkstationController {
   edit(ops: Op[], opts: { baseRevision?: number; label?: string; source?: "user" | "agent" } = {}): { revision: number; warnings: string[] } {
     this.checkRev(opts.baseRevision);
     const warnings = validateOps(this.project, ops);
-    this.commitProject(applyOps(this.project, ops), opts.label ?? summarizeOps(ops));
+    this.commitProject(applyOps(this.project, ops), opts.label ?? summarizeOps(ops), opts.source ?? "user");
     this.log(opts.source ?? "user", opts.label ?? summarizeOps(ops), true);
     return { revision: this.project.revision, warnings };
   }
@@ -246,6 +248,21 @@ export class WorkstationController {
     return true;
   }
   historyLabels() { return { undo: this.undoStack.map((e) => e.label), redo: this.redoStack.map((e) => e.label) }; }
+  /** #163 #8: agent undo/redo, scoped to the agent's own edits. The undo stack is shared with the user,
+   * so a plain agent undo could revert the user's latest edit; these refuse with NOT_AGENT_EDIT when the
+   * top entry is the user's (or a pre-source-tracking entry, treated as the user's). */
+  agentUndo(): boolean {
+    const top = this.undoStack[this.undoStack.length - 1];
+    if (!top) return false;
+    if (top.source !== "agent") throw new WorkstationError("NOT_AGENT_EDIT", `the last edit ("${top.label.slice(0, 80)}") was made by the user, not the agent; an agent undo would revert the user's work`);
+    return this.undo();
+  }
+  agentRedo(): boolean {
+    const top = this.redoStack[this.redoStack.length - 1];
+    if (!top) return false;
+    if (top.source !== "agent") throw new WorkstationError("NOT_AGENT_EDIT", `the next redo ("${top.label.slice(0, 80)}") was the user's edit, not the agent's`);
+    return this.redo();
+  }
 
   // ---- selection / loop (non-undoable view state, no revision bump) --------
   setSelection(sel: Partial<Selection>) { this.set({ project: { ...this.project, selection: { ...this.project.selection, ...sel } } }); }
@@ -349,7 +366,7 @@ export class WorkstationController {
       this.checkRev(p.baseRevision);
     }
     const next = applyOps(this.project, p.ops);
-    this.commitProject(next, `${opts.source === "agent" && this.autonomousAllowed(p.projectId) ? "agent (session)" : "accept"}: ${p.summary}`);
+    this.commitProject(next, `${opts.source === "agent" && this.autonomousAllowed(p.projectId) ? "agent (session)" : "accept"}: ${p.summary}`, p.source);
     this.setProposal(id, { status: "committed" });
     this.log(opts.source, `commit ${id}`, true);
     return { revision: this.project.revision };

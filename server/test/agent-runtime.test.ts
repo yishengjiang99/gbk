@@ -210,3 +210,86 @@ test("remix session (#164 review 3): create/generate are not offered, a call is 
   assert.equal(link.executed.at(-1)!.tool, "gbk_list_tracks");
   assert.equal(link.executed.at(-1)!.consent?.newProject, true);
 });
+
+test("#163 mode: first run is 'new' (create offered, consent true); follow-up derives 'edit' (create not offered, CONSENT_REQUIRED, consent false)", async () => {
+  const link = new FakeLink(ALL);
+  const { rt, conv, model } = setup([
+    () => calls(tc("c1", "gbk_create_project", { name: "First" })),
+    () => reply("Created."),
+    () => calls(tc("c2", "gbk_create_project", { name: "Sneaky second" })),
+    () => reply("Understood, editing instead."),
+  ], {}, link);
+  const opts = { user: "alice", model: "fake-model", conv, link, signal: new AbortController().signal };
+  const r1 = await rt.run({ ...opts, runId: "run_m1", text: "compose a fugue" });
+  assert.equal(r1.status, "completed");
+  const ctx1 = model.requests[0].messages.find((m) => m.role === "user") as { content: string };
+  assert.match(ctx1.content, /mode=new/);
+  assert.equal(link.executed[0].consent?.newProject, true);
+  const r2 = await rt.run({ ...opts, runId: "run_m2", text: "actually, scrap that and start a different piece" });
+  assert.equal(r2.status, "completed");
+  const ctx2 = model.requests[2].messages.filter((m) => m.role === "user").at(-1) as { content: string };
+  assert.match(ctx2.content, /mode=edit/);
+  assert.ok(!model.requests[2].tools.map((t) => t.function.name).includes("gbk_create_project"), "create is not offered on a follow-up");
+  assert.ok(!model.requests[2].tools.map((t) => t.function.name).includes("gbk_generate_arrangement"), "arrangement is not offered on a follow-up");
+  const refusal = JSON.parse((model.requests[3].messages.at(-1) as { content: string }).content);
+  assert.equal(refusal.error.code, "CONSENT_REQUIRED");
+  assert.equal(link.executed.filter((e) => e.tool === "gbk_create_project").length, 1, "the follow-up create never reached the browser");
+});
+
+test("#163 baseRevision: runtime injects the current revision into mutate calls that lack one, and never overwrites the model's", async () => {
+  let rev = 0;
+  const link = new FakeLink(ALL, () => ({ ok: true, projectId: "prj_1", revision: ++rev, data: {}, warnings: [] }));
+  const { go } = setup([
+    () => calls(tc("a", "gbk_set_tempo_map", { events: [{ bar: 1, bpm: 90 }] })),
+    () => calls(tc("b", "gbk_set_tempo_map", { events: [{ bar: 1, bpm: 95 }] }), tc("c", "gbk_set_instrument", { trackId: "t1", program: 4, baseRevision: 42 })),
+    () => reply("done"),
+  ], {}, link);
+  // First run binds the conversation; make it an edit run so revisions flow.
+  const r = await go();
+  assert.equal(r.status, "completed");
+  assert.equal(link.executed[0].args.baseRevision, undefined, "no revision known yet on the first mutation");
+  assert.equal(link.executed[1].args.baseRevision, 1, "second mutation carries the revision the first one produced");
+  assert.equal(link.executed[2].args.baseRevision, 42, "a model-supplied baseRevision is never overwritten");
+});
+
+test("#163 truncated output: a 'length' stop discards its tool calls and retries once with a server note; twice fails OUTPUT_TRUNCATED", async () => {
+  const truncated = { content: "", toolCalls: [tc("x", "gbk_list_tracks", "{partial")], finishReason: "length", usage: { promptTokens: 10, completionTokens: 5 } };
+  const link = new FakeLink(ALL);
+  const s = setup([() => truncated, () => reply("Recovered with a smaller reply.")], {}, link);
+  const r = await s.go();
+  assert.equal(r.status, "completed"); assert.equal(r.text, "Recovered with a smaller reply.");
+  assert.equal(link.executed.length, 0, "the truncated call was never executed");
+  assert.ok(s.model.requests[1].messages.some((m) => m.role === "user" && String(m.content).includes("cut off at the output limit")));
+  const s2 = setup([() => truncated, () => truncated], {}, new FakeLink(ALL));
+  const r2 = await s2.go();
+  assert.equal(r2.status, "failed"); assert.equal(r2.code, "OUTPUT_TRUNCATED");
+});
+
+test("#163 working memory: a project summary fills it, and the next edit run's context line carries it", async () => {
+  const summary = { name: "Song", key: { name: "C minor", estimated: false }, sections: [{ name: "Intro", startBar: 1, bars: 4 }], tracks: [{ id: "trk_1", name: "Violin", isPercussion: false }, { id: "trk_2", name: "Drums", isPercussion: true }], tempos: [{ tick: 0, microPerQuarter: 500000 }], pendingProposals: [] };
+  const link = new FakeLink(ALL, (t) => ({ ok: true, projectId: "prj_1", revision: 3, data: t === "gbk_get_project_summary" ? summary : {}, warnings: [] }));
+  const { rt, conv, model } = setup([() => calls(tc("a", "gbk_get_project_summary")), () => reply("Read it."), () => reply("Edited.")], {}, link);
+  const opts = { user: "alice", model: "fake-model", conv, link, signal: new AbortController().signal };
+  await rt.run({ ...opts, runId: "run_w1", text: "look at my song" });
+  assert.equal(conv.workingMemory?.key, "C minor");
+  assert.equal(conv.workingMemory?.tempoBpm, 120);
+  assert.deepEqual(conv.workingMemory?.tracks.map((t) => t.id), ["trk_1", "trk_2"]);
+  await rt.run({ ...opts, runId: "run_w2", text: "make it brighter" });
+  const ctx = model.requests[2].messages.filter((m) => m.role === "user").at(-1) as { content: string };
+  assert.match(ctx.content, /working memory \(data\): .*C minor/);
+  assert.match(ctx.content, /mode=edit/);
+});
+
+test("#163 traces: a completed run emits one trace with digests, mode and token totals, and no free text", async () => {
+  const link = new FakeLink(ALL);
+  const s = setup([() => calls(tc("a", "gbk_list_tracks")), () => reply("done")], {}, link);
+  const traces: unknown[] = [];
+  s.rt.onTrace = (t) => traces.push(t);
+  await s.go("compose a secret fugue about my diary");
+  assert.equal(traces.length, 1);
+  const t = traces[0] as { mode: string; status: string; calls: { tool: string; argsDigest: string }[]; promptTokens: number };
+  assert.equal(t.mode, "new"); assert.equal(t.status, "completed");
+  assert.deepEqual(t.calls.map((c) => c.tool), ["gbk_list_tracks"]);
+  assert.ok(t.promptTokens > 0);
+  assert.ok(!JSON.stringify(t).includes("diary"), "traces never contain user text");
+});

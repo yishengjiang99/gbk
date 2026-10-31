@@ -2,6 +2,29 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { newConversation, type Conversation } from "../agent/conversation.ts";
+import { compactMessages } from "../agent/context.ts";
+
+/** #163 #13: stored conversations are capped. The full uncompacted message list used to grow until the
+ * user reset; now the persisted form is the compacted one (plus working memory, which rides inside the
+ * compaction summary and as its own field), and history is bounded too. The in-memory conversation is
+ * untouched - only what lands on disk is trimmed. */
+export const MAX_STORED_MESSAGES = 240;
+export const MAX_STORED_HISTORY = 100;
+const STORAGE_TOKEN_BUDGET = 32_000;
+
+export function storedForm(c: Conversation): Conversation {
+  let messages = c.messages;
+  if (messages.length > MAX_STORED_MESSAGES) {
+    messages = compactMessages(messages, STORAGE_TOKEN_BUDGET, c.workingMemory).messages;
+    // Still too long: drop whole turns from the front (never split a tool call/result pair).
+    while (messages.length > MAX_STORED_MESSAGES) {
+      const next = messages.findIndex((m, i) => i > 0 && m.role === "user");
+      if (next < 0) break;
+      messages = messages.slice(next);
+    }
+  }
+  return { ...c, messages, history: c.history.slice(-MAX_STORED_HISTORY) };
+}
 
 export class ConversationStore {
   private cache = new Map<string, Conversation>();
@@ -17,7 +40,7 @@ export class ConversationStore {
   save(c: Conversation) {
     c.updatedAt = Date.now(); this.cache.set(c.user, c);
     if (!this.dir) return;
-    const f = this.file(c.user); writeFileSync(`${f}.tmp`, JSON.stringify(c)); renameSync(`${f}.tmp`, f);
+    const f = this.file(c.user); writeFileSync(`${f}.tmp`, JSON.stringify(storedForm(c))); renameSync(`${f}.tmp`, f);
   }
   reset(user: string): Conversation {
     const c = newConversation(user); this.cache.set(user, c);

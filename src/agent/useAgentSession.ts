@@ -85,7 +85,7 @@ export function useAgentSession() {
     // #162: a remix session's sends name the source song and carry the fork's current summary, so the
     // server can bind the run to the fork and tell the agent what it is looking at.
     const remix = remixRef.current;
-    if (!client.current.send({ type: "user_message", clientMessageId: id, text: t, ...(model ? { model } : {}), ...(remix ? { remixOf: { slug: remix.slug, title: remix.title, summary: projectSummary(workstation) } } : {}) })) return false;
+    if (!client.current.send({ type: "user_message", clientMessageId: id, text: t, ...(model ? { model } : {}), ...(remix ? { mode: "remix" as const, remixOf: { slug: remix.slug, title: remix.title, summary: projectSummary(workstation) } } : {}) })) return false;
     setItems((xs) => [...xs, { id, role: "user", text: t }]);
     return true;
   }, [model]);

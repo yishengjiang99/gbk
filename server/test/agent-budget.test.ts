@@ -88,3 +88,25 @@ test("closeDanglingTurns closes legacy unanswered prompts (stored conversations)
   assert.deepEqual(sent.map((m) => m.role), ["user", "assistant", "user"]);
   assert.match(String(sent[2].content), /^Jazz/);
 });
+
+test("#163 #12: the global daily cap persists across restarts (seeded from the accounts usage table)", () => {
+  const now = Date.UTC(2026, 9, 26, 1);
+  const cfg = testConfig({ AGENT_GLOBAL_DAILY_COST_BUDGET_USD: "0.05" });
+  const accts = new AccountStore(":memory:", () => now);
+  const l1 = new UsageLedger(cfg, () => now, accts);
+  l1.record("alice", { promptTokens: 10000, completionTokens: 1000 }); // $0.045 at default prices
+  assert.doesNotThrow(() => l1.check("bob"));
+  // A "restarted" ledger over the same store still sees the global spend.
+  const l2 = new UsageLedger(cfg, () => now, accts);
+  l2.record("bob", { promptTokens: 10000, completionTokens: 1000 }); // another $0.045 -> over the $0.05 global cap
+  assert.throws(() => l2.check("carol"), (e) => e instanceof BudgetError && e.code === "GLOBAL_BUDGET_EXHAUSTED");
+  assert.ok(l2.globalSnapshot().costUsd >= 0.09);
+});
+
+test("#163 #12: cached prompt tokens are priced at the cached rate, not the full input rate", () => {
+  const cfg = testConfig({ LLM_PRICE_INPUT_PER_MTOK: "10", LLM_PRICE_OUTPUT_PER_MTOK: "20", LLM_PRICE_CACHED_INPUT_PER_MTOK: "2" });
+  const ledger = new UsageLedger(cfg);
+  assert.equal(+ledger.cost({ promptTokens: 1_000_000, completionTokens: 0, cachedPromptTokens: 1_000_000 }).toFixed(4), 2);
+  assert.equal(+ledger.cost({ promptTokens: 1_000_000, completionTokens: 0, cachedPromptTokens: 500_000 }).toFixed(4), 6);
+  assert.equal(+ledger.cost({ promptTokens: 1_000_000, completionTokens: 0 }).toFixed(4), 10);
+});
