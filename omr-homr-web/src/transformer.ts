@@ -106,21 +106,47 @@ function floatToBits(v: number): number {
   return _u32[0];
 }
 
-/** float32 -> IEEE-754 binary16 bits, for feeding fp16 models. */
+/**
+ * float32 -> IEEE-754 binary16 bits, for feeding fp16 models.
+ * Round-to-nearest-even with subnormal support and overflow to Inf,
+ * matching the native Float16 conversion the reference (Music Reader /
+ * CoreML) applies to the same inputs. The previous implementation
+ * truncated the mantissa (a systematic downward bias on every fp16 SegNet
+ * and encoder input element), flushed subnormals to zero, and clamped
+ * overflow to the max finite value.
+ */
 export function float32ToFloat16(src: Float32Array | number[]): Uint16Array {
   const out = new Uint16Array(src.length);
   for (let i = 0; i < src.length; i += 1) {
     const bits = floatToBits(src[i]);
     const sign = (bits >> 16) & 0x8000;
-    const exp = ((bits >> 23) & 0xff) - 112;
+    const expField = (bits >> 23) & 0xff;
     const mant = bits & 0x007fffff;
     let h: number;
-    if (exp >= 31) {
-      h = sign | 0x7bff; // overflow -> inf (matches round-to-nearest clamping)
-    } else if (exp <= 0) {
-      h = sign; // underflow -> zero (subnormals flush to zero; inputs are 0..255)
+    if (expField === 0xff) {
+      // Inf / NaN.
+      h = sign | 0x7c00 | (mant !== 0 ? 0x0200 : 0);
+    } else if (expField - 127 > 15) {
+      // Overflow: magnitudes this large round to Inf under RN.
+      h = sign | 0x7c00;
+    } else if (expField - 127 >= -14) {
+      // Normal fp16 range: round the 23-bit mantissa to 10 bits (RN):
+      // bias = 2^12 - 1 + the last kept bit, so exact ties go to even.
+      // Adding the bias lets a carry propagate into the exponent, which
+      // also produces Inf exactly at the 65520 boundary.
+      const rounded = mant + 0xfff + ((mant >> 13) & 1);
+      h = sign | (((expField - 112) << 10) + (rounded >> 13));
+    } else if (expField - 127 >= -24) {
+      // Subnormal fp16: restore the implicit leading 1 and shift right
+      // with RN. f = m * 2^(e+1) in units of the 2^-24 quantum, so the
+      // shift is -e-1 (14 at e=-15, 23 at e=-24); a carry into bit 10 is
+      // the smallest normal, which is the correct RN result.
+      const m = mant | 0x800000;
+      const shift = 126 - expField;
+      const rounded = m + ((1 << (shift - 1)) - 1) + ((m >> shift) & 1);
+      h = sign | (rounded >> shift);
     } else {
-      h = sign | (exp << 10) | (mant >> 13);
+      h = sign; // too small even for a subnormal: rounds to zero
     }
     out[i] = h;
   }

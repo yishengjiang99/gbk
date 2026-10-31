@@ -16,6 +16,7 @@ import {
   decodeStaff,
   encodeStaff,
   float16ToFloat32,
+  float32ToFloat16,
   preprocessStaff,
   transcribeStaff,
 } from "../src/transformer.js";
@@ -100,5 +101,40 @@ describe("decode loop vs Python oracle (C-scale staff)", { skip: !modelsPresent 
     const ctx = await encodeStaff(encoder, input);
     assert.deepEqual([...ctx.dims], [1, 1280, 512]);
     assert.equal(ctx.data.length, 1 * 1280 * 512);
+  });
+});
+
+describe("float32ToFloat16 (round-to-nearest-even)", () => {
+  const h = (v: number) => float32ToFloat16([v])[0];
+  it("converts exact values", () => {
+    assert.equal(h(0), 0x0000);
+    assert.equal(h(-0), 0x8000);
+    assert.equal(h(1), 0x3c00);
+    assert.equal(h(-2), 0xc000);
+    assert.equal(h(65504), 0x7bff); // max finite
+  });
+  it("overflows to Inf at the RN boundary (old code clamped to 0x7bff)", () => {
+    assert.equal(h(65520), 0x7c00);
+    assert.equal(h(1e30), 0x7c00);
+    assert.equal(h(Infinity), 0x7c00);
+  });
+  it("rounds to nearest, ties to even (old code truncated)", () => {
+    // Halfway between 0x3c01 and 0x3c02 mantissas: even wins -> 0x3c02.
+    assert.equal(h(1 + 3 * 2 ** -11), 0x3c02);
+    // Halfway between 0x3c00 and 0x3c01: even wins -> 0x3c00.
+    assert.equal(h(1 + 2 ** -11), 0x3c00);
+    // Just above the midpoint rounds up (truncation would give 0x3c00).
+    assert.equal(h(1 + 2 ** -11 + 2 ** -20), 0x3c01);
+  });
+  it("keeps subnormals (old code flushed them to zero)", () => {
+    assert.equal(h(2 ** -24), 0x0001);
+    assert.equal(h(-(2 ** -24)), 0x8001);
+    assert.equal(h(2 ** -25), 0x0000); // exact tie -> even (zero)
+    assert.equal(h(3 * 2 ** -25), 0x0002); // tie between 1 and 2 -> even
+  });
+  it("round-trips every byte value exactly (SegNet inputs are 0..255)", () => {
+    for (let v = 0; v <= 255; v++) {
+      assert.equal(float16ToFloat32(float32ToFloat16([v]))[0], v);
+    }
   });
 });
