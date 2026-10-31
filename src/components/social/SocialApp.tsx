@@ -330,7 +330,7 @@ export function SocialApp({ route, onOpen }: { route: SocialRoute; onOpen: (slug
   return (
     <div className="so-app" data-testid="social-app">
       <header className="so-top"><a href="/" onClick={(e) => { e.preventDefault(); navigate(""); }}><b>gbk</b></a><span className="so-grow" />{me && <span className="so-dim" data-testid="me-handle">@{me.handle}</span>}</header>
-      <main className="so-main" key={bump}>
+      <main className={`so-main${route.view === "feed" ? " so-main-feed" : ""}`} key={bump}>
         {route.view === "feed" && <FeedView me={me} filter={filter} setFilter={setFilter} onSheet={setSheet} onOpen={onOpen} focusSlug={route.focus} />}
         {route.view === "profile" && <ProfileView handle={route.handle} me={me} onSheet={setSheet} setMe={setMe} />}
         {route.view === "inbox" && <div className="so-pad" data-testid="inbox-view"><h2>Inbox</h2>{me ? <p className="so-dim">Direct messages are coming in the next update. You'll be able to message any signed-in musician, and block, report or turn DMs off.</p> : <p className="so-dim">Messages appear here after you sign in. Tap Inbox to sign in.</p>}</div>}
