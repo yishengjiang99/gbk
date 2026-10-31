@@ -34,6 +34,12 @@ struct StudioWebView: View {
     /// A /studio universal link that arrived before the first load: used as the handoff path.
     @State private var pendingStudioPath: String?
     @State private var songLoadID: UUID?
+    /// A feed card landing is on its way: the Create-tab draft check must not `startNew()` over it.
+    @State private var landingInFlight = false
+    /// Remix landing with this tab already showing (first entry to Create): covers the page until
+    /// the song is ready. Otherwise the Feed stays up instead. Plus a failed request to retry.
+    @State private var remixOpening: String?
+    @State private var remixFailed: StudioPromptRequest?
     /// Set by the publish sheet on success; consumed when the sheet dismisses.
     @State private var lastPublished: PublishResult?
 
@@ -56,9 +62,8 @@ struct StudioWebView: View {
                         // A publish request follows finished work in the Studio: refresh `/api/me`
                         // so the paywall watcher (#123) sees any eligibility flip promptly.
                         WebView(url: url, scan: scan, songLoad: songLoadID, onLoad: { loaded in
-                            // A pending "Remix this prompt" takes this load: hand the song slug +
-                            // prompt to the page (the web reads gbk.composerRemix on the focus
-                            // event and loads a fork of the song) instead of the draft check.
+                            // A pending "Remix this prompt" takes this load: stash the remix for
+                            // the page and open the song's fork route instead of the draft check.
                             if let prompt = pendingPrompt {
                                 pendingPrompt = nil
                                 deliverRemix(prompt)
@@ -73,6 +78,7 @@ struct StudioWebView: View {
                     } else { ProgressView().tint(Theme.accent) }
                 }
                 .frame(width: g.size.width, height: g.size.height)
+                .overlay { remixOverlay }
                 .clipped()
             }
         }
@@ -107,6 +113,7 @@ struct StudioWebView: View {
         .onChange(of: router.studioPrompt) { _, req in if let req { handleStudioPrompt(req) } }
         .onChange(of: router.studioLink) { _, req in if let req { handleStudioLink(req) } }
         .task {
+            router.studioMounted = true
             if let req = router.studioLink { handleStudioLink(req) }
             if let req = router.studioSong { handleStudioSong(req) }
             if let req = router.studioPrompt { handleStudioPrompt(req) }
@@ -138,24 +145,39 @@ extension StudioWebView {
     /// the auth handoff when the Studio has not loaded yet.
     @MainActor func handleStudioSong(_ req: StudioSongRequest) {
         router.studioSong = nil
+        holdDraftCheck()
         if url == nil { pendingSong = req } else { loadSong(req) }
     }
 
+    /// Both the tab switch and the landing fire from the same tap; a landing outranks the draft check.
+    @MainActor func holdDraftCheck() {
+        landingInFlight = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            landingInFlight = false
+        }
+    }
+
     @MainActor func loadSong(_ req: StudioSongRequest) {
-        var comps = URLComponents(url: Self.studioURL, resolvingAgainstBaseURL: false)!
+        songLoadID = req.id
+        url = Self.songURL(req)
+    }
+
+    static func songURL(_ req: StudioSongRequest) -> URL? {
+        var comps = URLComponents(url: studioURL, resolvingAgainstBaseURL: false)!
         comps.path = "/s/\(req.slug)"
         // A bare /s/<slug> is the web feed card; the studio share route needs ?edit=1 (read-only) or ?fork=1.
         comps.queryItems = [req.fork ? URLQueryItem(name: "fork", value: "1") : URLQueryItem(name: "edit", value: "1")]
-        songLoadID = req.id
-        url = comps.url
+        return comps.url
     }
 
-    /// Feed card "Remix this prompt": same handoff the web card performs (sessionStorage
-    /// remix payload + focus event), delivered to the loaded Studio page, or queued for
-    /// the /studio load it triggers.
+    /// Feed card "Remix this prompt": the web card's `remix()` handoff, delivered once the
+    /// Studio page can take it, or queued for the /studio load it triggers.
     @MainActor func handleStudioPrompt(_ req: StudioPromptRequest) {
         router.studioPrompt = nil
-        if let web = scan.webView, web.url?.path.hasPrefix("/studio") == true {
+        holdDraftCheck()
+        beginRemix(req)
+        if let web = scan.webView, web.url?.host == Self.studioURL.host, !web.isLoading {
             deliverRemix(req)
         } else {
             pendingPrompt = req
@@ -165,16 +187,87 @@ extension StudioWebView {
         }
     }
 
-    /// Mirror of the web card's `remix()`: stash {slug, prompt} (prompt capped at 4,000
-    /// chars like the web) as gbk.composerRemix in sessionStorage and fire the focus
-    /// event the composer listens for. The web side loads a fork of the song from the
-    /// slug; without it the remix would land in an empty project (#162).
+    @MainActor func beginRemix(_ req: StudioPromptRequest) {
+        remixFailed = nil
+        remixOpening = router.selectedTab == .create ? req.title : nil
+    }
+
+    /// Mirror of the web card's `remix()` (src/components/social/SocialApp.tsx): the slug as
+    /// gbk.remixSlug and the prompt (capped at 4,000 chars) as the composer draft. The Studio
+    /// landing reads them to start a FRESH conversation with the prompt prefilled, never sent.
+    static let remixScript = """
+    try { await window.gbkStudio?.flushSave(); } catch (e) {}
+    sessionStorage.setItem("gbk.focusComposer", "1");
+    sessionStorage.setItem("gbk.remixSlug", slug);
+    sessionStorage.setItem("gbk.composerDraft", prompt);
+    """
+
+    /// "open" once the song is on the page and the composer took the prompt, "failed" on Root.tsx's
+    /// share error, "" while loading.
+    static let landingScript = """
+    const body = document.body.innerText;
+    if (body.includes("Could not open shared song")) return "failed";
+    return body.includes(title) && !sessionStorage.getItem("gbk.composerDraft") ? "open" : "";
+    """
+
+    /// Saves the current draft, stashes the remix, then opens the song's fork route.
     @MainActor func deliverRemix(_ req: StudioPromptRequest) {
         guard let web = scan.webView else { return }
-        let payload: [String: String] = ["slug": req.slug, "prompt": String(req.text.prefix(4000))]
-        let json = (try? JSONSerialization.data(withJSONObject: [payload])).flatMap { String(data: $0, encoding: .utf8) } ?? "[{}]"
-        let js = "sessionStorage.setItem('gbk.focusComposer','1'); sessionStorage.setItem('gbk.composerRemix', JSON.stringify(\(json)[0])); window.dispatchEvent(new Event('gbk:focus-composer'));"
-        web.evaluateJavaScript(js)
+        let song = StudioSongRequest(slug: req.slug, fork: true)
+        Task { @MainActor in
+            _ = try? await web.callAsyncJavaScript(Self.remixScript, arguments: ["slug": req.slug, "prompt": String(req.text.prefix(4000))], contentWorld: .page)
+            // Already on this fork: no load will happen, so the mounted Studio takes the landing directly.
+            if web.url == Self.songURL(song) {
+                _ = try? await web.evaluateJavaScript("window.dispatchEvent(new Event('gbk:focus-composer'))")
+            } else {
+                loadSong(song)
+            }
+            let outcome = await landingOutcome(web, title: req.title)
+            published = false // the fork is the open project now; the post-publish reset must not replace it
+            router.finishRemix()
+            remixOpening = nil
+            if outcome == "failed" { remixFailed = req }
+        }
+    }
+
+    /// Polls the song page for up to 15 s; a slow load drops the Opening screen rather than holding it.
+    @MainActor func landingOutcome(_ web: WKWebView, title: String) async -> String {
+        for _ in 0..<50 {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard web.url?.path.hasPrefix("/s/") == true, !web.isLoading else { continue }
+            let r = (try? await web.callAsyncJavaScript(Self.landingScript, arguments: ["title": title], contentWorld: .page)) as? String
+            if let r, !r.isEmpty { return r }
+        }
+        return "timeout"
+    }
+
+    @ViewBuilder var remixOverlay: some View {
+        if let title = remixOpening {
+            VStack(spacing: 12) {
+                ProgressView().tint(Theme.accent)
+                Text(title.isEmpty ? "Opening song" : "Opening \(title)")
+                    .font(.title3.weight(.bold)).foregroundStyle(Theme.text).multilineTextAlignment(.center)
+                Text("Making your own copy.").font(.subheadline).foregroundStyle(Theme.textSecondary)
+            }
+            .padding(32).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemBackground))
+            .accessibilityIdentifier("remix-opening")
+        } else if let failed = remixFailed {
+            VStack {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Couldn't open \(failed.title.isEmpty ? "that song" : failed.title). Your prompt is still in the chat box.")
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    HStack {
+                        Button("Try again") { beginRemix(failed); deliverRemix(failed) }
+                            .buttonStyle(.borderedProminent).tint(Theme.accent)
+                        Button("Dismiss") { remixFailed = nil }.buttonStyle(.bordered)
+                    }
+                }
+                .padding().frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 16)).padding()
+                Spacer()
+            }
+            .accessibilityIdentifier("remix-failed")
+        }
     }
 }
 
@@ -197,7 +290,8 @@ extension StudioWebView {
     """
 
     @MainActor func freshIfNoDraft(waitForRestore: Bool = false) async {
-        guard let web = scan.webView else { return }
+        guard let web = scan.webView, !landingInFlight else { return }
+        if !published, web.url?.path.hasPrefix("/s/") == true { return } // an opened song, not a draft to replace
         if web.microphoneCaptureState != .none { return } // hum recording
         if (try? await web.evaluateJavaScript(Self.busyScript)) as? Bool == true { return } // composer run
         let afterPublish = published

@@ -44,7 +44,8 @@ struct FeedCardView: View {
     var onFork: () -> Void = {}
     /// "Remix this prompt": hand the song (slug + shared prompt) to the Studio, which
     /// opens a fork of the song in a fresh composer session.
-    var onRemixPrompt: (String, String) -> Void = { _, _ in }
+    var onRemixPrompt: (String, String, String) -> Void = { _, _, _ in }
+    var remixing = false
 
     private var isPlaying: Bool { playback?.isPlaying ?? false }
     @EnvironmentObject private var auth: AuthStore
@@ -225,7 +226,8 @@ struct FeedCardView: View {
                         .font(.subheadline).foregroundStyle(Theme.text)
                         .lineLimit(2)
                     if layout != .side { Spacer(minLength: 0) }
-                    Button("Remix this prompt") { onRemixPrompt(song.slug, prompt) }
+                    Button("Remix this prompt") { onRemixPrompt(song.slug, prompt, song.title) }
+                        .disabled(remixing)
                         .font(.subheadline.weight(.semibold))
                         .buttonStyle(.bordered)
                         .tint(Theme.accent)

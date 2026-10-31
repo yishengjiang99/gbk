@@ -73,6 +73,7 @@ struct StudioLinkRequest: Equatable {
 struct StudioPromptRequest: Equatable {
     let slug: String
     let text: String
+    var title = ""
     let id = UUID()
 }
 
@@ -86,6 +87,10 @@ final class DeepLinkRouter: ObservableObject {
     @Published var studioSong: StudioSongRequest?
     @Published var studioPrompt: StudioPromptRequest?
     @Published var studioLink: StudioLinkRequest?
+    /// Remix waiting on the Studio: the Feed stays up (button disabled) until the fork is ready, so no
+    /// half-loaded page shows. Only possible once the Studio tab exists; it sets `studioMounted`.
+    @Published var remixLoadingSlug: String?
+    var studioMounted = false
 
     /// Feed card "open" / fork buttons: switch to Create and load the song there.
     func openInStudio(slug: String, fork: Bool) {
@@ -93,10 +98,22 @@ final class DeepLinkRouter: ObservableObject {
         selectedTab = .create
     }
 
-    /// Feed card "Remix this prompt": switch to Create; the Studio loads a fork of the
-    /// song in a fresh session with the prompt prefilled.
-    func remixPrompt(slug: String, prompt: String) {
-        studioPrompt = StudioPromptRequest(slug: slug, text: prompt)
+    /// Feed card "Remix this prompt": the Studio loads a fork of the song in a fresh session
+    /// with the prompt prefilled, and calls `finishRemix` when it is ready to be seen.
+    func remixPrompt(slug: String, prompt: String, title: String = "") {
+        let req = StudioPromptRequest(slug: slug, text: prompt, title: title)
+        studioPrompt = req
+        guard studioMounted else { selectedTab = .create; return }
+        remixLoadingSlug = slug
+        // A hidden tab that never picks the request up must not strand the Feed.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            if studioPrompt?.id == req.id { selectedTab = .create }
+        }
+    }
+
+    func finishRemix() {
+        remixLoadingSlug = nil
         selectedTab = .create
     }
 
