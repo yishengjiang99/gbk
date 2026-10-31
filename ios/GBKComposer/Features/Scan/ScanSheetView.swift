@@ -26,14 +26,14 @@ struct ScanSheetView: View {
         .fullScreenCover(isPresented: $showCamera) {
             DocumentCamera { images in
                 showCamera = false
-                controller.recognize(images.compactMap(SheetPage.init(uiImage:)))
+                controller.recognize(images.compactMap(SheetPage.init(uiImage:)), source: .camera)
             } onCancel: { showCamera = false } onError: { e in
                 showCamera = false; controller.fail(.failed(e.localizedDescription))
             }.ignoresSafeArea()
         }
         .fileImporter(isPresented: $showPDF, allowedContentTypes: [.pdf, .image]) { result in
             switch result {
-            case .success(let url): controller.recognize(pagesFromFile(url))
+            case .success(let url): controller.recognize(pagesFromFile(url), source: .file)
             case .failure(let e): controller.fail(.unreadableInput(e.localizedDescription))
             }
         }
@@ -45,7 +45,7 @@ struct ScanSheetView: View {
                     if let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data), let p = SheetPage(uiImage: img) { pages.append(p) }
                 }
                 photoItems = []
-                if pages.isEmpty { controller.fail(.unreadableInput("the selected photo couldn't be opened")) } else { controller.recognize(pages) }
+                if pages.isEmpty { controller.fail(.unreadableInput("the selected photo couldn't be opened")) } else { controller.recognize(pages, source: .photos) }
             }
         }
     }
@@ -88,7 +88,7 @@ struct ScanSheetView: View {
             if ScanSheetView.fixtureEnabled, let url = Bundle.main.url(forResource: "scan-fixture", withExtension: "png") {
                 // UI tests only (-uiTestScanFixture): the simulator has no document camera.
                 ScanOptionButton(title: "Use test sheet", icon: "testtube.2", id: "scan-fixture") {
-                    if let img = UIImage(contentsOfFile: url.path), let p = SheetPage(uiImage: img) { controller.recognize([p]) }
+                    if let img = UIImage(contentsOfFile: url.path), let p = SheetPage(uiImage: img) { controller.recognize([p], source: .fixture) }
                 }
             }
             Spacer()

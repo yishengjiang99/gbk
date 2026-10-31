@@ -131,7 +131,8 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now, billing });
   const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits,
     { usage, billing, aiLimit: (u) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens, renderLimit: (u) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders });
-  eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers, billing);
+  eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers, billing,
+    { record: (event, fields) => app.log.info({ scan: fields, event }, "scan telemetry") });
   billingRoutes(app, cfg, sessions, { funnel, billing, log: billingLog });
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {

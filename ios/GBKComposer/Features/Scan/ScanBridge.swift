@@ -52,22 +52,31 @@ final class ScanController: ObservableObject {
     weak var webView: WKWebView?
     let recognizer: SheetRecognizer
     let warmup: ScanModelWarmup
+    let telemetry: ScanTelemetryLogger
     /// Last SMF handed to the studio (tests).
     private(set) var lastMIDI: Data?
 
-    init(recognizer: SheetRecognizer = HomrSheetRecognizer(), warmup: ScanModelWarmup? = nil) {
+    init(recognizer: SheetRecognizer = HomrSheetRecognizer(), warmup: ScanModelWarmup? = nil,
+         telemetry: ScanTelemetryLogger? = nil) {
         self.recognizer = recognizer
         // Resolved inside the @MainActor init so nonisolated call sites (SwiftUI views) never
         // touch the main-actor singleton in a default-argument expression.
         self.warmup = warmup ?? .shared
+        self.telemetry = telemetry ?? .shared
     }
 
     func start() { phase = .choose; isPresented = true }
     func fail(_ e: ScanError) { phase = .error(e) }
 
-    func recognize(_ pages: [SheetPage]) {
+    func recognize(_ pages: [SheetPage], source: ScanSource = .photos) {
         guard !pages.isEmpty else { return }
         scanningPage = pages.first?.image
+        telemetry.started(source: source, pages: pages.count,
+                          imageWidth: pages.first?.image.width, imageHeight: pages.first?.image.height)
+        let scanStart = DispatchTime.now()
+        func scanMs() -> Double {
+            Double(DispatchTime.now().uptimeNanoseconds - scanStart.uptimeNanoseconds) / 1_000_000
+        }
         // Attach to an in-flight / re-warm warmup (bus replays the current fraction at once);
         // when already warm — or never warmed, which a scan must not start — go straight to
         // reading and the recognizer's lazy load does the work, as before.
@@ -89,14 +98,36 @@ final class ScanController: ObservableObject {
                 lastMIDI = midi
                 try await handOff(midi)
                 let tracks = score.parts.filter { !$0.notes.isEmpty }.count
+                telemetry.completed(summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
+                                    durationMs: scanMs(), noteCount: score.noteCount)
                 phase = .done(tracks: tracks, notes: score.noteCount)
                 try? await Task.sleep(nanoseconds: 700_000_000)
                 if case .done = phase { isPresented = false } // the studio's import chooser is now on screen
             } catch let e as ScanError {
+                telemetry.failed(reason: failureReason(for: e),
+                                 summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
+                                 durationMs: scanMs())
                 phase = .error(e)
             } catch {
+                telemetry.failed(reason: "failed",
+                                 summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
+                                 durationMs: scanMs())
                 phase = .error(.failed(error.localizedDescription))
             }
+        }
+    }
+
+    /// Telemetry reason code for a failed scan: the recognizer's classified code when it
+    /// reported one (the native engine's taxonomy), else a code from the error case.
+    private func failureReason(for error: ScanError) -> String {
+        if let code = (recognizer as? ScanSummaryProviding)?.lastScanSummary?.failureReason { return code }
+        switch error {
+        case .nothingRecognized: return "nothing_recognized"
+        case .recognizerUnavailable: return "recognizer_unavailable"
+        case .unreadableInput: return "unreadable_input"
+        case .studioNotReady: return "studio_not_ready"
+        case .cameraDenied: return "camera_denied"
+        case .failed: return "failed"
         }
     }
 
