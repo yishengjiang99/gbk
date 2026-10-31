@@ -74,9 +74,6 @@ final class ScanController: ObservableObject {
         telemetry.started(source: source, pages: pages.count,
                           imageWidth: pages.first?.image.width, imageHeight: pages.first?.image.height)
         let scanStart = DispatchTime.now()
-        func scanMs() -> Double {
-            Double(DispatchTime.now().uptimeNanoseconds - scanStart.uptimeNanoseconds) / 1_000_000
-        }
         // Attach to an in-flight / re-warm warmup (bus replays the current fraction at once);
         // when already warm — or never warmed, which a scan must not start — go straight to
         // reading and the recognizer's lazy load does the work, as before.
@@ -99,19 +96,19 @@ final class ScanController: ObservableObject {
                 try await handOff(midi)
                 let tracks = score.parts.filter { !$0.notes.isEmpty }.count
                 telemetry.completed(summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
-                                    durationMs: scanMs(), noteCount: score.noteCount)
+                                    durationMs: Self.msSince(scanStart), noteCount: score.noteCount)
                 phase = .done(tracks: tracks, notes: score.noteCount)
                 try? await Task.sleep(nanoseconds: 700_000_000)
                 if case .done = phase { isPresented = false } // the studio's import chooser is now on screen
             } catch let e as ScanError {
                 telemetry.failed(reason: failureReason(for: e),
                                  summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
-                                 durationMs: scanMs())
+                                 durationMs: Self.msSince(scanStart))
                 phase = .error(e)
             } catch {
                 telemetry.failed(reason: "failed",
                                  summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
-                                 durationMs: scanMs())
+                                 durationMs: Self.msSince(scanStart))
                 phase = .error(.failed(error.localizedDescription))
             }
         }
@@ -129,6 +126,11 @@ final class ScanController: ObservableObject {
         case .cameraDenied: return "camera_denied"
         case .failed: return "failed"
         }
+    }
+
+    /// Milliseconds since a DispatchTime stamp (scan-duration telemetry).
+    private static func msSince(_ t0: DispatchTime) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - t0.uptimeNanoseconds) / 1_000_000
     }
 
     /// Warmup bus updates (already hopped to the main actor by the attach closure). Only
