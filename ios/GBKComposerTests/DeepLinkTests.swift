@@ -7,7 +7,7 @@ final class DeepLinkTests: XCTestCase {
     func testUniversalLinks() {
         XCTAssertEqual(link("https://compose.grepawk.com/s/ember-crown-rmpaqyj8"), .share(slug: "ember-crown-rmpaqyj8"))
         XCTAssertEqual(link("https://compose.grepawk.com/s/ember-crown-rmpaqyj8/"), .share(slug: "ember-crown-rmpaqyj8"))
-        XCTAssertEqual(link("https://compose.grepawk.com/s/ember-crown-rmpaqyj8?fork=1"), .share(slug: "ember-crown-rmpaqyj8"))
+        XCTAssertEqual(link("https://compose.grepawk.com/s/ember-crown-rmpaqyj8?fork=0"), .share(slug: "ember-crown-rmpaqyj8"))
         XCTAssertEqual(link("https://COMPOSE.grepawk.com/u/maestroaria"), .user(name: "maestroaria"))
         XCTAssertEqual(link("https://compose.grepawk.com/t/epic"), .tag(name: "epic"))
         XCTAssertEqual(link("https://compose.grepawk.com/feed"), .feed)
@@ -23,8 +23,7 @@ final class DeepLinkTests: XCTestCase {
 
     func testRejects() {
         XCTAssertNil(link("https://evil.example.com/s/ember-crown-rmpaqyj8"))
-        XCTAssertNil(link("https://compose.grepawk.com/"))
-        XCTAssertNil(link("https://compose.grepawk.com/studio"))
+        XCTAssertNil(link("https://compose.grepawk.com/api/feed"))
         XCTAssertNil(link("https://compose.grepawk.com/s/ab"))          // slug too short
         XCTAssertNil(link("https://compose.grepawk.com/u/a"))           // handle too short
         XCTAssertNil(link("ftp://compose.grepawk.com/s/ember-crown-rmpaqyj8"))
@@ -44,6 +43,28 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(r.pending, .share(slug: "ember-crown-rmpaqyj8"))
         XCTAssertEqual(r.feedPath, [])
         XCTAssertFalse(r.handle(URL(string: "https://example.com/s/x")!))
+    }
+
+    @MainActor func testStudioAndRootLinks() {
+        let base = "https://compose.grepawk.com"
+        XCTAssertEqual(DeepLink(url: URL(string: base + "/s/ember-crown-rmpaqyj8?edit=1")!), .studioSong(slug: "ember-crown-rmpaqyj8", fork: false))
+        XCTAssertEqual(DeepLink(url: URL(string: base + "/s/ember-crown-rmpaqyj8?fork=1")!), .studioSong(slug: "ember-crown-rmpaqyj8", fork: true))
+        XCTAssertEqual(DeepLink(url: URL(string: base + "/s/ember-crown-rmpaqyj8")!), .share(slug: "ember-crown-rmpaqyj8"))
+        XCTAssertEqual(DeepLink(url: URL(string: base + "/")!), .feed)
+        XCTAssertEqual(DeepLink(url: URL(string: base)!), .feed)
+        XCTAssertEqual(DeepLink(url: URL(string: base + "/studio?new=1&mcp=abc")!), .studio(query: "new=1&mcp=abc"))
+        let r = DeepLinkRouter()
+        XCTAssertTrue(r.handle(URL(string: base + "/s/ember-crown-rmpaqyj8?fork=1")!))
+        XCTAssertEqual(r.selectedTab, .create)
+        XCTAssertEqual(r.studioSong?.slug, "ember-crown-rmpaqyj8")
+        XCTAssertEqual(r.studioSong?.fork, true)
+        XCTAssertTrue(r.handle(URL(string: base + "/studio?new=1")!))
+        XCTAssertEqual(r.selectedTab, .create)
+        XCTAssertEqual(r.studioLink?.path, "/studio?new=1")
+        XCTAssertTrue(r.handle(URL(string: base + "/studio")!))
+        XCTAssertEqual(r.studioLink?.path, "/studio")
+        XCTAssertTrue(r.handle(URL(string: base + "/")!))
+        XCTAssertEqual(r.selectedTab, .feed)
     }
 
     @MainActor func testFocusFetchesMissingSongAndPutsItFirst() async throws {

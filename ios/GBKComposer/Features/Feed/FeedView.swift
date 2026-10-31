@@ -185,7 +185,7 @@ struct FeedView: View {
             guard await model.focus(slug: slug) else { return }
             visibleSlug = slug
             playVisible(slug)
-        case .user, .inbox: break
+        case .user, .inbox, .studioSong, .studio: break
         }
     }
 

@@ -8,7 +8,9 @@ enum DeepLink: Equatable {
     case user(name: String)    // /u/:user
     case tag(name: String)     // /t/:tag (doc: /t is a tag, not a thread)
     case inbox(handle: String) // /inbox/:handle
-    case feed                  // /feed, /explore
+    case feed                  // /feed, /explore, / (empty path)
+    case studioSong(slug: String, fork: Bool) // /s/:slug?edit=1 or ?fork=1
+    case studio(query: String?)               // /studio[?new=…&mcp=…]
 
     static let host = "compose.grepawk.com"
     static let scheme = "gbk"
@@ -25,16 +27,21 @@ enum DeepLink: Equatable {
         default:
             return nil
         }
-        guard let first = parts.first?.lowercased() else { return nil }
+        guard let first = parts.first?.lowercased() else { self = .feed; return }
         if parts.count == 1 {
             if first == "feed" || first == "explore" { self = .feed; return }
+            if first == "studio" { self = .studio(query: URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery); return }
             return nil
         }
         let value = parts[1]
         switch first {
         case "s":
             guard value.range(of: #"^[a-z0-9][a-z0-9-]{3,127}$"#, options: .regularExpression) != nil else { return nil }
-            self = .share(slug: value)
+            let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            func on(_ k: String) -> Bool { q.contains { $0.name == k && ($0.value ?? "") != "" && $0.value != "0" } }
+            if on("fork") { self = .studioSong(slug: value, fork: true) }
+            else if on("edit") { self = .studioSong(slug: value, fork: false) }
+            else { self = .share(slug: value) }
         case "u":
             let h = value.lowercased()
             guard h.range(of: #"^[a-z0-9_]{3,20}$"#, options: .regularExpression) != nil else { return nil }
@@ -50,6 +57,12 @@ enum DeepLink: Equatable {
 struct StudioSongRequest: Equatable {
     let slug: String
     let fork: Bool
+    let id = UUID()
+}
+
+/// A universal link to /studio: load that path (query passed through) in the Create tab.
+struct StudioLinkRequest: Equatable {
+    let path: String
     let id = UUID()
 }
 
@@ -72,6 +85,7 @@ final class DeepLinkRouter: ObservableObject {
     /// One-shot requests from feed cards to the Studio web view.
     @Published var studioSong: StudioSongRequest?
     @Published var studioPrompt: StudioPromptRequest?
+    @Published var studioLink: StudioLinkRequest?
 
     /// Feed card "open" / fork buttons: switch to Create and load the song there.
     func openInStudio(slug: String, fork: Bool) {
@@ -100,13 +114,19 @@ final class DeepLinkRouter: ObservableObject {
 
     func open(_ link: DeepLink) {
         switch link {
+        case .studioSong(let slug, let fork): openInStudio(slug: slug, fork: fork); return
+        case .studio(let query):
+            studioLink = StudioLinkRequest(path: "/studio" + (query.map { $0.isEmpty ? "" : "?" + $0 } ?? ""))
+            selectedTab = .create
+            return
+        default: break
+        }
+        switch link {
         case .user(let handle): feedPath = [handle]; pending = nil
         case .share, .tag, .feed: feedPath = []; pending = link
         case .inbox: pending = link
+        case .studioSong, .studio: break
         }
-        switch link {
-        case .share, .user, .tag, .feed: selectedTab = .feed
-        case .inbox: selectedTab = .inbox
-        }
+        if case .inbox = link { selectedTab = .inbox } else { selectedTab = .feed }
     }
 }

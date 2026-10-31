@@ -31,6 +31,8 @@ struct StudioWebView: View {
     /// load (so the web view lets that one /s/<slug> navigation through to the Studio).
     @State private var pendingPrompt: StudioPromptRequest?
     @State private var pendingSong: StudioSongRequest?
+    /// A /studio universal link that arrived before the first load: used as the handoff path.
+    @State private var pendingStudioPath: String?
     @State private var songLoadID: UUID?
     /// Set by the publish sheet on success; consumed when the sheet dismisses.
     @State private var lastPublished: PublishResult?
@@ -95,14 +97,17 @@ struct StudioWebView: View {
         // published (any route), is empty, or after a native publish. Sheets (publish, scan, MIDI import) don't change
         // the tab, so returning from them never resets.
         .onChange(of: router.selectedTab) { old, new in
-            if new == .create, old != .create, url != nil, Self.humHarnessURL == nil { Task { await freshIfNoDraft() } }
+            // A /studio universal link picks the page itself; don't let the draft check override it.
+            if new == .create, old != .create, url != nil, Self.humHarnessURL == nil, router.studioLink == nil { Task { await freshIfNoDraft() } }
         }
         // Feed card "open" / fork and "Remix this prompt" requests. onChange covers a
         // mounted Studio; the .task below covers a request that arrived before the
         // Studio was first mounted (onChange does not fire for the initial value).
         .onChange(of: router.studioSong) { _, req in if let req { handleStudioSong(req) } }
         .onChange(of: router.studioPrompt) { _, req in if let req { handleStudioPrompt(req) } }
+        .onChange(of: router.studioLink) { _, req in if let req { handleStudioLink(req) } }
         .task {
+            if let req = router.studioLink { handleStudioLink(req) }
             if let req = router.studioSong { handleStudioSong(req) }
             if let req = router.studioPrompt { handleStudioPrompt(req) }
         }
@@ -110,7 +115,8 @@ struct StudioWebView: View {
             if let harness = Self.humHarnessURL { url = harness; return }
             let token = auth.accessToken
             if url != nil, urlToken == token { return } // tab re-entry: keep the live page (freshIfNoDraft decides)
-            let path = Self.studioPath(fresh: false)
+            let path = pendingStudioPath ?? Self.studioPath(fresh: false)
+            pendingStudioPath = nil
             let handoff = try? await AuthServices.current.webSessionURL(returnPath: path)
             if Task.isCancelled { return }
             urlToken = token
@@ -120,6 +126,13 @@ struct StudioWebView: View {
 }
 
 extension StudioWebView {
+    /// /studio universal link: load the path with its query (?new= starts blank via the web's own
+    /// restore skip). Cleared on the next turn so the tab-entry draft check sees it and stands down.
+    @MainActor func handleStudioLink(_ req: StudioLinkRequest) {
+        if url == nil { pendingStudioPath = req.path } else { url = URL(string: req.path, relativeTo: Self.studioURL)!.absoluteURL }
+        Task { @MainActor in if router.studioLink == req { router.studioLink = nil } }
+    }
+
     /// Feed card "open" / fork: load the song's /s/<slug> page in the Studio — its web
     /// share flow loads the song into the workstation (?fork=1 forks it). Queued behind
     /// the auth handoff when the Studio has not loaded yet.
