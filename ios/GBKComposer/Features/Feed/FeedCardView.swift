@@ -4,6 +4,32 @@ import SwiftUI
 /// with the action rail down its right side and the play button over its bottom-left corner; title,
 /// author line, rating, tags and the prompt box sit below it. The viz itself stays the iOS
 /// piano roll + spectrum/waveform (`NowPlayingVizView`).
+/// Width tiers for the feed card, mirroring web 19d0d66 (social.css FEED_DESKTOP_MIN / FEED_SIDE_MIN).
+enum FeedCardLayout: Equatable {
+    case phone   // < 768 pt: original card
+    case wide    // >= 768 pt: full-bleed card, meta under the roll
+    case side    // >= 1200 pt: roll left, 360 pt meta panel right
+
+    static let wideMin: CGFloat = 768, sideMin: CGFloat = 1200
+    static let sideWidth: CGFloat = 360, gap: CGFloat = 16
+    static let padV: CGFloat = 12, padH: CGFloat = 16, rollMetaGap: CGFloat = 8, radius: CGFloat = 14
+    static let railButton: CGFloat = 46, railGap: CGFloat = 10, railTop: CGFloat = 24
+    static let railInsetWide: CGFloat = 32, railInsetSide: CGFloat = 20
+    static let sideTitle: CGFloat = 22, panelPadding: CGFloat = 12
+
+    init(width: CGFloat) {
+        self = width >= Self.sideMin ? .side : width >= Self.wideMin ? .wide : .phone
+    }
+
+    /// Rail insets inside the roll: wide = 32 from the card's right / 24 from its top (card padding 16/12);
+    /// side = 20 from the roll's right edge, 24 from the card top.
+    var railTrailingInRoll: CGFloat { self == .side ? Self.railInsetSide : Self.railInsetWide - Self.padH }
+    var railTopInRoll: CGFloat { Self.railTop - Self.padV }
+
+    /// Roll render scale: never above 3x (large iPad canvases).
+    static func rollScale(_ displayScale: CGFloat) -> CGFloat { min(3, displayScale) }
+}
+
 struct FeedCardView: View {
     let song: Song
     let playback: CardPlayback?
@@ -23,8 +49,48 @@ struct FeedCardView: View {
     private var isPlaying: Bool { playback?.isPlaying ?? false }
     @EnvironmentObject private var auth: AuthStore
     @Environment(\.requestSignIn) private var requestSignIn
+    @Environment(\.displayScale) private var displayScale
+    @State private var layout: FeedCardLayout = .phone
 
     var body: some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { layout = FeedCardLayout(width: g.size.width) }
+                    .onChange(of: g.size.width) { _, w in layout = FeedCardLayout(width: w) }
+            })
+    }
+
+    @ViewBuilder private var content: some View {
+        switch layout {
+        case .phone: phoneCard
+        case .wide:
+            VStack(alignment: .leading, spacing: FeedCardLayout.rollMetaGap) {
+                vizBlock
+                metaBlock
+            }
+            .padding(.vertical, FeedCardLayout.padV).padding(.horizontal, FeedCardLayout.padH)
+            .background(Theme.background)
+        case .side:
+            HStack(alignment: .bottom, spacing: FeedCardLayout.gap) {
+                vizBlock
+                metaBlock
+                    .padding(FeedCardLayout.panelPadding)
+                    .frame(width: FeedCardLayout.sideWidth, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: FeedCardLayout.radius, style: .continuous).fill(Theme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: FeedCardLayout.radius, style: .continuous).stroke(Theme.border, lineWidth: 1))
+                    .accessibilityIdentifier("feed-meta-panel")
+            }
+            .padding(.vertical, FeedCardLayout.padV).padding(.horizontal, FeedCardLayout.padH)
+            .background(Theme.background)
+        }
+    }
+
+    private var rollRadius: CGFloat { layout == .phone ? 16 : FeedCardLayout.radius }
+    private var railSize: CGFloat { layout == .phone ? 52 : FeedCardLayout.railButton }
+
+    private var phoneCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             vizBlock
             metaBlock
@@ -43,9 +109,10 @@ struct FeedCardView: View {
 
     private var vizBlock: some View {
         NowPlayingVizView(preview: song.preview, playback: playback)
+            .environment(\.displayScale, FeedCardLayout.rollScale(displayScale))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.vizBg))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(RoundedRectangle(cornerRadius: rollRadius, style: .continuous).fill(Theme.vizBg))
+            .clipShape(RoundedRectangle(cornerRadius: rollRadius, style: .continuous))
             .overlay(alignment: .top) {
                 if !isPlaying {
                     // Web: the "Tap to play" pill floats over the roll until audio is running.
@@ -58,8 +125,8 @@ struct FeedCardView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .trailing) {
-                VStack(spacing: 10) {
+            .overlay(alignment: layout == .phone ? .trailing : .topTrailing) {
+                VStack(spacing: FeedCardLayout.railGap) {
                     railButton(icon: "bubble.left.fill", label: "\(song.commentCount)", action: onComments)
                         .accessibilityLabel("Comments")
                     railButton(icon: "pencil", label: "open", action: onOpen)
@@ -77,7 +144,10 @@ struct FeedCardView: View {
                             .accessibilityLabel("Report")
                     }
                 }
-                .padding(.trailing, 10)
+                .padding(.trailing, layout == .phone ? 10 : layout.railTrailingInRoll)
+                .padding(.top, layout == .phone ? 0 : layout.railTopInRoll)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("feed-rail")
             }
             .overlay(alignment: .bottomLeading) {
                 Button(action: onTap) {
@@ -110,7 +180,7 @@ struct FeedCardView: View {
             if let label { Text(label).font(.caption2.weight(.medium)).lineLimit(1) }
         }
         .foregroundStyle(Theme.text)
-        .frame(width: 52, height: 52)
+        .frame(width: railSize, height: railSize)
         .background(Circle().fill(Theme.surfaceRaised.opacity(0.92)))
         .overlay(Circle().stroke(Theme.border, lineWidth: 1))
         .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
@@ -120,7 +190,7 @@ struct FeedCardView: View {
 
     private var metaBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(song.title).font(.title2.bold()).foregroundStyle(Theme.text).lineLimit(2)
+            Text(song.title).font(layout == .side ? .system(size: FeedCardLayout.sideTitle, weight: .bold) : .title2.bold()).foregroundStyle(Theme.text).lineLimit(2)
             HStack(spacing: 6) {
                 NavigationLink(value: song.author.handle) {
                     Text("@\(song.author.handle)").font(.subheadline)
@@ -148,15 +218,18 @@ struct FeedCardView: View {
             }
 
             if song.promptShared == true, let prompt = song.promptText, !prompt.isEmpty {
-                HStack(alignment: .center, spacing: 12) {
+                let stack = layout == .side
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+                stack {
                     Text("\u{201C}\(prompt)\u{201D}")
                         .font(.subheadline).foregroundStyle(Theme.text)
                         .lineLimit(2)
-                    Spacer(minLength: 0)
+                    if layout != .side { Spacer(minLength: 0) }
                     Button("Remix this prompt") { onRemixPrompt(song.slug, prompt) }
                         .font(.subheadline.weight(.semibold))
                         .buttonStyle(.bordered)
                         .tint(Theme.accent)
+                        .frame(maxWidth: layout == .side ? .infinity : nil)
                 }
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(red: 0.05, green: 0.35, blue: 0.25).opacity(0.14)))

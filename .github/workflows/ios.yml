@@ -67,6 +67,29 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO
+      - name: iPad feed screenshot
+        if: always()
+        continue-on-error: true
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*Debug-iphonesimulator/GBKComposer.app' -maxdepth 6 | head -1)
+          IPAD=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          for k in sorted(d, reverse=True):
+              for dev in d[k]:
+                  if "iOS" in k and dev["name"].startswith("iPad Pro 13"): print(dev["udid"]); sys.exit()
+          for k in sorted(d, reverse=True):
+              for dev in d[k]:
+                  if "iOS" in k and dev["name"].startswith("iPad"): print(dev["udid"]); sys.exit()
+          ')
+          echo "app=$APP ipad=$IPAD"
+          mkdir -p snapshots
+          xcrun simctl boot "$IPAD" || true
+          xcrun simctl bootstatus "$IPAD" -b
+          xcrun simctl install "$IPAD" "$APP"
+          xcrun simctl launch "$IPAD" com.grepawk.moviefone
+          sleep 25
+          xcrun simctl io "$IPAD" screenshot snapshots/feed-ipad-portrait.png
       - name: Upload snapshots
         if: always()
         uses: actions/upload-artifact@v4
