@@ -8,8 +8,18 @@ import OMRHomrIOS
 protocol ScanPageParsing: AnyObject, Sendable {
     func parse(gray8: Data, width: Int, height: Int, progress: PageParseProgressHandler?) throws -> ScanPageOutput
     func parse(rgbx: Data, width: Int, height: Int, bytesPerRow: Int, progress: PageParseProgressHandler?) throws -> ScanPageOutput
-    /// ORT execution providers in play, e.g. "segnet:coreML encoder:coreML decoder:cpu slots:2".
-    var backendDescription: String { get }
+    /// ORT execution providers in play for this session.
+    var scanBackends: ScanBackends { get }
+}
+
+/// ORT execution providers in play (the web scan telemetry's `backends` shape):
+/// SegNet + encoder are CoreML EP with CPU fallback, the decoder is always CPU.
+struct ScanBackends: Equatable, Sendable {
+    var segnet = "unknown"
+    var encoder = "unknown"
+    var decoder = "unknown"
+    /// Parallel staff slots in the session pool.
+    var slots = 0
 }
 
 /// One parsed page: the package result plus the diagnostics Music Reader records per parse
@@ -31,7 +41,9 @@ struct ScanPageOutput: Sendable {
     var result: ParseSheetMusicResult
     var stages: [StageMs] = []
     var staffSymbols: [StaffSymbols] = []
-    var backend: String = ""
+    /// Per staff (same order as `staffSymbols`): encoder + decoder ms from the parse timings.
+    var perStaffMs: [Double] = []
+    var backends = ScanBackends()
     /// Wall time of the whole parse call (set by the engine; 0 for direct construction).
     var pageMs: Double = 0
 
@@ -39,11 +51,25 @@ struct ScanPageOutput: Sendable {
         self.result = result
     }
 
-    init(_ r: PageParseResult, backend: String) {
+    init(_ r: PageParseResult, backends: ScanBackends) {
         result = r.result
         stages = r.timings.map { .init(name: $0.stage, ms: $0.ms) }
         staffSymbols = Self.staffSymbolCounts(r)
-        self.backend = backend
+        perStaffMs = Self.perStaffMs(r)
+        self.backends = backends
+    }
+
+    /// Per-staff encode+decode ms, folded from the `decode_s<i>_enc` / `decode_s<i>_dec`
+    /// stage timings the package records per staff.
+    static func perStaffMs(_ r: PageParseResult) -> [Double] {
+        var out = [Double](repeating: 0, count: r.layout.staffs.count)
+        for t in r.timings {
+            guard t.stage.hasPrefix("decode_s") else { continue }
+            let rest = t.stage.dropFirst("decode_s".count)
+            guard let sep = rest.firstIndex(of: "_"), let i = Int(rest[..<sep]), out.indices.contains(i) else { continue }
+            out[i] += t.ms
+        }
+        return out
     }
 
     /// Per-staff symbol counts from a full `PageParseResult` (Music Reader's
@@ -64,15 +90,15 @@ struct ScanPageOutput: Sendable {
 extension PageInferenceSession: ScanPageParsing {
     func parse(gray8: Data, width: Int, height: Int, progress: PageParseProgressHandler?) throws -> ScanPageOutput {
         let r = try parsePage(gray8: gray8, width: width, height: height, progress: progress)
-        return ScanPageOutput(r, backend: backendDescription)
+        return ScanPageOutput(r, backends: scanBackends)
     }
 
     func parse(rgbx: Data, width: Int, height: Int, bytesPerRow: Int, progress: PageParseProgressHandler?) throws -> ScanPageOutput {
         let r = try parsePage(rgbx: rgbx, width: width, height: height, bytesPerRow: bytesPerRow, progress: progress)
-        return ScanPageOutput(r, backend: backendDescription)
+        return ScanPageOutput(r, backends: scanBackends)
     }
 
-    var backendDescription: String {
+    var scanBackends: ScanBackends {
         func name(_ backend: (any ORTSessionBackend)?) -> String {
             guard let reporting = backend as? ORTProviderReporting else { return "unknown" }
             switch reporting.provider {
@@ -80,8 +106,8 @@ extension PageInferenceSession: ScanPageParsing {
             case .cpu: return "cpu"
             }
         }
-        return "segnet:\(name(segnet.backend)) encoder:\(name(staff.encoder.backend)) "
-            + "decoder:\(name(staff.decoder.backend)) slots:\(staffPool.count)"
+        return ScanBackends(segnet: name(segnet.backend), encoder: name(staff.encoder.backend),
+                            decoder: name(staff.decoder.backend), slots: staffPool.count)
     }
 }
 
@@ -140,43 +166,56 @@ enum ScanOutcomeClassifier {
 }
 
 /// Measurements for one whole scan (1...n pages), aggregated from the per-page outputs.
-/// The field set mirrors Music Reader's `page_parse` diagnostics event and the web worker's
-/// scan telemetry: durations, per-stage ms, backend, staff/system counts, raw vs filtered
-/// token counts, notes produced.
+/// The field set mirrors the web scan telemetry's `ScanDiagnostics` (src/telemetry/scan.ts)
+/// and Music Reader's `page_parse` diagnostics event.
 struct ScanRunSummary: Equatable, Sendable {
     var pages = 0
     var totalMs = 0.0
     var stageMs: [String: Double] = [:]
-    var backend = ""
+    var backends: ScanBackends?
     var staffCount = 0
     var systemCount = 0
+    var voiceCount = 0
     var rawTokens = 0
     var filteredTokens = 0
+    /// Per staff across all pages, in parse order: post-filter token counts, raw token
+    /// counts, and encode+decode ms (the web telemetry's compact per-staff joins).
+    var perStaffTokens: [Int] = []
+    var perStaffRawTokens: [Int] = []
+    var perStaffMs: [Double] = []
     var noteCount = 0
     var midiBytes = 0
     var warningCount = 0
+    /// The last parsed page's layout source ("attention" / "midi-fallback").
+    var layoutSource = ""
     /// Set when the scan (or its last page) failed; one of the classifier's reason codes.
     var failureReason: String? = nil
 
     mutating func add(_ out: ScanPageOutput) {
         pages += 1
-        if backend.isEmpty { backend = out.backend }
+        if backends == nil { backends = out.backends }
         staffCount += out.result.staffCount
         systemCount += Set(out.staffSymbols.map(\.row)).count
+        voiceCount += Set(out.staffSymbols.map(\.voice)).count
         rawTokens += out.staffSymbols.reduce(0) { $0 + $1.raw }
         filteredTokens += out.staffSymbols.reduce(0) { $0 + $1.filtered }
+        perStaffTokens += out.staffSymbols.map(\.filtered)
+        perStaffRawTokens += out.staffSymbols.map(\.raw)
+        perStaffMs += out.perStaffMs
         noteCount += out.result.noteLayout.count
         midiBytes += out.result.midi.count
         warningCount += out.result.warnings.count
+        layoutSource = out.result.layoutSource.rawValue
         for s in out.stages { stageMs[s.name, default: 0] += s.ms }
     }
 
-    /// "decode=8120 preprocess=31 render=4 segnet=12013 ..." — Music Reader's stage format.
-    var stagesField: String {
-        stageMs.sorted { $0.key < $1.key }
-            .map { "\($0.key)=\(Int($0.value.rounded()))" }
-            .joined(separator: " ")
-    }
+    // Stage splits in the web telemetry's shape, folded from the package's stage timings
+    // (its "staffs" stage is the web's "detect"; per-staff decode stages split enc/dec).
+    var preprocessMs: Double { stageMs["preprocess"] ?? 0 }
+    var segnetMs: Double { stageMs["segnet"] ?? 0 }
+    var detectMs: Double { stageMs["staffs"] ?? 0 }
+    var encodeMs: Double { stageMs.filter { $0.key.hasPrefix("decode_s") && $0.key.hasSuffix("_enc") }.values.reduce(0, +) }
+    var decodeMs: Double { stageMs.filter { $0.key.hasPrefix("decode_s") && $0.key.hasSuffix("_dec") }.values.reduce(0, +) }
 }
 
 /// Thread-safe cell for the last scan's summary (the recognizer is a struct; its controller

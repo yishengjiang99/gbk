@@ -95,18 +95,18 @@ final class ScanController: ObservableObject {
                 lastMIDI = midi
                 try await handOff(midi)
                 let tracks = score.parts.filter { !$0.notes.isEmpty }.count
-                telemetry.completed(summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
+                telemetry.completed(source: source, summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
                                     durationMs: Self.msSince(scanStart), noteCount: score.noteCount)
                 phase = .done(tracks: tracks, notes: score.noteCount)
                 try? await Task.sleep(nanoseconds: 700_000_000)
                 if case .done = phase { isPresented = false } // the studio's import chooser is now on screen
             } catch let e as ScanError {
-                telemetry.failed(reason: failureReason(for: e),
+                telemetry.failed(source: source, reason: failureReason(for: e),
                                  summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
                                  durationMs: Self.msSince(scanStart))
                 phase = .error(e)
             } catch {
-                telemetry.failed(reason: "failed",
+                telemetry.failed(source: source, reason: "failed",
                                  summary: (recognizer as? ScanSummaryProviding)?.lastScanSummary,
                                  durationMs: Self.msSince(scanStart))
                 phase = .error(.failed(error.localizedDescription))

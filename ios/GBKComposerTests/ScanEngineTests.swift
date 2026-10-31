@@ -10,9 +10,10 @@ func fakeGoodOutput() -> ScanPageOutput {
         midi: ScanController.testSMF,
         noteLayout: (0..<8).map { NoteLayout(symbolIndex: $0, midiNote: 60 + $0) },
         layoutSource: .midiFallback, staffCount: 1, warnings: []))
-    out.backend = "fake-backend"
+    out.backends = ScanBackends(segnet: "fake-segnet", encoder: "fake-encoder", decoder: "fake-decoder", slots: 1)
     out.stages = [.init(name: "decode", ms: 10), .init(name: "segnet", ms: 5)]
     out.staffSymbols = [.init(raw: 20, filtered: 18, isGrandstaff: false, voice: 0, row: 0)]
+    out.perStaffMs = [15]
     return out
 }
 
@@ -31,7 +32,7 @@ private final class FakePageParser: ScanPageParsing, @unchecked Sendable {
 
     init(results: [Result<ScanPageOutput, Error>]) { self.results = results }
 
-    var backendDescription: String { "fake-backend" }
+    var scanBackends: ScanBackends { ScanBackends(segnet: "fake-segnet", encoder: "fake-encoder", decoder: "fake-decoder", slots: 1) }
     var calls: [Call] { lock.lock(); defer { lock.unlock() }; return recordedCalls }
     var maxConcurrent: Int { lock.lock(); defer { lock.unlock() }; return peak }
 
@@ -99,14 +100,20 @@ final class ScanClassifierTests: XCTestCase {
         s.add(fakeGoodOutput())
         s.add(fakeGoodOutput())
         XCTAssertEqual(s.pages, 2)
-        XCTAssertEqual(s.backend, "fake-backend")
+        XCTAssertEqual(s.backends?.segnet, "fake-segnet")
         XCTAssertEqual(s.staffCount, 2)
         XCTAssertEqual(s.systemCount, 2, "one system per page")
+        XCTAssertEqual(s.voiceCount, 2, "one voice per page")
         XCTAssertEqual(s.rawTokens, 40)
         XCTAssertEqual(s.filteredTokens, 36)
+        XCTAssertEqual(s.perStaffTokens, [18, 18])
+        XCTAssertEqual(s.perStaffRawTokens, [20, 20])
+        XCTAssertEqual(s.perStaffMs, [15, 15])
         XCTAssertEqual(s.noteCount, 16)
         XCTAssertEqual(s.midiBytes, ScanController.testSMF.count * 2)
-        XCTAssertEqual(s.stagesField, "decode=20 segnet=10")
+        XCTAssertEqual(s.layoutSource, "midi-fallback")
+        XCTAssertEqual(s.segnetMs, 10)
+        XCTAssertEqual(s.encodeMs, 0, "no per-staff decode stages in the fake output")
     }
 }
 
@@ -208,7 +215,8 @@ final class HomrEngineRecognizerTests: XCTestCase {
     }
 }
 
-/// Telemetry event shapes (#166): names, fields, and the `/api/events` wire JSON.
+/// Telemetry event shapes (#166): names, fields, and the client-error reporter's wire JSON
+/// (the web scan telemetry's taxonomy and pathway).
 @MainActor
 final class ScanTelemetryTests: XCTestCase {
     func testEventShapes() async {
@@ -220,23 +228,34 @@ final class ScanTelemetryTests: XCTestCase {
         logger.started(source: .camera, pages: 2, imageWidth: 3000, imageHeight: 2400)
         var summary = ScanRunSummary()
         summary.add(fakeGoodOutput())
-        logger.completed(summary: summary, durationMs: 999, noteCount: 8)
-        logger.failed(reason: "no_staff", summary: nil, durationMs: 50)
+        summary.totalMs = 4321
+        logger.completed(source: .photos, summary: summary, durationMs: 999, noteCount: 8)
+        logger.failed(source: .photos, reason: "no_staff", summary: nil, durationMs: 50)
 
         for _ in 0..<200 where sent.count < 3 { await Task.yield() }
         XCTAssertEqual(sent.map(\.name), ["scan_started", "scan_completed", "scan_failed"])
         XCTAssertEqual(sent[0].fields["source"], .string("camera"))
         XCTAssertEqual(sent[0].fields["pages"], .int(2))
-        XCTAssertEqual(sent[0].fields["image_w"], .int(3000))
-        XCTAssertEqual(sent[0].json()["event"] as? String, "scan_started")
-        XCTAssertEqual(sent[0].json()["ts"] as? Int64, 1_000_000)
-        // duration comes from the summary's own total when present
-        XCTAssertEqual(sent[1].fields["note_count"], .int(8))
-        XCTAssertEqual(sent[1].fields["staff_count"], .int(1))
-        XCTAssertEqual(sent[1].fields["backend"], .string("fake-backend"))
-        XCTAssertEqual(sent[1].fields["stages"], .string("decode=10 segnet=5"))
+        XCTAssertEqual(sent[0].fields["width"], .int(3000))
+        // Wire shape: a kind:"report" client-error entry, fields in context under where:"scan".
+        let wire = sent[0].json()
+        XCTAssertEqual(wire["kind"] as? String, "report")
+        XCTAssertEqual(wire["message"] as? String, "scan_started")
+        XCTAssertEqual(wire["ts"] as? Int64, 1_000_000)
+        let context = wire["context"] as? [String: Any]
+        XCTAssertEqual(context?["where"] as? String, "scan")
+        XCTAssertEqual(context?["event"] as? String, "scan_started")
+        XCTAssertEqual(context?["source"] as? String, "camera")
+        // The summary's own total wins over the caller's fallback duration.
+        XCTAssertEqual(sent[1].fields["totalMs"], .int(4321))
+        XCTAssertEqual(sent[1].fields["notes"], .int(8))
+        XCTAssertEqual(sent[1].fields["staffCount"], .int(1))
+        XCTAssertEqual(sent[1].fields["backendSegnet"], .string("fake-segnet"))
+        XCTAssertEqual(sent[1].fields["perStaffTokens"], .string("18"))
+        XCTAssertEqual(sent[1].fields["perStaffRawTokens"], .string("20"))
+        XCTAssertEqual(sent[1].fields["layoutSource"], .string("midi-fallback"))
         XCTAssertEqual(sent[2].fields["reason"], .string("no_staff"))
-        XCTAssertEqual(sent[2].fields["duration_ms"], .int(50))
-        XCTAssertNil(sent[2].fields["staff_count"], "no summary: no measurement fields")
+        XCTAssertEqual(sent[2].fields["totalMs"], .int(50))
+        XCTAssertNil(sent[2].fields["staffCount"], "no summary: no measurement fields")
     }
 }

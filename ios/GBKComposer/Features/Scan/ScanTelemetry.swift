@@ -1,15 +1,14 @@
 import Foundation
 
-/// One native-scan telemetry event (#166). `name` is the wire taxonomy shared with the web
-/// scan telemetry — do not rename:
-/// - `scan_started` {source, pages, image_w, image_h}
-/// - `scan_completed` {duration_ms, pages, stages, backend, staff_count, system_count,
-///   raw_tokens, filtered_tokens, note_count, midi_bytes, warnings}
-/// - `scan_failed` {reason, duration_ms, + whatever measurements the scan produced}
+/// One native-scan telemetry event (#166). The taxonomy is the web scan telemetry's
+/// (src/telemetry/scan.ts) — do not rename:
+/// - `scan_started` {source, width, height, pages}
+/// - `scan_completed` {source, totalMs, preprocessMs, segnetMs, detectMs, encodeMs, decodeMs,
+///   staffCount, systemCount, voiceCount, notes, perStaffTokens, perStaffRawTokens, perStaffMs,
+///   backendSegnet, backendEncoder, backendDecoder, layoutSource, warningCount}
+/// - `scan_failed` {source, reason, totalMs, + whatever counts the scan produced}
 ///
-/// Metadata only: no image data, no user content, no file names — the same rule as
-/// Music Reader's scan diagnostics. `source` is one of `ScanSource`'s raw values
-/// (camera / photos / file / fixture).
+/// Metadata and timings only: no image data, no file names, no user content.
 struct ScanTelemetryEvent: Equatable {
     enum Value: Equatable {
         case string(String), int(Int), double(Double)
@@ -26,10 +25,12 @@ struct ScanTelemetryEvent: Equatable {
     var fields: [String: Value]
     let ts: Int64
 
+    /// The client-error reporter's entry shape (kind "report", event name as the message,
+    /// fields in `context` under `where: "scan"` — exactly how the web reporter sends them).
     func json() -> [String: Any] {
-        var d: [String: Any] = ["event": name, "ts": ts]
-        for (k, v) in fields { d[k] = v.json }
-        return d
+        var context: [String: Any] = ["where": "scan", "event": name]
+        for (k, v) in fields { context[k] = v.json }
+        return ["kind": "report", "message": name, "ts": ts, "context": context]
     }
 }
 
@@ -38,22 +39,19 @@ enum ScanSource: String {
     case camera, photos, file, fixture
 }
 
-/// Scan telemetry over the app's existing event pathway — the same transport as
-/// `BillingEventLogger` / `ImpressionLogger`: `POST /api/events` with `client: "ios"` and
-/// the guest install id (`x-gbk-install`). The server records scan events server-side
-/// (structured log, via the events route's scan bridge); they are not feed impressions and
-/// not part of the user-facing analytics taxonomy. Scans are rare, so events send
-/// immediately instead of batching. Send failures are swallowed: telemetry must never
-/// break the scan it observes.
+/// Scan telemetry through the same server-side pathway the web scanner uses (#165): the
+/// client-error reporter channel — `POST /api/client-errors` with kind "report" — because
+/// `/api/events` is the feed-impression contract and cannot carry per-stage payloads. The
+/// server stores the reports scrubbed and size-capped, readable by the owner; they are not
+/// part of the user-facing analytics taxonomy. Scans are rare, so events send immediately
+/// instead of batching. Send failures are swallowed: telemetry must never break the scan
+/// it observes.
 @MainActor
 final class ScanTelemetryLogger {
     static let shared = ScanTelemetryLogger()
 
     var send: (ScanTelemetryEvent) async -> Void = { event in
-        let body: [String: Any] = ["session": ImpressionLogger.session, "client": "ios",
-                                   "events": [event.json()]]
-        var ep = Endpoint(path: "/api/events", method: .post, body: body)
-        ep.headers["x-gbk-install"] = AnonymousIdentity.deviceID
+        let ep = Endpoint(path: "/api/client-errors", method: .post, body: ["errors": [event.json()]])
         _ = try? await APIClient.shared.send(ep, as: OKResult.self)
     }
     var now: () -> Date = Date.init
@@ -70,41 +68,54 @@ final class ScanTelemetryLogger {
             "source": .string(source.rawValue),
             "pages": .int(pages),
         ]
-        if let imageWidth { fields["image_w"] = .int(imageWidth) }
-        if let imageHeight { fields["image_h"] = .int(imageHeight) }
+        if let imageWidth { fields["width"] = .int(imageWidth) }
+        if let imageHeight { fields["height"] = .int(imageHeight) }
         emit(ScanTelemetryEvent(name: "scan_started", fields: fields, ts: stamp()))
     }
 
-    func completed(summary: ScanRunSummary?, durationMs: Double, noteCount: Int) {
+    func completed(source: ScanSource, summary: ScanRunSummary?, durationMs: Double, noteCount: Int) {
         var fields = measurementFields(summary)
-        fields["duration_ms"] = .int(Int((summary?.totalMs ?? durationMs).rounded()))
-        if fields["note_count"] == nil { fields["note_count"] = .int(noteCount) }
+        fields["source"] = .string(source.rawValue)
+        fields["totalMs"] = .int(Int((summary?.totalMs ?? durationMs).rounded()))
+        if fields["notes"] == nil { fields["notes"] = .int(noteCount) }
         emit(ScanTelemetryEvent(name: "scan_completed", fields: fields, ts: stamp()))
     }
 
-    func failed(reason: String, summary: ScanRunSummary?, durationMs: Double) {
+    func failed(source: ScanSource, reason: String, summary: ScanRunSummary?, durationMs: Double) {
         var fields = measurementFields(summary)
+        fields["source"] = .string(source.rawValue)
         fields["reason"] = .string(reason)
-        fields["duration_ms"] = .int(Int((summary?.totalMs ?? durationMs).rounded()))
+        fields["totalMs"] = .int(Int((summary?.totalMs ?? durationMs).rounded()))
         emit(ScanTelemetryEvent(name: "scan_failed", fields: fields, ts: stamp()))
     }
 
-    /// The measurement fields shared by completed/failed (a failed multi-page scan still
-    /// reports the pages that parsed). Empty without a summary (fixture recognizers).
+    /// The measurement fields in the web telemetry's shape. Empty without a summary
+    /// (fixture recognizers, or a failure before the first page parsed).
     private func measurementFields(_ summary: ScanRunSummary?) -> [String: ScanTelemetryEvent.Value] {
         guard let summary else { return [:] }
         var fields: [String: ScanTelemetryEvent.Value] = [
+            "preprocessMs": .int(Int(summary.preprocessMs.rounded())),
+            "segnetMs": .int(Int(summary.segnetMs.rounded())),
+            "detectMs": .int(Int(summary.detectMs.rounded())),
+            "encodeMs": .int(Int(summary.encodeMs.rounded())),
+            "decodeMs": .int(Int(summary.decodeMs.rounded())),
+            "staffCount": .int(summary.staffCount),
+            "systemCount": .int(summary.systemCount),
+            "voiceCount": .int(summary.voiceCount),
+            "notes": .int(summary.noteCount),
+            "perStaffTokens": .string(summary.perStaffTokens.map(String.init).joined(separator: ",")),
+            "perStaffRawTokens": .string(summary.perStaffRawTokens.map(String.init).joined(separator: ",")),
+            "perStaffMs": .string(summary.perStaffMs.map { String(Int($0.rounded())) }.joined(separator: ",")),
+            "layoutSource": .string(summary.layoutSource),
+            "warningCount": .int(summary.warningCount),
             "pages": .int(summary.pages),
-            "staff_count": .int(summary.staffCount),
-            "system_count": .int(summary.systemCount),
-            "raw_tokens": .int(summary.rawTokens),
-            "filtered_tokens": .int(summary.filteredTokens),
-            "note_count": .int(summary.noteCount),
-            "midi_bytes": .int(summary.midiBytes),
-            "warnings": .int(summary.warningCount),
+            "midiBytes": .int(summary.midiBytes),
         ]
-        if !summary.backend.isEmpty { fields["backend"] = .string(summary.backend) }
-        if !summary.stageMs.isEmpty { fields["stages"] = .string(summary.stagesField) }
+        if let backends = summary.backends {
+            fields["backendSegnet"] = .string(backends.segnet)
+            fields["backendEncoder"] = .string(backends.encoder)
+            fields["backendDecoder"] = .string(backends.decoder)
+        }
         return fields
     }
 }

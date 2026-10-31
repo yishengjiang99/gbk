@@ -14,26 +14,7 @@ import type { BillingEvent } from "../persistence/funnel.ts";
 import { currentSession } from "./agent.ts";
 
 const GID = "gbk_gid"; const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
-
-// Native scan telemetry (#166): the iOS app posts scan_started / scan_completed / scan_failed
-// diagnostics in the same batch shape as impressions (metadata only — source, durations,
-// per-stage timings, model backend, staff/system/token counts, notes produced, failure reason
-// codes; never image data or user content). Like the billing bridge below, these rows are not
-// impressions: the route forwards them to the injected recorder (server-side structured log)
-// and counts them as accepted.
-export interface ScanRecorder { record(event: string, fields: Record<string, string | number>): void }
-const SCAN_EVENTS = new Set(["scan_started", "scan_completed", "scan_failed"]);
-const SCAN_STRING_FIELDS: Record<string, number> = { source: 32, stages: 512, backend: 128, reason: 64 };
-const SCAN_NUMBER_FIELDS = ["pages", "image_w", "image_h", "duration_ms", "staff_count", "system_count", "raw_tokens", "filtered_tokens", "note_count", "midi_bytes", "warnings"] as const;
-export function sanitizeScanEvent(e: Record<string, unknown>): { event: string; fields: Record<string, string | number> } | null {
-  if (typeof e.event !== "string" || !SCAN_EVENTS.has(e.event)) return null;
-  const fields: Record<string, string | number> = {};
-  for (const [k, cap] of Object.entries(SCAN_STRING_FIELDS)) if (typeof e[k] === "string") fields[k] = (e[k] as string).slice(0, cap);
-  for (const k of SCAN_NUMBER_FIELDS) { const n = Number(e[k]); if (Number.isFinite(n)) fields[k] = Math.min(1e9, Math.max(0, Math.round(n))); }
-  return { event: e.event, fields };
-}
-
-export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, events: EventStore, admins: string[], billing?: BillingRecorder, scan?: ScanRecorder) {
+export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, events: EventStore, admins: string[], billing?: BillingRecorder) {
   const lim = new RateLimiter(30); const ipLim = new RateLimiter(120);
   app.post("/api/events", { bodyLimit: 65536 }, async (req, reply) => {
     const s = currentSession(req, sessions); const bearer = /^Bearer /i.test(String(req.headers.authorization ?? ""));
@@ -55,12 +36,6 @@ export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     let bridged = 0;
     for (const e of list as Record<string, unknown>[]) {
       if (!e || typeof e !== "object") continue;
-      // #166 bridge: native scan telemetry events (see sanitizeScanEvent) are diagnostics,
-      // not impressions — forward them to the scan recorder (server-side structured log).
-      if (scan) {
-        const s = sanitizeScanEvent(e);
-        if (s) { scan.record(s.event, s.fields); bridged++; continue; }
-      }
       // #118 bridge: the iOS app posts its paywall/StoreKit funnel events (#119) to this endpoint in the
       // same batch shape as impressions. A row carrying a billing event name is not an impression —
       // forward it to the billing recorder instead of dropping it for lacking a song slug.
