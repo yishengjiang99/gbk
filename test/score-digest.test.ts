@@ -33,9 +33,11 @@ test("gbk_get_score_digest: per-bar pitch classes, ranges, counts, mean velocity
   assert.deepEqual(bars[1].pitchClasses, [2, 5, 9]);
 });
 
-test("system prompt carries the remix playbook (#162 step 6)", () => {
-  assert.match(SYSTEM_PROMPT, /Remix sessions/);
-  assert.match(SYSTEM_PROMPT, /NEVER call gbk_create_project or gbk_generate_arrangement/);
+test("system prompt carries the opened-song follow-up playbook (was the #162 step 6 remix playbook)", () => {
+  // The remix binding is gone; what survives is the opened-song guidance: read the digest before
+  // qualitative edits, a named key change is one remap call, and a follow-up never creates a project.
+  assert.match(SYSTEM_PROMPT, /Editing an opened song/);
+  assert.match(SYSTEM_PROMPT, /gbk_create_project is not available to you/);
   assert.match(SYSTEM_PROMPT, /gbk_get_score_digest/);
   assert.match(SYSTEM_PROMPT, /transform "remap", trackId "\*"/);
 });
