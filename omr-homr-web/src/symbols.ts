@@ -219,18 +219,21 @@ function fixOverEagerTuplets(chords: Chord[]): Chord[] {
   return result.flat();
 }
 
+/**
+ * A lower clef ANYWHERE in the stream marks a grand staff: keep lower
+ * positions. Music Reader (omr-sheet-cam) fix, replacing homr's first-5-chords
+ * heuristic: that heuristic assumed the interleaved homorhythmic order, where
+ * the bass clef rides with the treble clef in the first chord group. Hands
+ * that decode hand-after-hand carry the bass clef mid-stream, so the old rule
+ * silently converted the whole bass staff to upper — which also broke the
+ * per-hand timing split in midi.ts (it keys on the position tag).
+ */
 function onlyKeepLowerStaffIfThereIsAClef(chords: Chord[]): Chord[] {
-  let hasLowerClef = false;
-  return chords.map((chord, i) =>
-    chord.map((symbol) => {
-      if (hasLowerClef) return symbol;
-      if (i < 5 && symbol.rhythm.startsWith("clef") && isLowerPosition(symbol.position)) {
-        hasLowerClef = true;
-        return symbol;
-      }
-      return toUpperPosition(symbol);
-    }),
+  const hasLowerClef = chords.some((chord) =>
+    chord.some((s) => s.rhythm.startsWith("clef") && isLowerPosition(s.position)),
   );
+  if (hasLowerClef) return chords;
+  return chords.map((chord) => chord.map(toUpperPosition));
 }
 
 function removeDuplicatedPitches(chord: Chord): Chord {

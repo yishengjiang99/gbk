@@ -55,7 +55,7 @@ import { isUpperOrHasNoPosition, removeDuplicatedSymbols } from "./symbols.ts";
 import {
   SCAN_TEMPO_BPM,
   TICKS_PER_QUARTER,
-  staffSymbolsToNoteEvents,
+  pageVoiceNoteEvents,
 } from "./midi.ts";
 
 /** homr/constants.py: image_noise_limit. */
@@ -313,6 +313,12 @@ export interface ParsedVoice {
   symbols: DecodedSymbol[];
   /** Per-staff crop->page mappings, aligned with the non-empty staffs. */
   cropToPage: Array<(x: number, y: number) => [number, number]>;
+  /**
+   * True when this voice's staffs are grand staffs: the MIDI walk must split
+   * each row's stream at the first lower-position symbol so the two hands
+   * sound simultaneously (see pageVoiceNoteEvents in midi.ts).
+   */
+  grandstaff: boolean;
 }
 
 function newlineSymbol(): DecodedSymbol {
@@ -363,7 +369,11 @@ export async function parseStaffs(
       resultForVoice.push(...resultStaff);
       cropToPage.push(prepared.cropToPage);
     }
-    voices.push({ symbols: removeDuplicatedSymbols(resultForVoice), cropToPage });
+    voices.push({
+      symbols: removeDuplicatedSymbols(resultForVoice),
+      cropToPage,
+      grandstaff: staffsForVoice.length > 0 && staffsForVoice[0].isGrandstaff,
+    });
   }
   return voices;
 }
@@ -450,10 +460,15 @@ export function buildPageNoteLayout(
     }
     let cursor = 0;
     groups.forEach((group, groupIdx) => {
-      const { events, endTick } = staffSymbolsToNoteEvents(group, voiceIdx);
+      // Page walk with the cursor as startTick: grand-staff hands restart at
+      // the group start (simultaneous), and endTick chains the next group.
+      const { events, endTick } = pageVoiceNoteEvents(group, voiceIdx, {
+        grandstaff: voice.grandstaff,
+        startTick: cursor,
+      });
       const toPage = voice.cropToPage[groupIdx];
       for (const ev of events) {
-        const tick = ev.tick + cursor;
+        const tick = ev.tick;
         let box: PageNoteLayoutEntry["box"] = null;
         if (ev.attention && toPage) {
           const [ax, ay] = ev.attention;

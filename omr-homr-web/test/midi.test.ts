@@ -10,11 +10,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   groupIntoChords,
+  pageVoiceNoteEvents,
   parseKernDuration,
   pitchToMidi,
+  staffSymbolsToNoteEvents,
   symbolsToMidi,
   TICKS_PER_QUARTER,
 } from "../src/midi.js";
+import { removeDuplicatedSymbols } from "../src/symbols.js";
 import { parseMidiBuffer } from "../../src/midi-timer.worker.js";
 import type { DecodedSymbol } from "../src/vocab.js";
 
@@ -123,5 +126,86 @@ describe("oracle C-scale -> SMF", () => {
       [64, 960],
       [67, 960],
     ]);
+  });
+});
+
+describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
+  const lower = (rhythm: string, pitch = "."): DecodedSymbol => ({
+    ...sym(rhythm, pitch),
+    position: "lower",
+  });
+  const newline: DecodedSymbol = { ...sym("newline"), position: "nonote" };
+
+  it("sounds the lower hand from the row start, not after the upper hand", () => {
+    // Hand-after-hand decode: two upper quarters, then a lower clef and two
+    // lower quarters. Serialized (old behavior) the bass notes would start
+    // at tick 960; with the hand split they start at tick 0.
+    const stream: DecodedSymbol[] = [
+      sym("clef", "."),
+      sym("note_4", "C5"),
+      sym("note_4", "D5"),
+      { ...lower("clef"), rhythm: "clef" },
+      lower("note_4", "C3"),
+      lower("note_4", "D3"),
+    ];
+    const { events, endTick } = pageVoiceNoteEvents(stream, 0, { grandstaff: true });
+    const byPitch = new Map(events.map((e) => [e.midi, e.tick]));
+    assert.equal(byPitch.get(72), 0); // C5 upper
+    assert.equal(byPitch.get(74), 480); // D5 upper
+    assert.equal(byPitch.get(48), 0); // C3 lower starts with the row
+    assert.equal(byPitch.get(50), 480); // D3 lower
+    assert.equal(endTick, 960); // row ends after the longer hand (both 960)
+  });
+
+  it("chains the next row after the longer hand", () => {
+    const stream: DecodedSymbol[] = [
+      sym("note_2", "C5"), // upper hand: 960 ticks
+      lower("note_4", "C3"), // lower hand: 480 ticks
+      newline,
+      sym("note_4", "E5"),
+    ];
+    const { events, endTick } = pageVoiceNoteEvents(stream, 0, { grandstaff: true });
+    const e5 = events.find((e) => e.midi === 76);
+    assert.equal(e5?.tick, 960);
+    assert.equal(endTick, 1440);
+  });
+
+  it("does not split hands for a non-grand voice", () => {
+    const stream: DecodedSymbol[] = [sym("note_4", "C5"), lower("note_4", "C3")];
+    const { events } = pageVoiceNoteEvents(stream, 0, { grandstaff: false });
+    assert.deepEqual(events.map((e) => e.tick), [0, 480]);
+  });
+
+  it("staff-only walk restarts at a lower clef (resetCursorOnClef)", () => {
+    const stream: DecodedSymbol[] = [
+      sym("note_4", "C5"),
+      { ...lower("clef"), rhythm: "clef" },
+      lower("note_4", "C3"),
+    ];
+    const { events } = staffSymbolsToNoteEvents(stream, 0);
+    assert.deepEqual(events.map((e) => e.tick), [0, 0]);
+    const noReset = staffSymbolsToNoteEvents(stream, 0, { resetCursorOnClef: false });
+    assert.deepEqual(noReset.events.map((e) => e.tick), [0, 480]);
+  });
+});
+
+describe("lower-clef detection anywhere in the stream (SymbolCleanup port)", () => {
+  it("keeps lower positions when the bass clef arrives after 5+ chords", () => {
+    const symbols: DecodedSymbol[] = [];
+    for (let i = 0; i < 6; i++) symbols.push(sym("note_4", "C5"));
+    symbols.push({ ...sym("clef"), position: "lower" });
+    symbols.push({ ...sym("note_4", "C3"), position: "lower" });
+    const out = removeDuplicatedSymbols(symbols);
+    const bass = out.find((s) => s.pitch === "C3");
+    assert.equal(bass?.position, "lower");
+  });
+
+  it("rewrites lower positions to upper when no lower clef exists", () => {
+    const symbols: DecodedSymbol[] = [
+      sym("note_4", "C5"),
+      { ...sym("note_4", "C3"), position: "lower" },
+    ];
+    const out = removeDuplicatedSymbols(symbols);
+    assert.ok(out.every((s) => s.position !== "lower"));
   });
 });
