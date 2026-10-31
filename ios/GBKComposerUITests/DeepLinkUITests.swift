@@ -10,12 +10,12 @@ final class DeepLinkUITests: XCTestCase {
         URLSession.shared.dataTask(with: url) { data, _, _ in
             if let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let items = obj["items"] as? [[String: Any]] {
-                result = items.last(where: { ($0["media"] as? [String: Any])?["mp3"] is String })?["slug"] as? String
+                result = items.last(where: { ($0["media"] as? [String: Any])?["midi"] is String })?["slug"] as? String
             }
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 30)
-        return try XCTUnwrap(result, "no song with audio on prod feed")
+        return try XCTUnwrap(result, "no song with MIDI on prod feed")
     }
 
     /// A published song with audio and its author's handle (the author's profile lists it).
@@ -26,14 +26,14 @@ final class DeepLinkUITests: XCTestCase {
         URLSession.shared.dataTask(with: url) { data, _, _ in
             if let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let items = obj["items"] as? [[String: Any]],
-               let it = items.first(where: { ($0["media"] as? [String: Any])?["mp3"] is String && ($0["author"] as? [String: Any])?["handle"] is String }),
+               let it = items.first(where: { ($0["media"] as? [String: Any])?["midi"] is String && ($0["author"] as? [String: Any])?["handle"] is String }),
                let slug = it["slug"] as? String, let h = (it["author"] as? [String: Any])?["handle"] as? String {
                 result = (slug, h)
             }
             done.fulfill()
         }.resume()
         wait(for: [done], timeout: 30)
-        let r = try XCTUnwrap(result, "no authored song with audio on prod feed")
+        let r = try XCTUnwrap(result, "no authored song with MIDI on prod feed (the native feed plays MIDI)")
         return (r.0, r.1)
     }
 
