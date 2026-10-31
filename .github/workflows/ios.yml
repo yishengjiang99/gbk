@@ -7,6 +7,12 @@ on:
   pull_request:
     paths: ["ios/**", ".github/workflows/ios.yml", ".github/workflows/ios-release.yml", "src/native/**"]
   workflow_dispatch:
+    inputs:
+      suite:
+        description: "full = every test + iPad screenshot; quick = what push and PR run"
+        type: choice
+        options: [full, quick]
+        default: full
 
 concurrency:
   group: ios-${{ github.ref }}
@@ -15,6 +21,8 @@ concurrency:
 jobs:
   build-test:
     runs-on: macos-latest
+    env:
+      FULL_SUITE: ${{ github.event_name == 'workflow_dispatch' && inputs.suite != 'quick' }}
     timeout-minutes: 60 # build ~7 + test ~21 + iPad screenshot ~13 + uploads/post ~8 min
     defaults:
       run:
@@ -53,6 +61,7 @@ jobs:
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
           xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
       - name: Build
+        if: env.FULL_SUITE == 'true'
         run: |
           xcodebuild build -project GBKComposer.xcodeproj -scheme GBKComposer \
             -destination "id=${{ steps.sim.outputs.udid }}" \
@@ -63,12 +72,21 @@ jobs:
           TEST_RUNNER_SNAPSHOT_DIR: ${{ github.workspace }}/ios/snapshots
           TEST_RUNNER_OMR_REQUIRE_MODELS: "1"
         run: |
+          # Push and PR run about 20% of the tests; dispatch the workflow for the rest (UI, snapshots, Bach).
+          ONLY=()
+          if [ "$FULL_SUITE" != "true" ]; then
+            for t in StudioBridgeTests StudioStoreTests StudioModelTests StudioToolsTests StudioAudioTests \
+                     StudioMusicTests/testArrangementBaroque DeepLinkTests APIClientTests MIDIParserTests PublishDraftTests; do
+              ONLY+=("-only-testing:GBKComposerTests/$t")
+            done
+          fi
           xcodebuild test -project GBKComposer.xcodeproj -scheme GBKComposer \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath TestResults.xcresult \
+            "${ONLY[@]}" \
             CODE_SIGNING_ALLOWED=NO
       - name: iPad feed screenshot
-        if: always()
+        if: always() && env.FULL_SUITE == 'true'
         continue-on-error: true
         timeout-minutes: 15 # best-effort: a slow second simulator must not eat the job's time budget
         run: |
