@@ -23,6 +23,7 @@ import type {
   SheetMusicNoteBox,
   SheetMusicNoteLayout,
 } from "./sheet-music-reader.ts";
+import { scanStarted, type ScanDiagnostics, type ScanSource } from "./telemetry/scan.ts";
 
 /** Base URL the OMR model files are served from. Override for CDN hosting. */
 const VITE_BASE = (() => { try { return (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? "/"; } catch { return "/"; } })();
@@ -65,6 +66,8 @@ interface OmrPageResult {
   staffCount: number;
   warnings: string[];
   pageMapping?: OmrPageMapping;
+  /** Scan-pipeline diagnostics (additive; absent on older workers). */
+  diagnostics?: ScanDiagnostics;
 }
 
 type OmrWorkerMessage =
@@ -254,12 +257,19 @@ function requestTranscription(
 export async function transcribePhotoWithOmr(
   file: File,
   onProgress?: (stage: string) => void,
+  opts?: {
+    source?: ScanSource;
+    /** Receives the worker's scan diagnostics when the result carries them. */
+    onDiagnostics?: (diagnostics: ScanDiagnostics) => void;
+  },
 ): Promise<ParsedSheetMusicWithLayout> {
   if (!(await isOmrModelAvailable())) {
     throw new Error("OMR models are not available");
   }
   const { data, width, height } = await fileToRgba(file);
+  scanStarted(opts?.source ?? "file", width, height);
   const worker = await ensureOmrWorker(onProgress);
   const result = await requestTranscription(worker, data, width, height, file.name, onProgress);
+  if (result.diagnostics) opts?.onDiagnostics?.(result.diagnostics);
   return omrResultToScanResult(file.name, width, height, result);
 }

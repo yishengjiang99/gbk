@@ -19,6 +19,14 @@ export interface ModelSet {
   encoderInputFloat16?: boolean;
   /** True when the SegNet build expects float16 I/O (the fp16 model file). */
   segnetInputFloat16?: boolean;
+  /**
+   * Primary execution provider each session was created with, for scan
+   * telemetry. Caveat: ORT Web does not report per-op fallback — a session
+   * created with ["webgpu", "wasm"] is a WebGPU session whose individual
+   * ops may silently fall back to WASM. This is the closest backend signal
+   * the platform exposes.
+   */
+  backends?: { encoder: string; decoder: string; segnet?: string };
 }
 
 function toTensorLike(t: ort.Tensor): TensorLike {
@@ -91,10 +99,10 @@ async function createSession(
   url: string,
   executionProviders: string[],
   onProgress?: (stage: string) => void,
-): Promise<SessionLike> {
+): Promise<{ session: SessionLike; backend: string }> {
   const bytes = await fetchModelBytes(url, onProgress);
   const session = await ort.InferenceSession.create(bytes, { executionProviders });
-  return wrap(session);
+  return { session: wrap(session), backend: executionProviders[0] ?? "wasm" };
 }
 
 /** Override where onnxruntime-web loads its .wasm/.mjs runtime files from. */
@@ -149,10 +157,15 @@ export async function loadModels(
     ? await createSession(urls.segnetUrl, gpuFirst, onProgress)
     : undefined;
   return {
-    encoder,
-    decoder,
-    segnet,
+    encoder: encoder.session,
+    decoder: decoder.session,
+    segnet: segnet?.session,
     encoderInputFloat16: urls.encoderUrl.includes("fp16"),
     segnetInputFloat16: urls.segnetUrl?.includes("fp16") ?? false,
+    backends: {
+      encoder: encoder.backend,
+      decoder: decoder.backend,
+      segnet: segnet?.backend,
+    },
   };
 }

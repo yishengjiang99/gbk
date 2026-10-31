@@ -40,6 +40,36 @@ export interface NoteLayoutEntry {
   box: { x: number; y: number; w: number; h: number } | null;
 }
 
+/**
+ * Scan-pipeline diagnostics for transcribe-page (metadata and timings only —
+ * no image data, no user content). Additive protocol field: older clients
+ * ignore it. The gbk app forwards it to its telemetry pathway so scan
+ * quality regressions (wrong backend, slow stage, fallback) are visible.
+ */
+export interface ScanDiagnostics {
+  totalMs: number;
+  preprocessMs: number;
+  segnetMs: number;
+  detectMs: number;
+  encodeMs: number;
+  decodeMs: number;
+  /** Flat staff count on the page. */
+  staffCount: number;
+  /** Systems (rows) after grouping. */
+  systemCount: number;
+  voiceCount: number;
+  /** Sounding notes in the emitted MIDI. */
+  notes: number;
+  /** Decoded token count per staff decode, in decode order. */
+  perStaffTokens: number[];
+  /** Wall time per staff decode (encode + decode), in decode order. */
+  perStaffMs: number[];
+  /** Primary execution provider per model ("webgpu" | "wasm"). */
+  backends: { segnet: string | null; encoder: string | null; decoder: string | null };
+  layoutSource: "attention" | "midi-fallback";
+  warningCount: number;
+}
+
 export type WorkerResponse =
   | { type: "ready"; webgpu: boolean }
   | { type: "progress"; stage: string }
@@ -50,6 +80,8 @@ export type WorkerResponse =
       layoutSource: "attention" | "midi-fallback";
       staffCount: number;
       warnings: string[];
+      /** Present on transcribe-page results; absent on older workers. */
+      diagnostics?: ScanDiagnostics;
       /**
        * Maps preprocessed-page coordinates (noteLayout boxes) back onto the
        * source photo: photoX = cropX + box.x * (cropW / pageWidth), etc.
@@ -113,35 +145,51 @@ async function handleTranscribePage(
   if (!models.segnet) {
     throw new Error("segnet model not loaded; send 'load' with segnetUrl for transcribe-page");
   }
+  const tStart = performance.now();
   post({ type: "progress", stage: "preprocessing page" });
   const page = preprocessPageImage(new Uint8Array(pixels), width, height, format);
+  const tPreprocess = performance.now();
   const masks = await extractPagePredictions(
     models.segnet,
     page.preprocessed,
     (stage) => post({ type: "progress", stage }),
     models.segnetInputFloat16 ?? false,
   );
+  const tSegnet = performance.now();
   post({ type: "progress", stage: "detecting staffs" });
   const { multiStaffs, staffs } = detectStaffsInImage(masks, page.preprocessed);
+  const tDetect = performance.now();
   // parseStaffs' default transcriber always feeds float32 to the encoder;
   // forward the model's expected dtype (fp16 on WebGPU-capable browsers)
   // exactly like transcribeStaff does.
   const encoderInputFloat16 = models.encoderInputFloat16 ?? false;
+  let encodeMs = 0;
+  let decodeMs = 0;
+  const perStaffTokens: number[] = [];
+  const perStaffMs: number[] = [];
   const voices = await parseStaffs(
     multiStaffs,
     page.preprocessed,
     models.encoder,
     models.decoder,
     async (encoder, decoder, crop) => {
+      const t0 = performance.now();
       const input = preprocessStaff(crop.data, crop.width, crop.height);
       const context = await encodeStaff(encoder, input, encoderInputFloat16);
-      return decodeStaff(decoder, context);
+      const t1 = performance.now();
+      const symbols = await decodeStaff(decoder, context);
+      const t2 = performance.now();
+      encodeMs += t1 - t0;
+      decodeMs += t2 - t1;
+      perStaffTokens.push(symbols.length);
+      perStaffMs.push(t2 - t0);
+      return symbols;
     },
     (stage) => post({ type: "progress", stage }),
   );
   post({ type: "progress", stage: "writing MIDI" });
   const voiceSymbols = voices.map((v) => v.symbols);
-  const { midi, warnings } = symbolsToMidi(
+  const { midi, warnings, noteEvents } = symbolsToMidi(
     voiceSymbols,
     title ?? "homr scan",
     voices.map((v) => v.grandstaff),
@@ -160,6 +208,28 @@ async function handleTranscribePage(
   // partial or missing coverage is reported as "midi-fallback".
   const layoutSource = selectLayoutSource(noteLayout.length, attentionBoxes);
 
+  const diagnostics: ScanDiagnostics = {
+    totalMs: performance.now() - tStart,
+    preprocessMs: tPreprocess - tStart,
+    segnetMs: tSegnet - tPreprocess,
+    detectMs: tDetect - tSegnet,
+    encodeMs,
+    decodeMs,
+    staffCount: staffs.length,
+    systemCount: multiStaffs.length,
+    voiceCount: voices.length,
+    notes: noteEvents.length,
+    perStaffTokens,
+    perStaffMs,
+    backends: {
+      segnet: models.backends?.segnet ?? null,
+      encoder: models.backends?.encoder ?? null,
+      decoder: models.backends?.decoder ?? null,
+    },
+    layoutSource,
+    warningCount: warnings.length,
+  };
+
   const out = midi.slice().buffer as ArrayBuffer;
   post(
     {
@@ -169,6 +239,7 @@ async function handleTranscribePage(
       layoutSource,
       staffCount: staffs.length,
       warnings,
+      diagnostics,
       pageMapping: {
         srcWidth: width,
         srcHeight: height,

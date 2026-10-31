@@ -6,6 +6,7 @@ import {
   type ParsedSheetMusicWithLayout,
 } from "./sheet-music-reader.ts";
 import { isOmrModelAvailable, transcribePhotoWithOmr } from "./omr-sheet-bridge.ts";
+import { scanCompleted, scanFailed, scanFallback, type ScanSource } from "./telemetry/scan.ts";
 import type { Song } from "./midi-timer.worker.ts";
 import sf2ProcessorUrl from "./sf2-processor.ts?worker&url";
 import { DEFAULT_SOUNDFONT_PATH } from "./audio/soundfont-assets.ts";
@@ -162,7 +163,7 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
   }, []);
 
   const scanFile = useCallback(
-    async (file: File) => {
+    async (file: File, source: ScanSource = "file") => {
       if (!isSupportedSheetMusicImageFile(file)) {
         setScanError("Please choose a JPG or PNG photo of sheet music.");
         return;
@@ -191,8 +192,12 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
           // built-in OCR reader when the worker fails mid-flight.
           try {
             setScanStage("Reading with music recognition…");
-            result = await transcribePhotoWithOmr(file, (stage) => setScanStage(stage));
+            result = await transcribePhotoWithOmr(file, (stage) => setScanStage(stage), {
+              source,
+              onDiagnostics: (d) => scanCompleted(source, d),
+            });
           } catch (omrErr) {
+            scanFallback(source, "omr_error", omrErr instanceof Error ? omrErr.message : String(omrErr));
             result = await parseSheetMusicWithLayout(file);
             result.warnings = [
               ...result.warnings,
@@ -200,6 +205,7 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
             ];
           }
         } else {
+          scanFallback(source, "models_unavailable");
           result = await parseSheetMusicWithLayout(file);
         }
         scanRef.current = result;
@@ -207,6 +213,7 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
         setPhase("ready");
         onScanCompleteRef.current?.({ scan: result, photoUrl: objectUrl, photoFile: file });
       } catch (err) {
+        scanFailed(source, "scan", err instanceof Error ? err.message : String(err));
         setScanError(err instanceof Error ? err.message : String(err));
         setPhase("camera");
         void startCamera();
@@ -226,7 +233,7 @@ export function SheetCam({ onScanComplete, embedded = false }: SheetCamProps) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((blob) => {
       if (!blob) return;
-      void scanFile(new File([blob], "sheet-photo.jpg", { type: "image/jpeg" }));
+      void scanFile(new File([blob], "sheet-photo.jpg", { type: "image/jpeg" }), "camera");
     }, "image/jpeg", 0.92);
   }, [scanFile]);
 
