@@ -17,7 +17,6 @@ export interface Scenario {
   name: string;
   /** Turns of user text, run in order against one conversation. */
   turns: string[];
-  remix?: boolean;
   /** Start with the conversation already bound to the open project (a follow-up-only scenario). */
   prebound?: boolean;
   /** Tools that must never reach the browser across all turns. */
@@ -33,7 +32,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "new piece: create then arrange", turns: ["compose a short baroque fugue"], forbiddenExecuted: [], requiredExecuted: ["gbk_create_project"], maxStepsPerTurn: 4 },
   { name: "follow-up key change uses one remap, never create/generate", turns: ["compose a piece in C minor", "rewrite this in A major"], forbiddenExecuted: [], requiredExecuted: ["gbk_transform_notes"], maxStepsPerTurn: 4, expectKey: "A major" },
   { name: "follow-up 'brighter' reads analysis before notes", turns: ["make it brighter"], prebound: true, forbiddenExecuted: ["gbk_create_project", "gbk_generate_arrangement"], requiredExecuted: ["gbk_analyze_passage"], maxStepsPerTurn: 5 },
-  { name: "remix: every ask is an edit of the fork", turns: ["make it more dramatic"], remix: true, forbiddenExecuted: ["gbk_create_project", "gbk_generate_arrangement"], requiredExecuted: ["gbk_get_project_summary"], maxStepsPerTurn: 4 },
+  { name: "opened fork (a remix landing): every ask is an edit of the open song", turns: ["make it more dramatic"], prebound: true, forbiddenExecuted: ["gbk_create_project", "gbk_generate_arrangement"], requiredExecuted: ["gbk_get_project_summary"], maxStepsPerTurn: 4 },
 ];
 
 /** A deterministic model policy: one behaviour per scenario turn, driven by the context line's mode. */
@@ -44,7 +43,7 @@ export function policyFor(scenario: Scenario): (r: ModelRequest, i: number) => M
   return (r) => {
     const users = r.messages.filter((m) => m.role === "user");
     const lastUser = String(users.at(-1)?.content ?? "");
-    const mode = /mode=(new|edit|remix)/.exec(lastUser)?.[1] ?? "new";
+    const mode = /mode=(new|edit)/.exec(lastUser)?.[1] ?? "new";
     // Tool results in THIS turn only (messages after the last real user message; server notes excluded).
     const lastUserIdx = r.messages.map((m, i) => (m.role === "user" && !String(m.content).startsWith("[server note]") && !String(m.content).startsWith("[Conversation summary") ? i : -1)).filter((i) => i >= 0).at(-1) ?? 0;
     const toolResults = r.messages.slice(lastUserIdx).filter((m) => m.role === "tool").length;
@@ -63,8 +62,8 @@ export function policyFor(scenario: Scenario): (r: ModelRequest, i: number) => M
       if (mode === "edit" && toolResults === 1) return calls(tc("e3", "gbk_get_notes", { range: { unit: "bars", start: 1, end: 2 }, limit: 50 }));
       return reply("Brightened.");
     }
-    // remix
+    // opened-song follow-up (the remix landing): read the summary, then edit the open project.
     if (toolResults === 0) return calls(tc("e1", "gbk_get_project_summary"));
-    return reply("Edited the fork.");
+    return reply("Edited the open song.");
   };
 }

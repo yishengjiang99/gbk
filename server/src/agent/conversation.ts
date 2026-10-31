@@ -3,7 +3,9 @@ import type { ChatMessage } from "./model-client.ts";
 import type { ArtifactRef, HistoryItem } from "../../../src/agent/protocol.ts";
 
 /** #163 #3: the run's intent, set by the UI entry point when it knows, else derived by the runtime.
- * "new" may create a project; "edit" is a follow-up on the open project; "remix" is an edit of a fork. */
+ * "new" may create a project; "edit" is a follow-up on the open project. "remix" is legacy only: old
+ * persisted conversations/traces may carry it, but no run assigns it anymore - a chat opened on a fork
+ * derives "new"/"edit" like any other chat. */
 export type AgentMode = "new" | "edit" | "remix";
 
 /** #163 #7: structured working memory that survives context compaction. Updated deterministically from
@@ -26,8 +28,9 @@ export interface Conversation {
   /** Project this conversation composed / edits (set by gbk_create_project or the first run). */
   projectId: string | null; lastRevision: number | null;
   artifacts: ArtifactRef[]; recentEdits: string[];
-  /** #162: set when this conversation is a remix of a shared song; the open project is the user's fork
-   * of it. Null for ordinary conversations (and absent in conversations persisted before this field). */
+  /** Vestigial (#162, simplified away): the old shared-song remix binding. Kept on the shape so
+   * conversations persisted with it still deserialize unchanged; nothing reads or writes it for
+   * behavior anymore. Null for ordinary conversations (and absent in pre-#162 conversations). */
   remixOf: { slug: string; title: string; projectId: string } | null;
   /** #163 #7 (absent in conversations persisted before this field; readers must default it). */
   workingMemory?: WorkingMemory;

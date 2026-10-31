@@ -37,7 +37,7 @@ for (const s of SCENARIOS) {
     const { rt, conv, link } = runScenario(s);
     if (s.prebound) conv.projectId = link.projectId;
     for (const [i, text] of s.turns.entries()) {
-      const r = await rt.run({ runId: `eval_${i}`, user: "eval", text, model: "fake-model", conv, link, signal: new AbortController().signal, ...(s.remix ? { remixOf: { slug: "eval-song", title: "Eval Song" } } : {}) });
+      const r = await rt.run({ runId: `eval_${i}`, user: "eval", text, model: "fake-model", conv, link, signal: new AbortController().signal });
       assert.equal(r.status, "completed", `turn ${i} (${text}) failed: ${r.text}`);
       assert.ok(r.steps <= s.maxStepsPerTurn, `turn ${i} used ${r.steps} steps (max ${s.maxStepsPerTurn})`);
     }

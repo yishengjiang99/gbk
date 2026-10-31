@@ -32,6 +32,24 @@ test("connect + manifest sync + real tool execution through the bridge (create p
   } finally { await s.app.close(); }
 });
 
+test("legacy remix-tagged user_message is accepted and runs as a normal run (no binding)", async () => {
+  const model = new ScriptModel([() => reply("edited")]);
+  const s = await startServer(model);
+  try {
+    const a = await login(s.base, "code-a"); assert.equal(a.status, 200);
+    const tab = new TestTab(); await tab.open(s.base, a.cookie);
+    // An old client still tags the message with mode:"remix" + a remixOf payload.
+    tab.send({ type: "user_message", clientMessageId: "u1", text: "make it more dramatic", mode: "remix", remixOf: { slug: "some-song-abc123", title: "Some Song", summary: { noteCount: 42 } } });
+    const done = await tab.waitFor("run_completed", 20000);
+    assert.equal(done.text, "edited");
+    // The run context derives its mode the ordinary way (fresh conversation -> new) and never mentions a remix binding.
+    const firstUser = model.requests[0].messages.find((m) => m.role === "user") as { content: string };
+    assert.match(firstUser.content, /mode=new/);
+    assert.doesNotMatch(firstUser.content, /remix of shared song/);
+    tab.close();
+  } finally { await s.app.close(); }
+});
+
 test("auth rejection: no cookie, wrong origin, bad code", async () => {
   const s = await startServer(new ScriptModel([() => reply("x")]));
   try {
