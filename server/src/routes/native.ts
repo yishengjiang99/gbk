@@ -179,11 +179,13 @@ export function nativeRoutes(app: FastifyInstance, cfg: Config, d: { sessions: S
   });
 
   // Universal Links (+ legacy appID/paths for iOS < 13). Served at both AASA locations, JSON, no redirect.
-  const PATHS = ["/s/*", "/u/*", "/t/*", "/feed", "/feed*", "/explore"];
+  // Exclusions come first (first match wins); "/" is the exact root (the feed).
+  const EXCLUDE = ["/api/*", "/mcp*", "/assets/*", "/auth/*"];
+  const PATHS = ["/s/*", "/u/*", "/t/*", "/feed", "/feed*", "/explore", "/studio", "/studio*", "/"];
   const aasa = async (_req: unknown, reply: import("fastify").FastifyReply) => {
     if (!cfg.native.iosAppIds.length) return reply.code(404).send({ code: "NOT_FOUND", message: "no iOS app configured" });
     reply.header("content-type", "application/json").header("cache-control", "public, max-age=3600");
-    return { applinks: { apps: [], details: [{ appIDs: cfg.native.iosAppIds, components: PATHS.map((x) => ({ "/": x })) }, ...cfg.native.iosAppIds.map((id) => ({ appID: id, paths: PATHS }))] }, webcredentials: { apps: cfg.native.iosAppIds } };
+    return { applinks: { apps: [], details: [{ appIDs: cfg.native.iosAppIds, components: [...EXCLUDE.map((x) => ({ "/": x, exclude: true })), ...PATHS.map((x) => ({ "/": x }))] }, ...cfg.native.iosAppIds.map((id) => ({ appID: id, paths: [...EXCLUDE.map((x) => `NOT ${x}`), ...PATHS] }))] }, webcredentials: { apps: cfg.native.iosAppIds } };
   };
   app.get("/.well-known/apple-app-site-association", aasa);
   app.get("/apple-app-site-association", aasa);
