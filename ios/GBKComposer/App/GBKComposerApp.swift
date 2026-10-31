@@ -5,6 +5,7 @@ struct GBKComposerApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var auth = AuthStore.shared
     @StateObject private var router = DeepLinkRouter()
+    @StateObject private var pushLinks = PushLinkStore.shared
     @Environment(\.scenePhase) private var scenePhase
 
     /// Unit tests run inside this app; launch side effects (guest registration writes Keychain) would race them.
@@ -24,7 +25,9 @@ struct GBKComposerApp: App {
                 // Background homr model warmup for Scan (Music Reader parity): detached inside
                 // `start()`, never on the main thread; a scan arriving mid-warmup attaches to it.
                 .task { if !Self.isUnitTestHost { ScanModelWarmup.shared.start() } }
-                .onAppear { router.handleLaunchArguments() }
+                .onAppear { router.handleLaunchArguments(); consumePendingPushLink() }
+                // Push tap while the app is running (#137): AppDelegate enqueued the link.
+                .onChange(of: pushLinks.pendingURL) { _, url in if url != nil { consumePendingPushLink() } }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL { router.handle(url) }
                 }
@@ -41,5 +44,11 @@ struct GBKComposerApp: App {
             }
             if phase == .background { BillingEventLogger.shared.suspend() }
         }
+    }
+
+    /// Route a tapped push's link, if one is pending (cold launch from a tap enqueues
+    /// it before the UI exists; the scenePhase/onChange paths cover the warm cases).
+    private func consumePendingPushLink() {
+        if let url = pushLinks.consume() { router.handle(url) }
     }
 }

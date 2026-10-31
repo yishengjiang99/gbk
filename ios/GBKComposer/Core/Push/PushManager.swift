@@ -30,7 +30,8 @@ enum InstallIdentity {
 }
 
 /// APNs registration via `AuthServicing` (`POST /api/push/register` / `unregister`, live).
-/// Never prompts on launch; the prompt appears only via `enable()` (an explicit user action).
+/// Never prompts on launch; the prompt appears only via `enable()` (an explicit user action —
+/// the Notifications toggle in the Profile tab's gear menu, #137).
 @MainActor
 final class PushManager: ObservableObject {
     static let shared = PushManager()
@@ -60,13 +61,9 @@ final class PushManager: ObservableObject {
         self.enabledInApp = defaults.bool(forKey: Self.enabledKey)
     }
 
-    static var apnsEnvironment: String {
-        #if DEBUG
-        return "sandbox"
-        #else
-        return "production"
-        #endif
-    }
+    /// From the provisioning profile / receipt, NOT the build configuration (#137):
+    /// TestFlight Release builds hold sandbox tokens and must register as "sandbox".
+    static var apnsEnvironment: String { APNsEnvironment.current }
 
     var isAllowedBySystem: Bool {
         status == .authorized || status == .provisional || status == .ephemeral

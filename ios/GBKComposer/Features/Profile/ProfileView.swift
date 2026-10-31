@@ -82,6 +82,8 @@ struct UserProfileView: View {
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthStore
     @Environment(\.requestSignIn) private var requestSignIn
+    @ObservedObject private var push = PushManager.shared
+    @Environment(\.openURL) private var openURL
     @State private var confirmDelete = false
     @State private var message: String?
 
@@ -94,7 +96,22 @@ struct ProfileView: View {
                         .toolbar {
                             Menu {
                                 Button("Bluetooth MIDI…") { BluetoothMIDIPairing.present() }
-                                if auth.isLinkedAccount { Button("Sign out") { Task { await auth.signOut() } } }
+                                // Push opt-in (#137): the only surface that calls PushManager.enable() —
+                                // the APNs prompt appears on this explicit toggle, never on launch.
+                                // Linked accounts only: registration is gated on a linked account.
+                                if auth.isLinkedAccount {
+                                    Divider()
+                                    Toggle("Notifications", isOn: Binding(
+                                        get: { push.enabledInApp },
+                                        set: { on in Task { if on { _ = await push.enable() } else { await push.disable() } } }))
+                                    if !push.enabledInApp, push.status == .denied {
+                                        Button("Notifications are off in Settings") {
+                                            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                                        }
+                                    }
+                                    Divider()
+                                    Button("Sign out") { Task { await auth.signOut() } }
+                                }
                                 Button("Delete account", role: .destructive) { confirmDelete = true }
                                 AboutMenuItems()
                             } label: { Image(systemName: "gearshape") }
@@ -112,6 +129,7 @@ struct ProfileView: View {
                 }
             }
             .toolbar { ToolbarItem(placement: .topBarLeading) { ProButton() } }
+            .task { await push.refresh() }
             .alert("Delete your account?", isPresented: $confirmDelete) {
                 Button("Delete", role: .destructive) { Task { await deleteAccount() } }
                 Button("Cancel", role: .cancel) {}
