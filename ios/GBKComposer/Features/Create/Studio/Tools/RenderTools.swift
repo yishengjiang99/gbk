@@ -303,7 +303,7 @@ func instrumentReport(_ store: WorkstationStore, _ p: Project) -> [JSONValue] {
             ("muted", .bool(t.mix.mute)), ("pan", .number((pan * 1000).rounded() / 1000)),
             ("panSource", .string(t.mix.pan != 64 ? "mix" : "centre")), ("volume", .int(Int64(t.mix.volume))),
             ("faderDb", fader > 0 ? .number((20 * log10(fader) * 100).rounded() / 100) : .null),
-            ("presetOverride", .bool((p.sound?.tracks[t.id].isEmpty == false))),
+            ("presetOverride", .bool(p.sound?.tracks[t.id]?.isEmpty == false)),
         ])
     }
 }

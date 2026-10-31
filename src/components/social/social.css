@@ -91,3 +91,20 @@
 .si-dim{color:var(--so-dim);font-size:14px;display:block;margin:6px 0}
 .si-err{color:var(--so-danger)}
 .so-card:focus:not(:focus-visible){outline:none}
+/* Desktop feed (>=768px): full-viewport card, chips span the width. >=1200px: meta moves to a 360px side panel and
+   the action rail stays over the roll. Constants mirrored by GBK iOS iPad: FEED_DESKTOP_MIN=768, FEED_SIDE_MIN=1200,
+   FEED_SIDE_W=360, FEED_GAP=16, card padding 12/16, rail inset 20/24. Mobile (<768px) unchanged. */
+@media (min-width:768px){
+.so-main.so-main-feed{max-width:none;margin:0;border-left:0;border-right:0}
+.so-main-feed .so-filterbar{padding:6px 16px}
+.so-main-feed .so-card{padding:12px 16px;gap:8px}
+.so-main-feed .so-side{right:32px}
+}
+@media (min-width:1200px){
+.so-main-feed .so-card{display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:minmax(0,1fr);column-gap:16px}
+.so-main-feed .so-rollwrap{grid-column:1;grid-row:1;min-height:0}
+.so-main-feed .so-meta{grid-column:2;grid-row:1;align-self:end;min-height:0;max-height:100%;overflow:hidden;display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--so-border);border-radius:14px;background:var(--so-surface)}
+.so-main-feed .so-meta h2{font-size:22px}
+.so-main-feed .so-meta .so-prompt{flex-direction:column;align-items:stretch}
+.so-main-feed .so-side{right:calc(16px + 360px + 16px + 20px)}
+}
