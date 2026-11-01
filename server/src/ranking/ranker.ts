@@ -188,12 +188,12 @@ export class Ranker {
   /** Nightly: fit two LR heads, P(complete) and P(fast skip), on point-in-time features (as of each impression's
    *  hour, with its own session); the last HOLDOUT_DAYS are held out. The candidate is always stored, and promoted
    *  only if both heads' holdout AUC are >= the promoted model's on the same holdout (HEURISTIC = no model). */
-  train(): TrainResult | null {
+  train(): TrainResult | TrainSkip {
     const t0 = Date.now(); const t = this.now();
     const imps = this.db.prepare("SELECT actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at FROM impressions WHERE created_at > ? AND position >= 0 ORDER BY id DESC LIMIT 20000").all(t - 30 * 86_400_000) as { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number }[];
-    if (imps.length < MIN_TRAIN) return null;
+    if (imps.length < MIN_TRAIN) return { skipped: "few_impressions", impressions: imps.length, n: 0, holdout: 0, min: MIN_TRAIN };
     const { tr, ho } = this.dataset(imps, t - HOLDOUT_DAYS * 86_400_000);
-    if (tr.length < MIN_TRAIN || !ho.length) return null;
+    if (tr.length < MIN_TRAIN || !ho.length) return { skipped: tr.length < MIN_TRAIN ? "few_train_rows" : "no_holdout", impressions: imps.length, n: tr.length, holdout: ho.length, min: MIN_TRAIN };
     const model: Model = { complete: fitLR(tr.map((d) => ({ x: d.x, y: d.c }))), skip: fitLR(tr.map((d) => ({ x: d.x, y: d.s }))) };
     const ev = (m: Model) => ({ c: aucOf(ho.map((d) => lin(d.x, m.complete)), ho.map((d) => d.c)), s: aucOf(ho.map((d) => lin(d.x, m.skip)), ho.map((d) => d.s)) });
     const a = ev(model); model.auc_skip = a.s; const cur = this.promoted(); const b = cur ? ev(cur.model) : null;
@@ -216,6 +216,8 @@ export class Ranker {
     return { tr, ho };
   }
 }
+/** train() did not fit a model (too little data); logged as rank_train_skipped so a skip is visible. */
+export interface TrainSkip { skipped: "few_impressions" | "few_train_rows" | "no_holdout"; impressions: number; n: number; holdout: number; min: number }
 export interface TrainResult { version: string; n: number; holdout: number; auc: number | null; auc_skip: number | null; promoted: boolean; previous: string | null; previous_auc: number | null; previous_auc_skip: number | null; ms: number; model: Model }
 export type Row = { x: number[]; c: number; s: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
 export const HOLDOUT_DAYS = 3;
@@ -227,13 +229,13 @@ function fitLR(data: { x: number[]; y: number }[]): Weights {
 }
 /** Run train() in a worker thread on its own connection to the same database file; resolves with the result
  *  (the caller then calls ranker.reload()). In-memory databases train in-process. */
-export async function trainInWorker(ranker: Ranker, file: string | null, now?: number): Promise<TrainResult | null> {
+export async function trainInWorker(ranker: Ranker, file: string | null, now?: number): Promise<TrainResult | TrainSkip | null> {
   if (!file) return ranker.train();
   const { Worker } = await import("node:worker_threads"); const { existsSync } = await import("node:fs"); const { dirname, join } = await import("node:path"); const { fileURLToPath } = await import("node:url");
   const here = dirname(fileURLToPath(import.meta.url)); const mjs = join(here, "rank-train.mjs"), ts = join(here, "train-worker.ts");
   const w = existsSync(mjs) ? new Worker(mjs, { workerData: { file, now } })
     : new Worker(`import("tsx/esm/api").then((m) => { m.register(); return import(${JSON.stringify(`file://${ts}`)}); });`, { eval: true, workerData: { file, now } });
-  return new Promise((res, rej) => { w.once("message", (m: { ok: boolean; result?: TrainResult | null; error?: string }) => { void w.terminate(); if (m.ok) { ranker.reload(); res(m.result ?? null); } else rej(new Error(m.error)); }); w.once("error", rej); });
+  return new Promise((res, rej) => { w.once("message", (m: { ok: boolean; result?: TrainResult | TrainSkip | null; error?: string }) => { void w.terminate(); if (m.ok) { ranker.reload(); res(m.result ?? null); } else rej(new Error(m.error)); }); w.once("error", rej); });
 }
 export function aucOf(score: number[], y: number[]): number | null {
   const pos = y.filter((v) => v).length, neg = y.length - pos; if (!pos || !neg) return null;

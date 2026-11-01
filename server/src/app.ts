@@ -158,7 +158,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const trainTimer = setInterval(() => { const d = new Date(); const day = d.toISOString().slice(0, 10);
     if (d.getHours() !== 3 || d.getMinutes() < 30 || d.getMinutes() >= 40 || lastTrain === day || training) return; lastTrain = day; training = true;
     try { events.prune(); } catch { /* best effort */ }
-    trainInWorker(ranker, shares.database.location()).then((r) => { if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, holdout: r.holdout, auc: r.auc, promoted: r.promoted, previous: r.previous, previous_auc: r.previous_auc, ms: r.ms }); })
+    trainInWorker(ranker, shares.database.location()).then((r) => { if (r && "skipped" in r) app.log.info({ evt: "rank_train_skipped", reason: r.skipped, impressions: r.impressions, n: r.n, holdout: r.holdout, min: r.min }); else if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, holdout: r.holdout, auc: r.auc, promoted: r.promoted, previous: r.previous, previous_auc: r.previous_auc, ms: r.ms }); })
       .catch((e) => app.log.warn({ evt: "rank_train_error", message: (e as Error).message })).finally(() => { training = false; }); }, 600_000); trainTimer.unref();
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));

@@ -43,7 +43,7 @@ test("ranking: personalized For you learns from dwell/skips, session-aware, pagi
 });
 
 // ---- v2 unit tests on synthetic fixtures (rank-fixture.ts) ----
-import { Ranker, trainInWorker, FEATURES, HEURISTIC, SKIP_LAMBDA, labels, projectSeconds, QUOTAS, SOURCES } from "../src/ranking/ranker.ts";
+import { Ranker, trainInWorker, MIN_TRAIN, type TrainResult, FEATURES, HEURISTIC, SKIP_LAMBDA, labels, projectSeconds, QUOTAS, SOURCES } from "../src/ranking/ranker.ts";
 import { fixture, rand, H as HR, D } from "./rank-fixture.ts";
 
 const randomWorld = (fx: ReturnType<typeof fixture>, seed: number, n = 1600) => {
@@ -60,10 +60,18 @@ test("ranking v2 / phase 1: promotion gate keeps a better promoted model and sto
   const z = Object.fromEntries(FEATURES.map((k) => [k, 0])); const good = { complete: { ...z, bias: 0, popularity: 5 }, skip: { ...z, bias: 0, popularity: -5 } };
   new Ranker(fx.db, fx.now); fx.db.prepare("INSERT INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES ('lr-good', ?, 1, 0.99, ?, 1)").run(JSON.stringify(good), fx.now() - D);
   const rk = new Ranker(fx.db, fx.now); assert.equal(rk.version, "lr-good");
-  const res = rk.train()!; assert.equal(res.promoted, false); assert.ok(res.previous_auc! > res.auc!); assert.match(res.version, /^lr2-\d{8}/);
+  const res = rk.train() as TrainResult; assert.equal(res.promoted, false); assert.ok(res.previous_auc! > res.auc!); assert.match(res.version, /^lr2-\d{8}/);
   assert.equal(rk.version, "lr-good"); assert.equal(new Ranker(fx.db, fx.now).version, "lr-good", "startup loads the promoted model");
   assert.equal((fx.db.prepare("SELECT promoted FROM rank_models WHERE version = ?").get(res.version) as { promoted: number }).promoted, 0);
   void HEURISTIC;
+});
+
+test("ranking: train() with too little data reports why it skipped (counts vs MIN_TRAIN) and stores no model", () => {
+  const fx = fixture(); const songs = Array.from({ length: 10 }, (_, i) => fx.song({ owner: `o${i}`, score: i / 10 }));
+  for (let k = 0; k < 600; k++) fx.imp({ actor: `a${k % 20}`, song: songs[k % 10], at: fx.now() - HR - (k < 300 ? 0 : 5 * D), good: k % 2 === 0 });
+  const res = new Ranker(fx.db, fx.now).train();
+  assert.ok(res && "skipped" in res, "skip is reported, not null"); assert.equal(res.skipped, "few_train_rows"); assert.equal(res.impressions, 600); assert.ok(res.n < MIN_TRAIN && res.holdout > 0); assert.equal(res.min, MIN_TRAIN);
+  assert.equal((fx.db.prepare("SELECT COUNT(*) AS c FROM rank_models").get() as { c: number }).c, 0);
 });
 
 test("ranking v2 / phase 4: candidate sources with quotas; a fresh 0-score song is in the pool of a > 1000-song catalog", () => {
