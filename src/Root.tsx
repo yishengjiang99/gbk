@@ -50,7 +50,7 @@ export default function Root() {
   }, []);
   // Social routes render the Feed from the first paint: only a confirmed "no Composer server" (static Pages build) falls back to the studio.
   const explore = composer !== false && (route.view === "feed" || route.view === "profile" || route.view === "inbox" || route.view === "admin");
-  useEffect(() => { document.documentElement.classList.toggle("studio-fit", !explore); return () => document.documentElement.classList.remove("studio-fit"); }, [explore]);
+  useEffect(() => { document.documentElement.classList.toggle("studio-fit", !explore && route.view !== "jam"); return () => document.documentElement.classList.remove("studio-fit"); }, [explore, route.view]);
   if (route.view === "jam") return <Suspense fallback={<div className="jam-loading">Loading Live Jam…</div>}><JamApp roomId={route.roomId} /></Suspense>;
   return (
     <>
