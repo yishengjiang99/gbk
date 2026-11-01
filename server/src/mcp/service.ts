@@ -375,6 +375,7 @@ export class CompositionService {
   publish(owner: string, compositionId: string): { url: string; slug: string } {
     const { row } = this.getProject(owner, compositionId);
     const opened = this.openWorkstation(owner, compositionId);
+    if (!this.shares.ensurePlayable(opened.slug)) throw new McpError("INVALID_ARGUMENT", "This composition has no notes yet, so there is nothing to play. Add notes before publishing.");
     this.shares.setPublic(opened.slug, true);
     this.store.setVisibility(row.id, owner, "public");
     return { url: `${this.cfg.publicOrigin}/s/${opened.slug}`, slug: opened.slug };
