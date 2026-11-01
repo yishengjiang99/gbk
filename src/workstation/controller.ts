@@ -12,6 +12,14 @@ export type ProposalStatus = "pending" | "committed" | "discarded" | "stale" | "
  *  never wedge later runs: past the TTL the proposal expires and its commit fails fast instead of
  *  awaiting the panel until the tool-call timeout. */
 export const PROPOSAL_TTL_MS = 10 * 60_000;
+/** Longest gbk_create_project waits for the previous project's checkpoint (IndexedDB) before going on without it. */
+export const CHECKPOINT_BUDGET_MS = 1500;
+/** true if `p` resolved within `ms`; false on timeout (p keeps running). Rejections propagate. */
+async function settleWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
+  let t: ReturnType<typeof setTimeout> | undefined; p.catch(() => {}); // a late failure after the timeout is not unhandled
+  try { return await Promise.race([p.then(() => true), new Promise<boolean>((ok) => { t = setTimeout(() => ok(false), ms); })]); }
+  finally { clearTimeout(t); }
+}
 export interface Proposal {
   id: string; projectId: string; baseRevision: number; createdAt: number; source: "user" | "agent";
   range: { startTick: number; endTick: number }; trackIds: string[]; ops: Op[]; summary: string;
@@ -53,6 +61,8 @@ export interface WorkstationHost {
   download?(data: Blob | Uint8Array, filename: string): void | boolean;
   /** Persist a project snapshot (IndexedDB) before switching projects. */
   checkpoint?(project: Project): Promise<void>;
+  /** The checkpoint did not finish within the budget (it keeps running); for telemetry. */
+  onSlowCheckpoint?(projectId: string, budgetMs: number): void;
   /** SoundFont zones the track currently plays (its resolved preset), for voice inspection. */
   trackRegions?(project: Project, trackId: string): { presetName: string; presetIndex: number; regions: import("../sf2/soundfont.ts").SF2Region[] } | null;
 }
@@ -156,7 +166,11 @@ export class WorkstationController {
     const hasContent = prev.tracks.length > 0 || prev.notes.length > 0;
     if (hasContent && !o.replaceCurrent) {
       if (!this.host.checkpoint) throw new WorkstationError("UNSUPPORTED", "cannot checkpoint the current project; pass replaceCurrent:true to switch anyway");
-      await this.host.checkpoint(prev); checkpointed = true;
+      // Bounded: on iOS Safari the IndexedDB write behind checkpoint can stall for tens of seconds (or until the page is
+      // reloaded), which held gbk_create_project - and the whole run - on "Creating project". The write keeps going in
+      // the background; the new project never waits more than CHECKPOINT_BUDGET_MS for it.
+      checkpointed = await settleWithin(this.host.checkpoint(prev), CHECKPOINT_BUDGET_MS);
+      if (!checkpointed) this.host.onSlowCheckpoint?.(prev.id, CHECKPOINT_BUDGET_MS);
     }
     const p = emptyProject(o.name.slice(0, 128) || "Untitled", ppq);
     p.tempos = [{ tick: 0, microPerQuarter: Math.round(60e6 / tempo) }];

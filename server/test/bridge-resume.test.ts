@@ -132,3 +132,19 @@ test("a silent (iOS-frozen) socket is dropped after 2 missed pongs, and 'backgro
     await waitUntil(() => closed2 > 0, 9000); assert.ok(closed2 - t1 < 5500, `took ${closed2 - t1} ms`);
   } finally { await s2.app.close(); }
 });
+
+test("step log carries per-call browser timings; a slow call is logged while it runs", async () => {
+  const model = new ScriptModel([() => calls(tc("a", "gbk_list_tracks")), () => reply("ok")]);
+  const s = await startServer(model, { AGENT_TOOL_TIMEOUT_MS: "20000" });
+  const logs: Record<string, unknown>[] = []; (s.app.log as unknown as { info: (o: unknown) => void }).info = (o) => { if (o && typeof o === "object") logs.push(o as Record<string, unknown>); };
+  try {
+    const a = await login(s.base, "code-a"); const tab = new TestTab(); tab.autoRespond = false; await tab.open(s.base, a.cookie);
+    tab.send({ type: "user_message", clientMessageId: "u", text: "go" }); const call = await tab.waitFor("tool_call");
+    await waitUntil(() => logs.some((l) => l.evt === "tool_slow"), 7000); // flagged while still running
+    const slow = logs.find((l) => l.evt === "tool_slow")!; assert.equal(slow.tool, "gbk_list_tracks"); assert.ok(Number(slow.ms) >= 5000);
+    const result = await tab.bridge.execute(call, tab.sessionId); tab.send({ type: "tool_result", sessionId: call.sessionId, runId: call.runId, callId: call.callId, result });
+    await tab.waitFor("run_completed");
+    const step = logs.find((l) => l.evt === "step")!; const ms = step.ms as number[];
+    assert.equal(ms.length, 1); assert.ok(ms[0] >= 5000 && ms[0] < 15000, `ms ${ms[0]}`);
+  } finally { await s.app.close(); }
+});
