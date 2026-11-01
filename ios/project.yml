@@ -26,11 +26,10 @@ packages:
     path: Packages/HearSheetCore
   # Sheet-music scan (AGPL-3.0; OMRScanKit + OMRScanUI over omr-homr-ios, a port of liebharc/homr).
   # One source of truth in omr-sheet-cam; GBK keeps only the studio adapter (Features/Scan).
-  # Pinned to a commit on omr-sheet-cam's scan-kit-extract branch; move to the v0.1.0-scankit tag once the
-  # on-device gate (docs/scan-kit-test-plan) passes.
+  # Pinned to an omr-sheet-cam main commit. Fix scan bugs there and bump this revision.
   OMRScan:
     url: https://github.com/yishengjiang99/omr-sheet-cam.git
-    revision: b8bbe27f63648596850a5c4cf32c1a9bfcd2892a
+    revision: 80ad0721e29c5ffbfef4aef54a34f9df59dbaa2f
 targets:
   GBKComposer:
     type: application
