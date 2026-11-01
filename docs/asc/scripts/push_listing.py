@@ -114,7 +114,8 @@ def main():
     # App Review details
     rv = api("GET", f"/v1/appStoreVersions/{ver['id']}/appStoreReviewDetail", ok_fail=True)
     # The app works without an account (sign-in is optional), so no demo account.
-    rattrs = {"notes": review_notes(), "demoAccountName": None, "demoAccountRequired": False}
+    # demoAccountName is omitted, not nulled: the API ignores a null name on PATCH.
+    rattrs = {"notes": review_notes(), "demoAccountRequired": False}
     for env, k in [("REVIEW_CONTACT_FIRST", "contactFirstName"), ("REVIEW_CONTACT_LAST", "contactLastName"),
                    ("REVIEW_CONTACT_PHONE", "contactPhone"), ("REVIEW_CONTACT_EMAIL", "contactEmail")]:
         if os.environ.get(env): rattrs[k] = os.environ[env]
