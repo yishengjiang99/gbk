@@ -1,1 +1,1 @@
-First release.
+First release: compose music in chat, scan sheet music with the camera, hear real instrument playback in the feed, and remix anything you hear.

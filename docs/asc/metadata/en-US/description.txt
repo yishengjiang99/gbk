@@ -1,30 +1,30 @@
-GBK Music Composer is a feed of short musical pieces you can listen to, rate, and remix in a studio.
+GBK Music Composer turns a sentence into a piece of music.
 
-HOW IT WORKS
-1. Swipe through the feed to hear new pieces, each with its piano roll.
-2. Open a piece in the studio to see the prompt and notes behind it.
-3. Remix it, export WAV or MIDI, and share it back to the feed.
+Open the studio, describe what you want to hear, and GBK writes it as real notes you can play, edit and share: a piano piece, a string quartet, a Bach-style fugue. Every note stays editable, and every piece can be exported as WAV or MIDI.
 
-MADE TO BE REMIXED
-Every piece shows the prompt that made it. Tap Remix to start from it and make it your own. Forks credit the original composer.
+WRITE IT IN CHAT
+Tell the composer what to make, then revise it in plain words. Ask for a different key, a slower tempo, a new middle section. The studio keeps up to 10 revisions of a piece on the free plan, so you can always go back to an earlier version.
 
-FEATURES
-• Vertical audio feed with Following and For You tabs
-• Web studio with SoundFont playback and WAV/MIDI export
-• Star ratings and comments on every piece
-• Sign in with Apple or Google
-• Report any piece or comment, and block users
+SCAN SHEET MUSIC
+Point the camera at a printed page and GBK reads it into a playable score. Recognition runs on your device. Play the result, fix a note in the piano roll, or keep working on it in the studio.
 
-WHO IT'S FOR
-Composers, songwriters, students and anyone who likes hearing new music and tinkering with it.
+REAL INSTRUMENT SOUNDS
+Pieces play back with SoundFont samples, real recorded instruments rather than synth beeps. Watch the piano roll while a piece plays, read the prompt that produced it, and hear what changed when someone remixed it.
 
-GOOD TO KNOW
-• Listening and browsing work without an account; posting, rating and comments need one.
-• AI and render limits reset daily.
-• The first in-browser render downloads a ~32 MB SoundFont.
+A FEED OF NEW MUSIC
+The feed is short pieces other people made. Swipe to listen, leave a star rating or a comment, and open anything in the studio. Every piece shows the prompt behind it. Tap Remix to start from that prompt and publish your version; forks credit the original composer.
 
-PRIVACY
-We collect only what is needed to run your account and deliver notifications. See https://compose.grepawk.com/privacy. You can delete your account in the app (Profile) or via the support page.
+WRITE A FUGUE
+The built-in fugue generator writes Bach-style counterpoint. Pick a key, a mode and the number of voices, and it composes a subject, answers it, and develops it into a full piece you can edit like any other.
 
-OPEN SOURCE
-The iOS app is free software under the GNU AGPL v3 (or later). Source code: https://github.com/yishengjiang99/gbk/tree/main/ios (also linked in Profile › About). Sheet-music scanning uses homr (AGPL-3.0) and runs on your device.
+FREE AND PRO
+Composing, listening and sharing are free. The free plan keeps 10 revisions per piece, pieces up to 64 bars, and rendered files for 30 days.
+GBK Pro raises the limits: 10 times the daily composer budget, 100 revisions per piece, pieces up to 256 bars, rendered files kept for a year, and server renders up to 10 minutes each.
+GBK Pro is $5.99 per month or $47.99 per year, each starting with a 7-day free trial. GBK Pro Lifetime is a one-time purchase of $99.99.
+
+SUBSCRIPTION TERMS
+Payment is charged to your Apple account when you confirm the purchase. A subscription renews automatically unless it is cancelled at least 24 hours before the end of the current period, and your account is charged for renewal within 24 hours before that period ends. Manage or cancel a subscription in your App Store account settings. A free trial converts to a paid subscription unless it is cancelled before the trial ends. Prices are shown in USD and may vary by region.
+
+PRIVACY AND SOURCE
+Account data is used to run the app and is never used for tracking. Privacy policy: https://compose.grepawk.com/privacy
+GBK Music Composer is free software under the GNU AGPL v3 or later. Source code: https://github.com/yishengjiang99/gbk
