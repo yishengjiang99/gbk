@@ -43,6 +43,7 @@ export function friendlyError(raw: string): string {
   const limit = /You've hit today's AI limit\.[^\n]*/.exec(raw)?.[0];
   if (limit) return limit; // server-written plain message (reset time + Pro pointer), shown verbatim
   const code = /^([A-Z][A-Z0-9_]{2,}):/.exec(raw.trim())?.[1] ?? "";
+  if (/background too long, so the run stopped/.test(raw)) return "The app was in the background too long, so the run stopped. Finished changes are saved; tap Resume to continue.";
   if (/reloaded or closed, so the run stopped/.test(raw)) return "This page reloaded or closed, so the run stopped. Finished changes are saved; send your message again.";
   if (/BUDGET/.test(code)) return "You've hit today's AI limit. It resets at 5 PM PT.";
   if (/QUOTA|LIMIT/.test(code)) return "You've reached today's composing limit. Try again tomorrow.";

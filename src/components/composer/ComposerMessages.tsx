@@ -3,7 +3,7 @@ import type { ChatItem } from "../../agent/useAgentSession.ts";
 import { ComposerProgress } from "./ComposerProgress.tsx";
 import { ComposerArtifacts } from "./ComposerArtifacts.tsx";
 
-export function ComposerMessages({ items, onRetry }: { items: ChatItem[]; onRetry: (t: string) => void }) {
+export function ComposerMessages({ items, onRetry, onResume }: { items: ChatItem[]; onRetry: (t: string) => void; onResume?: (runId: string) => void }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [items]);
   return (
@@ -16,7 +16,7 @@ export function ComposerMessages({ items, onRetry }: { items: ChatItem[]; onRetr
             {m.text && <div className="cmp-bubble" data-testid="assistant-text">{m.text}</div>}
             <ComposerArtifacts artifacts={m.artifacts ?? []} />
           </>}
-          {m.role === "error" && <div className="cmp-error" role="alert">⚠ {m.text} {m.retryText && <button onClick={() => onRetry(m.retryText!)}>Retry</button>}</div>}
+          {m.role === "error" && <div className="cmp-error" role="alert">⚠ {m.text} {m.resumeRunId && onResume ? <button data-testid="run-resume" onClick={() => onResume(m.resumeRunId!)}>Resume</button> : m.retryText && <button onClick={() => onRetry(m.retryText!)}>Retry</button>}</div>}
         </div>
       ))}
       <div ref={end} />

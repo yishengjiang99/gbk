@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 // Fresh data dir per run so a previous conversation never leaks into the next run.
 const DATA = process.env.GBK_E2E_DATA ?? mkdtempSync(join(tmpdir(), "gbk-composer-e2e-"));
-const WEB = 5181, API = 8781, MODEL = 8799;
+// Ports overridable so two checkouts can run this suite side by side on one machine.
+const WEB = Number(process.env.GBK_E2E_WEB_PORT ?? 5181), API = Number(process.env.GBK_E2E_API_PORT ?? 8781), MODEL = Number(process.env.GBK_E2E_MODEL_PORT ?? 8799);
 const origin = `http://127.0.0.1:${WEB}`;
 const node22 = process.env.GBK_NODE22 ?? "node";
 export default defineConfig({
@@ -15,7 +16,7 @@ export default defineConfig({
   webServer: [
     { command: `${node22} --import tsx/esm server/test/fake-model.ts`, url: `http://127.0.0.1:${MODEL}/healthz`, reuseExistingServer: false, cwd: "../..", env: { FAKE_MODEL_PORT: String(MODEL) }, timeout: 30_000, ignoreHTTPSErrors: true },
     { command: `${node22} --disable-warning=ExperimentalWarning --import tsx/esm server/src/index.ts`, url: `http://127.0.0.1:${API}/api/health`, cwd: "../..", reuseExistingServer: false, timeout: 60_000,
-      env: { PORT: String(API), COMPOSER_PUBLIC_ORIGIN: origin, LLM_BASE_URL: `http://127.0.0.1:${MODEL}/v1`, LLM_API_KEY: "fake-key", LLM_MODEL: "fake-composer", LLM_PROVIDER_NAME: "fake (e2e)", SESSION_SECRET: "e2e-".repeat(10), COMPOSER_ACCESS_CODES: "tester:e2e-code,viewer2:e2e-code-2,paywall:e2e-code-3,resumer:e2e-code-4", COMPOSER_DATA_DIR: DATA, AGENT_TOOL_TIMEOUT_MS: "300000", RATE_MESSAGES_PER_MINUTE: "30", RATE_IP_PER_MINUTE: "5000", RATE_LOGIN_PER_MINUTE: "200", RATE_SHARES_PER_MINUTE: "500", LOG_LEVEL: "warn" } },
+      env: { PORT: String(API), COMPOSER_PUBLIC_ORIGIN: origin, LLM_BASE_URL: `http://127.0.0.1:${MODEL}/v1`, LLM_API_KEY: "fake-key", LLM_MODEL: "fake-composer", LLM_PROVIDER_NAME: "fake (e2e)", SESSION_SECRET: "e2e-".repeat(10), COMPOSER_ACCESS_CODES: "tester:e2e-code,viewer2:e2e-code-2,paywall:e2e-code-3,resumer:e2e-code-4", COMPOSER_DATA_DIR: DATA, AGENT_TOOL_TIMEOUT_MS: "300000", AGENT_RECONNECT_GRACE_MS: process.env.GBK_E2E_GRACE_MS ?? "20000", RATE_MESSAGES_PER_MINUTE: "30", RATE_IP_PER_MINUTE: "5000", RATE_LOGIN_PER_MINUTE: "200", RATE_SHARES_PER_MINUTE: "500", LOG_LEVEL: "warn" } },
     { command: `npm run dev -- --host 127.0.0.1 --port ${WEB} --strictPort`, url: `${origin}/`, cwd: "../..", reuseExistingServer: false, timeout: 60_000, env: { GBK_BASE_PATH: "/", GBK_DEV_API_PROXY: `http://127.0.0.1:${API}` } },
   ],
   projects: [

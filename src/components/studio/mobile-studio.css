@@ -114,3 +114,5 @@ html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
 
 .ms-back { font-size: 17px; font-weight: 600; line-height: 1; padding: 0 10px 0 2px; background: none; margin-left: -6px; white-space: nowrap; }
 .ms-new { flex: none; white-space: nowrap; }
+/* Run paused while the tab was away (iOS background): bright, readable, never pushes the composer bar off screen. */
+.ms-paused { background: #fff4d6; border-color: #f5b301; color: #5a3d00; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }

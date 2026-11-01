@@ -13,6 +13,14 @@ export function apiBase(): string {
   return `${base.replace(/\/$/, "")}/api`;
 }
 
+/** sessionStorage is per browser tab and survives an iOS page discard + reload, so the reloaded page can still re-attach
+ *  to its run (same tabId + run id). Private mode / disabled storage just falls back to memory. */
+const store = {
+  get(k: string) { try { return sessionStorage.getItem(k); } catch { return null; } },
+  set(k: string, v: string | null) { try { if (v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch { /* unavailable */ } },
+};
+const TAB_KEY = "gbk.agentTabId", RUN_KEY = "gbk.agentActiveRun";
+
 export class BridgeClient {
   private ws: WebSocket | null = null;
   private attempts = 0;
@@ -20,8 +28,11 @@ export class BridgeClient {
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private unsub: (() => void) | undefined;
   sessionId = "";
-  activeRunId: string | null = null;
-  readonly tabId = Math.random().toString(36).slice(2, 10);
+  // A fresh-start URL (iOS Create -> /studio?new=<n>) never re-attaches: workstation/instance.ts clears RUN_KEY at load.
+  private _activeRunId: string | null = store.get(RUN_KEY);
+  get activeRunId() { return this._activeRunId; }
+  set activeRunId(v: string | null) { this._activeRunId = v; store.set(RUN_KEY, v); }
+  readonly tabId = store.get(TAB_KEY) ?? (() => { const t = Math.random().toString(36).slice(2, 10); store.set(TAB_KEY, t); return t; })();
   readonly bridge: BrowserToolBridge;
   maxReconnects = 8;
   /** No server traffic for this long (server pings every ~20s) = a dead socket, e.g. after iOS suspended the tab. */
@@ -44,6 +55,8 @@ export class BridgeClient {
 
   /** Tab came back (visibilitychange/pageshow/online/focus): reconnect now if the socket is gone or silently dead. */
   resume = () => {
+    // Going to the background: tell the server (it probes the socket and pauses the run fast if iOS freezes us).
+    if (!this.closed && typeof document !== "undefined" && document.visibilityState === "hidden") { if (this.activeRunId && this.ws?.readyState === 1) this.send({ type: "backgrounded" }); return; }
     if (this.closed || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
     const ws = this.ws;
     if (ws && ws.readyState === 1 && (this.busy > 0 || Date.now() - this.lastSeen < BridgeClient.STALE_MS)) { this.send({ type: "ping", t: Date.now() }); return; }
@@ -59,9 +72,10 @@ export class BridgeClient {
   private watchLifecycle() {
     if (this.lifecycle || typeof window === "undefined") return;
     const on = () => this.resume();
+    const hide = () => { if (this.activeRunId && this.ws?.readyState === 1) this.send({ type: "backgrounded" }); };
     document.addEventListener("visibilitychange", on); window.addEventListener("pageshow", on); window.addEventListener("online", on); window.addEventListener("focus", on);
-    document.addEventListener("resume", on);
-    this.lifecycle = () => { document.removeEventListener("visibilitychange", on); window.removeEventListener("pageshow", on); window.removeEventListener("online", on); window.removeEventListener("focus", on); document.removeEventListener("resume", on); };
+    document.addEventListener("resume", on); window.addEventListener("pagehide", hide);
+    this.lifecycle = () => { document.removeEventListener("visibilitychange", on); window.removeEventListener("pageshow", on); window.removeEventListener("online", on); window.removeEventListener("focus", on); document.removeEventListener("resume", on); window.removeEventListener("pagehide", hide); };
   }
 
   connect() {
@@ -93,13 +107,16 @@ export class BridgeClient {
       this.ws = null;
       if (ev.code === 4401) { this.onState("unauthorized"); return; }
       if (this.closed) { this.onState("offline"); return; }
-      if (this.attempts >= this.maxReconnects) { this.gaveUp = true; this.onState("offline", "could not reconnect"); return; }
+      // A paused run is waiting for this tab: keep retrying (capped backoff) instead of giving up while it is held.
+      if (this.attempts >= this.maxReconnects && !this.activeRunId) { this.gaveUp = true; this.onState("offline", "could not reconnect"); return; }
       const delay = Math.min(15_000, 500 * 2 ** this.attempts++);
       this.onState("reconnecting", `retry in ${Math.round(delay / 1000)}s`);
       this.retryTimer = setTimeout(() => { this.retryTimer = undefined; if (!this.closed) this.connect(); }, delay);
     };
   }
 
+  /** One-tap Resume of a run that stopped because the tab was away too long. */
+  resumeRun(runId: string): boolean { return this.send({ type: "resume_run", runId, clientMessageId: `r_${Date.now()}` }); }
   close() { this.closed = true; clearTimeout(this.retryTimer); this.lifecycle?.(); this.lifecycle = undefined; this.ws?.close(1000); }
   /** Stop every tool call executing in this tab now (Stop button; the server also sends cancel_call). */
   cancelLocal() { this.bridge.cancel(); }

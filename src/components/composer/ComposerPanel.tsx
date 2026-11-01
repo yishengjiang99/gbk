@@ -57,9 +57,9 @@ export function ComposerPanel({ project, readOnly, dock = false }: { project: Pr
         {s.auth.error && <div className="cmp-error">{s.auth.error}</div>}
         </>
       ) : (<>
-        {s.conn.state !== "connected" && s.conn.state !== "connecting" && <div className="cmp-error">{STATUS[s.conn.state]} {s.conn.detail ?? ""} <button onClick={s.reconnect}>Reconnect</button></div>}
+        {s.paused ? <div className="cmp-run cmp-paused" data-testid="run-paused" role="status">Paused – reconnecting…</div> : s.conn.state !== "connected" && s.conn.state !== "connecting" && <div className="cmp-error">{STATUS[s.conn.state]} {s.conn.detail ?? ""} <button onClick={s.reconnect}>Reconnect</button></div>}
         {s.info?.rejectedTools.length ? <div className="cmp-error">Server refused {s.info.rejectedTools.length} tool definitions from this page (version mismatch? reload).</div> : null}
-        <ComposerMessages items={s.items} onRetry={(t) => submit(t)} />
+        <ComposerMessages items={s.items} onRetry={(t) => submit(t)} onResume={(r) => s.resume(r)} />
         {s.run && <div className="cmp-run" data-testid="composer-run" role="status">
           <span className="cmp-spinner" /> {s.run.task}{s.run.maxSteps ? ` · step ${s.run.step}/${s.run.maxSteps}` : ""}
           <button onClick={s.stop} data-testid="composer-stop">Stop</button>

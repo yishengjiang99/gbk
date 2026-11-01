@@ -7,7 +7,7 @@ import { BridgeClient, apiBase, type ConnState } from "./bridge-client.ts";
 import type { ArtifactRef, HistoryItem, ServerMessage, UsageInfo } from "./protocol.ts";
 
 export interface ToolStep { callId: string; tool: string; task: string; status: "pending" | "running" | "done" | "failed"; summary?: string; error?: string; progress?: string }
-export interface ChatItem { id: string; role: "user" | "assistant" | "error"; text: string; artifacts?: ArtifactRef[]; steps?: ToolStep[]; runId?: string; retryText?: string }
+export interface ChatItem { id: string; role: "user" | "assistant" | "error"; text: string; artifacts?: ArtifactRef[]; steps?: ToolStep[]; runId?: string; retryText?: string; resumeRunId?: string }
 export interface AuthState { checked: boolean; authenticated: boolean; user?: string; name?: string; csrf?: string; enabled?: boolean; error?: string; providers?: ("github" | "google")[]; codeLogin?: boolean; reviewerLogin?: boolean; limits?: { newAccount: boolean; dailyTokens: number; dailyRenders: number } | null; pro?: boolean; proSource?: "apple" | "stripe" | null; songCard?: boolean }
 
 async function api(path: string, init: RequestInit & { csrf?: string } = {}) {
@@ -21,7 +21,7 @@ export function useAgentSession() {
   const [auth, setAuth] = useState<AuthState>({ checked: false, authenticated: false });
   const [conn, setConn] = useState<{ state: ConnState; detail?: string }>({ state: "idle" });
   const [items, setItems] = useState<ChatItem[]>([]);
-  const [run, setRun] = useState<{ runId: string; task: string; step: number; maxSteps: number } | null>(null);
+  const [run, setRun] = useState<{ runId: string; task: string; step: number; maxSteps: number; paused?: boolean } | null>(null);
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [info, setInfo] = useState<{ model: string; models: string[]; provider: string; llmConfigured: boolean; rejectedTools: string[] } | null>(null);
   const [model, setModel] = useState<string>("");
@@ -68,9 +68,13 @@ export function useAgentSession() {
       case "progress": setRun((r) => r && { ...r, step: m.step, maxSteps: m.maxSteps, task: m.task }); break;
       case "usage": setUsage(m.usage); break;
       case "run_completed": setRun(null); patchLastAssistant(m.runId, (x) => ({ ...x, text: m.text || x.text, artifacts: m.artifacts.length ? dedupe([...(x.artifacts ?? []), ...m.artifacts]) : x.artifacts })); window.dispatchEvent(new CustomEvent("gbk:run-completed", { detail: { runId: m.runId, steps: m.steps } })); break;
-      case "run_failed": setRun(null); setItems((xs) => [...xs, { id: `e_${m.runId}_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message), runId: m.runId, retryText: m.retryable ? lastUser(xs) : undefined }]); window.dispatchEvent(new CustomEvent("gbk:run-failed", { detail: { runId: m.runId, code: m.code, message: m.message } })); break;
+      case "run_failed": setRun(null); setItems((xs) => m.code === "RUN_PAUSED_TOO_LONG" && xs.some((x) => x.resumeRunId === m.runId) ? xs : [...xs, { id: `e_${m.runId}_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message), runId: m.runId, ...(m.code === "RUN_PAUSED_TOO_LONG" ? { resumeRunId: m.runId } : { retryText: m.retryable ? lastUser(xs) : undefined }) }]); window.dispatchEvent(new CustomEvent("gbk:run-failed", { detail: { runId: m.runId, code: m.code, message: m.message } })); break;
       case "error": setItems((xs) => [...xs, { id: `e_${Date.now()}`, role: "error", text: friendlyError(m.code, m.message) }]); break;
-      case "session_reconnected": if (!m.resumed && m.runId) setRun(null); break;
+      case "session_reconnected":
+        if (m.resumed) { setRun((r) => r && { ...r, paused: false }); break; }
+        if (m.runId) setRun(null);
+        if (m.resumable && m.runId) { const rid = m.runId; setItems((xs) => xs.some((x) => x.resumeRunId === rid) ? xs : [...xs, { id: `p_${rid}`, role: "error", text: friendlyError("RUN_PAUSED_TOO_LONG", ""), runId: rid, resumeRunId: rid }]); }
+        break;
     }
   }, []);
 
@@ -106,9 +110,16 @@ export function useAgentSession() {
     await refreshAuth(); return true;
   }, [auth.csrf, refreshAuth]);
   const logout = useCallback(async () => { await api("/logout", { method: "POST", body: "{}", csrf: auth.csrf }); client.current?.close(); await refreshAuth(); }, [auth.csrf, refreshAuth]);
+  /** One-tap Resume (up to the server's resume window after a pause timed out). The error item goes away on send. */
+  const resume = useCallback((runId: string) => {
+    if (!client.current?.resumeRun(runId)) return false;
+    setItems((xs) => xs.filter((x) => x.resumeRunId !== runId)); return true;
+  }, []);
   const reconnect = useCallback(() => { client.current?.close(); const c = client.current; if (c) { c.maxReconnects = 8; c.connect(); } }, []);
 
-  return { auth, conn, items, run, usage, info, model, setModel, send, stop, reset, login, logout, reconnect, refreshAuth };
+  // Paused: a run is in flight but this tab's socket is down (backgrounded, offline). The server holds the run.
+  const paused = !!run && conn.state !== "connected";
+  return { auth, conn, items, run, paused, resume, usage, info, model, setModel, send, stop, reset, login, logout, reconnect, refreshAuth };
 }
 
 function dedupe(a: ArtifactRef[]) { const s = new Set<string>(); return a.filter((x) => !s.has(x.artifactId) && !!s.add(x.artifactId)); }

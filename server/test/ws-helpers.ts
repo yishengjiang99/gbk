@@ -30,14 +30,14 @@ export async function login(base: string, code: string, origin = "http://compose
 /** A node "browser tab": real WorkstationController + BrowserToolBridge over a real WebSocket. */
 export class TestTab {
   ws!: WebSocket; events: ServerMessage[] = []; sessionId = ""; c: WorkstationController; bridge: BrowserToolBridge; executed: string[] = [];
-  autoRespond = true; resumeRunId?: string;
+  autoRespond = true; resumeRunId?: string; tabId = "t"; autoPong = true;
   constructor(c?: WorkstationController, renderDeps?: McpRenderDeps) { this.c = c ?? new WorkstationController(); this.bridge = new BrowserToolBridge(this.c, undefined, renderDeps); }
   open(base: string, cookie: string, origin = "http://composer.test", manifest = this.bridge.manifest): Promise<void> {
     return new Promise((ok, fail) => {
-      this.ws = new WebSocket(`${base.replace("http", "ws")}/api/agent/ws`, { headers: { cookie, origin } });
+      this.ws = new WebSocket(`${base.replace("http", "ws")}/api/agent/ws`, { headers: { cookie, origin }, autoPong: this.autoPong });
       this.ws.on("unexpected-response", (_r, res) => fail(new Error(`HTTP ${res.statusCode}`)));
       this.ws.on("error", fail);
-      this.ws.on("open", () => this.send({ type: "hello", protocol: 1, tabId: "t", manifest, projectId: this.c.project.id, revision: this.c.project.revision, ...(this.resumeRunId ? { resumeRunId: this.resumeRunId } : {}) }));
+      this.ws.on("open", () => this.send({ type: "hello", protocol: 1, tabId: this.tabId, manifest, projectId: this.c.project.id, revision: this.c.project.revision, ...(this.resumeRunId ? { resumeRunId: this.resumeRunId } : {}) }));
       this.ws.on("message", async (raw) => {
         const m = JSON.parse(String(raw)) as ServerMessage; this.events.push(m);
         if (m.type === "session_ready") { this.sessionId = m.sessionId; ok(); }
