@@ -87,6 +87,10 @@ export class JamSignaling {
     switch (f.type) {
       case "auth": return this.sendTo(c, { type: "error", code: "BAD_FRAME", message: "already authenticated" });
       case "ping": return this.sendTo(c, { type: "pong", t: f.t, serverTime: performance.now() });
+      case "transport": {
+        try { this.rooms.setTransport(c.roomId, c.pid, f, performance.now()); } catch { return this.sendTo(c, { type: "error", code: "NOT_HOST", message: "only the host can change the metronome" }); }
+        return this.broadcastSnapshot(c.roomId);
+      }
       case "state": { const p = this.rooms.presenceOf(c.pid); p.state = f.state; if (f.instrumentRevision !== undefined) p.instrumentRevision = f.instrumentRevision; return this.broadcastSnapshot(c.roomId); }
       case "signal": {
         const snap = this.rooms.snapshot(c.roomId);

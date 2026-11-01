@@ -11,5 +11,15 @@ services:
     depends_on: [agent]
     ports: ["127.0.0.1:8793:80"]
     restart: unless-stopped
+  # Live Jam relay (docs/live-jam/deployment.md). Start with: docker compose --profile turn up -d turn
+  # Host networking: TURN needs its real ports and IP and must not sit behind nginx.
+  turn:
+    image: coturn/coturn:4.6.3
+    profiles: [turn]
+    network_mode: host
+    env_file: /etc/gbk-turn.env
+    volumes: ["./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro", "/etc/gbk-turn-certs:/etc/coturn/certs:ro"]
+    entrypoint: ["sh", "-c", 'exec turnserver -c /etc/coturn/turnserver.conf --static-auth-secret="$$TURN_SHARED_SECRET" --external-ip="$$TURN_EXTERNAL_IP" --realm="$$TURN_REALM"']
+    restart: unless-stopped
 volumes:
   composer-data: {}

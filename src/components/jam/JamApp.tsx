@@ -9,6 +9,9 @@ import { PeerManager } from "../../jam/peer-manager.ts";
 import { SignalingClient, browserSignalingDeps } from "../../jam/signaling-client.ts";
 import { MidiInputManager } from "../../workstation/midi-input.ts";
 import { connectionLabel, fmtMs } from "../../jam/diagnostics.ts";
+import { serializeSmf } from "../../workstation/smf.ts";
+import { midiFileStore } from "../../midi-file-store.ts";
+import { PROJECT_SCHEMA_VERSION } from "../../workstation/model.ts";
 
 export const INSTRUMENTS = [
   { name: "Grand piano", bank: 0, program: 0 }, { name: "Electric piano", bank: 0, program: 4 }, { name: "Organ", bank: 0, program: 16 },
@@ -111,6 +114,8 @@ function Room({ session, roomId, invite: firstInvite }: { session: JamSession; r
       <button className="jam-panic" data-testid="jam-panic" onClick={() => session.panic()}>Panic (all notes off)</button>
       <MidiPicker session={session} />
     </div>
+    <MetronomePanel session={session} />
+    <TakePanel session={session} />
     <JamKeyboard session={session} />
     {host && <div className="jam-row jam-host">
       {invite ? <><input readOnly value={link} aria-label="Invite link" data-testid="jam-invite-link" onFocus={(e) => e.target.select()} /><span>Code <b data-testid="jam-invite-code">{invite.code}</b></span></> : <span>Invite hidden. Make a new one to share.</span>}
@@ -124,6 +129,41 @@ function Room({ session, roomId, invite: firstInvite }: { session: JamSession; r
     {diag && <ConnectionDetails session={session} />}
     {err && <p role="alert" className="jam-err">{err}</p>}
   </section>;
+}
+
+function MetronomePanel({ session }: { session: JamSession }) {
+  const t = session.snapshot?.transport; const host = session.isHost; const m = session.metronome;
+  const [bpm, setBpm] = useState(t?.bpm ?? 100); const [meter, setMeter] = useState(t?.beatsPerBar ?? 4); const [countIn, setCountIn] = useState(1); const [, tick] = useState(0);
+  useEffect(() => { if (t) { setBpm(t.bpm); setMeter(t.beatsPerBar); } }, [t?.revision]);
+  useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 100); return () => clearInterval(i); }, []);
+  const pos = m.position(performance.now());
+  const send = (running: boolean, b = bpm, bp = meter) => session.setTransport(running, b, bp, countIn);
+  return <div className="jam-row jam-metro" data-testid="jam-metronome" data-running={t?.running ? "1" : "0"} data-bpm={t?.bpm ?? ""} data-clicks={m.scheduled}>
+    <strong>Metronome</strong>
+    {host ? <>
+      <button data-testid="jam-metro-toggle" onClick={() => send(!t?.running)}>{t?.running ? "Stop" : "Start"}</button>
+      <label>Tempo <input type="number" min={30} max={300} value={bpm} data-testid="jam-metro-bpm" onChange={(e) => setBpm(Number(e.target.value))} onBlur={() => t?.running && bpm >= 30 && bpm <= 300 && send(true)} /></label>
+      <label>Beats <select value={meter} onChange={(e) => { const v = Number(e.target.value); setMeter(v); if (t?.running) send(true, bpm, v); }}>{[2, 3, 4, 5, 6, 7].map((n) => <option key={n}>{n}</option>)}</select></label>
+      <label>Count-in <select value={countIn} onChange={(e) => setCountIn(Number(e.target.value))}><option value={0}>None</option><option value={1}>1 bar</option><option value={2}>2 bars</option></select></label>
+    </> : <span>{t?.running ? `${t.bpm} BPM, ${t.beatsPerBar}/4` : "Off"} (the host controls it)</span>}
+    <span data-testid="jam-metro-pos" aria-live="off">{pos ? (pos.countIn ? `Count-in ${pos.beatInBar}` : `Bar ${pos.bar} · ${pos.beatInBar}`) : ""}</span>
+    <label><input type="checkbox" checked={m.enabled} onChange={(e) => { m.setEnabled(e.target.checked); tick((n) => n + 1); }} /> Hear clicks</label>
+  </div>;
+}
+
+function TakePanel({ session }: { session: JamSession }) {
+  const tk = session.take; const [, tick] = useState(0); const [msgTxt, setMsg] = useState("");
+  useEffect(() => { if (!tk.recording) return; const i = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(i); }, [tk.recording]);
+  const has = !tk.recording && tk.stopMs > 0;
+  const download = () => { const p = session.takeProject(); const blob = new Blob([serializeSmf(p) as BlobPart], { type: "audio/midi" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "live-jam-take.mid"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10_000); };
+  const openStudio = async () => { const p = session.takeProject(); await midiFileStore.putProject({ id: p.id, schemaVersion: PROJECT_SCHEMA_VERSION, savedAt: Date.now(), project: p }); setMsg("Saved. Open Studio to edit it or export WAV."); navigate("studio"); };
+  return <div className="jam-row jam-take" data-testid="jam-take" data-notes={tk.count} data-recording={tk.recording ? "1" : "0"}>
+    <strong>Take</strong>
+    {tk.recording ? <><span className="jam-rec">● Recording · {tk.count} notes</span><button data-testid="jam-take-stop" onClick={() => session.stopTake()}>Stop take</button></>
+      : <button data-testid="jam-take-start" onClick={() => session.startTake()}>Record take</button>}
+    {has && <><span>{tk.count} notes</span><button data-testid="jam-take-mid" onClick={download}>Download MIDI</button><button onClick={() => void openStudio()}>Open in Studio</button></>}
+    <small>Recorded only on this device. Everyone's playing is captured as their own track.</small>{msgTxt && <small>{msgTxt}</small>}
+  </div>;
 }
 
 function ConnectionDetails({ session }: { session: JamSession }) {

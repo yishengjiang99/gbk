@@ -17,6 +17,7 @@ export type PeerState = z.infer<typeof PeerState>;
 export const ClientFrame = z.discriminatedUnion("type", [
   z.object({ type: z.literal("auth"), v: z.literal(JAM_PROTOCOL_VERSION), ticket: z.string().min(16).max(128) }),
   z.object({ type: z.literal("ping"), t: z.number().finite() }),
+  z.object({ type: z.literal("transport"), running: z.boolean(), bpm: z.number().min(30).max(300), beatsPerBar: z.number().int().min(1).max(12), countInBars: z.number().int().min(0).max(2) }),
   z.object({ type: z.literal("state"), state: PeerState, instrumentRevision: gen.optional() }),
   z.object({
     type: z.literal("signal"), to: id, toGeneration: gen, epoch: gen, revision: gen,
@@ -28,7 +29,23 @@ export const ClientFrame = z.discriminatedUnion("type", [
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
 export interface ParticipantView { participantId: string; name: string; role: "host" | "member"; state: PeerState; generation: number; connected: boolean; instrumentRevision: number }
-export interface RoomSnapshot { roomId: string; epoch: number; serverEpoch: string; hostId: string; maxParticipants: number; locked: boolean; expiresAt: number; participants: ParticipantView[] }
+/** Shared metronome timeline. Beat b sounds at room time anchorRoomTime + (b - anchorBeat) * 60000 / bpm.
+ *  Beats below 0 are the count-in. Room time = the signaling server's performance.now() in ms. */
+export interface TransportState { revision: number; running: boolean; bpm: number; beatsPerBar: number; anchorBeat: number; anchorRoomTime: number }
+export const TRANSPORT_LEAD_MS = 400;
+/** Next transport after a host change at room time `now` (pure; used by the server and tests). */
+export function nextTransport(cur: TransportState, req: { running: boolean; bpm: number; beatsPerBar: number; countInBars: number }, now: number): TransportState {
+  const at = now + TRANSPORT_LEAD_MS;
+  if (!req.running) return { ...cur, revision: cur.revision + 1, running: false, bpm: req.bpm, beatsPerBar: req.beatsPerBar };
+  if (!cur.running) return { revision: cur.revision + 1, running: true, bpm: req.bpm, beatsPerBar: req.beatsPerBar, anchorBeat: -req.countInBars * req.beatsPerBar, anchorRoomTime: at };
+  // Tempo/meter change while running: re-anchor on the first old-tempo beat at or after the lead time, so beats
+  // already scheduled by clients stay valid and the beat count continues.
+  const beatMs = 60000 / cur.bpm; const b = Math.ceil(cur.anchorBeat + (at - cur.anchorRoomTime) / beatMs);
+  return { revision: cur.revision + 1, running: true, bpm: req.bpm, beatsPerBar: req.beatsPerBar, anchorBeat: b, anchorRoomTime: cur.anchorRoomTime + (b - cur.anchorBeat) * beatMs };
+}
+export const STOPPED_TRANSPORT: TransportState = { revision: 0, running: false, bpm: 100, beatsPerBar: 4, anchorBeat: 0, anchorRoomTime: 0 };
+
+export interface RoomSnapshot { roomId: string; epoch: number; serverEpoch: string; hostId: string; maxParticipants: number; locked: boolean; expiresAt: number; participants: ParticipantView[]; transport: TransportState }
 
 /** Server -> client. */
 export type ServerFrame =
@@ -40,7 +57,7 @@ export type ServerFrame =
   | { type: "kicked" } | { type: "ended"; reason: "host" | "expired" | "disabled" | "shutdown" }
   | { type: "error"; code: JamErrorCode; message: string };
 
-export type JamErrorCode = "BAD_FRAME" | "PROTOCOL_MISMATCH" | "AUTH_REQUIRED" | "AUTH_FAILED" | "AUTH_TIMEOUT" | "RATE_LIMITED" | "BAD_TARGET" | "STALE" | "REPLACED" | "NOT_MEMBER";
+export type JamErrorCode = "BAD_FRAME" | "PROTOCOL_MISMATCH" | "AUTH_REQUIRED" | "AUTH_FAILED" | "AUTH_TIMEOUT" | "RATE_LIMITED" | "BAD_TARGET" | "STALE" | "REPLACED" | "NOT_MEMBER" | "NOT_HOST";
 
 export type DecodeResult = { ok: true; frame: ClientFrame } | { ok: false; code: "BAD_FRAME" | "PROTOCOL_MISMATCH"; message: string };
 /** Size + JSON + schema validation for one inbound text frame. */

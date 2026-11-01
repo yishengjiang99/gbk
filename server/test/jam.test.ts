@@ -101,6 +101,26 @@ test("signaling: pre-auth frames rejected, bad origin refused, generation bump r
   } finally { await srv.app.close(); }
 });
 
+test("metronome: host sets a future-anchored transport, everyone gets it, members cannot", async () => {
+  const { srv, users } = await setup();
+  try {
+    const c = await call(srv.base, users[0], "POST", "/api/jam/rooms", {}); const room = c.body.snapshot.roomId;
+    assert.equal(c.body.snapshot.transport.running, false);
+    const j = await call(srv.base, users[1], "POST", `/api/jam/rooms/${room}/join`, { invite: c.body.invite.token });
+    const open = async (u: U, pid: string) => { const t = await call(srv.base, u, "POST", `/api/jam/rooms/${room}/ws-ticket`, { participantId: pid }); const w = rawWs(srv.base); await w.opened; w.send({ type: "auth", v: 1, ticket: t.body.ticket }); await w.wait((m) => m.type === "welcome"); return w; };
+    const h = await open(users[0], c.body.participantId), m = await open(users[1], j.body.participantId);
+    m.send({ type: "transport", running: true, bpm: 90, beatsPerBar: 3, countInBars: 1 });
+    assert.equal((await m.wait((x) => x.type === "error")).code, "NOT_HOST");
+    h.send({ type: "ping", t: 1 }); const pong = await h.wait((x) => x.type === "pong");
+    h.send({ type: "transport", running: true, bpm: 90, beatsPerBar: 3, countInBars: 1 });
+    const s = (await m.wait((x) => x.type === "snapshot" && x.snapshot.transport.running)).snapshot.transport;
+    assert.equal(s.bpm, 90); assert.equal(s.beatsPerBar, 3); assert.equal(s.anchorBeat, -3); assert.ok(s.anchorRoomTime > pong.serverTime);
+    h.send({ type: "transport", running: true, bpm: 500, beatsPerBar: 3, countInBars: 1 });
+    assert.equal((await h.wait((x) => x.type === "error")).code, "BAD_FRAME");
+    h.ws.close(); m.ws.close();
+  } finally { await srv.app.close(); }
+});
+
 test("agent WebSocket still upgrades alongside jam; unknown upgrade paths destroyed", async () => {
   const { srv, users } = await setup();
   try {

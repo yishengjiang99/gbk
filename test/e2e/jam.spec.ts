@@ -1,8 +1,10 @@
-// Independent browser contexts (separate cookies/guests), real WebRTC data channels on localhost (direct, no TURN),
+// Independent browser contexts (separate cookies/guests), real WebRTC data channels on localhost (direct; relay-only
+// through a local coturn with JAM_E2E_RELAY=1, see jam.config.ts),
 // notes checked through the receiving session's scheduler counters AND audio energy on that player's engine.
 import { test, expect, type Browser, type Page } from "@playwright/test";
 
-type Jam = { router: { noteOn(n: number, v: number, t: number): void; noteOff(n: number, t: number): void }; received: Map<string, number>; selfId: string; links: Map<string, string>; peerStats(pid: string): { link: { relay: boolean | null; eventsOrdered: boolean | null; eventsMaxRetransmits: number | null } | null; receive: unknown } };
+type Jam = { router: { noteOn(n: number, v: number, t: number): void; noteOff(n: number, t: number): void }; received: Map<string, number>; selfId: string; links: Map<string, string>; metronome: { lastBeat: { beat: number; roomMs: number } | null; scheduled: number }; clock: { roomToLocal(ms: number): number; uncertaintyMs: number }; take: { count: number };
+  takeProject(): { tracks: { name: string }[]; notes: { trackId: string; pitch: number; tick: number }[] }; peerStats(pid: string): { link: { relay: boolean | null; candidateType?: string | null; eventsOrdered: boolean | null; eventsMaxRetransmits: number | null } | null; receive: unknown } };
 declare global { interface Window { __gbkJam?: Jam; __gbkJamAudio?: { level(pid: string): number } } }
 
 const GUEST: Record<string, string> = { P1: "AmberFox", P2: "BlueOwl", P3: "CalmBear", P4: "DeepElk", P5: "EagerCat" };
@@ -62,6 +64,7 @@ test("two players: notes arrive over real data channels and sound on the receive
   await pages[0].waitForTimeout(2500);
   const s = await pages[0].evaluate(() => { const j = window.__gbkJam!; const pid = [...j.links.keys()][0]; return j.peerStats(pid); });
   expect(s.link?.eventsOrdered).toBe(false); expect(s.link?.eventsMaxRetransmits).toBe(0);
+  if (process.env.JAM_E2E_RELAY === "1") { expect(s.link?.relay).toBe(true); expect(s.link?.candidateType).toBe("relay"); }
   console.log("P1 view of P2:", JSON.stringify(s));
 });
 
@@ -76,4 +79,34 @@ test("four players, mixed instruments: everyone hears everyone", async ({ browse
   const p5 = await player(browser, "P5", link.replace(/^https?:\/\/[^/]+/, ""));
   await p5.getByTestId("jam-enter").click();
   await expect(p5.getByRole("alert")).toContainText("full");
+});
+
+test("shared metronome: host starts it, every client clicks at the same wall time; take records editable tracks", async ({ browser }) => {
+  const pages = await room(browser, 3);
+  const [host, m1, m2] = pages;
+  await expect(m1.getByTestId("jam-metro-toggle")).toHaveCount(0); // host-only controls
+  await host.getByTestId("jam-metro-bpm").fill("150");
+  await host.getByTestId("jam-metro-toggle").click();
+  for (const p of pages) await expect(p.getByTestId("jam-metronome")).toHaveAttribute("data-running", "1");
+  await host.waitForTimeout(2500);
+  // Each client maps its last scheduled beat to absolute wall time (timeOrigin + local perf ms) for comparison.
+  const wall = (p: Page) => p.evaluate(() => { const j = window.__gbkJam!; const b = j.metronome.lastBeat!; return { beat: b.beat, wall: performance.timeOrigin + j.clock.roomToLocal(b.roomMs), unc: j.clock.uncertaintyMs }; });
+  const beats = await Promise.all(pages.map(wall));
+  const ref = beats[0]; const beatMs = 60000 / 150;
+  for (const b of beats) { const w = b.wall + (ref.beat - b.beat) * beatMs; expect(Math.abs(w - ref.wall), `click skew (±${b.unc.toFixed(1)}ms clock)`).toBeLessThan(20); }
+  console.log("metronome wall-time skew ms:", beats.map((b) => (b.wall + (ref.beat - b.beat) * beatMs - ref.wall).toFixed(2)).join(", "));
+  const clickLevel = await m2.evaluate(async () => { let m = 0; for (let k = 0; k < 40; k++) { m = Math.max(m, window.__gbkJamAudio!.level("__click")); await new Promise((r) => setTimeout(r, 25)); } return m; });
+  expect(clickLevel).toBeGreaterThan(0.001);
+  // Take on the host while a member plays; the result is one editable track per player who played.
+  await host.getByTestId("jam-take-start").click();
+  for (const [n, p] of [[60, m1], [64, m2], [67, m1]] as const) { await p.evaluate((x) => window.__gbkJam!.router.noteOn(x, 100, performance.now()), n); await p.waitForTimeout(200); await p.evaluate((x) => window.__gbkJam!.router.noteOff(x, performance.now()), n); }
+  await expect.poll(() => host.evaluate(() => window.__gbkJam!.take.count)).toBe(3);
+  await host.getByTestId("jam-take-stop").click();
+  const proj = await host.evaluate(() => window.__gbkJam!.takeProject());
+  expect(proj.tracks.length).toBe(2); expect(proj.notes.map((n) => n.pitch).sort()).toEqual([60, 64, 67]);
+  const dl = host.waitForEvent("download"); await host.getByTestId("jam-take-mid").click(); expect((await dl).suggestedFilename()).toBe("live-jam-take.mid");
+  // Stop: clicks end everywhere, playing still works without it.
+  await host.getByTestId("jam-metro-toggle").click();
+  for (const p of pages) await expect(p.getByTestId("jam-metronome")).toHaveAttribute("data-running", "0");
+  await playAndCheck(pages, 1, 72);
 });
