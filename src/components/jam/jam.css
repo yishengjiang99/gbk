@@ -16,3 +16,4 @@
 .jam-key.white.down { background: #9cf; } .jam-key.black.down { background: #369; }
 .jam-diag table { border-collapse: collapse; font-size: .85rem; } .jam-diag td, .jam-diag th { border: 1px solid #333; padding: 4px 6px; }
 @media (max-width: 600px) { .jam-kb { height: 120px; } }
+.jam-rec { color: #e53935; font-weight: 600; }

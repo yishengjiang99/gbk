@@ -8,6 +8,8 @@ import { ReceiveScheduler, type SchedulerOptions } from "./receive-scheduler.ts"
 import type { JamAudioOut } from "./audio.ts";
 import type { LinkState, PeerLinkStats } from "./peer-manager.ts";
 import type { SignalingState } from "./signaling-client.ts";
+import { CLICK_PID, Metronome } from "./metronome.ts";
+import { TakeRecorder } from "./take.ts";
 
 export interface SignalingLike { state: SignalingState; start(): void; stop(): void; send(f: ClientFrame): void; onFrame: (f: ServerFrame) => void; onState: (s: SignalingState) => void; onClockSample: (s: { t0: number; ts: number; t3: number }) => void }
 export interface PeerCallbacks { onEvents(pid: string, bytes: Uint8Array): void; onControl(pid: string, m: ControlMessage): void; onLinkState(pid: string, s: LinkState): void; signal(f: Extract<ClientFrame, { type: "signal" }>): void; selfId(): string; selfGeneration(): number; epoch(): number }
@@ -30,15 +32,18 @@ export class JamSession {
   readonly instruments = new Map<string, Instrument>();
   readonly mix = new Map<string, { volume: number; muted: boolean }>();
   myInstrument: Instrument = { bank: 0, program: 0, name: "", revision: 0 };
+  readonly metronome: Metronome;
+  readonly take = new TakeRecorder();
   received = new Map<string, number>(); // note-ons received per peer (diagnostics/tests)
   private peers: PeerLinksLike; private stops: (() => void)[] = []; private listeners = new Set<() => void>(); private torn = false; private serverEpoch = "";
   constructor(private d: SessionDeps) {
     const me = d.participantId;
     this.router = new InputRouter({
       monitor: (e) => d.audio.post(me, null, e),
-      send: (e, red) => this.broadcast(e, red),
+      send: (e, red) => { this.take.add(me, e); this.broadcast(e, red); },
       localToRoomMs: (t) => this.clock.localToRoom(t), clockRevision: () => this.clock.revision, generation: () => this.generation, instrumentRevision: () => this.myInstrument.revision,
     });
+    this.metronome = new Metronome({ roomToLocal: (t) => this.clock.roomToLocal(t), localToRoom: (t) => this.clock.localToRoom(t), post: (t, e) => d.audio.post(CLICK_PID, t, e), clear: () => d.audio.clear(CLICK_PID), now: d.now });
     this.peers = d.makePeers({
       onEvents: (pid, b) => this.onEvents(pid, b), onControl: (pid, m) => this.onControl(pid, m), onLinkState: (pid, s) => this.onLink(pid, s),
       signal: (f) => d.signaling.send(f), selfId: () => me, selfGeneration: () => this.generation, epoch: () => this.snapshot?.epoch ?? 1,
@@ -52,9 +57,10 @@ export class JamSession {
   private setPhase(p: SessionPhase) { if (this.phase === "kicked" || this.phase === "ended" || this.phase === "left") return; this.phase = p; }
 
   start() {
-    this.d.audio.ensure(this.d.participantId);
+    this.d.audio.ensure(this.d.participantId); this.d.audio.ensure(CLICK_PID); void this.d.audio.setInstrument(CLICK_PID, 128, 0);
     this.d.signaling.start();
     this.stops.push(this.d.every(() => this.heartbeat(), 250));
+    this.stops.push(this.d.every(() => { if (this.clock.ready) this.metronome.tick(); }, 50));
     this.stops.push(this.d.every(() => { for (const r of this.receivers.values()) r.checkLease(); }, 100));
   }
   get selfId() { return this.d.participantId; }
@@ -77,7 +83,7 @@ export class JamSession {
     }
   }
   private applySnapshot(s: RoomSnapshot) {
-    this.snapshot = s;
+    this.snapshot = s; if (s.transport) this.metronome.setTransport(s.transport);
     const present = new Set(s.participants.map((p) => p.participantId));
     for (const pid of [...this.receivers.keys()]) if (!present.has(pid)) this.dropPeer(pid);
     for (const p of s.participants) if (p.participantId !== this.d.participantId) {
@@ -104,6 +110,7 @@ export class JamSession {
   private onEvents(pid: string, bytes: Uint8Array) {
     const r = this.receivers.get(pid); if (!r) return;
     const p = decodePacket(bytes); if (!p.ok) { r.stats.malformed++; return; }
+    for (const e of p.events) this.take.add(pid, e);
     r.receive(p.events);
     this.received.set(pid, r.stats.attacks);
   }
@@ -126,6 +133,16 @@ export class JamSession {
     for (const pid of this.receivers.keys()) this.peers.sendControl(pid, { t: "instrument", revision: this.myInstrument.revision, soundfont: "default", bank, program, name: this.myInstrument.name });
     this.emit();
   }
+  /** Host only (the server enforces it). Changes start at a future beat on every client. */
+  setTransport(running: boolean, bpm: number, beatsPerBar: number, countInBars: number) { this.d.signaling.send({ type: "transport", running, bpm, beatsPerBar, countInBars }); }
+  startTake() { this.take.start(this.clock.localToRoom(this.d.now()), this.snapshot?.transport ?? null); this.emit(); }
+  stopTake() { this.take.stop(this.clock.localToRoom(this.d.now())); this.emit(); }
+  takeProject() {
+    const names = new Map((this.snapshot?.participants ?? []).map((p) => [p.participantId, p.name]));
+    const players = new Map<string, { name: string; bank: number; program: number }>();
+    for (const [pid, name] of names) { const i = pid === this.selfId ? this.myInstrument : this.instruments.get(pid); players.set(pid, { name, bank: i?.bank ?? 0, program: i?.program ?? 0 }); }
+    return this.take.toProject(players);
+  }
   setMix(pid: string, volume: number, muted: boolean) { this.mix.set(pid, { volume, muted }); this.d.audio.setGain(pid, muted ? 0 : volume); this.emit(); }
   /** Local panic: my notes off everywhere, every engine here silenced. */
   panic() { this.router.panic(this.d.now()); this.d.audio.panic(); for (const r of this.receivers.values()) r.releaseAll(); }
@@ -135,7 +152,7 @@ export class JamSession {
   teardown() {
     if (this.torn) return; this.torn = true;
     for (const s of this.stops) s(); this.stops = [];
-    this.d.signaling.stop(); this.peers.closeAll(); this.d.audio.panic();
+    this.d.signaling.stop(); this.peers.closeAll(); this.d.audio.panic(); this.d.audio.remove(CLICK_PID);
     if (this.phase !== "kicked" && this.phase !== "ended") this.phase = "left";
     this.emit();
   }

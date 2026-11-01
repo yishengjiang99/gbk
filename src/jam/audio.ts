@@ -21,7 +21,7 @@ export interface JamAudioOut {
 }
 
 interface Strip { node: AudioWorkletNode; gain: GainNode; analyser: AnalyserNode; lastFrame: number; buf: Float32Array<ArrayBuffer> }
-export const MAX_ENGINES = 4;
+export const MAX_ENGINES = 5; // 4 players + the metronome
 
 export class WebJamAudio implements JamAudioOut {
   private ctx!: AudioContext; private url = ""; private strips = new Map<string, Strip>(); private map = new ClockDomainMap(15);

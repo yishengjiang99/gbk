@@ -96,3 +96,28 @@ quantum at each event's offset, so an early event lands on its exact frame (test
 apply at the start of the next quantum and are counted. When the queue is full, attacks are dropped and anything
 else is applied immediately. `livePanic` clears the queue and sends CC64/66 = 0, CC123 and CC120 on all channels.
 The SMF sequence path is unchanged.
+
+## Metronome
+
+The host sends `{type:"transport", running, bpm, beatsPerBar, countInBars}` over signaling. Only the host may change
+it; anyone else gets a `NOT_HOST` error. The server stores
+`TransportState {revision, running, bpm, beatsPerBar, anchorBeat, anchorRoomTime}` and broadcasts it in the room
+snapshot.
+
+- Beat `b` sounds at room time `anchorRoomTime + (b - anchorBeat) * 60000 / bpm`.
+- Beats below 0 are the count-in.
+- A start anchors 400 ms ahead.
+- A tempo or meter change re-anchors on the first old-tempo beat at least 400 ms ahead. That is past every client's
+  200 ms lookahead, so beats already scheduled stay valid and the beat count carries on.
+
+Each client converts beat times through its clock estimate and schedules clicks on a local `__click` engine
+(GM drum kit, wood blocks). "Hear clicks" mutes them locally. The metronome state lives in memory and resets when the
+server restarts.
+
+## Takes
+
+"Record take" is started and stopped explicitly, and records on this device only. It captures every player's
+note and CC events at their sender's room capture time, ignoring the redundant copies. Stopping builds a workstation
+project with one track per player and their instrument. If the metronome was running, it uses the metronome's tempo
+and bar grid; otherwise it uses 120 BPM starting from the take start. The project can be downloaded as MIDI
+(`serializeSmf`) or saved and opened in Studio, which handles editing and WAV export.

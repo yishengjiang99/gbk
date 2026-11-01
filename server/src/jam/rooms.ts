@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { PeerState, ParticipantView, RoomSnapshot } from "../../../shared/jam/signaling.ts";
+import { nextTransport, STOPPED_TRANSPORT, type PeerState, type ParticipantView, type RoomSnapshot, type TransportState } from "../../../shared/jam/signaling.ts";
 
 export interface JamLimits { maxParticipants: number; roomTtlSec: number; inviteTtlSec: number; codeTtlSec: number; maxRoomsPerIdentity: number }
 interface RoomRow { id: string; host_id: string; created_by: string; created_at: number; expires_at: number; ended_at: number | null; epoch: number; locked: number }
@@ -24,6 +24,8 @@ export class JamRooms {
   readonly db: DatabaseSync;
   readonly serverEpoch = randomBytes(6).toString("hex");
   private presence = new Map<string, Presence>();
+  /** Metronome timeline per room (ephemeral: a restart stops the metronome; the new serverEpoch tells clients). */
+  private transports = new Map<string, TransportState>();
   private tickets = new Map<string, { participantId: string; roomId: string; exp: number }>();
   constructor(file: string, private lim: JamLimits, private now: () => number = Date.now) {
     if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
@@ -141,7 +143,7 @@ export class JamRooms {
     const t = this.now();
     for (const m of this.active(roomId)) { this.presence.delete(m.participant_id); }
     this.db.prepare("UPDATE jam_members SET left_at = ?, left_reason = 'ended' WHERE room_id = ? AND left_at IS NULL").run(t, roomId);
-    this.db.prepare("UPDATE jam_rooms SET ended_at = ? WHERE id = ? AND ended_at IS NULL").run(t, roomId);
+    this.db.prepare("UPDATE jam_rooms SET ended_at = ? WHERE id = ? AND ended_at IS NULL").run(t, roomId); this.transports.delete(roomId);
     this.revokeAll(roomId);
   }
   /** TTL cleanup: returns the ids of rooms that just expired, with their member ids. */
@@ -180,6 +182,11 @@ export class JamRooms {
   snapshot(roomId: string): RoomSnapshot {
     const r = this.db.prepare("SELECT * FROM jam_rooms WHERE id = ?").get(roomId) as unknown as RoomRow;
     const participants: ParticipantView[] = this.active(roomId).map((m) => { const p = this.presenceOf(m.participant_id); return { participantId: m.participant_id, name: m.name, role: m.participant_id === r.host_id ? "host" : "member", state: p.state, generation: p.generation, connected: p.connected, instrumentRevision: p.instrumentRevision }; });
-    return { roomId, epoch: r.epoch, serverEpoch: this.serverEpoch, hostId: r.host_id, maxParticipants: this.lim.maxParticipants, locked: !!r.locked, expiresAt: r.expires_at, participants };
+    return { roomId, epoch: r.epoch, serverEpoch: this.serverEpoch, hostId: r.host_id, maxParticipants: this.lim.maxParticipants, locked: !!r.locked, expiresAt: r.expires_at, participants, transport: this.transports.get(roomId) ?? STOPPED_TRANSPORT };
+  }
+  /** Host-only metronome change; `nowRoomMs` is the server's performance.now(). */
+  setTransport(roomId: string, pid: string, req: { running: boolean; bpm: number; beatsPerBar: number; countInBars: number }, nowRoomMs: number): TransportState {
+    if (this.hostOf(roomId) !== pid) throw new JamError(403, "NOT_HOST", "only the host can do that");
+    const t = nextTransport(this.transports.get(roomId) ?? STOPPED_TRANSPORT, req, nowRoomMs); this.transports.set(roomId, t); return t;
   }
 }
