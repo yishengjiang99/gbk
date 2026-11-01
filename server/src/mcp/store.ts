@@ -28,7 +28,7 @@ export interface ArtifactRow {
 export interface OAuthClientRow { client_id: string; client_name: string; redirect_uris: string; grant_types: string; created_at: number; cimd: number }
 export interface OAuthCodeRow { code_hash: string; client_id: string; user: string; redirect_uri: string; scope: string; code_challenge: string; resource: string; expires_at: number }
 export interface OAuthConsentRow { id: string; csrf_hash: string; user: string; client_id: string; redirect_uri: string; scope: string; code_challenge: string; resource: string; state: string; expires_at: number }
-export interface OAuthTokenRow { token_hash: string; kind: "access" | "refresh"; client_id: string; user: string; scope: string; resource: string; expires_at: number; family: string; revoked: number }
+export interface OAuthTokenRow { token_hash: string; kind: "access" | "refresh"; client_id: string; user: string; scope: string; resource: string; expires_at: number; family: string; revoked: number; daily_render_limit?: number | null }
 
 export class McpStore {
   private db: DatabaseSync;
@@ -80,11 +80,20 @@ export class McpStore {
         revoked INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS mcp_tokens_family ON mcp_oauth_tokens(family);
     `);
+    McpStore.migrate(this.db);
     // Crash recovery: a job left "running" by a dead process can never complete; fail it explicitly so no
     // caller waits forever and no partial artifact is ever published for it (artifacts are only inserted
     // after full validation, in the same transaction as the completion update).
     this.db.prepare("UPDATE mcp_render_jobs SET status='failed', error=?, finished_at=? WHERE status='running'")
       .run(JSON.stringify({ code: "WORKER_INTERRUPTED", message: "render was interrupted by a server restart; submit a new render — retries are safe" }), Date.now());
+  }
+  /** Idempotent additive migrations (safe to run on every start). daily_render_limit lives on every token row of a
+   *  family (access + refresh rotate within one family); NULL means "use the global/per-account cap". */
+  static migrate(db: DatabaseSync) {
+    const cols = (t: string) => new Set((db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name));
+    if (!cols("mcp_oauth_tokens").has("daily_render_limit")) db.exec("ALTER TABLE mcp_oauth_tokens ADD COLUMN daily_render_limit INTEGER");
+    if (!cols("mcp_render_jobs").has("token_family")) db.exec("ALTER TABLE mcp_render_jobs ADD COLUMN token_family TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS mcp_jobs_family ON mcp_render_jobs(token_family, created_at)");
   }
   /** Distinct composition owners (used to migrate pre-sign-in users into accounts). */
   owners(): string[] { return (this.db.prepare("SELECT DISTINCT owner FROM mcp_compositions").all() as { owner: string }[]).map((r) => r.owner); }
@@ -233,10 +242,10 @@ export class McpStore {
   }
 
   // ---- render jobs + artifacts ---------------------------------------------------
-  createJob(o: { compositionId: string; owner: string; revision: number; config: unknown }): RenderJobRow {
+  createJob(o: { compositionId: string; owner: string; revision: number; config: unknown; tokenFamily?: string }): RenderJobRow {
     const id = newOpaqueId("job");
-    this.db.prepare("INSERT INTO mcp_render_jobs (id, composition_id, owner, revision, status, progress, config_json, created_at) VALUES (?,?,?,?,'queued',0,?,?)")
-      .run(id, o.compositionId, o.owner, o.revision, JSON.stringify(o.config), Date.now());
+    this.db.prepare("INSERT INTO mcp_render_jobs (id, composition_id, owner, revision, status, progress, config_json, created_at, token_family) VALUES (?,?,?,?,'queued',0,?,?,?)")
+      .run(id, o.compositionId, o.owner, o.revision, JSON.stringify(o.config), Date.now(), o.tokenFamily ?? null);
     return this.getJob(id, o.owner)!;
   }
   getJob(id: string, owner: string): RenderJobRow | null {
@@ -269,6 +278,10 @@ export class McpStore {
   }
   countJobsSince(owner: string, sinceMs: number) {
     return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_render_jobs WHERE owner=? AND created_at>?").get(owner, Date.now() - sinceMs) as { n: number }).n);
+  }
+  /** Renders started by any token of an OAuth family in the window. */
+  countFamilyJobsSince(family: string, sinceMs: number) {
+    return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_render_jobs WHERE token_family=? AND created_at>?").get(family, Date.now() - sinceMs) as { n: number }).n);
   }
   queueDepth() {
     return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_render_jobs WHERE status IN ('queued','running')").get() as { n: number }).n);
@@ -352,12 +365,29 @@ export class McpStore {
     return row;
   }
   putToken(t: Omit<OAuthTokenRow, "token_hash" | "revoked"> & { token: string }) {
-    this.db.prepare("INSERT INTO mcp_oauth_tokens (token_hash, kind, client_id, user, scope, resource, expires_at, family, revoked) VALUES (?,?,?,?,?,?,?,?,0)")
-      .run(hashToken(t.token), t.kind, t.client_id, t.user, t.scope, t.resource, t.expires_at, t.family);
+    // New tokens (refresh rotation) inherit the family's custom render limit.
+    this.db.prepare("INSERT INTO mcp_oauth_tokens (token_hash, kind, client_id, user, scope, resource, expires_at, family, revoked, daily_render_limit) VALUES (?,?,?,?,?,?,?,?,0,(SELECT MAX(daily_render_limit) FROM mcp_oauth_tokens WHERE family=?))")
+      .run(hashToken(t.token), t.kind, t.client_id, t.user, t.scope, t.resource, t.expires_at, t.family, t.family);
   }
   getToken(token: string): OAuthTokenRow | null {
     return (this.db.prepare("SELECT * FROM mcp_oauth_tokens WHERE token_hash=?").get(hashToken(token)) as unknown as OAuthTokenRow) ?? null;
   }
   revokeToken(token: string) { this.db.prepare("UPDATE mcp_oauth_tokens SET revoked=1 WHERE token_hash=?").run(hashToken(token)); }
+  /** Custom daily render limit for a token family, or null (use the global cap). */
+  familyRenderLimit(family: string): number | null {
+    const r = this.db.prepare("SELECT MAX(daily_render_limit) AS n FROM mcp_oauth_tokens WHERE family=?").get(family) as { n: number | null } | undefined;
+    return r?.n == null ? null : Number(r.n);
+  }
+  /** Admin: set (or clear with null) the daily render limit on every token of each family starting with `prefix`. */
+  setFamilyRenderLimit(prefix: string, limit: number | null) { return setFamilyRenderLimit(this.db, prefix, limit); }
   revokeFamily(family: string) { this.db.prepare("UPDATE mcp_oauth_tokens SET revoked=1 WHERE family=?").run(family); }
+}
+
+/** Set (or clear with null) daily_render_limit on every token row whose family starts with `prefix` (LIKE-escaped).
+ *  Standalone so the admin CLI can run it against the live DB without McpStore's startup crash recovery. */
+export function setFamilyRenderLimit(db: DatabaseSync, prefix: string, limit: number | null): { families: string[]; tokens: number } {
+  const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const families = (db.prepare("SELECT DISTINCT family FROM mcp_oauth_tokens WHERE family LIKE ? ESCAPE '\\'").all(like) as { family: string }[]).map((r) => r.family);
+  const r = db.prepare("UPDATE mcp_oauth_tokens SET daily_render_limit=? WHERE family LIKE ? ESCAPE '\\'").run(limit, like);
+  return { families, tokens: Number(r.changes) };
 }

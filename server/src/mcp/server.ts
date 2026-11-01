@@ -251,7 +251,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     if (a.soundFont) resolveRenderFont(cfg, a.soundFont);
     const serverJob = async (guest: boolean) => {
       if (!guest) await renders.refreshPro(user);
-      const job = renders.submitServer(user, { ...row, revision: rowRev }, snapshot, config, { guest, client: ctx.auth.client, ...(guest ? { perDay: cfg.mcp.guestRendersPerDay } : {}) });
+      const job = renders.submitServer(user, { ...row, revision: rowRev }, snapshot, config, { guest, client: ctx.auth.client, family: p!.family, ...(guest ? { perDay: cfg.mcp.guestRendersPerDay } : {}) });
       const final = await renders.waitFor(user, job.id, (a.waitSeconds ?? SERVER_RENDER_DEFAULT_WAIT_S) * 1000);
       return { ...renders.jobView(user, final), renderedOn: "server",
         ...(final.status === "completed" ? { message: "Rendered on the GBK server. Give the user the wav and midi artifact downloadUrl values exactly as returned; never paste audio bytes." }
@@ -265,7 +265,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
         browserRender: browserRenderFor(user, row.id, rowRev),
         message: "MIDI is ready (signed download URL in artifacts). Server rendering is off on this deployment, so audio renders only in a browser: call gbk_show_composition_ui to play/render it in the in-chat player, or give the user browserRender.studioUrl (read-only private link) to open GBK Studio and play or export WAV there. Never claim a WAV exists until one is listed." };
     }
-    const sub = a.headless && renders.serverRenderEnabled ? null : renders.submit(user, { ...row, revision: rowRev }, snapshot, config);
+    const sub = a.headless && renders.serverRenderEnabled ? null : renders.submit(user, { ...row, revision: rowRev }, snapshot, config, p!.family);
     if (!sub || "studioRequired" in sub) {
       if (renders.serverRenderEnabled) return serverJob(false);
       return { status: "studio_required", compositionId: a.compositionId, revision: rowRev, studioUrl: sub!.studioUrl,
@@ -391,7 +391,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
         if (!old) throw new McpError("NOT_FOUND", `revision ${a.revision} not found for this composition`);
         snapshot = JSON.parse(old.project_json); rev = a.revision;
       }
-      const s = renders.submitWidget(user, { ...got.row, revision: rev }, snapshot, { ...DEFAULT_RENDER_CONFIG }, p!.via === "guest" ? cfg.mcp.guestRendersPerDay : undefined);
+      const s = renders.submitWidget(user, { ...got.row, revision: rev }, snapshot, { ...DEFAULT_RENDER_CONFIG }, p!.via === "guest" ? cfg.mcp.guestRendersPerDay : undefined, p!.family);
       return { jobId: s.job.id, compositionId: a.compositionId, revision: rev, token: s.token, snapshotUrl: s.snapshotUrl, uploadUrl: s.uploadUrl, chunkBytes: s.chunkBytes, options: s.options };
     });
     return r;
