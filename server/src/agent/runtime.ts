@@ -15,6 +15,8 @@ import { BridgeCallError } from "../bridge/pending-calls.ts";
 import { TAB_GONE, PAUSED_TOO_LONG } from "../bridge/run-link.ts";
 
 /** What the runtime needs from a connected browser tab. */
+/** A browser tool call still running after this long is logged (evt tool_slow) while it runs. */
+const SLOW_TOOL_MS = 5000;
 export interface BrowserLink {
   readonly sessionId: string;
   readonly allowedTools: Set<string>;
@@ -179,6 +181,7 @@ export class AgentRuntime {
       for (const tc of toolCalls) emit({ type: "tool_intent", runId: o.runId, callId: tc.id, tool: tc.function.name, arguments: safeArgs(tc.function.arguments), task: taskFor(tc.function.name) });
       calls += toolCalls.length;
       let disconnected = false; let projectSwitched = false;
+      const callMs = new Map<string, number>(); // browser round-trip per call (logged with the step; slow ones at once)
       const outcomes = await dispatchToolCalls(toolCalls, this.catalog, link.allowedTools, async ({ callId, tool, args }) => {
         if (disconnected) return { ok: false, projectId: link.projectId, revision: link.revision, warnings: [], error: { code: "BROWSER_DISCONNECTED", message: "not executed: the browser tab disconnected" } };
         if (blocked.has(tool)) {
@@ -188,6 +191,7 @@ export class AgentRuntime {
             : "not executed: this run is a follow-up edit of the open project; generating a new arrangement would replace the piece. Make targeted edits instead" } };
         }
         const pol = this.catalog.get(tool)!.policy;
+        let slow: ReturnType<typeof setTimeout> | undefined; let tc0 = 0;
         try {
           // #163 #2: inject the conversation's current revision into every mutate-class call whose
           // schema supports baseRevision and where the model did not supply one. Mutations are
@@ -198,12 +202,15 @@ export class AgentRuntime {
           let callArgs = args;
           const schemaProps = (this.catalog.get(tool)?.inputSchema?.properties ?? {}) as Record<string, unknown>;
           if (pol.cls !== "read" && "baseRevision" in schemaProps && callArgs.baseRevision === undefined && conv.lastRevision != null) callArgs = { ...callArgs, baseRevision: conv.lastRevision };
+          tc0 = Date.now(); slow = setTimeout(() => log({ evt: "tool_slow", runId: o.runId, tool, ms: Date.now() - tc0 }), SLOW_TOOL_MS); slow.unref?.();
           const r = await link.callTool(o.runId, callId, tool, callArgs, { expectProjectId: pol.createsProject ? null : (conv.projectId ?? link.projectId), consent: { newProject: mode === "new" }, timeoutMs: pol.cls === "render" ? cfg.agent.renderTimeoutMs : cfg.agent.toolTimeoutMs });
+          clearTimeout(slow); callMs.set(callId, Date.now() - tc0);
           if (r.ok && pol.createsProject) conv.projectId = r.projectId;
           if (!r.ok && r.error?.code === "PROJECT_CHANGED") { conv.projectId = r.projectId || link.projectId; projectSwitched = true; }
           if (r.ok) { conv.lastRevision = r.revision; if (pol.cls !== "read") conv.recentEdits = [...conv.recentEdits.slice(-19), `${tool} -> rev ${r.revision}`]; }
           return r;
         } catch (e) {
+          clearTimeout(slow); if (tc0) callMs.set(callId, Date.now() - tc0);
           if (e instanceof BridgeCallError && e.code === "BROWSER_DISCONNECTED") disconnected = true;
           if (e instanceof BridgeCallError && e.code === "TOOL_TIMEOUT") link.emit({ type: "cancel_call", runId: o.runId, callId });
           throw e;
@@ -219,7 +226,7 @@ export class AgentRuntime {
         // tool message with the SAME id; content is data (wrapped so the model treats it as untrusted)
         conv.messages.push({ role: "tool", tool_call_id: oc.callId, content: compactToolResult({ untrustedData: true, ...oc.result }, cfg.agent.maxToolResultChars) });
       }
-      log({ evt: "step", runId: o.runId, step: steps, calls: toolCalls.map((t) => t.function.name), ok: outcomes.map((x) => x.result.ok) });
+      log({ evt: "step", runId: o.runId, step: steps, calls: toolCalls.map((t) => t.function.name), ok: outcomes.map((x) => x.result.ok), ms: outcomes.map((x) => callMs.get(x.callId) ?? null) });
       try { o.onCheckpoint?.(); } catch { /* checkpointing never fails a run */ }
       if (projectSwitched && !disconnected) conv.messages.push({ role: "user", content: "[server note] The open project changed during this run. Re-read the currently open project and continue the task there." });
       if (disconnected) {

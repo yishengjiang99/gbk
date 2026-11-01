@@ -143,10 +143,12 @@ export class BridgeClient {
         const known = this.calls.get(m.callId);
         if (known) { if (known.result) this.send({ ...known.result, sessionId: this.sessionId }); return; } // replay after reconnect
         this.calls.set(m.callId, { runId: m.runId });
-        this.busy++; this.lastSeen = Date.now();
+        this.busy++; this.lastSeen = Date.now(); const t0 = Date.now();
         // Executes against this page's session; the result goes to whichever socket is live when it finishes.
         const result = await this.bridge.execute({ ...m, sessionId: this.sessionId }, this.sessionId, (progress, detail) => this.send({ type: "tool_progress", sessionId: this.sessionId, runId: m.runId, callId: m.callId, progress, detail }));
         this.busy--; this.lastSeen = Date.now();
+        // Slow non-render tool (e.g. create_project stuck on storage): report where the time went.
+        if (Date.now() - t0 > 5000 && m.tool !== "gbk_render_wav") reportError(new Error("slow tool"), { where: "tool.slow", tool: m.tool, ms: Date.now() - t0 });
         const msg = { type: "tool_result" as const, sessionId: this.sessionId, runId: m.runId, callId: m.callId, result };
         const entry = this.calls.get(m.callId); if (entry) entry.result = msg; // kept for a replay if this send is lost
         this.send(msg);

@@ -104,3 +104,21 @@ test("iphone resume: gbkStudio.flushSave() writes the project to IndexedDB befor
   expect(await page.evaluate(() => { window.dispatchEvent(new Event("pagehide")); return new Promise((r) => setTimeout(r, 300)); }).then(() => stored(B))).toBe(true); // well inside the 800 ms debounce
   await page.evaluate((names) => new Promise<void>((ok) => { const r = indexedDB.open("gbk-midi"); r.onsuccess = () => { const s = r.result.transaction("projects", "readwrite").objectStore("projects"); const q = s.getAll(); q.onsuccess = () => { for (const x of q.result) if (names.includes(x.project?.name)) s.delete(x.id); ok(); }; }; }), [A, B]); // clean test data
 });
+
+// Remix -> "Creating project": gbk_create_project checkpoints the open fork to IndexedDB first. On iOS Safari that write
+// can stall for tens of seconds; the new project must never wait more than the checkpoint budget for it.
+test("iphone resume: create_project over a remix stays fast, even when the IndexedDB checkpoint stalls", async ({ page }) => {
+  await page.goto("/studio"); await page.waitForFunction(() => !!(window as any).__gbkWorkstation);
+  const create = (name: string) => page.evaluate(async (n) => { const c = (window as any).__gbkWorkstation;
+    await c.createProject({ name: `${n} fork`, owner: "user", replaceCurrent: true });
+    c.edit([{ op: "addTrack", name: "Lead", channel: 0, id: "t_l", program: 0 }, { op: "addNotes", notes: Array.from({ length: 400 }, (_, i) => ({ trackId: "t_l", channel: 0, tick: i * 120, duration: 100, pitch: 60 + (i % 12), velocity: 90 })) }], { label: "seed" });
+    const t0 = performance.now(); const r = await c.createProject({ name: n, owner: "agent" }); return { ms: performance.now() - t0, checkpointed: r.checkpointed }; }, name);
+  const ok = await create(`Fast ${Date.now()}`);
+  console.log(`create_project with a healthy IndexedDB: ${Math.round(ok.ms)} ms`);
+  expect(ok.checkpointed).toBe(true); expect(ok.ms).toBeLessThan(1000);
+  await page.evaluate(() => { const put = IDBObjectStore.prototype.put; (window as any).__realPut = put; IDBObjectStore.prototype.put = function () { return { set onsuccess(_f: unknown) {}, set onerror(_f: unknown) {} } as unknown as IDBRequest; }; });
+  const stalled = await create(`Stalled ${Date.now()}`);
+  console.log(`create_project with a stalled IndexedDB: ${Math.round(stalled.ms)} ms`);
+  expect(stalled.checkpointed).toBe(false); expect(stalled.ms).toBeLessThan(2500);
+  await page.evaluate(() => { IDBObjectStore.prototype.put = (window as any).__realPut; });
+});
