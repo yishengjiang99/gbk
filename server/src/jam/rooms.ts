@@ -8,7 +8,7 @@ import { dirname } from "node:path";
 import { nextTransport, STOPPED_TRANSPORT, type PeerState, type ParticipantView, type RoomSnapshot, type TransportState } from "../../../shared/jam/signaling.ts";
 
 export interface JamLimits { maxParticipants: number; roomTtlSec: number; inviteTtlSec: number; codeTtlSec: number; maxRoomsPerIdentity: number }
-interface RoomRow { id: string; host_id: string; created_by: string; created_at: number; expires_at: number; ended_at: number | null; epoch: number; locked: number }
+interface RoomRow { id: string; host_id: string; created_by: string; created_at: number; expires_at: number; ended_at: number | null; epoch: number; locked: number; open: number }
 interface MemberRow { participant_id: string; room_id: string; account: string; name: string; joined_at: number; left_at: number | null }
 export interface Presence { generation: number; state: PeerState; instrumentRevision: number; connected: boolean; disconnectedAt: number }
 
@@ -39,6 +39,7 @@ export class JamRooms {
       CREATE TABLE IF NOT EXISTS jam_members (participant_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, account TEXT NOT NULL, name TEXT NOT NULL,
         joined_at INTEGER NOT NULL, left_at INTEGER, left_reason TEXT);
       CREATE INDEX IF NOT EXISTS jam_members_room ON jam_members(room_id, left_at);`);
+    if (!(this.db.prepare("PRAGMA table_info(jam_rooms)").all() as { name: string }[]).some((c) => c.name === "open")) this.db.exec("ALTER TABLE jam_rooms ADD COLUMN open INTEGER NOT NULL DEFAULT 0");
   }
   close() { try { this.db.close(); } catch { /* closed */ } }
   private tx<T>(f: () => T): T { this.db.exec("BEGIN IMMEDIATE"); try { const r = f(); this.db.exec("COMMIT"); return r; } catch (e) { this.db.exec("ROLLBACK"); throw e; } }
@@ -97,6 +98,20 @@ export class JamRooms {
       return { participantId: pid, snapshot: this.snapshot(roomId) };
     });
   }
+  /** Join any open, unlocked, live room with a free slot (fullest first, so players meet). Atomic like join(). */
+  joinRandom(account: string, name: string) {
+    return this.tx(() => {
+      const t = this.now();
+      const r = this.db.prepare(`SELECT r.id FROM jam_rooms r WHERE r.open = 1 AND r.locked = 0 AND r.ended_at IS NULL AND r.expires_at > ?
+          AND NOT EXISTS (SELECT 1 FROM jam_members m WHERE m.room_id = r.id AND m.left_at IS NULL AND m.account = ?)
+          AND (SELECT COUNT(*) FROM jam_members m WHERE m.room_id = r.id AND m.left_at IS NULL) < ?
+        ORDER BY (SELECT COUNT(*) FROM jam_members m WHERE m.room_id = r.id AND m.left_at IS NULL) DESC, random() LIMIT 1`).get(t, account, this.lim.maxParticipants) as { id: string } | undefined;
+      if (!r) throw new JamError(404, "NO_OPEN_ROOM", "no open room right now");
+      const pid = `p${randomBytes(8).toString("hex")}`;
+      this.db.prepare("INSERT INTO jam_members (participant_id, room_id, account, name, joined_at) VALUES (?, ?, ?, ?, ?)").run(pid, r.id, account, name, t);
+      return { participantId: pid, snapshot: this.snapshot(r.id) };
+    });
+  }
   /** Rooms whose host has been disconnected for at least graceMs. */
   absentHosts(graceMs: number) {
     const t = this.now(); const out: string[] = [];
@@ -109,6 +124,7 @@ export class JamRooms {
   rotateInvites(roomId: string, account: string, pid: string) { this.requireHost(roomId, account, pid); return this.tx(() => { this.revokeAll(roomId); return this.mintInvites(roomId); }); }
   revokeInvites(roomId: string, account: string, pid: string) { this.requireHost(roomId, account, pid); this.revokeAll(roomId); }
   private revokeAll(roomId: string) { this.db.prepare("UPDATE jam_invites SET revoked = 1 WHERE room_id = ?").run(roomId); }
+  setOpen(roomId: string, account: string, pid: string, open: boolean) { this.requireHost(roomId, account, pid); this.db.prepare("UPDATE jam_rooms SET open = ? WHERE id = ?").run(open ? 1 : 0, roomId); }
   setLocked(roomId: string, account: string, pid: string, locked: boolean) { this.requireHost(roomId, account, pid); this.db.prepare("UPDATE jam_rooms SET locked = ? WHERE id = ?").run(locked ? 1 : 0, roomId); }
 
   /** Removes a participant. Returns true if the room ended (no one left). */
@@ -182,7 +198,7 @@ export class JamRooms {
   snapshot(roomId: string): RoomSnapshot {
     const r = this.db.prepare("SELECT * FROM jam_rooms WHERE id = ?").get(roomId) as unknown as RoomRow;
     const participants: ParticipantView[] = this.active(roomId).map((m) => { const p = this.presenceOf(m.participant_id); return { participantId: m.participant_id, name: m.name, role: m.participant_id === r.host_id ? "host" : "member", state: p.state, generation: p.generation, connected: p.connected, instrumentRevision: p.instrumentRevision }; });
-    return { roomId, epoch: r.epoch, serverEpoch: this.serverEpoch, hostId: r.host_id, maxParticipants: this.lim.maxParticipants, locked: !!r.locked, expiresAt: r.expires_at, participants, transport: this.transports.get(roomId) ?? STOPPED_TRANSPORT };
+    return { roomId, epoch: r.epoch, serverEpoch: this.serverEpoch, hostId: r.host_id, maxParticipants: this.lim.maxParticipants, locked: !!r.locked, open: !!r.open, expiresAt: r.expires_at, participants, transport: this.transports.get(roomId) ?? STOPPED_TRANSPORT };
   }
   /** Host-only metronome change; `nowRoomMs` is the server's performance.now(). */
   setTransport(roomId: string, pid: string, req: { running: boolean; bpm: number; beatsPerBar: number; countInBars: number }, nowRoomMs: number): TransportState {

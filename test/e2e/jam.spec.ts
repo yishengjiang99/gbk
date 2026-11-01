@@ -3,7 +3,7 @@
 // notes checked through the receiving session's scheduler counters AND audio energy on that player's engine.
 import { test, expect, type Browser, type Page } from "@playwright/test";
 
-type Jam = { router: { noteOn(n: number, v: number, t: number): void; noteOff(n: number, t: number): void }; received: Map<string, number>; selfId: string; links: Map<string, string>; metronome: { lastBeat: { beat: number; roomMs: number } | null; scheduled: number }; clock: { roomToLocal(ms: number): number; uncertaintyMs: number }; take: { count: number };
+type Jam = { snapshot?: { roomId: string } | null; router: { noteOn(n: number, v: number, t: number): void; noteOff(n: number, t: number): void }; received: Map<string, number>; selfId: string; links: Map<string, string>; metronome: { lastBeat: { beat: number; roomMs: number } | null; scheduled: number }; clock: { roomToLocal(ms: number): number; uncertaintyMs: number }; take: { count: number };
   takeProject(): { tracks: { name: string }[]; notes: { trackId: string; pitch: number; tick: number }[] }; peerStats(pid: string): { link: { relay: boolean | null; candidateType?: string | null; eventsOrdered: boolean | null; eventsMaxRetransmits: number | null } | null; receive: unknown } };
 declare global { interface Window { __gbkJam?: Jam; __gbkJamAudio?: { level(pid: string): number } } }
 
@@ -23,18 +23,18 @@ async function player(browser: Browser, name: string, url: string, guest = false
 }
 const selfId = (p: Page) => p.evaluate(() => window.__gbkJam!.selfId);
 
-async function room(browser: Browser, n: number, guestHost = false) {
-  const host = await player(browser, "P1", "/jam", guestHost);
+/** guestJoiner: P2 opens the invite link signed out, does only the guest step, and lands in the room (no lobby click). */
+async function room(browser: Browser, n: number, guestJoiner = false) {
+  const host = await player(browser, "P1", "/jam");
   await host.getByTestId("jam-create").click();
-  await host.getByTestId("jam-enter").click();
   await expect(host.getByTestId("jam-room")).toBeVisible();
   const link = await host.getByTestId("jam-invite-link").inputValue();
   const code = await host.getByTestId("jam-invite-code").textContent();
   expect(link).toContain("#i="); expect(code).toMatch(/^[A-Z0-9]{8}$/);
   const pages = [host];
   for (let i = 2; i <= n; i++) {
-    const p = await player(browser, `P${i}`, link.replace(/^https?:\/\/[^/]+/, ""));
-    await p.getByTestId("jam-enter").click(); await expect(p.getByTestId("jam-room")).toBeVisible(); pages.push(p);
+    const p = await player(browser, `P${i}`, link.replace(/^https?:\/\/[^/]+/, ""), guestJoiner && i === 2);
+    await expect(p.getByTestId("jam-room")).toBeVisible(); pages.push(p);
   }
   // every player sees n-1 peer strips and every link open
   for (const p of pages) {
@@ -77,7 +77,6 @@ test("four players, mixed instruments: everyone hears everyone", async ({ browse
   // a fifth player is refused
   const link = await pages[0].getByTestId("jam-invite-link").inputValue();
   const p5 = await player(browser, "P5", link.replace(/^https?:\/\/[^/]+/, ""));
-  await p5.getByTestId("jam-enter").click();
   await expect(p5.getByRole("alert")).toContainText("full");
 });
 
@@ -109,4 +108,27 @@ test("shared metronome: host starts it, every client clicks at the same wall tim
   await host.getByTestId("jam-metro-toggle").click();
   for (const p of pages) await expect(p.getByTestId("jam-metronome")).toHaveAttribute("data-running", "0");
   await playAndCheck(pages, 1, 72);
+});
+
+test("code link and random open room go straight in; private rooms aren't matched", async ({ browser }) => {
+  const host = await player(browser, "P5", "/jam"); // P1 already hosts rooms from earlier tests (3-room limit)
+  await host.getByTestId("jam-create").click(); await expect(host.getByTestId("jam-room")).toBeVisible();
+  const code = (await host.getByTestId("jam-invite-code").textContent())!;
+  // /jam?code=XXXX joins without touching the lobby
+  const byCode = await player(browser, "P2", `/jam?code=${code}`);
+  await expect(byCode.getByTestId("jam-room")).toBeVisible(); await expect(host.getByTestId("jam-strip-peer")).toHaveCount(1);
+  // Private by default: random finds nothing and offers an open room
+  const r1 = await player(browser, "P3", "/jam");
+  await r1.getByTestId("jam-random").click(); await expect(r1.getByTestId("jam-no-open")).toBeVisible();
+  // Host opens it; random now joins it
+  await host.getByTestId("jam-open").click(); await expect(host.getByTestId("jam-open")).toBeChecked();
+  await r1.getByTestId("jam-random").click(); await expect(r1.getByTestId("jam-room")).toBeVisible();
+  await expect(host.getByTestId("jam-strip-peer")).toHaveCount(2);
+  expect(await r1.evaluate(() => window.__gbkJam!.snapshot?.roomId)).toBe(await host.evaluate(() => window.__gbkJam!.snapshot?.roomId));
+  // "Create an open room" path from the empty state
+  await host.getByTestId("jam-open").click(); await expect(host.getByTestId("jam-open")).not.toBeChecked();
+  const r2 = await player(browser, "P4", "/jam");
+  await r2.getByTestId("jam-random").click(); await r2.getByTestId("jam-create-open").click();
+  await expect(r2.getByTestId("jam-room")).toBeVisible(); await expect(r2.getByTestId("jam-open")).toBeChecked();
+  for (const p of [host, r2]) { p.on("dialog", (d) => d.accept()); await p.getByRole("button", { name: "End room" }).click(); }
 });

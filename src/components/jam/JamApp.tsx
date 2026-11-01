@@ -18,7 +18,7 @@ export const INSTRUMENTS = [
   { name: "Nylon guitar", bank: 0, program: 24 }, { name: "Electric bass", bank: 0, program: 33 }, { name: "Strings", bank: 0, program: 48 },
   { name: "Trumpet", bank: 0, program: 56 }, { name: "Synth lead", bank: 0, program: 80 }, { name: "Warm pad", bank: 0, program: 89 }, { name: "Drum kit", bank: 128, program: 0 },
 ];
-const ERR: Record<string, string> = { ROOM_FULL: "That room is full (4 players max).", INVITE_INVALID: "That invite has expired or was revoked. Ask the host for a new one.", ROOM_LOCKED: "The host locked this room.", NOT_FOUND: "That room no longer exists.", RATE_LIMITED: "Too many tries. Wait a minute and try again.", UNAUTHENTICATED: "Sign in or continue as a guest first." };
+const ERR: Record<string, string> = { NO_OPEN_ROOM: "No open rooms right now.", ROOM_FULL: "That room is full (4 players max).", INVITE_INVALID: "That invite has expired or was revoked. Ask the host for a new one.", ROOM_LOCKED: "The host locked this room.", NOT_FOUND: "That room no longer exists.", RATE_LIMITED: "Too many tries. Wait a minute and try again.", UNAUTHENTICATED: "Sign in or continue as a guest first." };
 const msg = (e: unknown) => e instanceof JamApiError ? (ERR[e.code] ?? e.message) : (e as Error).message;
 const storeKey = (roomId: string) => `gbk.jam.${roomId}`;
 interface Stored { participantId: string; invite?: Invite }
@@ -42,18 +42,30 @@ function GuestGate({ onDone }: { onDone: () => void }) {
     <a href={appUrl("studio")}>Sign in instead</a>{err && <p role="alert" className="jam-err">{err}</p>}</section>;
 }
 
+const codeFromUrl = () => new URLSearchParams(location.search).get("code")?.trim() ?? "";
 function Lobby() {
-  const [code, setCode] = useState(""); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
-  const create = async () => { setBusy(true); setErr(""); try { const r = await jamApi.create(); sessionStorage.setItem(storeKey(r.snapshot.roomId), JSON.stringify({ participantId: r.participantId, invite: r.invite })); navigate(`jam/${r.snapshot.roomId}`); } catch (e) { setErr(msg(e)); } finally { setBusy(false); } };
-  const join = async () => { setBusy(true); setErr(""); try { const r = await jamApi.join(null, code); sessionStorage.setItem(storeKey(r.snapshot.roomId), JSON.stringify({ participantId: r.participantId })); navigate(`jam/${r.snapshot.roomId}`); } catch (e) { setErr(msg(e)); } finally { setBusy(false); } };
+  const [code, setCode] = useState(codeFromUrl); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false); const [noOpen, setNoOpen] = useState(false);
+  const go = async (f: () => Promise<{ participantId: string; snapshot: { roomId: string }; invite?: Invite }>, after?: (roomId: string, pid: string) => Promise<unknown>) => {
+    setBusy(true); setErr(""); setNoOpen(false);
+    try { const r = await f(); await after?.(r.snapshot.roomId, r.participantId); sessionStorage.setItem(storeKey(r.snapshot.roomId), JSON.stringify({ participantId: r.participantId, invite: r.invite })); navigate(`jam/${r.snapshot.roomId}`); }
+    catch (e) { if (e instanceof JamApiError && e.code === "NO_OPEN_ROOM") setNoOpen(true); else setErr(msg(e)); } finally { setBusy(false); }
+  };
+  const create = () => go(() => jamApi.create());
+  const join = (c = code) => go(() => jamApi.join(null, c));
+  const random = () => go(() => jamApi.random());
+  const createOpen = () => go(() => jamApi.create(), (roomId, pid) => jamApi.setOpen(roomId, pid, true));
+  const auto = useRef(false);
+  useEffect(() => { const c = codeFromUrl(); if (c && !auto.current) { auto.current = true; history.replaceState(null, "", location.pathname); void join(c); } }, []); // /jam?code=XXXX goes straight in
   return <section className="jam-card">
     <button data-testid="jam-create" disabled={busy} onClick={create}>Create a room</button>
-    <div className="jam-row"><input data-testid="jam-code" placeholder="Room code" value={code} onChange={(e) => setCode(e.target.value)} aria-label="Room code" /><button data-testid="jam-join-code" disabled={busy || code.trim().length < 6} onClick={join}>Join</button></div>
+    <div className="jam-row"><input data-testid="jam-code" placeholder="Room code" value={code} onChange={(e) => setCode(e.target.value)} aria-label="Room code" /><button data-testid="jam-join-code" disabled={busy || code.trim().length < 6} onClick={() => join()}>Join</button></div>
+    <button data-testid="jam-random" disabled={busy} onClick={random}>Join random open room</button>
+    {noOpen && <p data-testid="jam-no-open">No open rooms right now. <button data-testid="jam-create-open" onClick={createOpen}>Create an open room</button></p>}
     {err && <p role="alert" className="jam-err">{err}</p>}
   </section>;
 }
 
-/** Resolves membership (stored participant, or redeem the #i= invite after a click), then starts the session on a user gesture. */
+/** Resolves membership (stored participant, or redeem the #i= invite) and goes straight into the room. Sound unlocks on the first tap if the browser needs a gesture. */
 function RoomGate({ roomId }: { roomId: string }) {
   const [stored, setStored] = useState<Stored | null>(() => loadStored(roomId)); const [err, setErr] = useState(""); const [session, setSession] = useState<JamSession | null>(null);
   const audio = useMemo(() => new WebJamAudio(), []);
@@ -72,16 +84,20 @@ function RoomGate({ roomId }: { roomId: string }) {
       (window as unknown as { __gbkJam?: JamSession; __gbkJamAudio?: WebJamAudio }).__gbkJam = sess; (window as unknown as { __gbkJamAudio?: WebJamAudio }).__gbkJamAudio = audio; // read-only hooks for diagnostics and e2e
     } catch (e) { if (e instanceof JamApiError && e.status === 404) { sessionStorage.removeItem(storeKey(roomId)); setStored(null); } setErr(msg(e)); }
   }, [roomId, stored, audio]);
+  const [tried, setTried] = useState(false);
+  // Deep link or fresh create: no extra click. The timer makes StrictMode's mount/unmount/mount run this once.
+  useEffect(() => { if (tried || session) return; const t = setTimeout(() => { setTried(true); void start(); }, 0); return () => clearTimeout(t); }, [tried, session, start]);
   useEffect(() => () => session?.teardown(), [session]);
   useEffect(() => () => audio.close(), [audio]);
-  if (session) return <Room session={session} roomId={roomId} invite={stored?.invite} />;
-  return <section className="jam-card"><p>{stored ? "Ready to rejoin this room." : "You're invited to a Live Jam room."} Sound starts when you press the button.</p>
-    <button data-testid="jam-enter" onClick={start}>{stored ? "Enter room" : "Join room"}</button>{err && <p role="alert" className="jam-err">{err}</p>}</section>;
+  if (session) return <Room session={session} roomId={roomId} invite={stored?.invite} audio={audio} />;
+  if (!err) return <section className="jam-card"><p data-testid="jam-joining">Joining the room…</p></section>;
+  return <section className="jam-card"><p role="alert" className="jam-err">{err}</p>
+    {stored && <button data-testid="jam-enter" onClick={start}>Try again</button>}<button onClick={() => navigate("jam")}>Back to Live Jam</button></section>;
 }
 
 function useSession(s: JamSession) { const [, set] = useState(0); useEffect(() => s.subscribe(() => set((n) => n + 1)), [s]); return s; }
 
-function Room({ session, roomId, invite: firstInvite }: { session: JamSession; roomId: string; invite?: Invite }) {
+function Room({ session, roomId, invite: firstInvite, audio }: { session: JamSession; roomId: string; invite?: Invite; audio?: WebJamAudio }) {
   useSession(session);
   const [invite, setInvite] = useState(firstInvite); const [err, setErr] = useState(""); const [diag, setDiag] = useState(false);
   const snap = session.snapshot; const me = session.selfId; const host = session.isHost;
@@ -90,6 +106,7 @@ function Room({ session, roomId, invite: firstInvite }: { session: JamSession; r
   if (session.phase === "kicked" || session.phase === "ended" || session.phase === "left")
     return <section className="jam-card"><p data-testid="jam-over">{session.phase === "kicked" ? "The host removed you from the room." : session.phase === "ended" ? "This room has ended." : "You left the room."}</p><button onClick={() => navigate("jam")}>Back to Live Jam</button></section>;
   return <section className="jam-room" data-testid="jam-room" data-phase={session.phase}>
+    <SoundBanner audio={audio} />
     {session.phase === "reconnecting" && <p className="jam-banner">Reconnecting…</p>}
     {session.phase === "suspended" && <p className="jam-banner">Lost the connection to the room. <button onClick={() => location.reload()}>Retry</button></p>}
     <p className="jam-note">You hear yourself right away. Each other player arrives with their own small delay.</p>
@@ -121,6 +138,7 @@ function Room({ session, roomId, invite: firstInvite }: { session: JamSession; r
       {invite ? <><input readOnly value={link} aria-label="Invite link" data-testid="jam-invite-link" onFocus={(e) => e.target.select()} /><span>Code <b data-testid="jam-invite-code">{invite.code}</b></span></> : <span>Invite hidden. Make a new one to share.</span>}
       <button onClick={act(async () => setInvite((await jamApi.rotate(roomId, me)).invite))}>New invite</button>
       <button onClick={act(async () => { await jamApi.revoke(roomId, me); setInvite(undefined); })}>Revoke invite</button>
+      <label><input type="checkbox" data-testid="jam-open" checked={!!snap?.open} onChange={act(() => jamApi.setOpen(roomId, me, !snap?.open))} /> Open to anyone</label>
       <button onClick={act(() => jamApi.lock(roomId, me, !snap?.locked))}>{snap?.locked ? "Unlock room" : "Lock room"}</button>
       <button onClick={act(() => jamApi.end(roomId, me))}>End room</button>
     </div>}
@@ -129,6 +147,12 @@ function Room({ session, roomId, invite: firstInvite }: { session: JamSession; r
     {diag && <ConnectionDetails session={session} />}
     {err && <p role="alert" className="jam-err">{err}</p>}
   </section>;
+}
+
+function SoundBanner({ audio }: { audio?: WebJamAudio }) {
+  const [, tick] = useState(0); useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t); }, []);
+  if (!audio?.suspended) return null;
+  return <p className="jam-banner" data-testid="jam-sound-off">Tap anywhere to turn on sound.</p>;
 }
 
 function MetronomePanel({ session }: { session: JamSession }) {

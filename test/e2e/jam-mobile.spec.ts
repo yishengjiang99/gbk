@@ -4,7 +4,7 @@ import { test, expect } from "@playwright/test";
 test("iPhone: room page scrolls, keyboard stays on screen and plays", async ({ page, context }) => {
   const csrf = (await (await context.request.get("/api/session")).json()).csrf as string;
   expect((await context.request.post("/api/login", { headers: { origin: "http://127.0.0.1:5211", "x-gbk-csrf": csrf }, data: { code: "jam-1" } })).ok()).toBe(true);
-  await page.goto("/jam"); await page.getByTestId("jam-create").tap(); await page.getByTestId("jam-enter").tap();
+  await page.goto("/jam"); await page.getByTestId("jam-create").tap(); await page.getByTestId("jam-room").waitFor();
   const kb = page.getByTestId("jam-keyboard");
   await expect(kb).toBeInViewport({ ratio: 0.9 });
   const scroll = await page.evaluate(() => { const before = document.scrollingElement!.scrollHeight - innerHeight; window.scrollTo(0, 1e5); return { room: before, y: scrollY }; });

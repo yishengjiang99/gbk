@@ -120,3 +120,11 @@ Changed existing code: `sf2-processor-core.ts` (live queue), `sf2-processor.ts` 
 The jam keyboard and engines are separate from the studio's `LiveInputSession`/`Sf2LiveSink`. The jam page is its
 own route, so the studio keyboard and player are not mounted while you jam. A Web MIDI controller is only attached
 by the jam page while it is open.
+
+## Open rooms and deep links
+
+Rooms are private by default. The host can tick "Open to anyone" (`POST /api/jam/rooms/:id/open`). `POST /api/jam/rooms/random`
+joins the caller to one open, unlocked, live room with a free slot, in one SQLite transaction like any other join.
+It picks the fullest room first, never one the caller is already in, and returns `404 NO_OPEN_ROOM` when there is none.
+`/jam/<roomId>#i=<invite>` and `/jam?code=XXXX` go straight into the room after sign-in or the guest step. If the browser
+needs a gesture before playing audio, the room shows "Tap anywhere to turn on sound".

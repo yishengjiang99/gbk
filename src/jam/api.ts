@@ -32,6 +32,8 @@ export const jamApi = {
     try { return await call<IceConfig>("POST", `/jam/rooms/${encodeURIComponent(roomId)}/ice-credentials`, { participantId: pid }); }
     catch (e) { if (e instanceof JamApiError && e.code === "TURN_UNCONFIGURED") return { iceServers: [], iceTransportPolicy: "all" }; throw e; }
   },
+  random: (name?: string) => call<{ participantId: string; snapshot: RoomSnapshot }>("POST", "/jam/rooms/random", name ? { name } : {}),
+  setOpen: (roomId: string, pid: string, open: boolean) => call("POST", `/jam/rooms/${roomId}/open`, { participantId: pid, open }),
   rotate: (roomId: string, pid: string) => call<{ invite: Invite }>("POST", `/jam/rooms/${roomId}/invite`, { participantId: pid }),
   revoke: (roomId: string, pid: string) => call("POST", `/jam/rooms/${roomId}/invite/revoke`, { participantId: pid }),
   lock: (roomId: string, pid: string, locked: boolean) => call("POST", `/jam/rooms/${roomId}/${locked ? "lock" : "unlock"}`, { participantId: pid }),
