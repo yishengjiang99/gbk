@@ -45,7 +45,7 @@ export function nextTransport(cur: TransportState, req: { running: boolean; bpm:
 }
 export const STOPPED_TRANSPORT: TransportState = { revision: 0, running: false, bpm: 100, beatsPerBar: 4, anchorBeat: 0, anchorRoomTime: 0 };
 
-export interface RoomSnapshot { roomId: string; epoch: number; serverEpoch: string; hostId: string; maxParticipants: number; locked: boolean; expiresAt: number; participants: ParticipantView[]; transport: TransportState }
+export interface RoomSnapshot { roomId: string; epoch: number; serverEpoch: string; hostId: string; maxParticipants: number; locked: boolean; /** Listed for "join random open room". */ open: boolean; expiresAt: number; participants: ParticipantView[]; transport: TransportState }
 
 /** Server -> client. */
 export type ServerFrame =
@@ -74,4 +74,5 @@ export const encodeServerFrame = (f: ServerFrame) => JSON.stringify(f);
 export const CreateRoomBody = z.object({ name: z.string().max(40).optional() }).strict();
 export const JoinRoomBody = z.object({ invite: z.string().min(6).max(128), name: z.string().max(40).optional(), participantId: id.optional() }).strict();
 export const ParticipantBody = z.object({ participantId: id }).strict();
+export const OpenBody = z.object({ participantId: id, open: z.boolean() }).strict();
 export const TargetBody = z.object({ participantId: id, target: id }).strict();

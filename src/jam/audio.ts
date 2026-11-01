@@ -36,11 +36,17 @@ export class WebJamAudio implements JamAudioOut {
       this.url = url;
       this.ctx = new AudioContext({ latencyHint: "interactive" });
       await this.ctx.audioWorklet.addModule(url);
-      if (this.ctx.state !== "running") await this.ctx.resume().catch(() => undefined);
+      // Without a user gesture (deep links) the context starts suspended; never block on resume(), unlock on the next tap.
+      if (this.ctx.state !== "running") { void this.ctx.resume().catch(() => undefined); this.unlockOnGesture(); }
       this.sampleClock(); this.timer = setInterval(() => this.sampleClock(), 250);
       await loadSoundFont();
     })();
     return this.ready;
+  }
+  get suspended() { return !!this.ctx && this.ctx.state !== "running"; }
+  private unlockOnGesture() {
+    const f = () => { void this.ctx.resume().then(() => { if (this.ctx.state === "running") for (const e of ["pointerdown", "keydown", "touchend"]) removeEventListener(e, f, true); }, () => undefined); };
+    for (const e of ["pointerdown", "keydown", "touchend"]) addEventListener(e, f, true);
   }
   private sampleClock() {
     const ts = (this.ctx as AudioContext & { getOutputTimestamp?: () => { contextTime?: number; performanceTime?: number } }).getOutputTimestamp?.();

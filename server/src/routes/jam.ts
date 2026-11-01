@@ -7,7 +7,7 @@ import type { SessionStore } from "../security/authentication.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
 import { currentSession, guardWrite } from "./agent.ts";
 import { isGuestAccount, type AccountStore } from "../persistence/accounts.ts";
-import { CreateRoomBody, JoinRoomBody, ParticipantBody, TargetBody } from "../../../shared/jam/signaling.ts";
+import { CreateRoomBody, JoinRoomBody, OpenBody, ParticipantBody, TargetBody } from "../../../shared/jam/signaling.ts";
 import { JamError, type JamRooms } from "../jam/rooms.ts";
 import type { JamSignaling } from "../jam/signaling.ts";
 import { turnCredentials } from "../jam/turn.ts";
@@ -45,6 +45,15 @@ export function jamRoutes(app: FastifyInstance, cfg: Config, d: { sessions: Sess
     if (!joins.take(s.user) || !joins.take(`ip:${req.ip}`)) return reply.code(429).send({ code: "RATE_LIMITED", message: "too many join attempts; wait a minute" });
     return run(reply, () => { const r = d.rooms.join(byRoom ? rid(req) : null, s.user, nameOf(s.user, b.name), b.invite, b.participantId); sig.broadcastSnapshot(r.snapshot.roomId, r.participantId); return r; });
   };
+  app.post("/api/jam/rooms/random", async (req, reply) => {
+    const s = auth(req, reply, true); if (!s) return; const b = body(CreateRoomBody, req, reply); if (!b) return;
+    if (!joins.take(s.user) || !joins.take(`ip:${req.ip}`)) return reply.code(429).send({ code: "RATE_LIMITED", message: "too many join attempts; wait a minute" });
+    return run(reply, () => { const r = d.rooms.joinRandom(s.user, nameOf(s.user, b.name)); sig.broadcastSnapshot(r.snapshot.roomId, r.participantId); return r; });
+  });
+  app.post("/api/jam/rooms/:id/open", async (req, reply) => {
+    const s = auth(req, reply, true); if (!s) return; const b = body(OpenBody, req, reply); if (!b) return;
+    return run(reply, () => { d.rooms.setOpen(rid(req), s.user, b.participantId, b.open); sig.broadcastSnapshot(rid(req)); return { ok: true }; });
+  });
   app.post("/api/jam/rooms/:id/join", join(true));
   app.post("/api/jam/join", join(false)); // human code without a room id
 

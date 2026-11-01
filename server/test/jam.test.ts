@@ -121,6 +121,27 @@ test("metronome: host sets a future-anchored transport, everyone gets it, member
   } finally { await srv.app.close(); }
 });
 
+test("random open room: private by default, host opens it, fills to the limit atomically, 404 when none", async () => {
+  const { srv, users } = await setup();
+  try {
+    const none = await call(srv.base, users[1], "POST", "/api/jam/rooms/random", {});
+    assert.equal(none.status, 404); assert.equal(none.body.code, "NO_OPEN_ROOM");
+    const c = await call(srv.base, users[0], "POST", "/api/jam/rooms", {}); const room = c.body.snapshot.roomId, host = c.body.participantId;
+    assert.equal(c.body.snapshot.open, false);
+    assert.equal((await call(srv.base, users[1], "POST", "/api/jam/rooms/random", {})).status, 404, "private rooms are not listed");
+    const j = await call(srv.base, users[1], "POST", `/api/jam/rooms/${room}/join`, { invite: c.body.invite.token });
+    assert.equal((await call(srv.base, users[1], "POST", `/api/jam/rooms/${room}/open`, { participantId: j.body.participantId, open: true })).status, 403);
+    assert.equal((await call(srv.base, users[0], "POST", `/api/jam/rooms/${room}/open`, { participantId: host, open: true })).status, 200);
+    assert.equal((await call(srv.base, users[1], "POST", "/api/jam/rooms/random", {})).status, 404, "never matched into a room you're already in");
+    const rs = await Promise.all(users.slice(2).map((u) => call(srv.base, u, "POST", "/api/jam/rooms/random", {})));
+    assert.equal(rs.filter((r) => r.status === 200).length, 2); assert.ok(rs.every((r) => r.status === 200 ? r.body.snapshot.roomId === room && r.body.snapshot.open : r.body.code === "NO_OPEN_ROOM"));
+    const snap = await call(srv.base, users[0], "GET", `/api/jam/rooms/${room}?participantId=${host}`); assert.equal(snap.body.snapshot.participants.length, 4);
+    await call(srv.base, users[0], "POST", `/api/jam/rooms/${room}/kick`, { participantId: host, target: j.body.participantId });
+    await call(srv.base, users[0], "POST", `/api/jam/rooms/${room}/lock`, { participantId: host });
+    assert.equal((await call(srv.base, users[1], "POST", "/api/jam/rooms/random", {})).status, 404, "locked rooms are not listed");
+  } finally { await srv.app.close(); }
+});
+
 test("agent WebSocket still upgrades alongside jam; unknown upgrade paths destroyed", async () => {
   const { srv, users } = await setup();
   try {

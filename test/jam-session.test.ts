@@ -27,7 +27,7 @@ class FakeRoom {
   sessions = new Map<string, { sig: FakeSignaling; peers: FakeLinks; s?: JamSession; gen: number }>();
   epoch = 1; host = "pa"; rand = 1; loss = 0; dup = 0; delayMs = 10;
   constructor(public clock: Clock) {}
-  snapshot(): RoomSnapshot { return { roomId: "r1", epoch: this.epoch, serverEpoch: "e1", hostId: this.host, maxParticipants: 4, locked: false, expiresAt: 1e12, participants: [...this.sessions].map(([pid, v]) => ({ participantId: pid, name: pid, role: pid === this.host ? "host" : "member", state: "ready", generation: v.gen, connected: v.sig.open, instrumentRevision: 0 })), transport: STOPPED_TRANSPORT }; }
+  snapshot(): RoomSnapshot { return { roomId: "r1", epoch: this.epoch, serverEpoch: "e1", hostId: this.host, maxParticipants: 4, locked: false, open: false, expiresAt: 1e12, participants: [...this.sessions].map(([pid, v]) => ({ participantId: pid, name: pid, role: pid === this.host ? "host" : "member", state: "ready", generation: v.gen, connected: v.sig.open, instrumentRevision: 0 })), transport: STOPPED_TRANSPORT }; }
   random() { this.rand = (this.rand * 16807) % 2147483647; return this.rand / 2147483647; }
   broadcast() { for (const v of this.sessions.values()) if (v.sig.open) v.sig.deliver({ type: "snapshot", snapshot: this.snapshot() }); }
   add(pid: string, audio: FakeAudio) {

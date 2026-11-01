@@ -16,7 +16,7 @@ export default defineConfig({
   use: { baseURL: `${origin}/`, trace: "retain-on-failure" },
   webServer: [
     { command: "node --disable-warning=ExperimentalWarning --import tsx/esm server/src/index.ts", url: `http://127.0.0.1:${API}/api/health`, cwd: "../..", reuseExistingServer: false, timeout: 60_000,
-      env: { PORT: String(API), COMPOSER_PUBLIC_ORIGIN: origin, SESSION_SECRET: "jam-e2e-".repeat(6), COMPOSER_DATA_DIR: DATA, SERVER_RENDER: "0", COMPOSER_ACCESS_CODES: "p1:jam-1,p2:jam-2,p3:jam-3,p4:jam-4,p5:jam-5", RATE_LOGIN_PER_MINUTE: "200", RATE_IP_PER_MINUTE: "5000", LOG_LEVEL: "warn", ...relayEnv } },
+      env: { PORT: String(API), COMPOSER_PUBLIC_ORIGIN: origin, SESSION_SECRET: "jam-e2e-".repeat(6), COMPOSER_DATA_DIR: DATA, SERVER_RENDER: "0", COMPOSER_ACCESS_CODES: "p1:jam-1,p2:jam-2,p3:jam-3,p4:jam-4,p5:jam-5", RATE_LOGIN_PER_MINUTE: "200", RATE_IP_PER_MINUTE: "5000", JAM_JOINS_PER_MINUTE: "200", LOG_LEVEL: "warn", ...relayEnv } },
     { command: `npm run dev -- --host 127.0.0.1 --port ${WEB} --strictPort`, url: `${origin}/`, cwd: "../..", reuseExistingServer: false, timeout: 90_000, env: { GBK_BASE_PATH: "/", GBK_DEV_API_PROXY: `http://127.0.0.1:${API}` } },
     ...(RELAY ? [{ command: "scripts/jam-turn-local.sh", port: 3478, cwd: "../..", reuseExistingServer: false, timeout: 20_000, env: { JAM_TURN_SECRET: TURN_SECRET, TURNSERVER: process.env.TURNSERVER ?? "turnserver" } } as WebServer] : []),
   ],
