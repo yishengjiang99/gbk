@@ -32,7 +32,6 @@ export class JamSignaling {
 
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     const reject = (code: number, msg: string) => { socket.write(`HTTP/1.1 ${code} ${msg}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); socket.destroy(); };
-    if (!this.cfg.jam.enabled) return reject(404, "Not Found");
     const ip = clientIp(req);
     if (!this.ipLimiter.take(`jamws:${ip}`)) return reject(429, "Too Many Requests");
     // Browsers always send Origin; native clients send none and still need a valid ticket.

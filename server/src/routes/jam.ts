@@ -21,7 +21,6 @@ export function jamRoutes(app: FastifyInstance, cfg: Config, d: { sessions: Sess
   const sig = d.signaling;
 
   const auth = (req: FastifyRequest, reply: FastifyReply, write: boolean) => {
-    if (!cfg.jam.enabled) { void reply.code(404).send({ code: "NOT_FOUND", message: "Live Jam is off" }); return null; }
     const s = currentSession(req, d.sessions);
     if (!s) { void reply.code(401).send({ code: "UNAUTHENTICATED", message: "sign in first" }); return null; }
     if (write && !guardWrite(cfg, req, reply, s)) return null;

@@ -89,10 +89,6 @@ must rejoin. No seamless failover is claimed.
 `credential = base64(HMAC-SHA1(secret, username))`. The secret stays server-side. `JAM_RELAY_ONLY=1` sets
 `iceTransportPolicy: "relay"`. coturn deployment config and docs come with the client PR.
 
-### Off switch
-
-`JAM_ENABLED=0`: routes 404, upgrades refused. Read at boot.
-
 ## Smoke test
 
 `scripts/jam-smoke.sh` starts a throwaway server and runs the full room flow (create, join by link and code,

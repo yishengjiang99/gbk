@@ -131,12 +131,7 @@ test("agent WebSocket still upgrades alongside jam; unknown upgrade paths destro
   } finally { await srv.app.close(); }
 });
 
-test("JAM_ENABLED=0 turns routes and sockets off; TURN unconfigured answers 503", async () => {
-  const off = await setup({ JAM_ENABLED: "0" });
-  try {
-    assert.equal((await call(off.srv.base, off.users[0], "POST", "/api/jam/rooms", {})).status, 404);
-    await assert.rejects(rawWs(off.srv.base).opened, /404/);
-  } finally { await off.srv.app.close(); }
+test("TURN unconfigured answers 503", async () => {
   const noTurn = await setup({ JAM_TURN_URLS: "" });
   try {
     const c = await call(noTurn.srv.base, noTurn.users[0], "POST", "/api/jam/rooms", {});
