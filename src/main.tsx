@@ -1,6 +1,8 @@
 import "./telemetry/install.ts";
 import { installSmartAppBanner } from "./smart-app-banner.ts";
 installSmartAppBanner();
+import { installViewportSync } from "./viewport-sync.ts";
+installViewportSync();
 import { funnelBeacon } from "./telemetry/funnel.ts";
 // Aggregate landing-page count (no identifiers); the Studio and other routes are not counted.
 if (location.pathname === "/") funnelBeacon("page_view_landing", "web");
