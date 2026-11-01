@@ -109,3 +109,13 @@ test("Smart App Banner app-argument is the current page URL on /s and /u, escape
   const evil = (await app.inject(`/s/${pub.slug}?q=%22%3E%3Cscript%3E`)).body;
   assert.ok(!/app-argument=[^"]*<script/.test(evil)); assert.equal((evil.match(/apple-itunes-app/g) ?? []).length, 1);
 });
+
+test("/s/<unknown-slug> is a 404 'Song not found' page (escaped); private songs keep the generic 200 shell", async () => {
+  const { app, shares } = await setup();
+  const priv = shares.create({ owner: "u1", title: "Secret", projectJson: proj, public: false });
+  const r = await app.inject("/s/no-such-song-zz99");
+  assert.equal(r.statusCode, 404); assert.match(r.body, /<title>Song not found · GBK Composer<\/title>/); assert.match(r.body, /<h1>Song not found<\/h1>/); assert.match(r.body, /noindex/);
+  const evil = await app.inject("/s/%3Cscript%3Ealert(1)%3C%2Fscript%3E");
+  assert.equal(evil.statusCode, 404); assert.ok(!evil.body.includes("<script>alert(1)")); assert.match(evil.body, /&lt;script&gt;/);
+  const p = await app.inject(`/s/${priv.slug}`); assert.equal(p.statusCode, 200); assert.ok(!p.body.includes("Secret"));
+});
