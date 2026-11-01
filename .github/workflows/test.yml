@@ -53,14 +53,12 @@ jobs:
       - run: npm run check:launch            # manifest validity, deploy package contents, token-leak scan
       - run: node --disable-warning=ExperimentalWarning --import tsx/esm --import ./test/support/offline-audio-context.ts --test server/test/gallery.test.ts server/test/deploy-nginx.test.ts server/test/funnel.test.ts
 
-  # Composer browser e2e (real server + fake model + Chromium). Report-only for now: 3 Studio specs
-  # (share-link open, theme/landing) already fail on main as of 2026-10-24; make this required once they pass.
+  # Composer browser e2e (real server + fake model + Chromium). Required.
   # Pinned to ubuntu-24.04: ubuntu-latest moved to 26.04, for which Playwright has no Chromium build
   # (the job died at "playwright install" without running a spec, 2026-10-29).
   e2e-composer:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    continue-on-error: true
     permissions:
       contents: read
     steps:

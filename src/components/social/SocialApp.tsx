@@ -112,22 +112,28 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen, focusSlug }: { me: M
   const focusDone = useRef<string | undefined>(undefined);
   useEffect(() => { focusDone.current = undefined; }, [focusSlug]);
   useEffect(() => { void social.tags().then((t) => setLabels(t.labels.map((l) => l.label).filter((l) => l !== "wip").slice(0, 4))).catch(() => undefined); }, []);
+  // Only the latest load applies (React StrictMode runs the mount effect twice in dev: a stale first
+  // load must not land after the second one). The pin decision is made up front, not after the await,
+  // so the response that wins is the one that pins.
+  const seq = useRef(0);
   const load = useCallback(async (reset: boolean) => {
-    setLoading(true); setErr("");
-    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key) return;
+    const my = ++seq.current; setLoading(true); setErr("");
+    const pin = reset && focusSlug && focusDone.current !== focusSlug ? focusSlug : null;
+    if (pin) focusDone.current = pin;
+    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key || seq.current !== my) return;
       let pageItems = r.items;
-      if (reset && focusSlug && focusDone.current !== focusSlug) {
-        focusDone.current = focusSlug;
+      if (pin) {
         // A post-Publish pin (?pin=) is one-shot: drop it from the URL so a reload or a later visit ranks normally.
-        { const u = new URL(location.href); if (u.searchParams.get("pin") === focusSlug) { u.searchParams.delete("pin"); history.replaceState(history.state, "", `${u.pathname}${u.search}${u.hash}`); } }
+        { const u = new URL(location.href); if (u.searchParams.get("pin") === pin) { u.searchParams.delete("pin"); history.replaceState(history.state, "", `${u.pathname}${u.search}${u.hash}`); } }
         // Always pin the shared song at index 0 (the active card), even when it is already on this page
         // further down — otherwise card 0 (another song) shows and plays for the share link.
-        const inPage = pageItems.find((x) => x.slug === focusSlug);
-        const s = inPage ?? await social.song(focusSlug).catch(() => null);
-        if (s && live.current === key) pageItems = [s, ...pageItems.filter((x) => x.slug !== focusSlug)];
+        const inPage = pageItems.find((x) => x.slug === pin);
+        const s = inPage ?? await social.song(pin).catch(() => null);
+        if (live.current !== key || seq.current !== my) return;
+        if (s) pageItems = [s, ...pageItems.filter((x) => x.slug !== pin)];
       }
       setItems((p) => reset ? pageItems : [...p, ...pageItems.filter((x) => !p.some((y) => y.slug === x.slug))]); setCursor(r.next_cursor); setDone(!r.next_cursor); if (r.model_version) mv.current = r.model_version; }
-    catch (e) { setErr((e as Error).message); } finally { setLoading(false); }
+    catch (e) { if (seq.current === my) setErr((e as Error).message); } finally { if (seq.current === my) setLoading(false); }
   }, [filter.sort, filter.label, filter.tag, cursor, key, focusSlug]);
   const feedEl = useRef<HTMLDivElement | null>(null); const [active, setActive] = useState(0); const [candidate, setCandidate] = useState(0);
   // Section switch (chip, #tag, Browse): fade the playing song out (58 ms), then start the new section at its first card.
