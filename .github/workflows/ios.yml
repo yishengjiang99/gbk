@@ -76,7 +76,7 @@ jobs:
           ONLY=()
           if [ "$FULL_SUITE" != "true" ]; then
             for t in StudioBridgeTests StudioStoreTests StudioModelTests StudioToolsTests StudioAudioTests \
-                     StudioMusicTests/testArrangementBaroque DeepLinkTests APIClientTests MIDIParserTests PublishDraftTests; do
+                     StudioMusicTests/testArrangementBaroque DeepLinkTests ProfileFocusTests APIClientTests MIDIParserTests PublishDraftTests; do
               ONLY+=("-only-testing:GBKComposerTests/$t")
             done
           fi

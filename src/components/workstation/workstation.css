@@ -112,7 +112,7 @@ html:has(.xp), html:has(.xp) body, html:has(.ws), html:has(.ws) body { backgroun
 /* ---- Studio fits the viewport: zero vertical scrolling (page and panels). Overflow flows sideways instead. ---- */
 /* Only while the studio is the visible view (Root sets html.studio-fit); landing/Explore scroll normally. */
 html.studio-fit, html.studio-fit body { height: 100%; overflow: hidden; }
-.ws { height: 100vh; height: var(--ws-vh, 100dvh); min-height: 0; overflow: hidden; }
+.ws { height: 100vh; height: var(--vvh, 100dvh); min-height: 0; overflow: hidden; }
 .ws-header { position: relative; flex: 0 0 auto; }
 .ws-body { flex: 1 1 0; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr); }
 .ws-tracks { max-height: none; height: 100%; overflow-y: hidden; }
@@ -310,3 +310,4 @@ html:has(.xp), html:has(.xp) body, html:has(.xp) #root { height: auto; overflow-
   .ws-batch.focus { border-color: #7cb3ff; box-shadow: 0 0 0 1px #7cb3ff inset; }
   .ws-batch .ws-dim { color: #a9b4c8; }
 }
+.cmp-run.cmp-paused { color: #5a3d00; background: #fff4d6; border: 1px solid #f5b301; border-radius: 8px; padding: 6px 10px; font-weight: 600; overflow-wrap: anywhere; }

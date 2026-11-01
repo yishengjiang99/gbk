@@ -2,21 +2,25 @@
    The chat is a full-screen modal: fixed over the whole viewport (z-index above the app shell's bottom
    tab bar, below the sign-in sheet at 90 and the paywall at 1100) so shell chrome never eats chat space.
    The shell/song view stays mounted underneath; the header's back button (studio-back) closes back to it.
-   Height still follows --ws-vh (the visual viewport) so the composer rides above the on-screen keyboard. */
+   Height follows --vvh (the visual viewport) so the composer rides above the on-screen keyboard. */
 .ms {
   --ms-bg: #ffffff; --ms-fg: #111111; --ms-mut: #6b7280; --ms-card: #f4f5f7; --ms-line: #e5e7eb; --ms-acc: #5b5bf6;
   --ms-acc-fg: #ffffff; --ms-bub: #5b5bf6; --ms-bub-fg: #ffffff; --ms-sheet: #ffffff; --ms-scrim: rgba(0,0,0,.4);
   --ms-err-bg: #fdecec; --ms-err-fg: #8a1f1f; --ms-rec-bg: #fee2e2; --ms-rec-fg: #b91c1c; --ms-tap: 44px; --ms-foot: 64px;
-  position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; height: 100vh; height: var(--ws-vh, 100dvh); width: 100%; max-width: 100vw;
+  position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; height: 100vh; height: var(--vvh, 100dvh); width: 100%; max-width: 100vw;
   overflow: hidden; background: var(--ms-bg); color: var(--ms-fg); font: 15px/1.4 -apple-system, system-ui, sans-serif; color-scheme: light;
   padding-top: env(safe-area-inset-top); box-sizing: border-box;
 }
 @media (prefers-color-scheme: dark) {
   .ms { --ms-bg: #0d0f14; --ms-fg: #f2f3f5; --ms-mut: #9aa1ad; --ms-card: #1a1d25; --ms-line: #2a2e38; --ms-acc: #8b8bff; --ms-acc-fg: #0d0f14;
     --ms-bub: #6a6af7; --ms-bub-fg: #ffffff; --ms-sheet: #171a21; --ms-scrim: rgba(0,0,0,.55); --ms-err-bg: #3b1616; --ms-err-fg: #fca5a5; --ms-rec-bg: #3b1616; --ms-rec-fg: #fca5a5; color-scheme: dark; }
-  html:has(.ms), html:has(.ms) body { background: #0d0f14; }
 }
+/* #187: html/body paint the same color as the visible .ms surface (white bright / #0d0f14 dark) so any gap during a
+   keyboard resize matches the app instead of flashing. Dark rule must come AFTER the base rule to win the cascade. */
 html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
+@media (prefers-color-scheme: dark) { html:has(.ms), html:has(.ms) body { background: #0d0f14; } }
+/* Follow Safari's visual-viewport pan so the composer never slides off-screen; no transition on height. */
+.ms { transform: translateY(var(--vv-top, 0px)); transition: none; }
 .ms *, .ms *::before, .ms *::after { box-sizing: border-box; }
 :where(.ms) button { font: inherit; color: inherit; cursor: pointer; }
 :where(.ms) button:disabled { opacity: .5; cursor: default; }
@@ -114,3 +118,5 @@ html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
 
 .ms-back { font-size: 17px; font-weight: 600; line-height: 1; padding: 0 10px 0 2px; background: none; margin-left: -6px; white-space: nowrap; }
 .ms-new { flex: none; white-space: nowrap; }
+/* Run paused while the tab was away (iOS background): bright, readable, never pushes the composer bar off screen. */
+.ms-paused { background: #fff4d6; border-color: #f5b301; color: #5a3d00; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }

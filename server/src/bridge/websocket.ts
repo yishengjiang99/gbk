@@ -25,10 +25,20 @@ export class BrowserConnection implements BrowserLink {
   readonly sessionId: string;
   allowedTools = new Set<string>();
   projectId = ""; revision = 0; ready = false; alive = true;
+  /** The page's per-tab id from hello (persisted in sessionStorage, so it survives an iOS page discard + reload). */
+  tabId = "";
+  /** Last time this socket showed signs of life (pong or any frame). */
+  lastSeen = Date.now();
   readonly pending = new PendingCalls();
   constructor(public user: string, public authSessionId: string, private ws: WebSocket, private hub: AgentHub) { this.sessionId = rid("bs"); }
   emit(m: ServerMessage) { if (this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); }
   close(code: number, reason: string) { try { this.ws.close(code, reason); } catch { /* closed */ } }
+  /** The page reports it is going to the background (iOS may freeze it any moment): probe now and drop the socket if it
+   *  goes silent, so the run pauses within seconds instead of after the heartbeat's two missed pongs. */
+  probe(ms: number) {
+    const t = Date.now(); try { this.ws.ping(); } catch { /* closed */ }
+    setTimeout(() => { if (this.alive && this.lastSeen <= t) { this.hub.log({ evt: "ws_suspect_drop", user: this.user, session: this.sessionId }); this.ws.terminate(); } }, ms).unref?.();
+  }
   callTool(runId: string, callId: string, tool: string, args: Record<string, unknown>, opts: { expectProjectId: string | null; consent: { newProject: boolean }; timeoutMs: number }): Promise<ToolResultEnvelope> {
     if (!this.alive || this.ws.readyState !== 1) return Promise.reject(new BridgeCallError("BROWSER_DISCONNECTED", "browser not connected"));
     const p = this.pending.add(callId, runId, tool, opts.timeoutMs);
@@ -44,12 +54,24 @@ export class AgentHub {
   readonly wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   private runs = new Map<string, { user: string; abort: AbortController; link: RunLink; origin: BrowserConnection; done?: Promise<void> }>();
   private slots: RunSlots;
-  constructor(private cfg: Config, private sessions: SessionStore, private runtime: AgentRuntime, private catalog: ToolCatalog, private convs: ConversationStore, private msgLimiter: RateLimiter, private ipLimiter: RateLimiter, private log: Log) {
+  /** Runs that stopped because their tab stayed away past the grace window: one per user, resumable by the same tab. */
+  private resumable = new Map<string, { runId: string; tabId: string; text: string; model: string; until: number }>();
+  /** Resume attempts (hello.resumeRunId + resume_run) per user: timestamps in the last minute. */
+  private resumeHits = new Map<string, number[]>();
+  static RESUME_PER_MINUTE = 5;
+  constructor(private cfg: Config, private sessions: SessionStore, private runtime: AgentRuntime, private catalog: ToolCatalog, private convs: ConversationStore, private msgLimiter: RateLimiter, private ipLimiter: RateLimiter, readonly log: Log) {
     this.slots = new RunSlots(cfg.agent.maxConcurrentRunsPerUser);
-    const hb = setInterval(() => { for (const c of this.wss.clients) { const s = c as WebSocket & { _alive?: boolean }; if (s._alive === false) { c.terminate(); continue; } s._alive = false; c.ping(); } }, 30_000);
+    // Heartbeat: a socket that missed 2 pongs in a row is dead (iOS froze the page with TCP half-open): terminate it so
+    // its run pauses now rather than minutes later.
+    const hb = setInterval(() => { for (const c of this.wss.clients) { const s = c as WebSocket & { _alive?: boolean; _missed?: number }; if (s._alive === false) { s._missed = (s._missed ?? 0) + 1; if (s._missed >= 2) { c.terminate(); continue; } } else s._missed = 0; s._alive = false; c.ping(); } }, cfg.agent.heartbeatMs);
     hb.unref?.();
   }
   get activeRuns() { return this.runs.size; }
+  private resumeAllowed(user: string) {
+    const now = Date.now(); const hits = (this.resumeHits.get(user) ?? []).filter((t) => now - t < 60_000);
+    if (hits.length >= AgentHub.RESUME_PER_MINUTE) { this.resumeHits.set(user, hits); return false; }
+    hits.push(now); this.resumeHits.set(user, hits); return true;
+  }
 
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     const reject = (code: number, msg: string) => { socket.write(`HTTP/1.1 ${code} ${msg}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); socket.destroy(); };
@@ -65,9 +87,10 @@ export class AgentHub {
   private onConnection(ws: WebSocket, user: string, authSessionId: string) {
     const conn = new BrowserConnection(user, authSessionId, ws, this);
     (ws as WebSocket & { _alive?: boolean })._alive = true;
-    ws.on("pong", () => { (ws as WebSocket & { _alive?: boolean })._alive = true; });
+    ws.on("pong", () => { (ws as WebSocket & { _alive?: boolean })._alive = true; conn.lastSeen = Date.now(); });
     this.log({ evt: "ws_open", user, session: conn.sessionId });
     ws.on("message", (raw, isBinary) => {
+      conn.lastSeen = Date.now(); (ws as WebSocket & { _alive?: boolean })._alive = true;
       if (isBinary) return conn.emit({ type: "error", code: "BAD_FRAME", message: "binary frames are not accepted" });
       if (!this.sessions.isLive(authSessionId)) { conn.close(4401, "session expired"); return; }
       let m: ClientMessage;
@@ -80,6 +103,9 @@ export class AgentHub {
       conn.pending.rejectAll("BROWSER_DISCONNECTED", "browser tab disconnected");
       // A run outlives its socket (iOS pauses/drops it on tab switch): hold its calls for the grace window.
       for (const r of this.runs.values()) r.link.detach(conn);
+      // At most one paused run held per user: older ones end now.
+      const held = [...this.runs.values()].filter((r) => r.user === user && r.link.state === "paused").sort((a, b) => b.link.pausedAt - a.link.pausedAt);
+      for (const r of held.slice(1)) r.link.end();
       this.log({ evt: "ws_close", user, session: conn.sessionId });
     });
   }
@@ -89,19 +115,33 @@ export class AgentHub {
       case "hello": {
         if (m.protocol !== PROTOCOL_VERSION) { conn.emit({ type: "error", code: "PROTOCOL_MISMATCH", message: `server speaks protocol ${PROTOCOL_VERSION}; reload the page` }); conn.close(4400, "protocol"); return; }
         const { accepted, rejected } = this.catalog.reconcile(m.manifest?.tools);
+        conn.tabId = typeof m.tabId === "string" ? m.tabId.slice(0, 64) : "";
         conn.allowedTools = new Set(accepted); conn.projectId = String(m.projectId ?? "").slice(0, 100); conn.revision = Number(m.revision) || 0; conn.ready = true;
         this.registry.attach(conn);
         const conv = this.convs.get(conn.user);
         conn.emit({ type: "session_ready", sessionId: conn.sessionId, user: conn.user, model: this.cfg.llm.model, models: this.cfg.llm.models, provider: this.cfg.llm.provider, llmConfigured: llmConfigured(this.cfg), manifestHash: this.catalog.hash, acceptedTools: accepted, rejectedTools: rejected, history: conv.history.slice(-40), limits: { maxToolSteps: this.cfg.agent.maxToolSteps, maxInputChars: this.cfg.agent.maxInputChars } });
         // The same tab reconnecting re-attaches to its in-flight run (outstanding tool calls are replayed). A fresh page
         // (reload, iOS /studio?new=...) has no resumeRunId: the tab that ran this user's detached runs is gone, end them.
-        const resume = m.resumeRunId ? this.runs.get(String(m.resumeRunId)) : undefined;
-        if (resume && resume.user === conn.user && resume.link.rebind(conn)) { /* resumed */ }
-        else if (m.resumeRunId) conn.emit({ type: "session_reconnected", sessionId: conn.sessionId, runId: String(m.resumeRunId), resumed: false, reason: "that run is no longer active" });
+        // A resume must come from the same signed-in user AND the same tab (tabId) that started the run; attempts are rate limited.
+        const wantId = m.resumeRunId ? String(m.resumeRunId).slice(0, 64) : "";
+        const limited = !!wantId && !this.resumeAllowed(conn.user);
+        const cand = wantId && !limited ? this.runs.get(wantId) : undefined;
+        const resume = cand && cand.user === conn.user && cand.link.tabId === conn.tabId ? cand : undefined;
+        const late = this.resumable.get(conn.user);
+        if (resume && resume.link.rebind(conn)) this.log({ evt: "run_resumed", user: conn.user, runId: wantId, pausedMs: Date.now() - (resume.link.pausedAt || Date.now()) });
+        else if (wantId && !limited && !cand && late && late.runId === wantId && late.tabId === conn.tabId && late.until > Date.now())
+          conn.emit({ type: "session_reconnected", sessionId: conn.sessionId, runId: wantId, resumed: false, resumable: true, reason: "paused too long" });
+        else if (wantId) {
+          const denied = limited || (!!cand && !resume);
+          if (denied) this.log({ evt: "resume_denied", user: conn.user, runId: wantId, reason: limited ? "rate" : "mismatch" });
+          conn.emit({ type: "session_reconnected", sessionId: conn.sessionId, runId: wantId, resumed: false, ...(denied ? { code: "RESUME_DENIED" } : {}), reason: limited ? "too many resume attempts" : denied ? "that run belongs to another tab" : "that run is no longer active" });
+        }
         for (const r of this.runs.values()) if (r !== resume && r.user === conn.user && !r.link.attached) r.link.end();
         this.log({ evt: "hello", user: conn.user, accepted: accepted.length, rejected: rejected.length, hashMatch: m.manifest?.hash === this.catalog.hash });
         return;
       }
+      case "backgrounded": conn.probe(5000); return;
+      case "resume_run": return void this.resumeRun(conn, m);
       case "ping": conn.emit({ type: "pong", t: Number(m.t) || 0 }); return;
       case "pong": return;
       case "project_state": conn.projectId = String(m.projectId ?? "").slice(0, 100); conn.revision = Number(m.revision) || 0; return;
@@ -122,6 +162,17 @@ export class AgentHub {
       case "user_message": return void this.startRun(conn, m);
       default: conn.emit({ type: "error", code: "UNKNOWN_TYPE", message: "unknown message type" });
     }
+  }
+
+  /** One-tap Resume after a run stopped for pausing too long: same user + same tab + inside the window, rate limited. */
+  private resumeRun(conn: BrowserConnection, m: Extract<ClientMessage, { type: "resume_run" }>) {
+    const r = this.resumable.get(conn.user); const runId = String(m.runId ?? "").slice(0, 64);
+    if (!this.resumeAllowed(conn.user)) return conn.emit({ type: "error", code: "RATE_LIMITED", message: "too many resume attempts; wait a minute" });
+    if (!r || r.runId !== runId || r.tabId !== conn.tabId || r.until <= Date.now()) { this.log({ evt: "resume_denied", user: conn.user, runId, reason: r ? "mismatch" : "none" }); return conn.emit({ type: "error", code: "RESUME_DENIED", message: "That run can't be resumed anymore. Send your message again." }); }
+    this.resumable.delete(conn.user);
+    this.log({ evt: "run_resume_late", user: conn.user, runId });
+    const note = "[resume] The previous run stopped because the app was in the background too long. Re-read the open project state, then finish this request: ";
+    return this.startRun(conn, { type: "user_message", clientMessageId: String(m.clientMessageId ?? "").slice(0, 60), text: (note + r.text).slice(0, this.cfg.agent.maxInputChars), model: r.model });
   }
 
   private async startRun(conn: BrowserConnection, m: Extract<ClientMessage, { type: "user_message" }>) {
@@ -148,7 +199,8 @@ export class AgentHub {
     const mode = rawMode === "new" || rawMode === "edit" ? rawMode : undefined;
     const runId = rid("run"); const abort = new AbortController();
     let finished!: () => void; const done = new Promise<void>((ok) => { finished = ok; });
-    const link = new RunLink(runId, conn, this.cfg.agent.reconnectGraceMs, () => this.registry.get(conn.user));
+    const link = new RunLink(runId, conn, this.cfg.agent.reconnectGraceMs, () => this.registry.get(conn.user), conn.tabId);
+    this.resumable.delete(conn.user); // a new run supersedes an older resumable one
     this.runs.set(runId, { user: conn.user, abort, link, origin: conn, done });
     const conv = this.convs.get(conn.user);
     conn.emit({ type: "run_started", runId, clientMessageId: String(m.clientMessageId ?? "").slice(0, 60), text: text.slice(0, 200) });
@@ -156,6 +208,7 @@ export class AgentHub {
     try {
       const r = await this.runtime.run({ runId, user: conn.user, text, model, conv, link, signal: abort.signal, log: this.log, mode, onCheckpoint: () => this.convs.save(conv) });
       this.log({ evt: "run_end", user: conn.user, runId, status: r.status, code: r.code, steps: r.steps, ms: Date.now() - t0 });
+      if (r.code === "RUN_PAUSED_TOO_LONG") this.resumable.set(conn.user, { runId, tabId: link.tabId, text: text.startsWith("[resume]") ? text.slice(text.indexOf(": ") + 2) : text, model, until: Date.now() + this.cfg.agent.resumeWindowMs });
     } catch (e) {
       this.log({ evt: "run_crash", runId, err: (e as Error).message });
       link.emit({ type: "run_failed", runId, code: "INTERNAL_ERROR", message: "internal error", retryable: true });

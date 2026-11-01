@@ -3,7 +3,7 @@
 
 Env: ASC_ISSUER_ID (or APP_STORE_CONNECT_ISSUER_ID), ASC_KEY_ID (default 95M27GJTV7),
      ASC_KEY_PATH (default /workspace/asc/AuthKey_95M27GJTV7.p8) or ASC_API_PRIVATE_KEY.
-Optional: REVIEW_CONTACT_FIRST/LAST/PHONE/EMAIL, REVIEW_DEMO_PASSWORD.
+Optional: REVIEW_CONTACT_FIRST/LAST/PHONE/EMAIL.
 Flags: --dry-run, --no-screenshots, --verify (read back only)
 """
 import hashlib, json, os, re, sys, time
@@ -14,7 +14,10 @@ APP_ID = "6826906431"; VERSION = "1.0"; LOCALE = "en-US"
 ASC = Path(__file__).resolve().parent.parent
 MD = ASC / "metadata" / LOCALE
 SHOTS = ASC / "screenshots" / LOCALE
-SHOT_TYPES = {"iphone-69": "APP_IPHONE_67", "iphone-65": "APP_IPHONE_65"}
+SHOT_TYPES = {"iphone-69": "APP_IPHONE_67", "ipad-129": "APP_IPAD_PRO_3GEN_129"}
+# Display types this script no longer manages; sets of these types on the version
+# localization are stale (built for an old listing) and removed on push.
+REMOVE_SHOT_TYPES = {"APP_IPHONE_65"}
 DRY = "--dry-run" in sys.argv
 BASE = "https://api.appstoreconnect.apple.com"
 
@@ -110,9 +113,11 @@ def main():
 
     # App Review details
     rv = api("GET", f"/v1/appStoreVersions/{ver['id']}/appStoreReviewDetail", ok_fail=True)
-    rattrs = {"notes": review_notes(), "demoAccountName": "openai-reviewer", "demoAccountRequired": True}
+    # The app works without an account (sign-in is optional), so no demo account.
+    # demoAccountName is omitted, not nulled: the API ignores a null name on PATCH.
+    rattrs = {"notes": review_notes(), "demoAccountRequired": False}
     for env, k in [("REVIEW_CONTACT_FIRST", "contactFirstName"), ("REVIEW_CONTACT_LAST", "contactLastName"),
-                   ("REVIEW_CONTACT_PHONE", "contactPhone"), ("REVIEW_CONTACT_EMAIL", "contactEmail"), ("REVIEW_DEMO_PASSWORD", "demoAccountPassword")]:
+                   ("REVIEW_CONTACT_PHONE", "contactPhone"), ("REVIEW_CONTACT_EMAIL", "contactEmail")]:
         if os.environ.get(env): rattrs[k] = os.environ[env]
     if rv and rv.get("data"):
         patch("appStoreReviewDetails", rv["data"]["id"], rattrs)
@@ -142,6 +147,14 @@ def main():
                     requests.request(op["method"], op["url"], data=data[op["offset"]:op["offset"] + op["length"]], headers=h, timeout=180).raise_for_status()
                 patch("appScreenshots", shot["id"], {"uploaded": True, "sourceFileChecksum": hashlib.md5(data).hexdigest()})
                 print("uploaded", dtype, f.name)
+        for stale in sets:
+            if stale["attributes"]["screenshotDisplayType"] in REMOVE_SHOT_TYPES:
+                sid = stale["id"]
+                if api("DELETE", f"/v1/appScreenshotSets/{sid}", ok_fail=True) is None:
+                    for old in api("GET", f"/v1/appScreenshotSets/{sid}/appScreenshots")["data"]:
+                        api("DELETE", f"/v1/appScreenshots/{old['id']}")
+                    api("DELETE", f"/v1/appScreenshotSets/{sid}")
+                print("removed stale screenshot set", stale["attributes"]["screenshotDisplayType"])
         time.sleep(10)
     verify()
 

@@ -1,1 +1,1 @@
-music,composer,midi,songwriting,remix,classical,soundfont,piano,orchestra,melody,ai,create,feed
+sheet,scanner,midi,editor,piano,roll,fugue,soundfont,notation,melody,score,orchestra,classical,ai

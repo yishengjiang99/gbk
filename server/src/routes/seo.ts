@@ -101,6 +101,7 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
 
   const songQ = db.prepare(`SELECT s.id, s.title, s.slug, s.owner, s.labels, s.prompt_shared, s.prompt_text, s.wav_meta, s.project_json, s.created_at, s.published_at, s.updated_at,
     s.mp3 IS NOT NULL AS h3, p.handle, p.display_name FROM shares s LEFT JOIN profiles p ON p.user_id = s.owner WHERE s.slug = ? AND s.public = 1`);
+  const existsQ = db.prepare("SELECT 1 FROM shares WHERE slug = ?");
   const tagsQ = db.prepare("SELECT tag FROM share_tags WHERE share_id = ? ORDER BY tag");
   const byOwnerQ = db.prepare("SELECT slug, title, labels, created_at, published_at FROM shares WHERE owner = ? AND public = 1 ORDER BY COALESCE(published_at, created_at) DESC LIMIT ?");
   type SongRow = { id: string; title: string; slug: string; owner: string; labels: string; prompt_shared: number; prompt_text: string | null; wav_meta: string | null; project_json: string; created_at: number; published_at: number | null; updated_at: number | null; h3: number; handle: string | null; display_name: string | null };
@@ -121,7 +122,7 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
       const mp3 = (mp3Q.get(r.slug) as { mp3: Uint8Array | null } | undefined)?.mp3;
       if (!mp3) return reply.code(404).send("not found");
       let file: string;
-      try { file = await ogVideo(ogDir, r.slug, ogImage(ogDir, ogOf(r)), mp3, opts.ffmpeg); }
+      try { file = await ogVideo(ogDir, ogOf(r), mp3, opts.ffmpeg); }
       catch (e) { req.log.error({ err: e, slug: r.slug }, "og video render failed"); return reply.code(503).send("video unavailable"); }
       const size = statSync(file).size, buf = readFileSync(file);
       reply.type("video/mp4").header("accept-ranges", "bytes").header("cache-control", "public, max-age=86400").header("x-content-type-options", "nosniff");
@@ -139,7 +140,11 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
   app.get("/s/:slug", async (req, reply) => {
     const slug = (req.params as { slug: string }).slug;
     const r = song(slug);
-    if (!r) return render(reply, generic(`${origin}/s/${encodeURIComponent(slug)}`), req);
+    if (!r) {
+      // Unknown slug: a real 404 with a "Song not found" view (the SPA shows the same). A private/unlisted song keeps the generic 200 shell.
+      if (!/^[a-z0-9][a-z0-9-]{3,127}$/.test(slug) || !existsQ.get(slug)) { reply.code(404); return render(reply, { ...generic(`${origin}/s/${encodeURIComponent(slug)}`), title: "Song not found · GBK Composer", body: `<h1>Song not found</h1><p>No song at “${htmlEsc(slug)}”. It may have been removed.</p><p><a href="/feed">Browse the feed</a></p>` }, req); }
+      return render(reply, generic(`${origin}/s/${encodeURIComponent(slug)}`), req);
+    }
     const url = `${origin}/s/${encodeURIComponent(r.slug)}`, labels = labelsOf(r.labels), tags = (tagsQ.all(r.id) as { tag: string }[]).map((x) => x.tag);
     const artist = r.display_name ?? "GBK Composer", artistUrl = r.handle ? `${origin}/u/${encodeURIComponent(r.handle)}` : null;
     const by = r.display_name ? ` by ${r.display_name}` : "";

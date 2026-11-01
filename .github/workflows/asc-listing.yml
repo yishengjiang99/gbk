@@ -1,0 +1,67 @@
+name: ASC Listing (metadata + screenshots)
+
+# Manual only. Applies the docs/asc listing (copy + screenshots) to App Store Connect
+# via docs/asc/scripts/push_listing.py. NEVER submits for review, and App Privacy is
+# not touched (Apple exposes no API for it).
+# Secrets mirror ios-release.yml: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
+# APP_STORE_CONNECT_API_KEY_P8. push_listing.py reads ASC_ISSUER_ID / ASC_KEY_ID / ASC_KEY_PATH.
+# Optional secrets, passed through only if set: REVIEW_CONTACT_FIRST, REVIEW_CONTACT_LAST,
+# REVIEW_CONTACT_PHONE, REVIEW_CONTACT_EMAIL, REVIEW_DEMO_PASSWORD.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "push = apply listing, then read back; verify = read back only"
+        type: choice
+        options: [push, verify]
+        default: push
+
+concurrency:
+  group: asc-listing
+  cancel-in-progress: false
+
+jobs:
+  listing:
+    name: Apply listing to ASC
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_KEY_PATH: ${{ github.workspace }}/private_keys/AuthKey.p8
+      REVIEW_CONTACT_FIRST: ${{ secrets.REVIEW_CONTACT_FIRST }}
+      REVIEW_CONTACT_LAST: ${{ secrets.REVIEW_CONTACT_LAST }}
+      REVIEW_CONTACT_PHONE: ${{ secrets.REVIEW_CONTACT_PHONE }}
+      REVIEW_CONTACT_EMAIL: ${{ secrets.REVIEW_CONTACT_EMAIL }}
+      REVIEW_DEMO_PASSWORD: ${{ secrets.REVIEW_DEMO_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install "pyjwt[crypto]" requests
+
+      - name: Write ASC API key
+        env:
+          P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "${ASC_ISSUER_ID:-}"
+          test -n "${ASC_KEY_ID:-}"
+          test -n "${P8:-}"
+          mkdir -p "$(dirname "$ASC_KEY_PATH")"
+          printf '%s\n' "$P8" > "$ASC_KEY_PATH"
+          chmod 600 "$ASC_KEY_PATH"
+
+      - name: Push listing (never submits)
+        if: inputs.mode == 'push'
+        run: python3 docs/asc/scripts/push_listing.py
+
+      - name: Verify listing (read back only)
+        if: inputs.mode == 'verify'
+        run: python3 docs/asc/scripts/push_listing.py --verify

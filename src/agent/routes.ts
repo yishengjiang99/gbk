@@ -6,6 +6,9 @@ export type Route = SocialRoute | { view: "studio" } | { view: "jam"; roomId: st
 export function parseRoute(pathname = location.pathname, search = location.search): Route {
   const b = base(); let rel = pathname.startsWith(b) ? pathname.slice(b.length) : pathname.replace(/^\//, "");
   rel = rel.replace(/\/$/, "");
+  // Legacy/alias share forms (/song/<slug>, /share/<slug>, /?s=<slug>) open the same song card as /s/<slug>.
+  const legacy = /^(?:song|share)\/([a-z0-9][a-z0-9-]{3,127})$/.exec(rel)?.[1] ?? (rel === "" ? new URLSearchParams(search).get("s") : null);
+  if (legacy && /^[a-z0-9][a-z0-9-]{3,127}$/.test(legacy)) { const q = new URLSearchParams(search); q.delete("s"); rel = `s/${legacy}`; search = q.toString() ? `?${q}` : ""; try { history.replaceState(history.state, "", appUrl(rel) + search); } catch { /* non-browser */ } }
   const m = /^s\/([a-z0-9][a-z0-9-]{3,127})$/.exec(rel);
   // A share link lands on the song's feed card (playing once audio unlocks), not in the
   // Studio. The editor opens only on an explicit studio route: ?edit=1 (the card's "open", read-only) or ?fork=1 (Remix).

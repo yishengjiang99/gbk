@@ -75,4 +75,47 @@ final class DeepLinkUITests: XCTestCase {
             app.terminate()
         }
     }
+
+    // MARK: #189
+
+    private func assertShowsCard(_ app: XCUIApplication, _ slug: String, _ why: String) {
+        let card = app.descendants(matching: .any)["feedCard-\(slug)"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 45), "card for \(slug): \(why)")
+        if app.alerts.firstMatch.waitForExistence(timeout: 2) { app.alerts.buttons.firstMatch.tap() } // "no audio yet"
+        XCTAssertTrue(card.isHittable, "\(slug) is the visible card: \(why)")
+    }
+
+    /// @sunnywalrus showed "Couldn't load the profile."; tapping a song (not the first) must open that song.
+    func testSunnywalrusProfileLoadsAndTapOpensThatSong() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-deepLink", "https://compose.grepawk.com/u/sunnywalrus"]
+        app.launch()
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'profileSong-'"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 45), "profile songs for @sunnywalrus")
+        XCTAssertFalse(app.staticTexts["Couldn't load the profile."].exists)
+        let row = rows.element(boundBy: rows.count - 1)
+        let slug = String(row.identifier.dropFirst("profileSong-".count))
+        row.tap()
+        assertShowsCard(app, slug, "tapped on @sunnywalrus")
+    }
+
+    /// Share link via the system (open(url:)) while the app isn't running.
+    func testShareLinkColdStartOpensThatSong() throws {
+        let slug = try deepSlug()
+        let app = XCUIApplication()
+        app.terminate()
+        app.open(URL(string: "gbk://s/\(slug)")!)
+        assertShowsCard(app, slug, "cold start")
+    }
+
+    /// Share link while the app is in the background, scrolled into the feed.
+    func testShareLinkWarmStartOpensThatSong() throws {
+        let slug = try deepSlug()
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'feedCard-'")).firstMatch.waitForExistence(timeout: 45))
+        XCUIDevice.shared.press(.home)
+        app.open(URL(string: "gbk://s/\(slug)")!)
+        assertShowsCard(app, slug, "warm start")
+    }
 }

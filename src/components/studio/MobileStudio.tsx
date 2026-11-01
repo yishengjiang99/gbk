@@ -240,10 +240,11 @@ export function MobileStudio(props: MobileStudioProps) {
         </div>}
         {original && <VersionCard v={original} p={p} playing={original.revision === p.revision ? t.playing : preview?.n === original.n} pos={pos} total={total} current={original.revision === p.revision}
           onPlay={() => playVersion(original, original.revision === p.revision)} onEdit={() => openEditor(original)} onRestore={() => restore(original)} />}
-        {s.items.map((m, i) => <Message key={m.id} m={m} text={mapped[i].text} songCard={mapped[i].card} live={m.runId != null && m.runId === s.run?.runId} onRetry={(x) => send(x)}
+        {s.items.map((m, i) => <Message key={m.id} m={m} text={mapped[i].text} songCard={mapped[i].card} live={m.runId != null && m.runId === s.run?.runId} onRetry={(x) => send(x)} onResume={(r) => s.resume(r)}
           card={(c) => c.kind === "version" ? versionCard(c.version) : currentCard} />)}
         {showCurrent && !inlineCurrent && currentCard}
-        {s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ms-note" data-testid="conn-note">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ms-btn ms-small" onClick={s.reconnect}>Try again</button>}</div>}
+        {s.paused ? <div className="ms-note ms-paused" data-testid="run-paused" role="status">Paused – reconnecting…</div>
+          : s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ms-note" data-testid="conn-note">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ms-btn ms-small" onClick={s.reconnect}>Try again</button>}</div>}
       </main>
 
       {(sheet || fullRoll) && <div className="ms-scrim" data-testid="sheet-scrim" onClick={() => { setSheet(null); setFullRoll(false); }} />}
@@ -369,9 +370,9 @@ function Steps({ m }: { m?: ChatItem }) {
       {x.status === "done" ? "✓" : x.status === "running" ? "●" : x.status === "failed" ? "!" : "○"} {x.task}{x.n > 1 ? ` (${x.n})` : ""}{x.status === "running" ? "…" : ""}</li>)}
   </ul>;
 }
-function Message({ m, text, songCard, live, onRetry, card }: { m: ChatItem; text: string; songCard: SongCard | null; live: boolean; onRetry: (t: string) => void; card: (c: SongCard) => ReactNode }) {
+function Message({ m, text, songCard, live, onRetry, onResume, card }: { m: ChatItem; text: string; songCard: SongCard | null; live: boolean; onRetry: (t: string) => void; onResume: (runId: string) => void; card: (c: SongCard) => ReactNode }) {
   if (m.role === "user") return <div className="ms-me" data-testid="user-msg">{m.text}</div>;
-  if (m.role === "error") return <div className="ms-ai"><div className="ms-err" role="alert" data-testid="studio-error">{friendlyError(m.text)} {m.retryText && <button className="ms-btn ms-small" onClick={() => onRetry(m.retryText!)}>Try again</button>}</div></div>;
+  if (m.role === "error") return <div className="ms-ai"><div className="ms-err" role="alert" data-testid="studio-error">{friendlyError(m.text)} {m.resumeRunId ? <button className="ms-btn ms-small" data-testid="run-resume" onClick={() => onResume(m.resumeRunId!)}>Resume</button> : m.retryText && <button className="ms-btn ms-small" onClick={() => onRetry(m.retryText!)}>Try again</button>}</div></div>;
   return <div className="ms-ai" data-role="assistant">
     {(text || live) && <p data-testid="assistant-text">{text || "Working on it…"}</p>}
     {live && <div className="ms-steps" data-testid="composer-run" role="status"><Steps m={m} /></div>}

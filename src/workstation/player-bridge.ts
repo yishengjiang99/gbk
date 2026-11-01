@@ -179,6 +179,7 @@ export function bindController(c: WorkstationController) {
     const { PROJECT_SCHEMA_VERSION } = await import("./model.ts");
     await midiFileStore.putProject({ id: project.id, schemaVersion: PROJECT_SCHEMA_VERSION, savedAt: Date.now(), project });
   };
+  c.host.onSlowCheckpoint = (projectId, budgetMs) => reportError(new Error("checkpoint slow"), { where: "create_project.checkpoint", projectId, budgetMs });
   // Offline renders of the project the player has loaded use the player's pinned per-track presets (live parity).
   setLivePresetOverridesProvider((project) => {
     const h = playerBridge.handle;

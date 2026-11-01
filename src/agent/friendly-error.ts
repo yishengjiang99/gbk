@@ -1,6 +1,8 @@
 // Composer errors in plain language: no internal codes or ids reach the chat (bridge/runtime codes stay in logs).
 const PLAIN: Record<string, string> = {
   BROWSER_DISCONNECTED: "This page reloaded or closed, so the run stopped. Finished changes are saved; send your message again to continue.",
+  RUN_PAUSED_TOO_LONG: "The app was in the background too long, so the run stopped. Finished changes are saved; tap Resume to continue.",
+  RESUME_DENIED: "That run can't be resumed anymore. Send your message again.",
   PROJECT_CHANGED: "A different song was opened while this was running, so that step was skipped.",
   STALE_REVISION: "The song changed while this step was running, so it was skipped.",
   TOOL_TIMEOUT: "That step took too long and was stopped.",

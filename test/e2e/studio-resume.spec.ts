@@ -2,7 +2,7 @@
 // by run id when visible again; a fresh page load ends the in-flight run cleanly; flushSave writes IndexedDB now.
 import { test, expect, type Page } from "@playwright/test";
 import { composerConn } from "./app-menu";
-const MODEL = "http://127.0.0.1:8799";
+const MODEL = `http://127.0.0.1:${process.env.GBK_E2E_MODEL_PORT ?? 8799}`;
 const openGate = () => fetch(`${MODEL}/gate`, { method: "POST" });
 
 async function signIn(page: Page) {
@@ -60,6 +60,35 @@ test("iphone resume: hidden + dropped socket mid-run, then visible: the run re-a
   await page.evaluate(() => (window as any).__gbkComposer.client.send({ type: "reset_conversation" })); // clean test data
 });
 
+test("iphone resume: backgrounded past the pause window shows Paused, then a clear stop with one-tap Resume that finishes the run", async ({ page }) => {
+  test.skip(test.info().project.name !== "mobile-webkit", "WebKit iPhone");
+  test.setTimeout(240_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio"); await signIn(page);
+  await send(page, "resume check three");
+  await expect(page.getByTestId("composer-stop")).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1500);
+  await page.context().setOffline(true); await hide(page);
+  // While away: the run is paused (not failed) and the composer input stays usable and on screen.
+  await expect(page.getByTestId("run-paused")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("run-paused")).toContainText("Paused – reconnecting");
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await expect(page.getByTestId("studio-error")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await openGate(); // the next tool call is issued while away
+  await page.waitForTimeout(Number(process.env.GBK_E2E_GRACE_MS ?? 20_000) + 3000); // past the (test-shortened) pause window
+  await page.context().setOffline(false); await show(page);
+  await expect(page.getByTestId("studio-error").last()).toContainText(/background too long/, { timeout: 30_000 });
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await page.getByTestId("run-resume").click();
+  await expect(page.getByTestId("composer-stop")).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1500); await openGate();
+  await expect(page.getByText(/Resumed OK after 1 summary read/).last()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("run-resume")).toHaveCount(0);
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await page.evaluate(() => (window as any).__gbkComposer.client.send({ type: "reset_conversation" })); // clean test data
+});
+
 test("iphone resume: gbkStudio.flushSave() writes the project to IndexedDB before the autosave debounce; pagehide flushes too", async ({ page }) => {
   test.skip(test.info().project.name !== "mobile-webkit", "WebKit iPhone");
   const stored = (n: string) => page.evaluate((name) => new Promise<boolean>((ok) => { const r = indexedDB.open("gbk-midi"); r.onsuccess = () => { const q = r.result.transaction("projects").objectStore("projects").getAll(); q.onsuccess = () => ok(q.result.some((x: any) => x.project?.name === name)); }; }), n);
@@ -74,4 +103,22 @@ test("iphone resume: gbkStudio.flushSave() writes the project to IndexedDB befor
   const B = `Flush B ${Date.now()}`; await seed(B);
   expect(await page.evaluate(() => { window.dispatchEvent(new Event("pagehide")); return new Promise((r) => setTimeout(r, 300)); }).then(() => stored(B))).toBe(true); // well inside the 800 ms debounce
   await page.evaluate((names) => new Promise<void>((ok) => { const r = indexedDB.open("gbk-midi"); r.onsuccess = () => { const s = r.result.transaction("projects", "readwrite").objectStore("projects"); const q = s.getAll(); q.onsuccess = () => { for (const x of q.result) if (names.includes(x.project?.name)) s.delete(x.id); ok(); }; }; }), [A, B]); // clean test data
+});
+
+// Remix -> "Creating project": gbk_create_project checkpoints the open fork to IndexedDB first. On iOS Safari that write
+// can stall for tens of seconds; the new project must never wait more than the checkpoint budget for it.
+test("iphone resume: create_project over a remix stays fast, even when the IndexedDB checkpoint stalls", async ({ page }) => {
+  await page.goto("/studio"); await page.waitForFunction(() => !!(window as any).__gbkWorkstation);
+  const create = (name: string) => page.evaluate(async (n) => { const c = (window as any).__gbkWorkstation;
+    await c.createProject({ name: `${n} fork`, owner: "user", replaceCurrent: true });
+    c.edit([{ op: "addTrack", name: "Lead", channel: 0, id: "t_l", program: 0 }, { op: "addNotes", notes: Array.from({ length: 400 }, (_, i) => ({ trackId: "t_l", channel: 0, tick: i * 120, duration: 100, pitch: 60 + (i % 12), velocity: 90 })) }], { label: "seed" });
+    const t0 = performance.now(); const r = await c.createProject({ name: n, owner: "agent" }); return { ms: performance.now() - t0, checkpointed: r.checkpointed }; }, name);
+  const ok = await create(`Fast ${Date.now()}`);
+  console.log(`create_project with a healthy IndexedDB: ${Math.round(ok.ms)} ms`);
+  expect(ok.checkpointed).toBe(true); expect(ok.ms).toBeLessThan(1000);
+  await page.evaluate(() => { const put = IDBObjectStore.prototype.put; (window as any).__realPut = put; IDBObjectStore.prototype.put = function () { return { set onsuccess(_f: unknown) {}, set onerror(_f: unknown) {} } as unknown as IDBRequest; }; });
+  const stalled = await create(`Stalled ${Date.now()}`);
+  console.log(`create_project with a stalled IndexedDB: ${Math.round(stalled.ms)} ms`);
+  expect(stalled.checkpointed).toBe(false); expect(stalled.ms).toBeLessThan(2500);
+  await page.evaluate(() => { IDBObjectStore.prototype.put = (window as any).__realPut; });
 });

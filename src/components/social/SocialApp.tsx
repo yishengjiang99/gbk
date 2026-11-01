@@ -110,29 +110,38 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen, focusSlug }: { me: M
   // Share link (/s/<slug>): the shared song is pinned at the top of the feed, so it is the
   // active card — it starts as soon as audio unlocks (the Tap to play pill targets it).
   const focusDone = useRef<string | undefined>(undefined);
+  // A share link to a song that does not exist (or is no longer public) shows "Song not found", never a generic feed.
+  const [notFound, setNotFound] = useState<string | null>(null);
   useEffect(() => { focusDone.current = undefined; }, [focusSlug]);
   useEffect(() => { void social.tags().then((t) => setLabels(t.labels.map((l) => l.label).filter((l) => l !== "wip").slice(0, 4))).catch(() => undefined); }, []);
+  // Only the latest load applies (React StrictMode runs the mount effect twice in dev: a stale first
+  // load must not land after the second one). The pin decision is made up front, not after the await,
+  // so the response that wins is the one that pins.
+  const seq = useRef(0);
   const load = useCallback(async (reset: boolean) => {
-    setLoading(true); setErr("");
-    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key) return;
+    const my = ++seq.current; setLoading(true); setErr("");
+    const pin = reset && focusSlug && focusDone.current !== focusSlug ? focusSlug : null;
+    if (pin) focusDone.current = pin;
+    try { const r = await social.feed({ sort: filter.sort, label: filter.label, tag: filter.tag, cursor: reset ? null : cursor, limit: 10 }); if (live.current !== key || seq.current !== my) return;
       let pageItems = r.items;
-      if (reset && focusSlug && focusDone.current !== focusSlug) {
-        focusDone.current = focusSlug;
+      if (pin) {
         // A post-Publish pin (?pin=) is one-shot: drop it from the URL so a reload or a later visit ranks normally.
-        { const u = new URL(location.href); if (u.searchParams.get("pin") === focusSlug) { u.searchParams.delete("pin"); history.replaceState(history.state, "", `${u.pathname}${u.search}${u.hash}`); } }
+        { const u = new URL(location.href); if (u.searchParams.get("pin") === pin) { u.searchParams.delete("pin"); history.replaceState(history.state, "", `${u.pathname}${u.search}${u.hash}`); } }
         // Always pin the shared song at index 0 (the active card), even when it is already on this page
         // further down — otherwise card 0 (another song) shows and plays for the share link.
-        const inPage = pageItems.find((x) => x.slug === focusSlug);
-        const s = inPage ?? await social.song(focusSlug).catch(() => null);
-        if (s && live.current === key) pageItems = [s, ...pageItems.filter((x) => x.slug !== focusSlug)];
+        const inPage = pageItems.find((x) => x.slug === pin);
+        const s = inPage ?? await social.song(pin).catch(() => null);
+        if (live.current !== key || seq.current !== my) return;
+        if (!s) { setNotFound(pin); return; }
+        pageItems = [s, ...pageItems.filter((x) => x.slug !== pin)];
       }
       setItems((p) => reset ? pageItems : [...p, ...pageItems.filter((x) => !p.some((y) => y.slug === x.slug))]); setCursor(r.next_cursor); setDone(!r.next_cursor); if (r.model_version) mv.current = r.model_version; }
-    catch (e) { setErr((e as Error).message); } finally { setLoading(false); }
+    catch (e) { if (seq.current === my) setErr((e as Error).message); } finally { if (seq.current === my) setLoading(false); }
   }, [filter.sort, filter.label, filter.tag, cursor, key, focusSlug]);
   const feedEl = useRef<HTMLDivElement | null>(null); const [active, setActive] = useState(0); const [candidate, setCandidate] = useState(0);
   // Section switch (chip, #tag, Browse): fade the playing song out (58 ms), then start the new section at its first card.
   const focusFirst = useRef(false);
-  useEffect(() => { live.current = key; setItems([]); setCursor(null); setDone(false); audio.fadeOut(); feedEl.current?.scrollTo({ top: 0 }); setActive(0); setCandidate(0); focusFirst.current = true; void load(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
+  useEffect(() => { live.current = key; setNotFound(null); setItems([]); setCursor(null); setDone(false); audio.fadeOut(); feedEl.current?.scrollTo({ top: 0 }); setActive(0); setCandidate(0); focusFirst.current = true; void load(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
   useEffect(() => { if (!focusFirst.current || !items.length) return; focusFirst.current = false; const f = feedEl.current; if (!f) return; f.scrollTo({ top: 0 }); f.querySelector<HTMLElement>('[data-idx="0"]')?.focus({ preventScroll: true }); }, [items]);
   // Autoplay: the card that is >= 60% in view is active; it plays once audio is unlocked (first tap), and the next card preloads.
   useEffect(() => {
@@ -190,7 +199,8 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen, focusSlug }: { me: M
         {filter.label && !labels.includes(filter.label) && chip(`${filter.label} ✕`, { sort: "for_you" }, true, "chip-label")}
         <button className="so-chip" data-testid="browse" onClick={() => onSheet({ kind: "browse" })}>Browse ▾</button>
       </div>
-      <div className="so-feed" data-testid="feed" ref={feedEl} data-active={active} data-unlocked={audio.unlocked ? "1" : "0"} data-fading={audio.fading ?? ""} data-candidate={candidate}>
+      {notFound && <div className="so-empty" data-testid="song-not-found" role="alert"><h2>Song not found</h2><p>No public song at “{notFound}”. It may have been removed or made private.</p><button className="so-chip" data-testid="not-found-feed" onClick={() => navigate("feed")}>Browse the feed</button></div>}
+      <div className="so-feed" data-testid="feed" hidden={!!notFound} ref={feedEl} data-active={active} data-unlocked={audio.unlocked ? "1" : "0"} data-fading={audio.fading ?? ""} data-candidate={candidate}>
         <div ref={audio.host} hidden data-testid="feed-audio" />
         {!audio.unlocked && items.length > 0 && <button className="so-unlock" data-testid="tap-to-play" onClick={() => { const s = items[active]; if (s) audio.start(s, true); }}>🔊 Tap to play</button>}
         {items.map((s, i) => <Card key={s.slug} idx={i} song={s} me={me} playing={audio.cur === s.slug} viz={audio.viz} onPlay={audio.toggle} onUpdate={(n) => setItems((p) => p.map((x) => x.slug === n.slug ? n : x))} onSheet={onSheet} onFilter={(f) => setFilter({ sort: "new", ...f })} onOpen={onOpen} />)}

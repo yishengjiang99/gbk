@@ -18,6 +18,8 @@ if (!(g as { __gbkBound?: boolean }).__gbkBound) {
   // project. Earlier projects stay in IndexedDB. The param is stripped so a later reload restores as usual.
   const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : null;
   const fresh = !shareRoute && !!q?.get("new") && q.get("new") !== "0";
+  // A fresh start never re-attaches to the run this tab had in flight (see bridge-client.ts RUN_KEY).
+  if (fresh) { try { sessionStorage.removeItem("gbk.agentActiveRun"); } catch { /* storage unavailable */ } }
   if (fresh && typeof history !== "undefined") { q!.delete("new"); history.replaceState(history.state, "", `${location.pathname}${q!.toString() ? `?${q}` : ""}${location.hash}`); }
   if (shareRoute || fresh) playerBridge.holdStartupLoads = true;
   if (typeof indexedDB !== "undefined" && (shareRoute || fresh)) enableAutosave(workstation);
