@@ -73,7 +73,7 @@ struct StudioWebView: View {
                             // App launch (or any full load that restored a project): same draft check.
                             } else if Self.humHarnessURL == nil, loaded.query?.contains("new=") != true { Task { await freshIfNoDraft(waitForRestore: true) } }
                         }, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } },
-                           onDeepLink: { router.open($0) })
+                           onDeepLink: { router.open($0) }, onTab: { router.selectedTab = $0 })
                             .accessibilityIdentifier("studio-webview")
                     } else { ProgressView().tint(Theme.accent) }
                 }
@@ -342,6 +342,8 @@ struct WebView: UIViewRepresentable {
     var onPublish: (@MainActor (PublishBridge.Request) -> Void)? = nil
     /// Song pages (/s/<slug>) open the native feed card instead of loading inside the studio.
     var onDeepLink: (@MainActor (DeepLink) -> Void)? = nil
+    /// Web links to the feed/inbox/profile switch native tabs instead.
+    var onTab: (@MainActor (AppTab) -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -352,6 +354,7 @@ struct WebView: UIViewRepresentable {
         context.coordinator.publish.onPublish = onPublish
         context.coordinator.onLoad = onLoad
         context.coordinator.onDeepLink = onDeepLink
+        context.coordinator.onTab = onTab
         let midi = MIDIBridge.install(in: config) // Web MIDI polyfill backed by CoreMIDI (Core/MIDI, docs/ios/midi.md)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
@@ -361,6 +364,7 @@ struct WebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         context.coordinator.observeMicrophone(view)
+        context.coordinator.observeURL(view)
         view.isOpaque = false
         view.backgroundColor = .clear
         // The page lays itself out to the visible viewport; don't let the scroll view add safe-area/keyboard
@@ -376,6 +380,7 @@ struct WebView: UIViewRepresentable {
         context.coordinator.publish.onPublish = onPublish
         context.coordinator.onLoad = onLoad
         context.coordinator.onDeepLink = onDeepLink
+        context.coordinator.onTab = onTab
         if let songLoad, songLoad != context.coordinator.seenSongLoad {
             context.coordinator.seenSongLoad = songLoad
             context.coordinator.allowSongPageOnce = true
@@ -396,6 +401,8 @@ struct WebView: UIViewRepresentable {
         var loaded: URL?
         var onLoad: (@MainActor (URL) -> Void)?
         var onDeepLink: (@MainActor (DeepLink) -> Void)?
+        var onTab: (@MainActor (AppTab) -> Void)?
+        private var urlObservation: NSKeyValueObservation?
         /// Set when the app itself asked the Studio to open a song (feed card "open"/fork);
         /// consumed by the next /s/<slug> navigation decision.
         var allowSongPageOnce = false
@@ -505,7 +512,52 @@ struct WebView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 Task { @MainActor in onDeepLink(link) }
             } else {
-                decisionHandler(.allow)
+                let r = Self.route(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true)
+                decisionHandler(r == .allow ? .allow : .cancel)
+                if r != .allow { perform(r, action.request.url) }
+            }
+        }
+
+        enum Route: Equatable { case allow, link(DeepLink), tab(AppTab), safari }
+
+        /// Only /studio, /s/ (songs) and /api (auth redeem) stay in the Studio; other site pages go native or to Safari.
+        static func route(_ url: URL?, mainFrame: Bool) -> Route {
+            guard mainFrame, let url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  url.host?.lowercased() == DeepLink.host else { return .allow }
+            let parts = url.pathComponents.filter { $0 != "/" }.map { $0.lowercased() }
+            switch parts.first {
+            case nil, "feed", "explore": return .link(.feed)
+            case "studio", "s", "api": return .allow
+            case "inbox": return parts.count > 1 ? .link(.inbox(handle: url.pathComponents.filter { $0 != "/" }[1])) : .tab(.inbox)
+            case "profile": return .tab(.profile)
+            case "u": return DeepLink(url: url).map { .link($0) } ?? .tab(.profile)
+            default: return .safari
+            }
+        }
+
+        private func perform(_ r: Route, _ url: URL?) {
+            let (link, tab) = (onDeepLink, onTab)
+            Task { @MainActor in
+                switch r {
+                case .allow: break
+                case .link(let l): link?(l)
+                case .tab(let t): tab?(t)
+                case .safari: if let url { UIApplication.shared.open(url) }
+                }
+            }
+        }
+
+        /// SPA navigations (pushState, e.g. the studio's ‹ Back → "/") skip decidePolicyFor: route them and return to /studio.
+        func observeURL(_ webView: WKWebView) {
+            urlObservation = webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
+                guard let self else { return }
+                let r = Self.route(wv.url, mainFrame: true)
+                guard r != .allow else { return }
+                self.perform(r, wv.url)
+                DispatchQueue.main.async {
+                    if wv.canGoBack { wv.goBack() }
+                    else { wv.load(URLRequest(url: URL(string: "https://\(DeepLink.host)/studio")!)) }
+                }
             }
         }
     }

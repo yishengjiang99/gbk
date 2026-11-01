@@ -67,6 +67,25 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(r.selectedTab, .feed)
     }
 
+    func testStudioWebRoute() {
+        typealias C = WebView.Coordinator
+        func r(_ s: String, main: Bool = true) -> C.Route { C.route(URL(string: s), mainFrame: main) }
+        let b = "https://compose.grepawk.com"
+        XCTAssertEqual(r(b + "/studio?new=1"), .allow)
+        XCTAssertEqual(r(b + "/s/ember-crown-rmpaqyj8"), .allow)
+        XCTAssertEqual(r(b + "/api/auth/web-code/redeem?code=x&return=/studio"), .allow)
+        XCTAssertEqual(r(b + "/", main: false), .allow)
+        XCTAssertEqual(r("https://accounts.google.com/x"), .allow)
+        XCTAssertEqual(r("about:blank"), .allow)
+        XCTAssertEqual(r(b + "/"), .link(.feed))   // studio ‹ Back (pushState "/"), via URL KVO
+        XCTAssertEqual(r(b), .link(.feed))
+        XCTAssertEqual(r(b + "/feed"), .link(.feed))
+        XCTAssertEqual(r(b + "/inbox"), .tab(.inbox))
+        XCTAssertEqual(r(b + "/profile"), .tab(.profile))
+        XCTAssertEqual(r(b + "/u/maestroaria"), .link(.user(name: "maestroaria")))
+        XCTAssertEqual(r(b + "/privacy"), .safari)
+    }
+
     @MainActor func testFocusFetchesMissingSongAndPutsItFirst() async throws {
         // The native feed plays MIDI live through SF2, so a focusable song needs `media.midi`.
         let json = APIClientTests.docSong.replacingOccurrences(
