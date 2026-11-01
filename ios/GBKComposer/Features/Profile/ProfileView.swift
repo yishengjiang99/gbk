@@ -7,14 +7,30 @@ final class ProfileModel: ObservableObject {
     @Published var error: String?
     private var cursor: String?
     @Published private(set) var done = false
+    private var loading = false
+    let fetch: (String, String?) async throws -> UserProfilePage
 
+    init(fetch: @escaping (String, String?) async throws -> UserProfilePage = {
+        try await APIClient.shared.send(Endpoints.user($0, cursor: $1), as: UserProfilePage.self)
+    }) { self.fetch = fetch }
+
+    /// One request at a time: the initial `.task` and the "load more" spinner's `.task` used to race, appending the
+    /// first page twice (duplicate row ids, so taps hit the wrong song), and the spinner's cancelled task surfaced as
+    /// "Couldn't load the profile."
     func load(handle: String, reset: Bool = true) async {
+        guard !loading else { return }
         if reset { songs = []; cursor = nil; done = false }
         guard !done else { return }
+        loading = true
+        defer { loading = false }
         do {
-            let page = try await APIClient.shared.send(Endpoints.user(handle, cursor: cursor), as: UserProfilePage.self)
-            user = page.user; songs += page.songs; cursor = page.nextCursor; done = page.nextCursor == nil
-        } catch APIError.notAvailable { error = "No such user."; done = true }
+            let page = try await fetch(handle, cursor)
+            let known = Set(songs.map(\.slug))
+            user = page.user; songs += page.songs.filter { !known.contains($0.slug) }
+            cursor = page.nextCursor; done = page.nextCursor == nil; error = nil
+        } catch is CancellationError { return }
+        catch let e as URLError where e.code == .cancelled { return }
+        catch APIError.notAvailable { error = "No such user."; done = true }
         catch { self.error = "Couldn't load the profile."; done = true }
     }
 }

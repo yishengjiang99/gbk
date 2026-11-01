@@ -62,7 +62,7 @@ enum Endpoints {
     static func meEngagement(event: String) -> Endpoint {
         Endpoint(path: "/api/me/engagement", method: .post, body: ["event": event])
     }
-    static func user(_ handle: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/users/\(handle)", query: q("cursor", cursor)) }
+    static func user(_ handle: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/users/\(handle.hasPrefix("@") ? String(handle.dropFirst()) : handle)", query: q("cursor", cursor)) }
 
     // MARK: Reports (P1, live) / blocks (P4, not live)
     static func report(kind: String, target: String, reason: String) -> Endpoint {

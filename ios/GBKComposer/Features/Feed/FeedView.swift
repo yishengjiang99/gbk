@@ -5,8 +5,12 @@ final class FeedViewModel: ObservableObject {
     @Published private(set) var items: [Song] = []
     @Published private(set) var error: String?
     @Published var query = FeedQuery() {
-        didSet { if query != oldValue { Task { await reload() } } }
+        didSet { if query != oldValue { pinned = nil; Task { await reload() } } }
     }
+    /// Shown when a deep link / profile tap can't open its song (instead of silently showing another one).
+    @Published var focusError: String?
+    /// The deep-linked song; survives a reload so a link that lands before the first page stays card 0.
+    private var pinned: Song?
     private var cursor: String?
     /// slug → model_version of the feed page that delivered it.
     private(set) var modelVersions: [String: String] = [:]
@@ -17,7 +21,7 @@ final class FeedViewModel: ObservableObject {
     init(provider: FeedProviding = APIClient.shared) { self.provider = provider }
 
     func reload() async {
-        items = []; cursor = nil; exhausted = false; error = nil
+        items = pinned.map { [$0] } ?? []; cursor = nil; exhausted = false; error = nil
         await loadMoreIfNeeded(current: nil)
     }
 
@@ -42,14 +46,19 @@ final class FeedViewModel: ObservableObject {
     }
 
     /// Deep link: always pin `slug` as card 0 and drop its duplicate below (same as web 42adb71), fetching
-    /// `GET /api/songs/:slug` only when it isn't loaded yet. Returns false when the song can't be found or has no audio.
+    /// `GET /api/songs/:slug` only when it isn't loaded yet. On failure sets `focusError` and returns false.
+    /// A song without MIDI is still shown (it just can't play natively).
     func focus(slug: String, fetch: (String) async throws -> Song = { try await APIClient.shared.send(Endpoints.song($0), as: Song.self) }) async -> Bool {
-        if let i = items.firstIndex(where: { $0.slug == slug }) {
-            let song = items.remove(at: i)
-            items.insert(song, at: 0)
-            return true
+        focusError = nil
+        let song: Song
+        if let loaded = items.first(where: { $0.slug == slug }) { song = loaded }
+        else {
+            do { song = try await fetch(slug) }
+            catch APIError.notAvailable { focusError = "That song isn't available."; return false }
+            catch { focusError = "Couldn't open that song."; return false }
         }
-        guard let song = try? await fetch(slug), song.midiURL != nil else { return false }
+        if song.midiURL == nil { focusError = "This song has no audio yet." }
+        pinned = song
         items.removeAll { $0.slug == song.slug }
         items.insert(song, at: 0)
         return true
@@ -112,6 +121,7 @@ struct FeedView: View {
                 else { ProgressView().tint(Theme.accent) }
             }
         }
+        .alert(model.focusError ?? "", isPresented: Binding(get: { model.focusError != nil }, set: { if !$0 { model.focusError = nil } })) {}
         .sheet(item: $commentsFor) { song in
             CommentsSheet(song: song) { delta in
                 var s = song; s.commentCount = max(0, s.commentCount + delta); model.update(s)
@@ -122,8 +132,9 @@ struct FeedView: View {
         }
         .task {
             player.onStart = { slug in Task { _ = try? await APIClient.shared.send(Endpoints.play(slug), as: [String: Int].self) } }
-            if model.items.isEmpty { await model.reload() }
-            if let link = router.pending { await open(link) } // cold start: the link arrived before this view
+            // Cold start: the link arrived before this view. Focus first; the reload keeps the pinned song as card 0.
+            if let link = router.pending { await open(link) }
+            if model.items.count <= 1 { await model.reload() }
         }
         .onChange(of: visibleSlug) { _, slug in playVisible(slug) }
         // Section change (sort chip, label, #tag): the old section's song must not keep playing while the new one loads,
