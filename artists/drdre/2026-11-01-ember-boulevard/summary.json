@@ -1,0 +1,165 @@
+{
+ "name": "Ember Boulevard",
+ "ppq": 480,
+ "revision": 20,
+ "endTick": 115080,
+ "durationSec": 159.833,
+ "bars": 60,
+ "tempos": [
+  {
+   "tick": 0,
+   "microPerQuarter": 666667
+  }
+ ],
+ "timeSigs": [
+  {
+   "tick": 0,
+   "numerator": 4,
+   "denominator": 4
+  }
+ ],
+ "trackCount": 6,
+ "noteCount": 2504,
+ "ccCount": 0,
+ "pendingProposals": [],
+ "key": {
+  "name": "E minor",
+  "estimated": false
+ },
+ "sections": [
+  {
+   "name": "Intro",
+   "startBar": 1,
+   "bars": 4,
+   "energy": 0.3
+  },
+  {
+   "name": "Verse 1",
+   "startBar": 5,
+   "bars": 12,
+   "energy": 0.6
+  },
+  {
+   "name": "Hook",
+   "startBar": 17,
+   "bars": 8,
+   "energy": 0.85
+  },
+  {
+   "name": "Verse 2",
+   "startBar": 25,
+   "bars": 12,
+   "energy": 0.65
+  },
+  {
+   "name": "Hook 2",
+   "startBar": 37,
+   "bars": 8,
+   "energy": 0.9
+  },
+  {
+   "name": "Bridge",
+   "startBar": 45,
+   "bars": 4,
+   "energy": 0.45
+  },
+  {
+   "name": "Hook 3",
+   "startBar": 49,
+   "bars": 8,
+   "energy": 0.95
+  },
+  {
+   "name": "Outro",
+   "startBar": 57,
+   "bars": 4,
+   "energy": 0.35
+  }
+ ],
+ "tracks": [
+  {
+   "id": "trk_mvy3fsm83g379",
+   "name": "Saw Lead",
+   "channel": 0,
+   "program": {
+    "program": 81,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 196,
+   "minPitch": 62,
+   "maxPitch": 83
+  },
+  {
+   "id": "trk_mvy3fsmp5c6y3",
+   "name": "Tonewheel Organ",
+   "channel": 1,
+   "program": {
+    "program": 16,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 476,
+   "minPitch": 55,
+   "maxPitch": 67
+  },
+  {
+   "id": "trk_mvy3fsn37jefo",
+   "name": "Muted Guitar",
+   "channel": 2,
+   "program": {
+    "program": 28,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 286,
+   "minPitch": 59,
+   "maxPitch": 67
+  },
+  {
+   "id": "trk_mvy3fsng94ms4",
+   "name": "Synth Brass",
+   "channel": 3,
+   "program": {
+    "program": 62,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 144,
+   "minPitch": 71,
+   "maxPitch": 79
+  },
+  {
+   "id": "trk_mvy3fsntb1we9",
+   "name": "Synth Bass 2",
+   "channel": 4,
+   "program": {
+    "program": 39,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 327,
+   "minPitch": 35,
+   "maxPitch": 57
+  },
+  {
+   "id": "trk_mvy3fso7djmpq",
+   "name": "Electronic Kit",
+   "channel": 9,
+   "program": {
+    "program": 24,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": true,
+   "noteCount": 1075,
+   "minPitch": 36,
+   "maxPitch": 54
+  }
+ ]
+}
