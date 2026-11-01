@@ -83,11 +83,11 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const compact = useMedia("(max-width: 499px)") || typeof (window as { gbkNative?: unknown }).gbkNative === "object";
   const [menuOpen, setMenuOpen] = useState(false); const [sheetOpen, setSheetOpen] = useState(false);
   const hasTracks = p.tracks.length > 0;
-  // iOS keyboard: size the studio to the visual viewport and undo Safari's pan, so the docked composer input sits
+  // iOS keyboard: --vvh (global viewport-sync) sizes the studio to the visual viewport; here we undo Safari's pan, so the docked composer input sits
   // right above the keyboard instead of the page shifting up.
   useEffect(() => {
     const vv = window.visualViewport; if (!vv) return;
-    const f = () => { const ws = document.querySelector<HTMLElement>("[data-testid=workstation]"); if (ws) ws.style.setProperty("--ws-vh", `${Math.round(vv.height)}px`); if (vv.offsetTop > 0 && document.documentElement.classList.contains("studio-fit")) window.scrollTo(0, 0); };
+    const f = () => { /* height comes from --vvh (src/viewport-sync.ts, #187) */ if (vv.offsetTop > 0 && document.documentElement.classList.contains("studio-fit")) window.scrollTo(0, 0); };
     f(); vv.addEventListener("resize", f); vv.addEventListener("scroll", f); window.addEventListener("resize", f);
     return () => { vv.removeEventListener("resize", f); vv.removeEventListener("scroll", f); window.removeEventListener("resize", f); };
   }, []);
