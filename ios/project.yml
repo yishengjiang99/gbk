@@ -24,10 +24,12 @@ packages:
     path: Packages/SF2Player
   HearSheetCore:
     path: Packages/HearSheetCore
-  # Sheet-music recognition (AGPL-3.0, port of liebharc/homr). Vendored copy of omr-sheet-cam's
-  # Packages/omr-homr-ios (see Packages/omr-homr-ios/VENDORED.md for the pinned SHA and update steps).
-  OMRHomrIOS:
-    path: Packages/omr-homr-ios
+  # Sheet-music scan (AGPL-3.0; OMRScanKit + OMRScanUI over omr-homr-ios, a port of liebharc/homr).
+  # One source of truth in omr-sheet-cam; GBK keeps only the studio adapter (Features/Scan).
+  # Pinned to an omr-sheet-cam main commit. Fix scan bugs there and bump this revision.
+  OMRScan:
+    url: https://github.com/yishengjiang99/omr-sheet-cam.git
+    revision: 80ad0721e29c5ffbfef4aef54a34f9df59dbaa2f
 targets:
   GBKComposer:
     type: application
@@ -58,8 +60,10 @@ targets:
       - package: SF2PlayerLocal
         product: SF2Player
       - package: HearSheetCore
-      - package: OMRHomrIOS
-        product: OMRHomrIOS
+      - package: OMRScan
+        product: OMRScanKit
+      - package: OMRScan
+        product: OMRScanUI
     postCompileScripts:
       - name: Bundle OMR models
         basedOnDependencyAnalysis: false

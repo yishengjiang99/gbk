@@ -1,4 +1,5 @@
 import Foundation
+import OMRScanKit
 
 /// One native-scan telemetry event (#166). The taxonomy is the web scan telemetry's
 /// (src/telemetry/scan.ts) — do not rename:
@@ -32,11 +33,6 @@ struct ScanTelemetryEvent: Equatable {
         for (k, v) in fields { context[k] = v.json }
         return ["kind": "report", "message": name, "ts": ts, "context": context]
     }
-}
-
-/// Where a scan's pages came from (telemetry `source` + the sheet's entry points).
-enum ScanSource: String {
-    case camera, photos, file, fixture
 }
 
 /// Scan telemetry through the same server-side pathway the web scanner uses (#165): the
@@ -73,7 +69,7 @@ final class ScanTelemetryLogger {
         emit(ScanTelemetryEvent(name: "scan_started", fields: fields, ts: stamp()))
     }
 
-    func completed(source: ScanSource, summary: ScanRunSummary?, durationMs: Double, noteCount: Int) {
+    func completed(source: ScanSource, diagnostics summary: ScanDiagnostics?, durationMs: Double, noteCount: Int) {
         var fields = measurementFields(summary)
         fields["source"] = .string(source.rawValue)
         fields["totalMs"] = .int(Int((summary?.totalMs ?? durationMs).rounded()))
@@ -81,7 +77,7 @@ final class ScanTelemetryLogger {
         emit(ScanTelemetryEvent(name: "scan_completed", fields: fields, ts: stamp()))
     }
 
-    func failed(source: ScanSource, reason: String, summary: ScanRunSummary?, durationMs: Double) {
+    func failed(source: ScanSource, reason: String, diagnostics summary: ScanDiagnostics?, durationMs: Double) {
         var fields = measurementFields(summary)
         fields["source"] = .string(source.rawValue)
         fields["reason"] = .string(reason)
@@ -91,7 +87,7 @@ final class ScanTelemetryLogger {
 
     /// The measurement fields in the web telemetry's shape. Empty without a summary
     /// (fixture recognizers, or a failure before the first page parsed).
-    private func measurementFields(_ summary: ScanRunSummary?) -> [String: ScanTelemetryEvent.Value] {
+    private func measurementFields(_ summary: ScanDiagnostics?) -> [String: ScanTelemetryEvent.Value] {
         guard let summary else { return [:] }
         var fields: [String: ScanTelemetryEvent.Value] = [
             "preprocessMs": .int(Int(summary.preprocessMs.rounded())),
@@ -111,11 +107,9 @@ final class ScanTelemetryLogger {
             "pages": .int(summary.pages),
             "midiBytes": .int(summary.midiBytes),
         ]
-        if let backends = summary.backends {
-            fields["backendSegnet"] = .string(backends.segnet)
-            fields["backendEncoder"] = .string(backends.encoder)
-            fields["backendDecoder"] = .string(backends.decoder)
-        }
+        if let b = summary.backendSegnet { fields["backendSegnet"] = .string(b) }
+        if let b = summary.backendEncoder { fields["backendEncoder"] = .string(b) }
+        if let b = summary.backendDecoder { fields["backendDecoder"] = .string(b) }
         return fields
     }
 }

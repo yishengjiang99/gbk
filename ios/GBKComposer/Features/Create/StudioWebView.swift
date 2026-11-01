@@ -22,7 +22,7 @@ struct StudioWebView: View {
     @State private var urlToken: String?
     /// UI tests (`-uiTestDark`): the app is locked to Light (Info.plist), so dark screenshots need an override.
     static var forcedScheme: ColorScheme? { ProcessInfo.processInfo.arguments.contains("-uiTestDark") ? .dark : nil }
-    @StateObject private var scan = ScanController()
+    @StateObject private var scan = ScanCoordinator()
     @State private var publishRequest: PublishBridge.Request?
     @State private var published = false
     /// Feed-card requests waiting on the Studio page: a remix (song slug + prompt) to hand
@@ -84,7 +84,7 @@ struct StudioWebView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .preferredColorScheme(Self.forcedScheme)
-        .sheet(isPresented: $scan.isPresented) { ScanSheetView(controller: scan) }
+        .sheet(isPresented: $scan.isPresented) { ScanSheet(coordinator: scan) }
         .sheet(item: $publishRequest, onDismiss: {
             // Visual confirmation: a successful publish lands on the song's feed card
             // (focused and playing) instead of dropping back into the Studio, where
@@ -334,7 +334,7 @@ struct StudioNativeBar: View {
 
 struct WebView: UIViewRepresentable {
     let url: URL
-    var scan: ScanController? = nil
+    var scan: ScanCoordinator? = nil
     /// Identity of a deliberate open-this-song load: the coordinator lets that one
     /// /s/<slug> main-frame navigation through instead of routing it to the feed.
     var songLoad: UUID? = nil
