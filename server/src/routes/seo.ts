@@ -121,7 +121,7 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
       const mp3 = (mp3Q.get(r.slug) as { mp3: Uint8Array | null } | undefined)?.mp3;
       if (!mp3) return reply.code(404).send("not found");
       let file: string;
-      try { file = await ogVideo(ogDir, r.slug, ogImage(ogDir, ogOf(r)), mp3, opts.ffmpeg); }
+      try { file = await ogVideo(ogDir, ogOf(r), mp3, opts.ffmpeg); }
       catch (e) { req.log.error({ err: e, slug: r.slug }, "og video render failed"); return reply.code(503).send("video unavailable"); }
       const size = statSync(file).size, buf = readFileSync(file);
       reply.type("video/mp4").header("accept-ranges", "bytes").header("cache-control", "public, max-age=86400").header("x-content-type-options", "nosniff");

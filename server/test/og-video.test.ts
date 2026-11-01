@@ -13,6 +13,9 @@ import { SocialStore } from "../src/persistence/social.ts";
 import { seoRoutes } from "../src/routes/seo.ts";
 import { RateLimiter } from "../src/security/rate-limit.ts";
 import type { Config } from "../src/config.ts";
+import { frameTimes, mp3Duration, OGV_FPS, OGV_MAX_SEC, OGV_PAL, rollFrame, rollFrameSvg } from "../src/og-video.ts";
+import { VIZ } from "../../src/components/social/viz-constants.ts";
+import type { PianoRollPreview } from "../../src/agent/piano-roll-preview.ts";
 
 const SHELL = `<!doctype html><html><head><title>G</title><meta name="description" content="g" /><meta property="og:type" content="website" /><meta property="og:title" content="g" /><meta property="og:description" content="g" /></head><body><div id="root"></div></body></html>`;
 const proj = JSON.stringify({ name: "x", tracks: [] });
@@ -63,7 +66,7 @@ test("mp4 route serves video/mp4 from one render, caches it, dedups concurrent r
   assert.equal(calls().length, 1, "one render for concurrent requests"); assert.equal(mp4s().length, 1);
   assert.ok(!readdirSync(og).some((f) => f.endsWith(".tmp.mp4") || f.endsWith(".mp3")), "no temp files left");
   const args = calls()[0];
-  for (const [flag, val] of [["-c:v", "libx264"], ["-pix_fmt", "yuv420p"], ["-profile:v", "main"], ["-c:a", "aac"], ["-movflags", "+faststart"]]) assert.equal(args[args.indexOf(flag) + 1], val, flag);
+  for (const [flag, val] of [["-c:v", "libx264"], ["-pix_fmt", "yuv420p"], ["-profile:v", "main"], ["-c:a", "aac"], ["-movflags", "+faststart"]]) assert.equal(args[args.lastIndexOf(flag) + 1], val, flag);
   const part = await app.inject({ url: `/og/s/${s.slug}.mp4`, headers: { range: "bytes=0-99" } });
   assert.equal(part.statusCode, 206); assert.deepEqual(part.rawPayload, MP4.subarray(0, 100)); assert.equal(part.headers["content-range"], `bytes 0-99/${MP4.length}`);
   assert.equal((await app.inject({ url: `/og/s/${s.slug}.mp4`, headers: { range: `bytes=${MP4.length}-` } })).statusCode, 416);
@@ -89,4 +92,36 @@ test("mp4 route is rate limited per IP", async () => {
   await app.inject(`/og/s/${s.slug}.mp4`);
   const r = await app.inject(`/og/s/${s.slug}.mp4`);
   assert.equal(r.statusCode, 429); assert.ok(r.headers["retry-after"]);
+});
+
+// Pure frame/geometry logic (no ffmpeg).
+const PV: PianoRollPreview = { tracks: ["#e5396b", "#2d6a93"], lo: 60, hi: 72, end: 1000, notes: [[0, 0, 100, 60], [1, 250, 100, 64], [0, 500, 100, 67], [1, 900, 100, 72]] };
+
+test("roll frame: notes scroll left past a fixed playhead as time advances", () => {
+  const a = rollFrame(PV, 0, 10, 1200, 510), b = rollFrame(PV, 2, 10, 1200, 510);
+  assert.equal(a.playheadX, 1200 * VIZ.playheadFrac); assert.equal(b.playheadX, a.playheadX, "playhead fixed");
+  const pps = 1200 / VIZ.windowSec, first = (f: typeof a) => f.notes.find((n) => n.fill.includes("rgb") || n.fill === "#e5396b")!;
+  assert.equal(first(a).x, a.playheadX, "note at t=0 starts on the playhead");
+  const x64 = (f: typeof a) => f.notes.find((n) => n.fill.startsWith("#2d6a93") || n.fill.startsWith("rgb(1"))!;
+  assert.ok(Math.abs(x64(a).x - x64(b).x - 2 * pps) < 1e-6, "scrolls windowSec-relative pixels per second");
+  assert.ok(a.notes.length < PV.notes.length, "only the visible window is drawn");
+  assert.notEqual(rollFrameSvg(PV, 0, 10), rollFrameSvg(PV, 1, 10));
+});
+
+test("roll frame: active note is lightened with a playhead outline; past notes are faded", () => {
+  const f = rollFrame(PV, 0.5, 10);
+  const on = f.notes.filter((n) => n.stroke === OGV_PAL.head); assert.equal(on.length, 1); assert.match(on[0].fill, /^rgb\(/); assert.equal(on[0].opacity, 1);
+  const g = rollFrame(PV, 1.5, 10); assert.ok(g.notes.some((n) => n.opacity === VIZ.pastAlpha));
+  assert.ok(g.rows.every((r) => r.fill === OGV_PAL.row && r.y >= 0 && r.y < 630));
+  assert.equal(OGV_PAL.bg, "#f8fcff", "bright feed-card theme");
+});
+
+test("frame times: 10 fps, at least one frame for tiny audio, capped duration", () => {
+  assert.equal(OGV_FPS, 10); assert.equal(frameTimes(0.05).length, 1); assert.equal(frameTimes(1).length, 10);
+  assert.equal(frameTimes(1).at(-1), 0.9); assert.equal(frameTimes(10_000).length, OGV_MAX_SEC * OGV_FPS);
+});
+
+test("mp3 duration parses frame headers without ffmpeg", () => {
+  const d = mp3Duration(MP3); assert.ok(d > 0 && d < 2, String(d));
+  assert.equal(mp3Duration(new Uint8Array([1, 2, 3])), 0);
 });
