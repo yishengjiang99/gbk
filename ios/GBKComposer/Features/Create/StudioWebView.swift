@@ -526,7 +526,11 @@ struct WebView: UIViewRepresentable {
                   url.host?.lowercased() == DeepLink.host else { return .allow }
             let parts = url.pathComponents.filter { $0 != "/" }.map { $0.lowercased() }
             switch parts.first {
-            case nil, "feed", "explore": return .link(.feed)
+            case nil, "feed", "explore":
+                // Web Publish lands on /feed?pin=<slug> (the new song first): open that song's native feed card.
+                if let pin = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "pin" })?.value, !pin.contains("/"),
+                   let song = URL(string: "https://\(DeepLink.host)/s/\(pin)"), case .share(let slug)? = DeepLink(url: song) { return .link(.share(slug: slug)) }
+                return .link(.feed)
             case "studio", "s", "api": return .allow
             case "inbox": return parts.count > 1 ? .link(.inbox(handle: url.pathComponents.filter { $0 != "/" }[1])) : .tab(.inbox)
             case "profile": return .tab(.profile)

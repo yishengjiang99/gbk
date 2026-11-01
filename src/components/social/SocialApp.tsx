@@ -118,6 +118,8 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen, focusSlug }: { me: M
       let pageItems = r.items;
       if (reset && focusSlug && focusDone.current !== focusSlug) {
         focusDone.current = focusSlug;
+        // A post-Publish pin (?pin=) is one-shot: drop it from the URL so a reload or a later visit ranks normally.
+        { const u = new URL(location.href); if (u.searchParams.get("pin") === focusSlug) { u.searchParams.delete("pin"); history.replaceState(history.state, "", `${u.pathname}${u.search}${u.hash}`); } }
         // Always pin the shared song at index 0 (the active card), even when it is already on this page
         // further down — otherwise card 0 (another song) shows and plays for the share link.
         const inPage = pageItems.find((x) => x.slug === focusSlug);

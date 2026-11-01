@@ -37,13 +37,14 @@ import { selectedTrackId } from "../../workstation/live-input.ts";
 import type { Note, Project } from "../../workstation/model.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import type { SavedSong } from "../../agent/share-client.ts";
-import { appUrl } from "../../agent/routes.ts";
+import { appUrl, navigate } from "../../agent/routes.ts";
 import { Metronome } from "../../audio/metronome.ts";
 import { sfChoice } from "../../audio/sf-choice.ts";
 import { deploymentBase } from "../../audio/soundfont-loader.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
 import { waitShareOpen } from "../../agent/share-open.ts";
-import { autoGrowTextarea, friendlyError, versionLog } from "./studio-logic.ts";
+import { autoGrowTextarea, friendlyError, songSeconds, versionLog, latestArtifactItemId, songCardFor, publishedFeedPath, type SongCard, type SongVersion } from "./studio-logic.ts";
+import { VersionCard } from "./SongCard.tsx";
 import "./desktop-studio.css";
 
 export interface DesktopStudioProps {
@@ -235,6 +236,19 @@ export function DesktopStudio(props: DesktopStudioProps) {
   const steps = (running ? lastAssistant?.steps : null) ?? [];
   const phase = running ? Math.max(0, ...steps.map((x) => phaseOf(x.tool))) : lastAssistant ? 4 : -1;
   const pending = state.proposals.filter((x) => x.status === "pending").length;
+  // Song card in chat (STUDIO_SONG_CARD): the finished song shows as a card (Play / Open editor / Publish), no raw ids.
+  const cardOn = s.auth.songCard !== false;
+  const loadedRev = useRef({ id: p.id, rev: p.revision }); if (loadedRev.current.id !== p.id) loadedRev.current = { id: p.id, rev: p.revision };
+  const versions = versionLog.list(p.id);
+  const publishable = versions.some((v) => v.runId !== "remix-original") || p.revision !== (versions.find((v) => v.label === "Original")?.revision ?? loadedRev.current.rev);
+  const latestArt = latestArtifactItemId(s.items);
+  const songCard = (c: SongCard) => {
+    const v: SongVersion | undefined = c.kind === "version" ? c.version : undefined; const cur = !v || v.revision === p.revision;
+    const makeCurrent = () => cur || workstation.restoreSnapshot(v!.snapshot, `restore v${v!.n}`);
+    return <div className="ms-card-host"><VersionCard v={v} p={p} current={cur} playing={cur && t.playing} pos={secs} total={songSeconds(p)}
+      onPlay={() => { if (makeCurrent()) play(); }} onEdit={() => { if (makeCurrent()) { setMenu(null); document.querySelector<HTMLElement>("[data-testid=composer-log]")?.blur(); say("Edit notes in the piano roll above."); } }}
+      onPublish={v || publishable ? () => { if (makeCurrent()) void doPublish(); } : undefined} /></div>;
+  };
 
   const doPublish = async () => {
     setMenu(null);
@@ -510,7 +524,8 @@ export function DesktopStudio(props: DesktopStudioProps) {
           <div className="ds-log" ref={log} data-testid="composer-log" data-scroll-ok aria-live="polite">
             {!s.items.length && <div className="ds-small">Ask the composer anything, e.g. “add a walking bass under the piano”.</div>}
             {!s.items.length && s.auth.authenticated && <div className="ds-starters" data-testid="starter-prompts">{STARTER_PROMPTS.map((x) => <button key={x.label} className="ds-btn" disabled={running || s.conn.state !== "connected"} title={x.text} onClick={() => send(x.text)}>{x.label}</button>)}</div>}
-            {s.items.map((m) => <LogItem key={m.id} m={m} onRetry={(x) => send(x)} />)}
+            {s.items.map((m) => { const c = songCardFor(m, { version: versionLog.forRun(p.id, m.runId), hasSong: p.tracks.length > 0 && !running, latestArtifactId: latestArt, enabled: cardOn });
+              return <LogItem key={m.id} m={m} text={c.text} card={cardOn ? (c.card ? songCard(c.card) : null) : undefined} onRetry={(x) => send(x)} />; })}
             {s.run && <div className="ds-run" data-testid="composer-run" role="status">● {s.run.task}{s.run.maxSteps ? ` · step ${s.run.step}/${s.run.maxSteps}` : ""}</div>}
             {s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ds-err">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ds-btn" onClick={s.reconnect}>Try again</button>}</div>}
             {shared && <div data-testid="share-link">Published: <a href={shared.url} target="_blank" rel="noreferrer">{shared.url}</a> <button className="ds-btn" onClick={() => void navigator.clipboard?.writeText(shared.url ?? "")}>Copy</button></div>}
@@ -568,7 +583,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
       </SidePanel>
       <input ref={imgIn} type="file" accept="image/jpeg,image/png" hidden data-testid="sheet-image-input" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void readSheetImage(f); }} />
       <input ref={midiIn} type="file" accept=".mid,.midi,audio/midi,audio/x-midi,audio/mid" hidden data-testid="midi-file-input" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f) return; if (isMidiFile(f)) openMidiFile(f); else say("Pick a .mid or .midi file."); }} />
-      {publish && <PublishDialog song={publish} onClose={() => { setPublish(null); setSongsKey((x) => x + 1); }} onPublished={(x) => { setPublish(null); setShared(x); setSongsKey((k) => k + 1); say("Published! Your song is on Explore."); }} />}
+      {publish && <PublishDialog song={publish} onClose={() => { setPublish(null); setSongsKey((x) => x + 1); }} onPublished={(x) => { setPublish(null); setSongsKey((k) => k + 1); if (cardOn && x.slug) { workstation.pause(); navigate(publishedFeedPath(x.slug)); } else { setShared(x); say("Published! Your song is on Explore."); } }} />}
     </div>
   );
 }
@@ -589,13 +604,14 @@ function SidePanel({ open, title, testId, onClose, children }: { open: boolean; 
   </section>;
 }
 
-function LogItem({ m, onRetry }: { m: ChatItem; onRetry: (t: string) => void }) {
+/** card: undefined = old behaviour (raw artifact list); null = no card for this item; a node = the song card. */
+function LogItem({ m, text, card, onRetry }: { m: ChatItem; text: string; card?: ReactNode; onRetry: (t: string) => void }) {
   if (m.role === "user") return <div className="ds-u" data-testid="user-msg">You: {m.text}</div>;
   if (m.role === "error") return <div className="ds-err" role="alert" data-testid="studio-error">{friendlyError(m.text)} {m.retryText && <button className="ds-btn" onClick={() => onRetry(m.retryText!)}>Try again</button>}</div>;
   return <div className="ds-a" data-role="assistant">
     <ComposerProgress steps={m.steps ?? []} />
-    {m.text && <div data-testid="assistant-text">Composer: {m.text}</div>}
-    <ComposerArtifacts artifacts={m.artifacts ?? []} />
+    {text && <div data-testid="assistant-text">Composer: {text}</div>}
+    {card === undefined ? <ComposerArtifacts artifacts={m.artifacts ?? []} /> : card}
   </div>;
 }
 

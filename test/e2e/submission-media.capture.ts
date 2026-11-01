@@ -52,7 +52,7 @@ test("capture demo recording + starter-prompt screenshots", async ({ browser }) 
   await studio.getByTestId("composer-input").pressSequentially(STUDIO_PROMPT, { delay: 25 });
   await studio.getByTestId("composer-input").press("Enter");
   await expect(studio.getByTestId("piano-roll")).toBeVisible();
-  await expect(studio.getByTestId("assistant-text").last()).toContainText("Rendered WAV artifact", { timeout: 540_000 });
+  await expect(studio.getByTestId("version-card").last()).toBeVisible({ timeout: 540_000 }); // the finished song card (no raw artifact id)
   const dlg = studio.getByTestId("publish-dialog");
   if (await dlg.isVisible({ timeout: 20_000 }).catch(() => false)) { await studio.waitForTimeout(1200); await studio.getByTestId("publish-cancel").click(); }
   await studio.getByTestId("ws-play").click(); await studio.waitForTimeout(12_000);

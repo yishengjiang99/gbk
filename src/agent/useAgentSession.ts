@@ -8,7 +8,7 @@ import type { ArtifactRef, HistoryItem, ServerMessage, UsageInfo } from "./proto
 
 export interface ToolStep { callId: string; tool: string; task: string; status: "pending" | "running" | "done" | "failed"; summary?: string; error?: string; progress?: string }
 export interface ChatItem { id: string; role: "user" | "assistant" | "error"; text: string; artifacts?: ArtifactRef[]; steps?: ToolStep[]; runId?: string; retryText?: string }
-export interface AuthState { checked: boolean; authenticated: boolean; user?: string; name?: string; csrf?: string; enabled?: boolean; error?: string; providers?: ("github" | "google")[]; codeLogin?: boolean; reviewerLogin?: boolean; limits?: { newAccount: boolean; dailyTokens: number; dailyRenders: number } | null; pro?: boolean; proSource?: "apple" | "stripe" | null }
+export interface AuthState { checked: boolean; authenticated: boolean; user?: string; name?: string; csrf?: string; enabled?: boolean; error?: string; providers?: ("github" | "google")[]; codeLogin?: boolean; reviewerLogin?: boolean; limits?: { newAccount: boolean; dailyTokens: number; dailyRenders: number } | null; pro?: boolean; proSource?: "apple" | "stripe" | null; songCard?: boolean }
 
 async function api(path: string, init: RequestInit & { csrf?: string } = {}) {
   const headers: Record<string, string> = { ...(init.body ? { "content-type": "application/json" } : {}), ...(init.csrf ? { "x-gbk-csrf": init.csrf } : {}) };
@@ -33,7 +33,7 @@ export function useAgentSession() {
 
   const refreshAuth = useCallback(async () => {
     // A 5xx / unreachable server (e.g. mid-deploy) is not a logout: keep the last known sign-in state.
-    try { const { status, body } = await api("/session"); if (status >= 500) { setAuth((a) => ({ ...a, checked: true, error: "server error" })); return; } setAuth({ checked: true, authenticated: !!body.authenticated, user: body.user, name: body.name ?? body.user, csrf: body.csrf, enabled: body.enabled !== false, providers: Array.isArray(body.providers) ? body.providers : [], codeLogin: !!body.loginAvailable, reviewerLogin: !!body.reviewerLogin, limits: body.limits ?? null, pro: body.pro === true, proSource: body.pro_source ?? null, error: status >= 500 ? "server error" : undefined }); }
+    try { const { status, body } = await api("/session"); if (status >= 500) { setAuth((a) => ({ ...a, checked: true, error: "server error" })); return; } setAuth({ checked: true, authenticated: !!body.authenticated, user: body.user, name: body.name ?? body.user, csrf: body.csrf, enabled: body.enabled !== false, providers: Array.isArray(body.providers) ? body.providers : [], codeLogin: !!body.loginAvailable, reviewerLogin: !!body.reviewerLogin, limits: body.limits ?? null, pro: body.pro === true, proSource: body.pro_source ?? null, songCard: body.studio_song_card !== false, error: status >= 500 ? "server error" : undefined }); }
     catch { setAuth((a) => ({ ...a, checked: true, error: "Composer server unreachable" })); }
   }, []);
   useEffect(() => { void refreshAuth(); }, [refreshAuth]);

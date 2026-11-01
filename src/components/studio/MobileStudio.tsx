@@ -4,7 +4,7 @@
 // is ALWAYS visible (docs/social/feed-design.md): sheets open above the input bar, never over it.
 // The whole chat is a full-screen modal (see .ms in mobile-studio.css): fixed over the viewport, above the app
 // shell's bottom tab bar; the header's ‹ Back button returns to the shell/song view, which stays mounted underneath.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useWorkstation, workstation } from "../workstation/useWorkstation.ts";
 import { useAgentSession, type ChatItem } from "../../agent/useAgentSession.ts";
 import { songAutosaver } from "../../agent/autosave.ts";
@@ -27,13 +27,13 @@ import { nativeHum, type HumState } from "../../hum/native-bridge.ts";
 import { MIDI_UNSUPPORTED_MESSAGE } from "../../workstation/midi-input.ts";
 import { isMidiFile } from "../../workstation/midi-import.ts";
 import { tickToSec } from "../../workstation/timing.ts";
-import type { Project } from "../../workstation/model.ts";
 import type { Proposal } from "../../workstation/controller.ts";
 import type { SavedSong } from "../../agent/share-client.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
-import { appUrl } from "../../agent/routes.ts";
+import { appUrl, navigate } from "../../agent/routes.ts";
 import { waitShareOpen } from "../../agent/share-open.ts";
-import { autoGrowTextarea, phoneComposerMaxPx, fmtTime, friendlyError, plainStep, songSeconds, trackChips, versionLog, type SongVersion } from "./studio-logic.ts";
+import { autoGrowTextarea, phoneComposerMaxPx, fmtTime, friendlyError, plainStep, songSeconds, versionLog, latestArtifactItemId, songCardFor, publishedFeedPath, type SongCard, type SongVersion } from "./studio-logic.ts";
+import { VersionCard } from "./SongCard.tsx";
 import "./mobile-studio.css";
 import { RecentProjects } from "./RecentProjects.tsx";
 import { startNew } from "../../workstation/studio-api.ts";
@@ -212,6 +212,14 @@ export function MobileStudio(props: MobileStudioProps) {
   // fork) loaded, or edits after a composer run. A freshly loaded song shows just Play and Open editor.
   const base = original?.revision ?? loaded.current.rev;
   const currentPublishable = versions.some((v) => v.runId !== "remix-original") || p.revision !== base;
+  // Song card in chat (STUDIO_SONG_CARD): a finished compose/render shows the song card inline, never a raw artifact id.
+  const cardOn = s.auth.songCard !== false;
+  const latestArt = latestArtifactItemId(s.items);
+  const mapped = s.items.map((m) => songCardFor(m, { version: versionLog.forRun(p.id, m.runId), hasSong: p.tracks.length > 0 && !running, latestArtifactId: latestArt, enabled: cardOn }));
+  const inlineCurrent = mapped.some((x) => x.card?.kind === "current");
+  const currentCard = <VersionCard p={p} playing={t.playing} pos={pos} total={total} current onPlay={playCurrent} onEdit={() => openEditor()} onPublish={currentPublishable ? () => void doPublish() : undefined} />;
+  const versionCard = (v: SongVersion) => <VersionCard v={v} p={p} playing={v.revision === p.revision ? t.playing : preview?.n === v.n} pos={pos} total={total} current={v.revision === p.revision}
+    onPlay={() => playVersion(v, v.revision === p.revision)} onEdit={() => openEditor(v)} onPublish={() => void doPublish(v)} onRestore={() => restore(v)} />;
   return (
     <div className="ms" ref={root} data-testid="workstation" data-compact="1" data-sheet={sheet ?? ""}>
       <header className="ms-head" data-testid="compact-head">
@@ -232,10 +240,9 @@ export function MobileStudio(props: MobileStudioProps) {
         </div>}
         {original && <VersionCard v={original} p={p} playing={original.revision === p.revision ? t.playing : preview?.n === original.n} pos={pos} total={total} current={original.revision === p.revision}
           onPlay={() => playVersion(original, original.revision === p.revision)} onEdit={() => openEditor(original)} onRestore={() => restore(original)} />}
-        {s.items.map((m) => <Message key={m.id} m={m} p={p} live={m.runId != null && m.runId === s.run?.runId} onRetry={(x) => send(x)}
-          card={(v) => <VersionCard v={v} p={p} playing={v.revision === p.revision ? t.playing : preview?.n === v.n} pos={pos} total={total} current={v.revision === p.revision}
-            onPlay={() => playVersion(v, v.revision === p.revision)} onEdit={() => openEditor(v)} onPublish={() => void doPublish(v)} onRestore={() => restore(v)} />} />)}
-        {showCurrent && <VersionCard p={p} playing={t.playing} pos={pos} total={total} current onPlay={playCurrent} onEdit={() => openEditor()} onPublish={currentPublishable ? () => void doPublish() : undefined} />}
+        {s.items.map((m, i) => <Message key={m.id} m={m} text={mapped[i].text} songCard={mapped[i].card} live={m.runId != null && m.runId === s.run?.runId} onRetry={(x) => send(x)}
+          card={(c) => c.kind === "version" ? versionCard(c.version) : currentCard} />)}
+        {showCurrent && !inlineCurrent && currentCard}
         {s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ms-note" data-testid="conn-note">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ms-btn ms-small" onClick={s.reconnect}>Try again</button>}</div>}
       </main>
 
@@ -334,7 +341,7 @@ export function MobileStudio(props: MobileStudioProps) {
       </footer>
       <input ref={imgIn} type="file" accept="image/jpeg,image/png" hidden data-testid="sheet-image-input" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void readSheetImage(f); }} />
       <input ref={midiIn} type="file" accept=".mid,.midi,audio/midi,audio/x-midi,audio/mid" hidden data-testid="midi-file-input" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f) return; if (isMidiFile(f)) openMidiFile(f); else say("Pick a .mid or .midi file."); }} />
-      {publish && <PublishDialog song={publish} onClose={() => setPublish(null)} onPublished={() => { setPublish(null); say("Published! Your song is on Explore."); }} />}
+      {publish && <PublishDialog song={publish} onClose={() => setPublish(null)} onPublished={(x) => { setPublish(null); if (cardOn && x.slug) { stopPreview(); workstation.pause(); navigate(publishedFeedPath(x.slug)); } else say("Published! Your song is on Explore."); }} />}
     </div>
   );
 }
@@ -362,46 +369,12 @@ function Steps({ m }: { m?: ChatItem }) {
       {x.status === "done" ? "✓" : x.status === "running" ? "●" : x.status === "failed" ? "!" : "○"} {x.task}{x.n > 1 ? ` (${x.n})` : ""}{x.status === "running" ? "…" : ""}</li>)}
   </ul>;
 }
-function Message({ m, p, live, onRetry, card }: { m: ChatItem; p: Project; live: boolean; onRetry: (t: string) => void; card: (v: SongVersion) => ReactNode }) {
+function Message({ m, text, songCard, live, onRetry, card }: { m: ChatItem; text: string; songCard: SongCard | null; live: boolean; onRetry: (t: string) => void; card: (c: SongCard) => ReactNode }) {
   if (m.role === "user") return <div className="ms-me" data-testid="user-msg">{m.text}</div>;
   if (m.role === "error") return <div className="ms-ai"><div className="ms-err" role="alert" data-testid="studio-error">{friendlyError(m.text)} {m.retryText && <button className="ms-btn ms-small" onClick={() => onRetry(m.retryText!)}>Try again</button>}</div></div>;
-  const v = versionLog.forRun(p.id, m.runId);
   return <div className="ms-ai" data-role="assistant">
-    {(m.text || live) && <p data-testid="assistant-text">{m.text || "Working on it…"}</p>}
+    {(text || live) && <p data-testid="assistant-text">{text || "Working on it…"}</p>}
     {live && <div className="ms-steps" data-testid="composer-run" role="status"><Steps m={m} /></div>}
-    {v && card(v)}
+    {songCard && card(songCard)}
   </div>;
-}
-
-function VersionCard({ v, p, current, playing, pos, total, onPlay, onEdit, onPublish, onRestore }: { v?: SongVersion; p: Project; current: boolean; playing: boolean; pos: number; total: number; onPlay: () => void; onEdit: () => void; onPublish?: () => void; onRestore?: () => void }) {
-  const song = v?.snapshot ?? p;
-  const len = current ? total : songSeconds(song);
-  const label = `${p.name === "Untitled" ? "Song" : p.name}${v ? (v.label ? ` · ${v.label}` : ` v${v.n}`) : ""}`;
-  return <div className="ms-song" data-testid="version-card" data-version={v?.n ?? "current"} data-current={current ? "1" : "0"}>
-    <div className="ms-song-t">
-      <button className="ms-btn ms-play" aria-label={playing ? `Pause ${label}` : `Play ${label}`} data-testid="version-play" onClick={onPlay}>{playing ? "❚❚" : "▶︎"}</button>
-      <b className="ms-grow">{label}{!v && <span className="ms-mut"> · latest edits</span>}</b>
-      <span className="ms-mut ms-time">{current && playing ? fmtTime(pos) : "0:00"} / {fmtTime(len)}</span>
-    </div>
-    <RollThumb p={song} ph={current && playing && len > 0 ? pos / len : null} />
-    <div className="ms-chips">{trackChips(song).map((c) => <span key={c} className="ms-chip">{c}</span>)}</div>
-    <div className="ms-acts">
-      <button data-testid="version-open-editor" onClick={onEdit}>Open editor</button>
-      {onPublish && <button className="pri" data-testid="version-publish" onClick={onPublish}>Publish</button>}
-    </div>
-    {!current && onRestore && <button className="ms-link ms-restore" data-testid="version-restore" onClick={onRestore}>Restore this version</button>}
-  </div>;
-}
-
-/** Tiny piano-roll picture of a song (at most 400 notes drawn). */
-function RollThumb({ p, ph }: { p: Project; ph: number | null }) {
-  const shapes = useMemo(() => {
-    const ns = p.notes.length > 400 ? p.notes.filter((_, i) => i % Math.ceil(p.notes.length / 400) === 0) : p.notes;
-    if (!ns.length) return [];
-    let lo = 127, hi = 0, end = 1; for (const n of ns) { lo = Math.min(lo, n.pitch); hi = Math.max(hi, n.pitch); end = Math.max(end, n.tick + n.duration); }
-    const color = new Map(p.tracks.map((t) => [t.id, t.color])); const span = Math.max(12, hi - lo + 1);
-    return ns.map((n) => ({ x: (n.tick / end) * 100, w: Math.max(0.6, (n.duration / end) * 100), y: ((hi - n.pitch) / span) * 56 + 4, c: color.get(n.trackId) ?? "#5b5bf6" }));
-  }, [p]);
-  return <div className="ms-thumb" aria-hidden><svg viewBox="0 0 100 64" preserveAspectRatio="none">{shapes.map((s, i) => <rect key={i} x={s.x} y={s.y} width={s.w} height={3.2} rx={0.8} fill={s.c} />)}</svg>
-    {ph != null && <i className="ms-ph" style={{ left: `${Math.min(100, ph * 100)}%` }} />}</div>;
 }
