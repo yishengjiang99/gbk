@@ -1,0 +1,18 @@
+.jam-page { max-width: 960px; margin: 0 auto; padding: 16px; font-family: system-ui, sans-serif; color: #eee; background: #15161a; min-height: 100vh; }
+.jam-header { display: flex; gap: 16px; align-items: center; } .jam-header a { color: #9cf; }
+.jam-card, .jam-room { display: flex; flex-direction: column; gap: 12px; }
+.jam-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.jam-page button { padding: 8px 12px; border-radius: 6px; border: 1px solid #444; background: #2a2d35; color: #eee; font-size: 1rem; cursor: pointer; }
+.jam-page input, .jam-page select { padding: 6px; font-size: 1rem; }
+.jam-err { color: #ff8a8a; } .jam-banner { background: #5a4500; padding: 8px; border-radius: 6px; } .jam-note { color: #aaa; font-size: .9rem; }
+.jam-strips { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.jam-strip { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid #333; border-radius: 8px; background: #1d1f25; }
+.jam-q { font-size: .85rem; color: #bdf; }
+.jam-panic { background: #7a1f1f !important; font-weight: 600; }
+.jam-host input { flex: 1; min-width: 200px; }
+.jam-kb { position: relative; display: flex; height: 160px; user-select: none; }
+.jam-key.white { flex: 1; background: #f4f4f4; border: 1px solid #999; border-radius: 0 0 4px 4px; }
+.jam-key.black { flex: 0 0 24px; margin: 0 -12px; height: 100px; z-index: 1; background: #222; border-radius: 0 0 3px 3px; }
+.jam-key.white.down { background: #9cf; } .jam-key.black.down { background: #369; }
+.jam-diag table { border-collapse: collapse; font-size: .85rem; } .jam-diag td, .jam-diag th { border: 1px solid #333; padding: 4px 6px; }
+@media (max-width: 600px) { .jam-kb { height: 120px; } }

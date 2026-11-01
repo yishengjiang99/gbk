@@ -12,6 +12,8 @@ import { apiBase } from "./agent/bridge-client.ts";
 import { openShared } from "./agent/share-client.ts";
 import { beginShareOpen, settleShareOpen } from "./agent/share-open.ts";
 import { reportError } from "./telemetry/error-reporter.ts";
+import { lazy, Suspense } from "react";
+const JamApp = lazy(() => import("./components/jam/JamApp.tsx"));
 
 /** Is the Composer server (same-origin /api) present? Not on the GitHub Pages build: then GBK behaves as before. */
 function useComposerAvailable(): boolean | null {
@@ -49,6 +51,7 @@ export default function Root() {
   // Social routes render the Feed from the first paint: only a confirmed "no Composer server" (static Pages build) falls back to the studio.
   const explore = composer !== false && (route.view === "feed" || route.view === "profile" || route.view === "inbox" || route.view === "admin");
   useEffect(() => { document.documentElement.classList.toggle("studio-fit", !explore); return () => document.documentElement.classList.remove("studio-fit"); }, [explore]);
+  if (route.view === "jam") return <Suspense fallback={<div className="jam-loading">Loading Live Jam…</div>}><JamApp roomId={route.roomId} /></Suspense>;
   return (
     <>
       {explore && <SocialApp route={route as import("./agent/routes.ts").SocialRoute} onOpen={(slug, fork) => navigate(`s/${slug}?${fork ? "fork=1" : "edit=1"}`)} />}

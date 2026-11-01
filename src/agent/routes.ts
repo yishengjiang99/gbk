@@ -2,7 +2,7 @@
 export function base(): string { try { return (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? "/"; } catch { return "/"; } }
 export const appUrl = (path = "") => `${base()}${path.replace(/^\//, "")}`;
 export type SocialRoute = { view: "feed"; sort?: string; label?: string; tag?: string; focus?: string } | { view: "profile"; handle: string | null } | { view: "inbox" } | { view: "admin" };
-export type Route = SocialRoute | { view: "studio" } | { view: "share"; slug: string; fork: boolean };
+export type Route = SocialRoute | { view: "studio" } | { view: "jam"; roomId: string | null } | { view: "share"; slug: string; fork: boolean };
 export function parseRoute(pathname = location.pathname, search = location.search): Route {
   const b = base(); let rel = pathname.startsWith(b) ? pathname.slice(b.length) : pathname.replace(/^\//, "");
   rel = rel.replace(/\/$/, "");
@@ -10,6 +10,7 @@ export function parseRoute(pathname = location.pathname, search = location.searc
   // A share link lands on the song's feed card (playing once audio unlocks), not in the
   // Studio. The editor opens only on an explicit studio route: ?edit=1 (the card's "open", read-only) or ?fork=1 (Remix).
   if (m) { const q = new URLSearchParams(search); const fork = q.get("fork") === "1"; return fork || q.get("edit") === "1" ? { view: "share", slug: m[1], fork } : { view: "feed", focus: m[1] }; }
+  const jam = /^jam(?:\/([A-Za-z0-9]{6,40}))?$/.exec(rel); if (jam) return { view: "jam", roomId: jam[1] ?? null };
   if (rel === "studio" || new URLSearchParams(search).has("player")) return { view: "studio" };
   const q = new URLSearchParams(search);
   if (rel === "" || rel === "explore" || rel === "feed") return { view: "feed", sort: q.get("sort") ?? undefined, label: q.get("label") ?? undefined };
