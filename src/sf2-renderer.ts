@@ -1145,9 +1145,9 @@ export class Sf2SynthEngine {
 
   /** AudioWorklet path: dispatches events whose frame <= renderedSamples (events without a frame never fire). */
   renderScheduled(outL: Float32Array, outR: Float32Array, events: SynthEvent[], eventIndex = 0,
-    renderedSamples = 0): { eventIndex: number; renderedSamples: number } {
-    const n = Math.min(outL.length, outR.length);
-    for (let i = 0; i < n; i++) {
+    renderedSamples = 0, start = 0, end = Math.min(outL.length, outR.length)): { eventIndex: number; renderedSamples: number } {
+    const n = Math.min(outL.length, outR.length, end);
+    for (let i = start; i < n; i++) {
       while (eventIndex < events.length && ev(events[eventIndex].frame, Infinity) <= renderedSamples) {
         this.dispatchEvent(events[eventIndex]);
         eventIndex += 1;

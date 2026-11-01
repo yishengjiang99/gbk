@@ -9,6 +9,7 @@ declare class AudioWorkletProcessor {
   constructor();
 }
 declare const sampleRate: number;
+declare const currentFrame: number;
 declare function registerProcessor(name: string, processorCtor: new () => AudioWorkletProcessor): void;
 
 /** One SF2 engine per node: realtime playback (AudioContext) and WAV rendering (OfflineAudioContext) alike. */
@@ -20,7 +21,7 @@ class Sf2Processor extends AudioWorkletProcessor {
     this.port.onmessage = (event: MessageEvent) => this.core.onMsg(event.data as SynthEvent);
   }
   process(_inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
-    this.core.process(outputs[0][0], outputs[0][1]);
+    this.core.process(outputs[0][0], outputs[0][1], currentFrame);
     return true;
   }
 }

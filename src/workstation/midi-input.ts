@@ -24,7 +24,7 @@ export class MidiInputManager {
   private access: AccessLike | null = null;
   private attached = new Map<string, { input: InputLike; fn: (e: { data: Uint8Array | null }) => void }>();
   private listeners = new Set<() => void>();
-  constructor(private nav: NavigatorLike | undefined, private onMessage: (data: Uint8Array, deviceId: string) => void) {}
+  constructor(private nav: NavigatorLike | undefined, private onMessage: (data: Uint8Array, deviceId: string, timeStamp: number) => void) {}
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   private emit() { for (const l of this.listeners) l(); }
   get supported(): boolean { return typeof this.nav?.requestMIDIAccess === "function"; }
@@ -55,7 +55,8 @@ export class MidiInputManager {
     const ids = new Set(live.map((i) => i.id));
     for (const id of [...this.attached.keys()]) if (!ids.has(id)) this.detach(id);
     for (const input of live) if (!this.attached.has(input.id)) {
-      const fn = (e: { data: Uint8Array | null }) => { if (e.data && (this.selectedId === "all" || this.selectedId === input.id)) this.onMessage(e.data, input.id); };
+      // Keep the capture timestamp from the event (performance.now() domain), not the time this handler runs.
+      const fn = (e: { data: Uint8Array | null; timeStamp?: number }) => { if (e.data && (this.selectedId === "all" || this.selectedId === input.id)) this.onMessage(e.data, input.id, typeof e.timeStamp === "number" && e.timeStamp > 0 ? e.timeStamp : performance.now()); };
       input.addEventListener("midimessage", fn); this.attached.set(input.id, { input, fn });
     }
     this.devices = live.map((i) => ({ id: i.id, name: i.name || i.id, manufacturer: i.manufacturer ?? "", state: i.state ?? "connected" }));

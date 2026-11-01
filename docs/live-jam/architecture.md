@@ -3,7 +3,7 @@
 Two to four players in a private room, full-mesh WebRTC data channels, every client synthesizes every
 player locally. The server owns rooms, membership, signaling and TURN credentials. It never touches audio.
 
-This PR covers the server and deploy side only. The web client comes next; iOS comes after that.
+Server/deploy landed first (PR #174). The web client is described under "Web client" below. iOS comes later.
 
 ## Where it plugs in
 
@@ -99,3 +99,28 @@ must rejoin. No seamless failover is claimed.
 4-player limit, revoke, kick, host transfer, offer/answer relay, TURN credentials, leave, end).
 `JAM_SMOKE_BASE=https://staging... scripts/jam-smoke.sh` runs it against an existing server that has
 `p1..p5:code-p1..code-p5` access codes.
+
+## Web client
+
+Route `/jam` (lobby) and `/jam/<roomId>#i=<invite>`. The invite is in the fragment, so it never reaches server logs
+or the Referer header. The page drops it after joining.
+
+| Module | Role |
+|---|---|
+| `src/jam/session.ts` | `JamSession`: the one owner of signaling, peers, clock, router, receivers, audio and timers. All injected |
+| `src/jam/signaling-client.ts` | ticket per attempt, ticket as first frame, backoff with jitter, 60 s loss grace then `suspended`, pings |
+| `src/jam/peer-manager.ts` | full mesh `RTCPeerConnection`s, data channels only, deterministic offerer, early-signal buffer, ICE restart, getStats |
+| `src/jam/clock.ts` | room clock estimate |
+| `src/jam/input-router.ts` | local capture: monitor once, send once, redundancy, snapshots, Web MIDI bytes |
+| `src/jam/receive-scheduler.ts` | per-peer replay window, reconciler, adaptive budget, lease, toSynth via `synth-ingress` |
+| `src/jam/reconciler.ts`, `dedupe.ts` | note safety and dedupe |
+| `src/jam/audio.ts` | one AudioContext, one `sf2-processor` node per player (max 4), GainNode mix, AnalyserNode level |
+| `src/components/jam/JamApp.tsx` | lobby, guest gate, room, player strips, instrument, keyboard, MIDI picker, host controls, panic, details |
+
+Changed existing code: `sf2-processor-core.ts` (live queue), `sf2-processor.ts` (passes `currentFrame`),
+`sf2-renderer.ts` (`renderScheduled` takes a start/end range; default unchanged), `midi-input.ts` (passes
+`event.timeStamp`), `agent/routes.ts` + `Root.tsx` (`/jam` route, lazy loaded).
+
+The jam keyboard and engines are separate from the studio's `LiveInputSession`/`Sf2LiveSink`. The jam page is its
+own route, so the studio keyboard and player are not mounted while you jam. A Web MIDI controller is only attached
+by the jam page while it is open.

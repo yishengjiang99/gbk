@@ -1,0 +1,94 @@
+[
+  {
+    "name": "note-on",
+    "hex": "010103000100000000000054346f9d41003c64000700000002000500",
+    "json": [
+      {
+        "kind": 1,
+        "generation": 3,
+        "seq": 1,
+        "roomTimeUs": 123456789,
+        "channel": 0,
+        "a": 60,
+        "b": 100,
+        "stream": 0,
+        "noteId": 7,
+        "instrumentRevision": 2,
+        "clockRevision": 5
+      }
+    ]
+  },
+  {
+    "name": "note-off-with-redundancy",
+    "hex": "010203000200000000000054346f9d41003c00000700000002000500010103000100000000000054346f9d41003c64000700000002000500",
+    "json": [
+      {
+        "kind": 2,
+        "generation": 3,
+        "seq": 2,
+        "roomTimeUs": 123456789,
+        "channel": 0,
+        "a": 60,
+        "b": 0,
+        "stream": 0,
+        "noteId": 7,
+        "instrumentRevision": 2,
+        "clockRevision": 5
+      },
+      {
+        "kind": 1,
+        "generation": 3,
+        "seq": 1,
+        "roomTimeUs": 123456789,
+        "channel": 0,
+        "a": 60,
+        "b": 100,
+        "stream": 0,
+        "noteId": 7,
+        "instrumentRevision": 2,
+        "clockRevision": 5
+      }
+    ]
+  },
+  {
+    "name": "bend-max-seq-wrap",
+    "hex": "01040300ffffffff0000000000003043007f7f000000000002000500",
+    "json": [
+      {
+        "kind": 4,
+        "generation": 3,
+        "seq": 4294967295,
+        "roomTimeUs": 4503599627370496,
+        "channel": 0,
+        "a": 127,
+        "b": 127,
+        "stream": 0,
+        "noteId": 0,
+        "instrumentRevision": 2,
+        "clockRevision": 5
+      }
+    ]
+  },
+  {
+    "name": "snapshot",
+    "hex": "010903000900000000000054346f9d41000000000000000002000500000000000000001000000000000000807f000000",
+    "json": [
+      {
+        "kind": 9,
+        "generation": 3,
+        "seq": 9,
+        "roomTimeUs": 123456789,
+        "channel": 0,
+        "a": 0,
+        "b": 0,
+        "stream": 0,
+        "noteId": 0,
+        "instrumentRevision": 2,
+        "clockRevision": 5,
+        "held": "00000000000000100000000000000080",
+        "sustain": 127,
+        "sostenuto": 0
+      }
+    ]
+  }
+]
