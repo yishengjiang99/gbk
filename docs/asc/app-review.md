@@ -32,14 +32,11 @@ All "None" except: **Unrestricted Web Access: No** (the studio web view is limit
 ```
 GBK Music Composer is a feed of short music pieces that users can play, rate, comment on and remix in a studio (compose.grepawk.com in a web view).
 
-Sign-in: Browsing and playback need no account. To test signed-in features (ratings, comments, report/block) use the review account:
-  Username: openai-reviewer
-  Password: (entered in the "Sign-in information" fields of App Review Information)
-Reviewer sign-in page: https://compose.grepawk.com/signin/reviewer (form posts to /api/auth/reviewer). It is the same account used for our ChatGPT app review and has normal daily limits.
+Sign-in: No account is required to use the app. Browsing, playback and composing all work signed out. Sign-in is optional and only adds sharing and sync (publishing pieces, ratings, comments, report/block).
 
 UGC safeguards (Guideline 1.2): every piece and comment has Report, and users can be blocked; reports are reviewed within 24 h and offending content is removed. Terms: https://compose.grepawk.com/terms.
 Push notifications are only used for replies and forks and are opt-in.
 Account deletion: Profile › Delete account (DELETE /api/me), also via Support (https://compose.grepawk.com/support).
 ```
 
-Sign-in fields in ASC: username `openai-reviewer`; password is held by Yisheng (never commit it).
+Sign-in fields in ASC: none. Demo account not required (the app works without an account; sign-in is optional).
