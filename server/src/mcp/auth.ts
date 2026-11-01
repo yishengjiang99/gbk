@@ -28,6 +28,8 @@ export interface Principal {
   scopes: Scope[];
   via: "oauth" | "session" | "test" | "guest";
   clientId?: string;
+  /** OAuth token family (one authorization grant and its refresh rotations). */
+  family?: string;
 }
 
 export function requireScope(p: Principal | null, scope: Scope): Principal {
@@ -57,7 +59,7 @@ export function resolvePrincipal(
       if (tok.expires_at <= Date.now()) throw new McpError("UNAUTHENTICATED", "access token expired; re-authorize");
       if (tok.resource !== resource) throw new McpError("UNAUTHENTICATED", "access token was issued for a different resource (audience mismatch)");
       const scopes = tok.scope.split(/\s+/).filter((s): s is Scope => (ALL_SCOPES as string[]).includes(s));
-      return { user: tok.user, scopes, via: "oauth", clientId: tok.client_id };
+      return { user: tok.user, scopes, via: "oauth", clientId: tok.client_id, family: tok.family };
     }
     // A Bearer header that matches nothing is a failed login attempt, not an anonymous request.
     throw new McpError("UNAUTHENTICATED", "invalid access token");

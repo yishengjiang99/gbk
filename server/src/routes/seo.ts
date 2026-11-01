@@ -2,13 +2,15 @@
 // server-side meta injection (title, description, canonical, og/twitter) into the SPA shell for /s/<slug>
 // and /u/<handle>. Only public songs and profiles with public songs (or AI artists) are listed.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Config } from "../config.ts";
 import { PAGE_PATHS } from "./pages.ts";
-import { ogImage } from "../og-image.ts";
+import { ogImage, OG_W, OG_H } from "../og-image.ts";
+import { ogVideo, ogVideoEnabled } from "../og-video.ts";
+import { RateLimiter } from "../security/rate-limit.ts";
 
 export const SITEMAP_CHUNK = 45_000;
 export const STATIC_PATHS = ["/", "/feed", "/explore", ...PAGE_PATHS, "/chatgpt/gallery", "/pricing", "/plans"];
@@ -43,7 +45,7 @@ function sendXml(req: FastifyRequest, reply: FastifyReply, body: string) {
   return reply.type("application/xml; charset=utf-8").send(body);
 }
 
-export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, opts: { chunk?: number; shellFile?: string; ogDir?: string; proOf?: (userId: string) => boolean } = {}) {
+export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, opts: { chunk?: number; shellFile?: string; ogDir?: string; proOf?: (userId: string) => boolean; ogVideo?: boolean; ffmpeg?: string; videoLimiter?: RateLimiter } = {}) {
   const chunk = opts.chunk ?? SITEMAP_CHUNK, origin = cfg.publicOrigin;
   app.get("/sitemap.xml", async (req, reply) => {
     const { pages, songs } = sitemapEntries(db, origin);
@@ -106,10 +108,30 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
   const labelsOf = (j: string): string[] => { try { const v = JSON.parse(j || "[]"); return Array.isArray(v) ? v.map(String) : []; } catch { return []; } };
   const ogOf = (r: SongRow) => ({ slug: r.slug, title: r.title, artist: r.display_name ?? "GBK Composer", genre: labelsOf(r.labels).join(" · "), projectJson: r.project_json, rev: r.updated_at ?? r.created_at });
 
+  const videoOn = opts.ogVideo ?? ogVideoEnabled(), videoL = opts.videoLimiter ?? new RateLimiter(20);
+  const mp3Q = db.prepare("SELECT mp3 FROM shares WHERE slug = ? AND public = 1");
   app.get("/og/s/:file", async (req, reply) => {
-    const m = /^([a-zA-Z0-9-]{1,140})\.png$/.exec((req.params as { file: string }).file);
+    // Strict allowlist: [a-zA-Z0-9-] only, so no path separators or dots reach the filesystem.
+    const m = /^([a-zA-Z0-9-]{1,140})\.(png|mp4)$/.exec((req.params as { file: string }).file);
     const r = m ? song(m[1]) : undefined;
     if (!r) return reply.code(404).send("not found");
+    if (m![2] === "mp4") {
+      if (!videoOn || !r.h3) return reply.code(404).send("not found");
+      if (!videoL.take(req.ip)) return reply.code(429).header("retry-after", String(videoL.retryAfterSec(req.ip))).send("rate limited");
+      const mp3 = (mp3Q.get(r.slug) as { mp3: Uint8Array | null } | undefined)?.mp3;
+      if (!mp3) return reply.code(404).send("not found");
+      let file: string;
+      try { file = await ogVideo(ogDir, r.slug, ogImage(ogDir, ogOf(r)), mp3, opts.ffmpeg); }
+      catch (e) { req.log.error({ err: e, slug: r.slug }, "og video render failed"); return reply.code(503).send("video unavailable"); }
+      const size = statSync(file).size, buf = readFileSync(file);
+      reply.type("video/mp4").header("accept-ranges", "bytes").header("cache-control", "public, max-age=86400").header("x-content-type-options", "nosniff");
+      const rg = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+      if (!rg || (!rg[1] && !rg[2])) return reply.send(buf);
+      let start = rg[1] ? Number(rg[1]) : size - Number(rg[2]), end = rg[1] && rg[2] ? Math.min(Number(rg[2]), size - 1) : size - 1;
+      if (start < 0) start = 0;
+      if (start >= size || start > end) return reply.code(416).header("content-range", `bytes */${size}`).send();
+      return reply.code(206).header("content-range", `bytes ${start}-${end}/${size}`).send(buf.subarray(start, end + 1));
+    }
     const png = readFileSync(ogImage(ogDir, ogOf(r)));
     return reply.type("image/png").header("cache-control", "public, max-age=86400").header("x-content-type-options", "nosniff").send(png);
   });
@@ -125,8 +147,11 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
     const secs = durationSeconds(r.wav_meta, r.project_json), published = new Date(r.published_at ?? r.created_at);
     const desc = [`${r.title}${by}: an original song made with GBK Composer. Listen, remix, and download the MIDI.`, labels.length ? `Genre: ${labels.join(", ")}.` : "", prompt ? `Prompt: ${prompt}` : ""].filter(Boolean).join(" ").slice(0, 300);
     const image = `${origin}/og/s/${encodeURIComponent(r.slug)}.png`, audio = r.h3 ? `${origin}/api/shares/${encodeURIComponent(r.slug)}/media/mp3` : null;
+    const video = `${origin}/og/s/${encodeURIComponent(r.slug)}.mp4`;
     const more = r.owner ? (byOwnerQ.all(r.owner, 11) as { slug: string; title: string }[]).filter((x) => x.slug !== r.slug).slice(0, 10) : [];
     const extraHead = [audio && `    <meta property="og:audio" content="${htmlEsc(audio)}" />\n    <meta property="og:audio:type" content="audio/mpeg" />\n`,
+      audio && videoOn && [`    <meta property="og:video" content="${htmlEsc(video)}" />\n`, `    <meta property="og:video:secure_url" content="${htmlEsc(video)}" />\n`,
+        `    <meta property="og:video:type" content="video/mp4" />\n`, `    <meta property="og:video:width" content="${OG_W}" />\n`, `    <meta property="og:video:height" content="${OG_H}" />\n`].join(""),
       artistUrl && `    <meta property="music:musician" content="${htmlEsc(artistUrl)}" />\n`, secs ? `    <meta property="music:duration" content="${Math.round(secs)}" />\n` : "",
       `    <meta property="music:release_date" content="${published.toISOString().slice(0, 10)}" />\n`].filter(Boolean).join("");
     const jsonLd = { "@context": "https://schema.org", "@type": "MusicRecording", name: r.title, url, image, datePublished: published.toISOString().slice(0, 10),

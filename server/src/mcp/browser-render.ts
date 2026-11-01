@@ -76,6 +76,14 @@ export class RenderService {
   refreshPro: (owner: string) => Promise<unknown> = async () => {};
   /** Server-render limits for an owner: guest 6/h 180 s, account 30/h 300 s, Pro 120/h 600 s (defaults). */
   /** Informational limit copy for MCP/ChatGPT: names the plan and links /plans only (never pricing, checkout or upgrades). */
+  /** Daily render cap. A token family with its own daily_render_limit counts renders across the family against that
+   *  limit; everyone else keeps the per-account/global cap. Same QUOTA_EXCEEDED message either way. */
+  private checkDaily(owner: string, guest: boolean, family: string | undefined, fallback: number) {
+    const custom = family ? this.store.familyRenderLimit(family) : null;
+    const limit = custom ?? fallback;
+    const used = custom != null ? this.store.countFamilyJobsSince(family!, 86_400_000) : this.store.countJobsSince(owner, 86_400_000);
+    if (used >= limit) throw new McpError("QUOTA_EXCEEDED", this.overLimit(owner, guest, `${limit} renders per day`));
+  }
   private overLimit(owner: string, guest: boolean, what: string) {
     const plan = !guest && this.isPro(owner) ? "Pro" : "free";
     return `This is over the ${plan} plan's limit (${what}). Plans: ${this.cfg.publicOrigin}/plans`;
@@ -108,7 +116,7 @@ export class RenderService {
    * MIDI is always exported. Limits: duration, per-owner hourly rate + one in flight, per-network daily cap for
    * guests, bounded queue and a hard timeout (ServerRenderPool).
    */
-  submitServer(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, o: { guest: boolean; client?: string; perDay?: number }): RenderJobRow {
+  submitServer(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, o: { guest: boolean; client?: string; perDay?: number; family?: string }): RenderJobRow {
     const pool = this.serverPool;
     if (!pool?.enabled) throw new McpError("WORKER_UNAVAILABLE", "server rendering is turned off on this deployment");
     const jobFont = this.resolveJobFont(config);
@@ -116,8 +124,7 @@ export class RenderService {
     const { maxSeconds, perHour } = this.serverLimits(owner, o.guest);
     const seconds = tickToSec(snapshot, snapshot.endTick) + (config.tailSeconds ?? 3);
     if (!Number.isFinite(seconds) || seconds > maxSeconds) throw new McpError("QUOTA_EXCEEDED", `${this.overLimit(owner, o.guest, `${maxSeconds} s per server render`)} This piece is ${Math.round(seconds)} s including the tail; shorten it or render it in GBK Studio.`);
-    const perDay = o.perDay ?? this.rendersPerDay(owner);
-    if (this.store.countJobsSince(owner, 86_400_000) >= perDay) throw new McpError("QUOTA_EXCEEDED", this.overLimit(owner, o.guest, `${perDay} renders per day`));
+    this.checkDaily(owner, o.guest, o.family, o.perDay ?? this.rendersPerDay(owner));
     const now = Date.now();
     const recent = (this.recentServer.get(owner) ?? []).filter((t) => t > now - 3_600_000);
     if (recent.length >= perHour) throw new McpError("QUOTA_EXCEEDED", this.overLimit(owner, o.guest, `${perHour} per hour`));
@@ -126,7 +133,7 @@ export class RenderService {
     if (o.guest && !this.store.takeGuestBudget(`server-render:${o.client ?? "unknown"}`, sr.guestPerClientPerDay)) throw new McpError("QUOTA_EXCEEDED", `account-free server render limit for this network reached (${sr.guestPerClientPerDay} per day); retry tomorrow or sign in`);
     recent.push(now); this.recentServer.set(owner, recent);
     const cfgFull: RenderConfig = { ...config, includeMidi: true };
-    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...cfgFull, executor: "server", rendererVersion: RENDERER_VERSION } });
+    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...cfgFull, executor: "server", rendererVersion: RENDERER_VERSION }, tokenFamily: o.family });
     mkdirSync(this.store.artifactsDir, { recursive: true });
     const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config: cfgFull, tokenHash: hash(randomBytes(24).toString("base64url")), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
     this.active.set(job.id, a);
@@ -153,12 +160,11 @@ export class RenderService {
   studioUrl(compositionId?: string) { void compositionId; return `${this.cfg.publicOrigin}/studio`; }
 
   /** Start a render in the user's Studio tab, or report that a tab must be opened first. */
-  submit(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig): { job: RenderJobRow } | { studioRequired: true; studioUrl: string } {
-    const limit = this.rendersPerDay(owner);
-    if (this.store.countJobsSince(owner, 86_400_000) >= limit) throw new McpError("QUOTA_EXCEEDED", this.overLimit(owner, isGuest(owner), `${limit} renders per day`));
+  submit(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, family?: string): { job: RenderJobRow } | { studioRequired: true; studioUrl: string } {
+    this.checkDaily(owner, isGuest(owner), family, this.rendersPerDay(owner));
     const link = this.studio(owner);
     if (!link || !link.ready) return { studioRequired: true, studioUrl: this.studioUrl(row.id) };
-    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, executor: this.executor, rendererVersion: RENDERER_VERSION } });
+    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, executor: this.executor, rendererVersion: RENDERER_VERSION }, tokenFamily: family });
     const token = randomBytes(24).toString("base64url");
     mkdirSync(this.store.artifactsDir, { recursive: true });
     const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config, tokenHash: hash(token), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
@@ -211,10 +217,9 @@ export class RenderService {
    * tab or sign-in needed there. Same job row, capability token, snapshot/upload endpoints and validation as the Studio
    * path; the widget reports completion with finishWidget().
    */
-  submitWidget(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, perDay?: number) {
-    const limit = perDay ?? this.rendersPerDay(owner);
-    if (this.store.countJobsSince(owner, 86_400_000) >= limit) throw new McpError("QUOTA_EXCEEDED", this.overLimit(owner, isGuest(owner), `${limit} renders per day`));
-    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, executor: "widget", rendererVersion: RENDERER_VERSION } });
+  submitWidget(owner: string, row: CompositionRow, snapshot: Project, config: RenderConfig, perDay?: number, family?: string) {
+    this.checkDaily(owner, isGuest(owner), family, perDay ?? this.rendersPerDay(owner));
+    const job = this.store.createJob({ compositionId: row.id, owner, revision: row.revision, config: { ...config, executor: "widget", rendererVersion: RENDERER_VERSION }, tokenFamily: family });
     const token = randomBytes(24).toString("base64url");
     mkdirSync(this.store.artifactsDir, { recursive: true });
     const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config, tokenHash: hash(token), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
