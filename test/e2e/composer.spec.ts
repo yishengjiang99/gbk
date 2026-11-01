@@ -57,7 +57,9 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   // live: the piano roll gets notes before the run finishes
   await expect.poll(async () => (await ws(page)).notes, { timeout: 120_000 }).toBeGreaterThan(400);
   const text = page.getByTestId("assistant-text").last();
-  await expect(text).toContainText("Rendered WAV artifact", { timeout: 540_000 });
+  // The finished song shows as the inline song card (no raw artifact id in the text).
+  await expect(page.getByTestId("composer-log").getByTestId("version-card")).toBeVisible({ timeout: 540_000 });
+  await expect(text).toContainText("Composed", { timeout: 30_000 });
   console.log("compose run ms", Date.now() - t0);
 
   const s = await ws(page);
@@ -71,12 +73,14 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   // piano roll + CC lane reflect the controller state
   await expect(page.getByTestId("piano-roll")).toBeVisible();
   await expect(page.getByTestId("lane-11")).toBeVisible();
-  // artifact shown in the Composer, referenced by the final reply
-  const art = page.getByTestId("composer-artifact").first();
-  await expect(art).toBeVisible();
-  const artifactId = (await art.getAttribute("data-artifact-id"))!;
-  await expect(text).toContainText(artifactId);
-  const wavB64 = await page.evaluate(async () => { const a = document.querySelector('[data-testid="composer-artifact"] audio') as HTMLAudioElement; const b = new Uint8Array(await (await fetch(a.src)).arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); });
+  // The rendered WAV is in this browser's artifact store; the reply no longer shows its raw id.
+  await expect(text).not.toContainText(/wav_|artifact/i);
+  const wavB64 = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((res, rej) => { const r = indexedDB.open("gbk-render-artifacts"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const get = <T,>(store: string, f: (o: IDBObjectStore) => IDBRequest) => new Promise<T>((res, rej) => { const q = f(db.transaction(store).objectStore(store)); q.onsuccess = () => res(q.result as T); q.onerror = () => rej(q.error); });
+    const metas = (await get<any[]>("meta", (o) => o.getAll())).filter((m) => m.kind === "wav").sort((a, b) => b.createdAt - a.createdAt);
+    const v = await get<any>("blobs", (o) => o.get(metas[0].id));
+    const b = new Uint8Array(v instanceof Blob ? await v.arrayBuffer() : v.buf); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); });
   const wav = Buffer.from(wavB64, "base64");
   writeFileSync(`${SHOTS}/composer-e2e-fugue.wav`, wav);
   const h = parseWavHeader(new Uint8Array(wav));
@@ -123,7 +127,10 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await page.getByTestId("publish-title").fill("Midnight Fugue in D Minor (dark cello)");
   await page.getByTestId("publish-confirm").click();
   await expect(page.getByTestId("publish-dialog")).toBeHidden();
-  const link = await page.getByTestId("share-link").locator("a").getAttribute("href");
+  // Publish lands on the For You feed with the new song pinned first (STUDIO_SONG_CARD).
+  await expect(page).toHaveURL(/\/feed$/, { timeout: 30_000 });
+  const pubSlug = await page.getByTestId("feed-card").first().getAttribute("data-slug", { timeout: 30_000 });
+  const link = new URL(`/s/${pubSlug}`, page.url()).href;
   expect(link).toMatch(/\/s\/midnight-fugue-in-d-minor-dark-cello-[a-z0-9]{8}$/); expect(link).toContain(privSlug!.slice(-8));
   const anon = await browser.newContext(); const v2 = await anon.newPage();
   await v2.goto("/");
@@ -507,7 +514,7 @@ test("paywall modal: landing right after sign-in, dismiss cooldown silences comp
   // --- 1st composition: counted, but no paywall (the dismiss cooldown silences every soft trigger).
   await page.getByTestId("composer-input").fill(PROMPT);
   await page.getByTestId("composer-input").press("Enter");
-  await expect(page.getByTestId("assistant-text").last()).toContainText("Rendered WAV artifact", { timeout: 540_000 });
+  await expect(page.getByTestId("composer-log").getByTestId("version-card")).toBeVisible({ timeout: 540_000 });
   await expect(page.getByTestId("publish-dialog")).toBeVisible({ timeout: 30_000 }); // autosave offer, as in the fugue flow
   await page.getByTestId("publish-cancel").click();
   await page.waitForTimeout(3_000); // let the run-completed eligibility check settle
@@ -613,7 +620,8 @@ test("mobile composer view: song card — a finished compose shows a playable ca
   await page.screenshot({ path: `${SHOTS}/song-card-${P}.png` });
   await card.getByTestId("version-publish").click();
   await expect(dlg).toBeVisible({ timeout: 30_000 });
-  const patch = page.waitForResponse((r) => r.request().method() === "PATCH" && /\/api\/shares\/[a-z0-9-]+$/.test(r.url()));
+  // The publish PATCH (public: true), not an autosave PATCH of an earlier song in this account.
+  const patch = page.waitForResponse((r) => r.request().method() === "PATCH" && /\/api\/shares\/[a-z0-9-]+$/.test(r.url()) && (() => { try { return r.request().postDataJSON()?.public === true; } catch { return false; } })());
   await page.getByTestId("publish-confirm").click();
   const slug = (await (await patch).json()).slug as string; // publishing with the suggested title can re-slug the song
   const first = page.getByTestId("feed-card").first();
