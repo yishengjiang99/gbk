@@ -30,7 +30,7 @@ packages:
   # on-device gate (docs/scan-kit-test-plan) passes.
   OMRScan:
     url: https://github.com/yishengjiang99/omr-sheet-cam.git
-    revision: 39e0db89fae157e2bae8812cbd47ca23794cd5d8
+    revision: e3d7154489e4eeec50a8a5826a71bc65ee27f46e
 targets:
   GBKComposer:
     type: application
