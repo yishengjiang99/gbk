@@ -28,6 +28,10 @@ jobs:
       - run: npm run build:server   # server/dist/widget assets served by /api/mcp/widget
       - run: npm run test:server
         timeout-minutes: 15
+      - name: Install ffmpeg (og:video integration test)
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
+      - run: npm run test:integration:og-video   # real ffmpeg render + ffprobe codecs; fails if ffmpeg is missing
+        timeout-minutes: 5
       - run: npm run test:mcp   # MCP subset again on its own line so a protocol regression is easy to spot in the log
         timeout-minutes: 10
 
