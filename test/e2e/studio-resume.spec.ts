@@ -2,7 +2,7 @@
 // by run id when visible again; a fresh page load ends the in-flight run cleanly; flushSave writes IndexedDB now.
 import { test, expect, type Page } from "@playwright/test";
 import { composerConn } from "./app-menu";
-const MODEL = "http://127.0.0.1:8799";
+const MODEL = `http://127.0.0.1:${process.env.GBK_E2E_MODEL_PORT ?? 8799}`;
 const openGate = () => fetch(`${MODEL}/gate`, { method: "POST" });
 
 async function signIn(page: Page) {
@@ -56,6 +56,35 @@ test("iphone resume: hidden + dropped socket mid-run, then visible: the run re-a
   await openGate();
   await expect(page.getByTestId("studio-error").last()).toContainText(/reloaded or closed/, { timeout: 30_000 });
   await expect(page.getByTestId("composer-stop")).toHaveCount(0);
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await page.evaluate(() => (window as any).__gbkComposer.client.send({ type: "reset_conversation" })); // clean test data
+});
+
+test("iphone resume: backgrounded past the pause window shows Paused, then a clear stop with one-tap Resume that finishes the run", async ({ page }) => {
+  test.skip(test.info().project.name !== "mobile-webkit", "WebKit iPhone");
+  test.setTimeout(240_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio"); await signIn(page);
+  await send(page, "resume check three");
+  await expect(page.getByTestId("composer-stop")).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1500);
+  await page.context().setOffline(true); await hide(page);
+  // While away: the run is paused (not failed) and the composer input stays usable and on screen.
+  await expect(page.getByTestId("run-paused")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("run-paused")).toContainText("Paused – reconnecting");
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await expect(page.getByTestId("studio-error")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await openGate(); // the next tool call is issued while away
+  await page.waitForTimeout(Number(process.env.GBK_E2E_GRACE_MS ?? 20_000) + 3000); // past the (test-shortened) pause window
+  await page.context().setOffline(false); await show(page);
+  await expect(page.getByTestId("studio-error").last()).toContainText(/background too long/, { timeout: 30_000 });
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await page.getByTestId("run-resume").click();
+  await expect(page.getByTestId("composer-stop")).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1500); await openGate();
+  await expect(page.getByText(/Resumed OK after 1 summary read/).last()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("run-resume")).toHaveCount(0);
   await expect(page.getByTestId("composer-input")).toBeVisible();
   await page.evaluate(() => (window as any).__gbkComposer.client.send({ type: "reset_conversation" })); // clean test data
 });

@@ -12,7 +12,7 @@ import { workingMemoryOf, type AgentMode, type Conversation } from "./conversati
 import { argsDigest, type RunTrace } from "./trace.ts";
 import type { ArtifactRef, ServerMessage, ToolResultEnvelope } from "../bridge/protocol.ts";
 import { BridgeCallError } from "../bridge/pending-calls.ts";
-import { TAB_GONE } from "../bridge/run-link.ts";
+import { TAB_GONE, PAUSED_TOO_LONG } from "../bridge/run-link.ts";
 
 /** What the runtime needs from a connected browser tab. */
 export interface BrowserLink {
@@ -225,7 +225,7 @@ export class AgentRuntime {
       if (disconnected) {
         emit({ type: "progress", runId: o.runId, step: steps, maxSteps: cfg.agent.maxToolSteps, task: "Browser disconnected - waiting for reconnect" });
         const next = await link.awaitReconnect(cfg.agent.reconnectGraceMs, o.signal);
-        if (!next) return fail("BROWSER_DISCONNECTED", TAB_GONE, true);
+        if (!next) return (link as { endReason?: string }).endReason === "expired" ? fail("RUN_PAUSED_TOO_LONG", PAUSED_TOO_LONG, true) : fail("BROWSER_DISCONNECTED", TAB_GONE, true);
         const switched = !!conv.projectId && next.projectId !== conv.projectId;
         // A RunLink re-attaches in place (and announces it); a link that hands over to a different object is announced here.
         if (next !== link) next.emit({ type: "session_reconnected", sessionId: next.sessionId, runId: o.runId, resumed: true });

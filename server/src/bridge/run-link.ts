@@ -10,9 +10,14 @@ import { BridgeCallError } from "./pending-calls.ts";
 /** The socket-level connection a RunLink drives (BrowserConnection implements it). */
 export interface Conn { readonly sessionId: string; allowedTools: Set<string>; projectId: string; revision: number; alive: boolean; emit(m: ServerMessage): void }
 
-interface Call { tool: string; args: Record<string, unknown>; opts: { expectProjectId: string | null; consent: { newProject: boolean }; timeoutMs: number }; resolve(r: ToolResultEnvelope): void; reject(e: Error): void; timer?: ReturnType<typeof setTimeout> }
+interface Call { tool: string; args: Record<string, unknown>; opts: { expectProjectId: string | null; consent: { newProject: boolean }; timeoutMs: number }; resolve(r: ToolResultEnvelope): void; reject(e: Error): void; timer?: ReturnType<typeof setTimeout>;
+  /** Project open in the tab when this call was first sent (undefined = never sent): server-side create_project dedupe. */
+  sentProjectId?: string }
 
 export const TAB_GONE = "This page reloaded or closed, so the run stopped. Finished changes are saved; send your message again to continue.";
+/** The tab stayed away (iOS background) past the pause window. The run can be resumed with one tap for a while after. */
+export const PAUSED_TOO_LONG = "The app was in the background too long, so the run stopped. Finished changes are saved; tap Resume to continue.";
+export type RunLinkState = "running" | "paused" | "ended";
 
 export class RunLink implements BrowserLink {
   conn: Conn | null;
@@ -20,9 +25,12 @@ export class RunLink implements BrowserLink {
   private graceTimer: ReturnType<typeof setTimeout> | undefined;
   private waiters = new Set<(l: RunLink | null) => void>();
   gone = false;
+  /** Why the link ended: the pause window ran out ("expired") or a fresh page / the run itself ended it ("replaced"). */
+  endReason: "expired" | "replaced" | null = null;
+  pausedAt = 0;
   private last: { sessionId: string; allowedTools: Set<string>; projectId: string; revision: number };
   /** `fallback` = where terminal run events go while no tab is attached (the user's current tab, if any). */
-  constructor(readonly runId: string, conn: Conn, private graceMs: number, private fallback: () => Conn | null) {
+  constructor(readonly runId: string, conn: Conn, private graceMs: number, private fallback: () => Conn | null, readonly tabId = "") {
     this.conn = conn; this.last = { sessionId: conn.sessionId, allowedTools: conn.allowedTools, projectId: conn.projectId, revision: conn.revision };
   }
   private get c() { return this.conn ?? this.last; }
@@ -31,6 +39,7 @@ export class RunLink implements BrowserLink {
   get projectId() { return this.c.projectId; } set projectId(v: string) { this.last.projectId = v; if (this.conn) this.conn.projectId = v; }
   get revision() { return this.c.revision; } set revision(v: number) { this.last.revision = v; if (this.conn) this.conn.revision = v; }
   get attached() { return !!this.conn && this.conn.alive; }
+  get state(): RunLinkState { return this.gone ? "ended" : this.attached ? "running" : "paused"; }
 
   emit(m: ServerMessage) {
     if (this.attached) return this.conn!.emit(m);
@@ -48,6 +57,7 @@ export class RunLink implements BrowserLink {
   private send(callId: string) {
     const c = this.calls.get(callId); if (!c || !this.conn) return;
     clearTimeout(c.timer);
+    if (c.sentProjectId === undefined) c.sentProjectId = this.conn.projectId;
     c.timer = setTimeout(() => { if (this.calls.get(callId) !== c) return; this.calls.delete(callId); c.reject(new BridgeCallError("TOOL_TIMEOUT", `${c.tool} did not finish within ${Math.round(c.opts.timeoutMs / 1000)} s`)); }, c.opts.timeoutMs);
     this.conn.emit({ type: "tool_call", sessionId: this.conn.sessionId, runId: this.runId, callId, tool: c.tool, arguments: c.args, expectProjectId: c.opts.expectProjectId, consent: c.opts.consent, deadlineMs: c.opts.timeoutMs });
   }
@@ -63,26 +73,34 @@ export class RunLink implements BrowserLink {
   detach(conn: Conn) {
     if (conn !== this.conn) return;
     this.last = { sessionId: conn.sessionId, allowedTools: conn.allowedTools, projectId: conn.projectId, revision: conn.revision };
-    this.conn = null;
+    this.conn = null; this.pausedAt = Date.now();
     for (const c of this.calls.values()) clearTimeout(c.timer);
     clearTimeout(this.graceTimer);
-    this.graceTimer = setTimeout(() => this.end(), this.graceMs);
+    this.graceTimer = setTimeout(() => this.end("expired"), this.graceMs);
     this.graceTimer.unref?.();
   }
   /** The same tab came back (hello.resumeRunId): continue on its new socket and replay outstanding calls. */
   rebind(conn: Conn) {
     if (this.gone) return false;
-    clearTimeout(this.graceTimer); this.conn = conn;
+    clearTimeout(this.graceTimer); this.conn = conn; this.pausedAt = 0;
     conn.emit({ type: "session_reconnected", sessionId: conn.sessionId, runId: this.runId, resumed: true });
-    for (const id of this.calls.keys()) this.send(id);
+    for (const [id, c] of [...this.calls]) {
+      // Dedupe a create_project that already ran before the drop but whose result was lost with the page (iOS discard):
+      // the tab now has a different project open than when the call went out, so that project IS the result.
+      if (c.tool === "gbk_create_project" && c.sentProjectId !== undefined && conn.projectId && conn.projectId !== c.sentProjectId) {
+        this.calls.delete(id); c.resolve({ ok: true, projectId: conn.projectId, revision: conn.revision, data: { projectId: conn.projectId, recovered: true }, warnings: ["recovered after reconnect: the project had already been created"] });
+        continue;
+      }
+      this.send(id);
+    }
     for (const w of this.waiters) w(this); this.waiters.clear();
     return true;
   }
   /** No tab will come back (grace over, or a fresh page took over): fail outstanding calls; the runtime ends the run. */
-  end() {
-    if (this.gone) return; this.gone = true; clearTimeout(this.graceTimer);
+  end(reason: "expired" | "replaced" = "replaced") {
+    if (this.gone) return; this.gone = true; this.endReason = reason; clearTimeout(this.graceTimer);
     if (this.conn) { this.last.projectId = this.conn.projectId; this.conn = null; }
-    this.rejectAll("BROWSER_DISCONNECTED", TAB_GONE);
+    this.rejectAll("BROWSER_DISCONNECTED", reason === "expired" ? PAUSED_TOO_LONG : TAB_GONE);
     for (const w of this.waiters) w(null); this.waiters.clear();
   }
   awaitReconnect(_ms: number, signal: AbortSignal): Promise<BrowserLink | null> {

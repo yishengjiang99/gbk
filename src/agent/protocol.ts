@@ -16,13 +16,15 @@ export type ClientMessage =
   | { type: "project_state"; projectId: string; revision: number }
   | { type: "cancel_run"; runId: string }
   | { type: "reset_conversation" }
+  | { type: "backgrounded" }
+  | { type: "resume_run"; runId: string; clientMessageId: string }
   | { type: "ping"; t: number }
   | { type: "pong"; t: number };
 
 // server -> browser
 export type ServerMessage =
   | { type: "session_ready"; sessionId: string; user: string; model: string; models: string[]; provider: string; llmConfigured: boolean; manifestHash: string; acceptedTools: string[]; rejectedTools: string[]; history: HistoryItem[]; limits: Record<string, number> }
-  | { type: "session_reconnected"; sessionId: string; runId: string | null; resumed: boolean; reason?: string }
+  | { type: "session_reconnected"; sessionId: string; runId: string | null; resumed: boolean; reason?: string; resumable?: boolean; code?: string }
   | { type: "run_started"; runId: string; clientMessageId: string; text: string }
   | { type: "assistant_delta"; runId: string; text: string }
   | { type: "assistant_message"; runId: string; text: string }

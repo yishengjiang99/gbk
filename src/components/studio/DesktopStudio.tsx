@@ -525,9 +525,9 @@ export function DesktopStudio(props: DesktopStudioProps) {
             {!s.items.length && <div className="ds-small">Ask the composer anything, e.g. “add a walking bass under the piano”.</div>}
             {!s.items.length && s.auth.authenticated && <div className="ds-starters" data-testid="starter-prompts">{STARTER_PROMPTS.map((x) => <button key={x.label} className="ds-btn" disabled={running || s.conn.state !== "connected"} title={x.text} onClick={() => send(x.text)}>{x.label}</button>)}</div>}
             {s.items.map((m) => { const c = songCardFor(m, { version: versionLog.forRun(p.id, m.runId), hasSong: p.tracks.length > 0 && !running, latestArtifactId: latestArt, enabled: cardOn });
-              return <LogItem key={m.id} m={m} text={c.text} card={cardOn ? (c.card ? songCard(c.card) : null) : undefined} onRetry={(x) => send(x)} />; })}
+              return <LogItem key={m.id} m={m} text={c.text} card={cardOn ? (c.card ? songCard(c.card) : null) : undefined} onRetry={(x) => send(x)} onResume={(r) => s.resume(r)} />; })}
             {s.run && <div className="ds-run" data-testid="composer-run" role="status">● {s.run.task}{s.run.maxSteps ? ` · step ${s.run.step}/${s.run.maxSteps}` : ""}</div>}
-            {s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ds-err">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ds-btn" onClick={s.reconnect}>Try again</button>}</div>}
+            {s.paused ? <div className="ds-err ds-paused" data-testid="run-paused" role="status">Paused – reconnecting…</div> : s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ds-err">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ds-btn" onClick={s.reconnect}>Try again</button>}</div>}
             {shared && <div data-testid="share-link">Published: <a href={shared.url} target="_blank" rel="noreferrer">{shared.url}</a> <button className="ds-btn" onClick={() => void navigator.clipboard?.writeText(shared.url ?? "")}>Copy</button></div>}
             {busy && <div className="ds-run" role="status" data-testid="studio-busy">{busy}</div>}
             {hum.phase !== "idle" && <div className="ds-run" role="status" data-testid="hum-strip">{hum.phase === "recording" ? `● Listening… ${Math.floor(hum.elapsed)}s, press Stop humming when done` : `Turning your melody into notes${hum.progress > 0 ? ` ${Math.round(hum.progress * 100)}%` : "…"}`}</div>}
@@ -605,9 +605,9 @@ function SidePanel({ open, title, testId, onClose, children }: { open: boolean; 
 }
 
 /** card: undefined = old behaviour (raw artifact list); null = no card for this item; a node = the song card. */
-function LogItem({ m, text, card, onRetry }: { m: ChatItem; text: string; card?: ReactNode; onRetry: (t: string) => void }) {
+function LogItem({ m, text, card, onRetry, onResume }: { m: ChatItem; text: string; card?: ReactNode; onRetry: (t: string) => void; onResume: (runId: string) => void }) {
   if (m.role === "user") return <div className="ds-u" data-testid="user-msg">You: {m.text}</div>;
-  if (m.role === "error") return <div className="ds-err" role="alert" data-testid="studio-error">{friendlyError(m.text)} {m.retryText && <button className="ds-btn" onClick={() => onRetry(m.retryText!)}>Try again</button>}</div>;
+  if (m.role === "error") return <div className="ds-err" role="alert" data-testid="studio-error">{friendlyError(m.text)} {m.resumeRunId ? <button className="ds-btn" data-testid="run-resume" onClick={() => onResume(m.resumeRunId!)}>Resume</button> : m.retryText && <button className="ds-btn" onClick={() => onRetry(m.retryText!)}>Try again</button>}</div>;
   return <div className="ds-a" data-role="assistant">
     <ComposerProgress steps={m.steps ?? []} />
     {text && <div data-testid="assistant-text">Composer: {text}</div>}
