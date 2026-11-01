@@ -55,6 +55,9 @@ import { EventStore } from "./persistence/events.ts";
 import { Ranker, trainInWorker } from "./ranking/ranker.ts";
 import { isGuest, resolveGuestCapability } from "./mcp/guest.ts";
 import type { McpMetrics } from "./mcp/server.ts";
+import { JamRooms } from "./jam/rooms.ts";
+import { JamSignaling } from "./jam/signaling.ts";
+import { jamRoutes } from "./routes/jam.ts";
 
 export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
 
@@ -149,6 +152,10 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     const text = typeof first?.content === "string" ? first.content : Array.isArray(first?.content) ? (first!.content as { text?: string }[]).map((x) => x.text ?? "").join(" ") : "";
     return { prompt: text.trim().slice(0, 4000) || null, sameProject: !!row.project_id && c.projectId === row.project_id };
   });
+  // Live Jam: rooms in SQLite, signaling on its own WebSocketServer (independent of the agent bridge and LLM config).
+  const jamRooms = new JamRooms(persist ? join(cfg.dataDir, "jam.sqlite") : ":memory:", cfg.jam, deps.now);
+  const jamSignaling = new JamSignaling(cfg, jamRooms, (o) => app.log.info(o), deps.now);
+  jamRoutes(app, cfg, { sessions, accounts, rooms: jamRooms, signaling: jamSignaling, now: deps.now });
   // Unknown /api routes: Fastify's {message,error,statusCode} plus our `code` so clients can rely on one shape.
   app.all("/api/*", async (req, reply) => reply.code(404).send({ code: "NOT_FOUND", message: `Route ${req.method}:${req.url.split("?")[0]} not found`, error: "Not Found", statusCode: 404 }));
   const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, iap, usage, me: socialApi.me, fetch: deps.fetch });
@@ -188,11 +195,13 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     close: async () => { clearInterval(pruneTimer); clearInterval(guestTimer); clearInterval(rescoreTimer); native.close(); await mcpHttp.close(); await mcpRenders.stop(); await serverPool.stop(); mcpStore.close(); accounts.close(); clientErrors.close(); funnel.close(); proWaitlist.close(); sessions.close(); } };
   app.addHook("onClose", async () => { await mcp.close(); });
   app.server.on("upgrade", (req, socket, head) => {
-    if ((req.url ?? "").split("?")[0] === "/api/agent/ws") hub.handleUpgrade(req, socket, head);
+    const path = (req.url ?? "").split("?")[0];
+    if (path === "/api/agent/ws") hub.handleUpgrade(req, socket, head);
+    else if (path === "/api/jam/ws") jamSignaling.handleUpgrade(req, socket, head);
     else socket.destroy();
   });
   const sweepSessions = () => { try { sessions.sweep(); } catch (e) { app.log.warn({ evt: "session_sweep_failed", message: (e as Error).message }); } };
   sweepSessions(); const sweep = setInterval(sweepSessions, 3_600_000); sweep.unref?.();
-  app.addHook("preClose", async () => { clearInterval(sweep); for (const c of hub.wss.clients) c.terminate(); });
+  app.addHook("preClose", async () => { clearInterval(sweep); for (const c of hub.wss.clients) c.terminate(); jamSignaling.close(); jamRooms.close(); });
   return { app, hub, sessions, ledger, limits, shares, mcp, accounts, clientErrors, usage };
 }

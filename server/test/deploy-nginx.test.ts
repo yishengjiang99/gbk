@@ -31,3 +31,13 @@ test("install-nginx.sh refuses a config without TLS and leaves the live file unt
     assert.equal(same.status, 0); assert.match(same.stdout, /already current/);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+test("both nginx configs route /api/jam/ws as a WebSocket without upstream failover", () => {
+  for (const f of ["deploy/nginx.conf", "deploy/nginx.docker.conf"]) {
+    const c = readFileSync(f, "utf8"); const m = c.match(/location = \/api\/jam\/ws \{([^}]*)\}/);
+    assert.ok(m, `${f}: jam ws location`);
+    assert.match(m![1], /proxy_set_header Upgrade \$http_upgrade;/); assert.match(m![1], /proxy_read_timeout/);
+    assert.ok(!m![1].includes("proxy_next_upstream"), `${f}: no failover`);
+    assert.ok(c.includes("location = /api/agent/ws {"), `${f}: agent ws kept`);
+  }
+});

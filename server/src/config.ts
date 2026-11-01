@@ -59,6 +59,9 @@ export interface Config {
     guestCreatesPerClientPerDay: number;
   };
   /** Headless server-side rendering for MCP clients without a Studio tab. SERVER_RENDER=0 turns it off. */
+  /** Live Jam rooms + signaling. JAM_ENABLED=0 is the off switch (routes 404, sockets refused). */
+  jam: { enabled: boolean; maxParticipants: number; roomTtlSec: number; inviteTtlSec: number; codeTtlSec: number; reconnectGraceSec: number; hostGraceSec: number;
+    turnUrls: string[]; turnSecret: string; turnTtlSec: number; relayOnly: boolean; maxRoomsPerIdentity: number; createsPerHour: number; joinsPerMinute: number; icePerMinute: number; framesPerSecond: number };
   serverRender: { enabled: boolean; concurrency: number; maxQueue: number; timeoutMs: number; workerHeapMb: number;
     guestMaxSeconds: number; accountMaxSeconds: number; guestPerHour: number; accountPerHour: number; proPerHour: number; proMaxSeconds: number; guestPerClientPerDay: number };
 }
@@ -75,6 +78,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (env.NODE_ENV === "production" && env.MCP_TEST_AUTH === "1") throw new Error("MCP_TEST_AUTH=1 is forbidden in production (test authentication must fail closed)");
   const style = env.LLM_API_STYLE ?? "chat_completions";
   if (style !== "chat_completions" && style !== "responses") throw new Error(`LLM_API_STYLE must be chat_completions or responses, got ${style}`);
+  const jamMax = Math.floor(num(env.JAM_MAX_PARTICIPANTS, 4));
+  if (jamMax < 2 || jamMax > 4) throw new Error(`JAM_MAX_PARTICIPANTS must be 2..4, got ${env.JAM_MAX_PARTICIPANTS}`);
+  const turnUrls = list(env.JAM_TURN_URLS), turnSecret = env.JAM_TURN_SHARED_SECRET ?? "";
+  if (turnUrls.length && turnSecret.length < 16) throw new Error("JAM_TURN_SHARED_SECRET must be set (>= 16 chars) when JAM_TURN_URLS is set");
+  const turnTtl = Math.floor(num(env.JAM_TURN_CREDENTIAL_TTL_SECONDS, 3600));
+  if (turnTtl < 60 || turnTtl > 86400) throw new Error("JAM_TURN_CREDENTIAL_TTL_SECONDS must be 60..86400");
   return {
     publicOrigin, allowedOrigins: [publicOrigin, ...list(env.COMPOSER_EXTRA_ORIGINS)], adminUsers: list(env.COMPOSER_ADMIN_USERS), port: num(env.PORT, 8080), host: env.HOST ?? "127.0.0.1",
     dataDir: env.COMPOSER_DATA_DIR ?? "./composer-data", enabled: env.COMPOSER_ENABLED !== "0", chatgptPluginUrl: (env.CHATGPT_PLUGIN_URL ?? "").trim(), openaiAppsChallenge: (env.OPENAI_APPS_CHALLENGE ?? "").trim(),
@@ -147,6 +156,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       guestArtifactRetentionDays: Math.max(1, num(env.MCP_GUEST_ARTIFACT_RETENTION_DAYS, 7)),
       guestCallsPerMinute: Math.max(1, Math.floor(num(env.MCP_GUEST_CALLS_PER_MINUTE, 60))),
       guestCreatesPerClientPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_CLIENT_PER_DAY, 20))),
+    },
+    jam: {
+      enabled: env.JAM_ENABLED !== "0", maxParticipants: jamMax,
+      roomTtlSec: Math.max(300, num(env.JAM_ROOM_TTL_SECONDS, 6 * 3600)), inviteTtlSec: Math.max(60, num(env.JAM_INVITE_TTL_SECONDS, 24 * 3600)),
+      codeTtlSec: Math.min(3600, Math.max(60, num(env.JAM_CODE_TTL_SECONDS, 900))),
+      reconnectGraceSec: Math.max(5, num(env.JAM_RECONNECT_GRACE_SECONDS, 60)), hostGraceSec: Math.max(2, num(env.JAM_HOST_GRACE_SECONDS, 15)),
+      turnUrls, turnSecret, turnTtlSec: turnTtl, relayOnly: env.JAM_RELAY_ONLY === "1",
+      maxRoomsPerIdentity: Math.max(1, Math.floor(num(env.JAM_MAX_ROOMS_PER_IDENTITY, 3))),
+      createsPerHour: Math.max(1, Math.floor(num(env.JAM_CREATES_PER_HOUR, 20))), joinsPerMinute: Math.max(1, Math.floor(num(env.JAM_JOINS_PER_MINUTE, 10))),
+      icePerMinute: Math.max(1, Math.floor(num(env.JAM_ICE_PER_MINUTE, 10))), framesPerSecond: Math.max(5, Math.floor(num(env.JAM_FRAMES_PER_SECOND, 50))),
     },
     serverRender: {
       enabled: env.SERVER_RENDER !== "0",
