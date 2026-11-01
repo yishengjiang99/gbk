@@ -44,7 +44,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install deps
-        run: pip install pyjwt requests
+        run: pip install "pyjwt[crypto]" requests
 
       - name: Write ASC API key
         env:
