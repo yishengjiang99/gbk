@@ -46,6 +46,7 @@ import { waitShareOpen } from "../../agent/share-open.ts";
 import { autoGrowTextarea, friendlyError, songSeconds, versionLog, latestArtifactItemId, songCardFor, publishedFeedPath, type SongCard, type SongVersion } from "./studio-logic.ts";
 import { VersionCard } from "./SongCard.tsx";
 import "./desktop-studio.css";
+import { useStickToBottom } from "./stick-to-bottom.ts";
 
 export interface DesktopStudioProps {
   view: View; setView: (v: View | ((v: View) => View)) => void; rollWidth: () => number; onRollWidth: (px: number) => void; onManualScroll: () => void;
@@ -221,16 +222,17 @@ export function DesktopStudio(props: DesktopStudioProps) {
   useEffect(() => { if (s.conn.state !== "connected") return; const x = takePending("compose"); if (x && s.send(x.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   useEffect(() => { if (s.auth.authenticated && takePending("publish")) void doPublish(); }, [s.auth.authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
   const running = !!s.run;
+  const stickRef = useRef<{ repin: () => void } | null>(null);
   const send = (raw = text) => {
     const v = raw.trim(); if (!v) { input.current?.focus(); return; }
     if (!s.auth.authenticated) { sessionStorage.setItem("gbk.composerDraft", v); needSignIn("Sign in to compose with the AI. It's free, with a daily limit.", { kind: "compose", text: v }); return; }
     if (ro) { say("This shared song is read-only. Press Fork to change your own copy."); return; }
     if (s.conn.state !== "connected") { say("Still connecting to the composer. Try again in a moment."); s.reconnect(); return; }
     if (running) return;
-    if (s.send(v)) setText(""); else say("Couldn't send that. Check your connection and try again.");
+    if (s.send(v)) { setText(""); stickRef.current?.repin(); } else say("Couldn't send that. Check your connection and try again.");
   };
   const log = useRef<HTMLDivElement>(null);
-  useEffect(() => { const c = log.current; if (c) c.scrollTop = c.scrollHeight; }, [s.items, running, shared, busy]);
+  const stick = useStickToBottom(log); stickRef.current = stick; // see stick-to-bottom.ts
   useEffect(() => { const on = () => setPanel("agent"); addEventListener("gbk-approval-request", on); return () => removeEventListener("gbk-approval-request", on); }, []);
   const lastAssistant = [...s.items].reverse().find((m) => m.role === "assistant");
   const steps = (running ? lastAssistant?.steps : null) ?? [];
@@ -531,6 +533,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
             {shared && <div data-testid="share-link">Published: <a href={shared.url} target="_blank" rel="noreferrer">{shared.url}</a> <button className="ds-btn" onClick={() => void navigator.clipboard?.writeText(shared.url ?? "")}>Copy</button></div>}
             {busy && <div className="ds-run" role="status" data-testid="studio-busy">{busy}</div>}
             {hum.phase !== "idle" && <div className="ds-run" role="status" data-testid="hum-strip">{hum.phase === "recording" ? `● Listening… ${Math.floor(hum.elapsed)}s, press Stop humming when done` : `Turning your melody into notes${hum.progress > 0 ? ` ${Math.round(hum.progress * 100)}%` : "…"}`}</div>}
+            {stick.showJump && <button type="button" className="ds-jump" data-jump-pill data-testid="jump-latest" onClick={stick.repin}>↓ Jump to latest</button>}
           </div>
           {toast && <div className="ds-toast" role="status" data-testid="studio-toast">{toast}</div>}
           <form className="ds-ain" data-testid="composer-bar" data-state={s.auth.authenticated ? s.conn.state : "signed-out"} onSubmit={(e) => { e.preventDefault(); send(); }}>

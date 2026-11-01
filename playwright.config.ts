@@ -24,7 +24,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /workstation-(webmcp|voice)\.spec\.ts|autonomous-compose\.spec\.ts|song-video\.spec\.ts|composer\.spec\.ts|keyboard-flash\.spec\.ts/,
+      testIgnore: /workstation-(webmcp|voice)\.spec\.ts|autonomous-compose\.spec\.ts|song-video\.spec\.ts|composer\.spec\.ts|keyboard-flash\.spec\.ts|chat-autoscroll\.spec\.ts/,
     },
     // Real WebMCP runtime: Chrome stable with the WebMCP testing feature (exposes document.modelContext).
     {
@@ -54,7 +54,7 @@ export default defineConfig({
     // WAV render in a real WebKit (Safari engine): OfflineAudioContext + AudioWorklet, no realtime AudioContext.
     {
       name: "webkit-render",
-      testMatch: /offline-render\.spec\.ts|share-link-pin\.spec\.ts|one-tap-play\.spec\.ts|studio-new\.spec\.ts|keyboard-flash\.spec\.ts/,
+      testMatch: /offline-render\.spec\.ts|share-link-pin\.spec\.ts|one-tap-play\.spec\.ts|studio-new\.spec\.ts|keyboard-flash\.spec\.ts|chat-autoscroll\.spec\.ts/,
       use: { ...devices["iPhone 13"] },
     },
     ...(enableVisualChrome

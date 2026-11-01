@@ -35,6 +35,7 @@ import { waitShareOpen } from "../../agent/share-open.ts";
 import { autoGrowTextarea, phoneComposerMaxPx, fmtTime, friendlyError, plainStep, songSeconds, versionLog, latestArtifactItemId, songCardFor, publishedFeedPath, type SongCard, type SongVersion } from "./studio-logic.ts";
 import { VersionCard } from "./SongCard.tsx";
 import "./mobile-studio.css";
+import { useStickToBottom } from "./stick-to-bottom.ts";
 import { RecentProjects } from "./RecentProjects.tsx";
 import { startNew } from "../../workstation/studio-api.ts";
 
@@ -83,20 +84,21 @@ export function MobileStudio(props: MobileStudioProps) {
   useEffect(() => { if (s.conn.state !== "connected") return; const q = takePending("compose"); if (q && s.send(q.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   useEffect(() => { if (s.auth.authenticated && takePending("publish")) void doPublish(); }, [s.auth.authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
   const running = !!s.run;
+  const stickRef = useRef<{ repin: () => void } | null>(null);
   const send = (raw = text) => {
     const v = raw.trim(); if (!v) { input.current?.focus(); return; }
     if (!s.auth.authenticated) { sessionStorage.setItem("gbk.composerDraft", v); needSignIn("Sign in to compose with the AI. It's free, with a daily limit.", { kind: "compose", text: v }); return; }
     if (workstation.readOnlyReason) { say("This shared song is read-only. Tap “Make a copy” to change it."); return; }
     if (s.conn.state !== "connected") { say("Still connecting to the composer. Try again in a moment."); s.reconnect(); return; }
     if (running) return;
-    if (s.send(v)) setText(""); else say("Couldn't send that. Check your connection and try again.");
+    if (s.send(v)) { setText(""); stickRef.current?.repin(); } else say("Couldn't send that. Check your connection and try again.");
   };
 
   // ---- layout: sheets sit above the input bar --------------------------------------------------------------------
   const root = useRef<HTMLDivElement>(null); const foot = useRef<HTMLElement>(null); const chat = useRef<HTMLDivElement>(null);
   useEffect(() => { const f = foot.current, r = root.current; if (!f || !r || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => r.style.setProperty("--ms-foot", `${f.offsetHeight}px`)); ro.observe(f); r.style.setProperty("--ms-foot", `${f.offsetHeight}px`); return () => ro.disconnect(); }, []);
-  useEffect(() => { const c = chat.current; if (c) c.scrollTop = c.scrollHeight; }, [s.items, running, versionLog.list(p.id).length]);
+  const stick = useStickToBottom(chat); stickRef.current = stick; // follows new messages/steps/keyboard while pinned; see stick-to-bottom.ts
   useEffect(() => { const on = () => { setTab("Agent"); setSheet("editor"); }; addEventListener("gbk-approval-request", on); return () => removeEventListener("gbk-approval-request", on); }, []);
 
   // Revision the open project had when it loaded (new id = a different song/fork just opened).
@@ -245,6 +247,7 @@ export function MobileStudio(props: MobileStudioProps) {
         {showCurrent && !inlineCurrent && currentCard}
         {s.paused ? <div className="ms-note ms-paused" data-testid="run-paused" role="status">Paused – reconnecting…</div>
           : s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ms-note" data-testid="conn-note">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ms-btn ms-small" onClick={s.reconnect}>Try again</button>}</div>}
+        {stick.showJump && <button type="button" className="ms-jump" data-jump-pill data-testid="jump-latest" onClick={stick.repin}>↓ Jump to latest</button>}
       </main>
 
       {(sheet || fullRoll) && <div className="ms-scrim" data-testid="sheet-scrim" onClick={() => { setSheet(null); setFullRoll(false); }} />}

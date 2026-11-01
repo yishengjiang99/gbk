@@ -142,3 +142,5 @@ html:has(.ds), html:has(.ds) body { background: #ffffff; overflow: hidden; }
 .ds .ds-tn, .ds .ds-tn:focus, .ds .ds-tn:hover { background: none; color: inherit; border: 0; box-shadow: none; }
 .ds .ds-btn:disabled { background: var(--card); color: var(--fg); border-color: var(--line); }
 .ds-paused { color: #5a3d00; background: #fff4d6; border: 1px solid #f5b301; border-radius: 8px; padding: 6px 10px; font-weight: 600; overflow-wrap: anywhere; }
+/* "Jump to latest" pill in the composer log (stick-to-bottom.ts). */
+.ds-jump { position: sticky; bottom: 4px; display: block; margin: 4px auto 0; padding: 4px 12px; border-radius: 14px; border: 0; background: var(--acc); color: var(--accfg); font-weight: 600; cursor: pointer; }

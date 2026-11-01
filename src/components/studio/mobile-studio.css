@@ -120,3 +120,6 @@ html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
 .ms-new { flex: none; white-space: nowrap; }
 /* Run paused while the tab was away (iOS background): bright, readable, never pushes the composer bar off screen. */
 .ms-paused { background: #fff4d6; border-color: #f5b301; color: #5a3d00; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }
+/* "Jump to latest": shown when the reader scrolled up and new chat content arrived (stick-to-bottom.ts). */
+.ms-jump { position: sticky; bottom: 4px; align-self: center; flex: none; z-index: 3; min-height: 36px; padding: 0 14px; border-radius: 18px; border: 0;
+  background: var(--ms-acc); color: var(--ms-acc-fg); font-size: 14px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.2); max-width: 100%; }
