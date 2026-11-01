@@ -14,7 +14,7 @@ APP_ID = "6826906431"; VERSION = "1.0"; LOCALE = "en-US"
 ASC = Path(__file__).resolve().parent.parent
 MD = ASC / "metadata" / LOCALE
 SHOTS = ASC / "screenshots" / LOCALE
-SHOT_TYPES = {"iphone-69": "APP_IPHONE_69", "ipad-129": "APP_IPAD_PRO_3GEN_129"}
+SHOT_TYPES = {"iphone-69": "APP_IPHONE_67", "ipad-129": "APP_IPAD_PRO_3GEN_129"}
 DRY = "--dry-run" in sys.argv
 BASE = "https://api.appstoreconnect.apple.com"
 
