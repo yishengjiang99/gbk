@@ -59,8 +59,8 @@ export interface Config {
     guestCreatesPerClientPerDay: number;
   };
   /** Headless server-side rendering for MCP clients without a Studio tab. SERVER_RENDER=0 turns it off. */
-  /** Live Jam rooms + signaling. JAM_ENABLED=0 is the off switch (routes 404, sockets refused). */
-  jam: { enabled: boolean; maxParticipants: number; roomTtlSec: number; inviteTtlSec: number; codeTtlSec: number; reconnectGraceSec: number; hostGraceSec: number;
+  /** Live Jam rooms + signaling (always on). */
+  jam: { maxParticipants: number; roomTtlSec: number; inviteTtlSec: number; codeTtlSec: number; reconnectGraceSec: number; hostGraceSec: number;
     turnUrls: string[]; turnSecret: string; turnTtlSec: number; relayOnly: boolean; maxRoomsPerIdentity: number; createsPerHour: number; joinsPerMinute: number; icePerMinute: number; framesPerSecond: number };
   serverRender: { enabled: boolean; concurrency: number; maxQueue: number; timeoutMs: number; workerHeapMb: number;
     guestMaxSeconds: number; accountMaxSeconds: number; guestPerHour: number; accountPerHour: number; proPerHour: number; proMaxSeconds: number; guestPerClientPerDay: number };
@@ -158,7 +158,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       guestCreatesPerClientPerDay: Math.max(1, Math.floor(num(env.MCP_GUEST_CREATES_PER_CLIENT_PER_DAY, 20))),
     },
     jam: {
-      enabled: env.JAM_ENABLED !== "0", maxParticipants: jamMax,
+      maxParticipants: jamMax,
       roomTtlSec: Math.max(300, num(env.JAM_ROOM_TTL_SECONDS, 6 * 3600)), inviteTtlSec: Math.max(60, num(env.JAM_INVITE_TTL_SECONDS, 24 * 3600)),
       codeTtlSec: Math.min(3600, Math.max(60, num(env.JAM_CODE_TTL_SECONDS, 900))),
       reconnectGraceSec: Math.max(5, num(env.JAM_RECONNECT_GRACE_SECONDS, 60)), hostGraceSec: Math.max(2, num(env.JAM_HOST_GRACE_SECONDS, 15)),

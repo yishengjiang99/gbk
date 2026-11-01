@@ -64,4 +64,4 @@ coturn takes one `static-auth-secret`, so rotating it briefly breaks credentials
 
 - Turn TURN off: `docker compose --profile turn stop turn` and clear `JAM_TURN_URLS`. Direct connections keep
   working; `/ice` answers 503, and players who need a relay can't connect.
-- Turn the whole feature off: set `JAM_ENABLED=0` and restart the agent. The routes and the socket both go away.
+- Live Jam itself has no off switch; roll back to the previous release to remove it.
