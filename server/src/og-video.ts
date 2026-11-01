@@ -19,9 +19,9 @@ export function ogVideo(dir: string, slug: string, pngPath: string, mp3: Uint8Ar
     mkdirSync(dir, { recursive: true });
     const tag = `${process.pid}-${Date.now()}`, audio = `${file}.${tag}.mp3`, tmp = `${file}.${tag}.tmp.mp4`;
     writeFileSync(audio, mp3);
-    const args = ["-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-framerate", "2", "-i", pngPath, "-i", audio,
+    const args = ["-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-framerate", "10", "-i", pngPath, "-i", audio,
       "-map", "0:v:0", "-map", "1:a:0", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
-      "-c:v", "libx264", "-profile:v", "main", "-tune", "stillimage", "-preset", "veryfast", "-r", "2", "-pix_fmt", "yuv420p",
+      "-c:v", "libx264", "-profile:v", "main", "-tune", "stillimage", "-preset", "veryfast", "-r", "10", "-pix_fmt", "yuv420p",
       "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-shortest", "-t", "600", "-movflags", "+faststart", "-f", "mp4", tmp];
     execFile(ffmpeg, args, { timeout: 180_000, maxBuffer: 1 << 20 }, (err) => {
       rmSync(audio, { force: true });
