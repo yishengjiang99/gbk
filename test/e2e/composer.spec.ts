@@ -582,3 +582,44 @@ test("mobile composer view: a just-loaded song's card has no Publish until it is
     c.edit([{ op: "addNotes", notes: [{ trackId: c.project.tracks[0].id, channel: 0, tick: 0, duration: 240, pitch: 72, velocity: 90 }] }], { label: "e2e edit" }); });
   await expect(card.getByTestId("version-publish")).toBeVisible();
 });
+
+test("mobile composer view: song card — a finished compose shows a playable card with no raw artifact id; Publish lands on the For You feed with that song first", async ({ page }) => {
+  const P = test.info().project.name; const phone = P.startsWith("mobile");
+  test.skip(!phone && P !== "chrome-no-webmcp", "chrome (desktop studio) + phones");
+  test.setTimeout(300_000);
+  if (phone) await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio"); await signIn(page);
+  await dismissLandingPaywall(page);
+  await expect(async () => { await page.getByTestId("composer-input").fill("Song card check: a tiny pop loop"); await expect(page.getByTestId("composer-send")).toBeEnabled({ timeout: 1000 }); }).toPass({ timeout: 15_000 });
+  await page.getByTestId("composer-send").click();
+  // The stubbed run (fake model: create -> 2-bar arrangement -> render) ends with "WAV artifact **wav_…**".
+  const chat = phone ? page.getByTestId("studio-chat") : page.getByTestId("composer-log");
+  const reply = chat.locator("[data-role=assistant]").last();
+  const card = reply.getByTestId("version-card");
+  await expect(card).toBeVisible({ timeout: 240_000 });
+  await expect(reply.getByTestId("assistant-text")).toContainText("Here's your song.");
+  await expect(reply).not.toContainText(/wav_|midi_|artifact/i);
+  await expect(chat).not.toContainText(/\bwav_[a-z0-9]{6,}/i);
+  await expect(page.getByTestId("composer-artifacts")).toHaveCount(0);
+  await expect(card.getByTestId("version-play")).toBeVisible(); await expect(card.getByTestId("version-open-editor")).toBeVisible();
+  await expect(card.getByTestId("version-publish")).toBeVisible(); // a run made this song: Publish shows (76821f6 rule)
+  if (phone) await inputOk(page, "song card shown");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // Desktop offers Publish after a run on its own; close that offer so the card's own Publish is what we test.
+  const dlg = page.getByTestId("publish-dialog");
+  if (!phone) await dlg.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+  if (await dlg.isVisible().catch(() => false)) { await page.getByTestId("publish-cancel").click(); await expect(dlg).toBeHidden(); }
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${SHOTS}/song-card-${P}.png` });
+  await card.getByTestId("version-publish").click();
+  await expect(dlg).toBeVisible({ timeout: 30_000 });
+  const patch = page.waitForResponse((r) => r.request().method() === "PATCH" && /\/api\/shares\/[a-z0-9-]+$/.test(r.url()));
+  await page.getByTestId("publish-confirm").click();
+  const slug = (await (await patch).json()).slug as string; // publishing with the suggested title can re-slug the song
+  const first = page.getByTestId("feed-card").first();
+  await expect(first).toHaveAttribute("data-slug", slug, { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/feed$/); // the one-shot pin is dropped from the URL (no pin on reload / next session)
+  await page.screenshot({ path: `${SHOTS}/song-card-feed-${P}.png` });
+  // Normal ranking resumes after the pinned song: a reload without ?pin= does not force it to the top by URL.
+  expect(new URL(page.url()).searchParams.get("pin")).toBeNull();
+});

@@ -1,0 +1,26 @@
+/* Song card outside the phone studio (desktop studio chat). The phone studio styles .ms-song in mobile-studio.css;
+   here the same card gets the same bright palette (dark only when the device asks, like .ds). */
+.ms-card-host { --ms-bg: #ffffff; --ms-fg: #111111; --ms-mut: #6b7280; --ms-card: #f4f5f7; --ms-line: #e5e7eb; --ms-acc: #5b5bf6; --ms-acc-fg: #ffffff; --ms-tap: 36px;
+  color: var(--ms-fg); font: 13px/1.4 -apple-system, system-ui, sans-serif; max-width: 440px; min-width: 0; margin: 6px 0; }
+@media (prefers-color-scheme: dark) {
+  .ms-card-host { --ms-bg: #0d0f14; --ms-fg: #f2f3f5; --ms-mut: #9aa1ad; --ms-card: #1a1d25; --ms-line: #2a2e38; --ms-acc: #8b8bff; --ms-acc-fg: #0d0f14; }
+}
+.ms-card-host .ms-song { background: var(--ms-card); border: 1px solid var(--ms-line); border-radius: 14px; padding: 10px; min-width: 0; }
+.ms-card-host .ms-btn { min-width: var(--ms-tap); height: var(--ms-tap); padding: 0 10px; border-radius: 18px; border: 0; background: var(--ms-card); color: var(--ms-fg); cursor: pointer; }
+.ms-card-host .ms-song-t { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; min-width: 0; }
+.ms-card-host .ms-song-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-card-host .ms-grow { flex: 1 1 auto; min-width: 0; text-align: left; }
+.ms-card-host .ms-mut { color: var(--ms-mut); }
+.ms-card-host .ms-play { background: var(--ms-acc); color: var(--ms-acc-fg); }
+.ms-card-host .ms-time { font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+.ms-card-host .ms-thumb { position: relative; height: 48px; border-radius: 8px; background: var(--ms-bg); overflow: hidden; margin-bottom: 6px; }
+.ms-card-host .ms-thumb svg { width: 100%; height: 100%; display: block; }
+.ms-card-host .ms-ph { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; }
+.ms-card-host .ms-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.ms-card-host .ms-chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--ms-bg); color: var(--ms-mut); border: 1px solid var(--ms-line); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-card-host .ms-acts { display: flex; gap: 6px; }
+.ms-card-host .ms-acts button { flex: 1; height: var(--ms-tap); border-radius: 10px; border: 1px solid var(--ms-line); background: var(--ms-bg); color: var(--ms-fg); font-size: 13px; font-weight: 600; cursor: pointer; }
+.ms-card-host .ms-acts .pri { background: var(--ms-acc); color: var(--ms-acc-fg); border: 0; }
+.ms-card-host .ms-link { background: none; border: 0; padding: 4px 0; color: var(--ms-acc); font-size: 13px; cursor: pointer; }
+/* The desktop chat log is a short strip: keep the card to one title row + actions there (the roll above shows the notes). */
+.ds-log .ms-card-host .ms-thumb, .ds-log .ms-card-host .ms-chips { display: none; }

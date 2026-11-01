@@ -83,3 +83,56 @@ export function trackChips(p: Project, max = 6): string[] {
   for (const t of p.tracks) { const n = t.name.trim() || "Track"; if (!seen.has(n)) { seen.add(n); out.push(n); } }
   return out.length > max ? [...out.slice(0, max), `+${out.length - max}`] : out;
 }
+
+// ---- song card in chat ------------------------------------------------------------------------------------------
+// When a composition/render finishes, the chat shows the song as a card (Play / Open editor / Publish) instead of
+// assistant text with a raw artifact id. Off switch: STUDIO_SONG_CARD=0 on the server (sent in /api/session).
+
+/** The parts of a chat item the card mapping reads (a ChatItem from useAgentSession fits). */
+export interface SongCardItem { id: string; role: "user" | "assistant" | "error"; text: string; runId?: string; artifacts?: { artifactId: string; kind: "wav" | "midi" }[] }
+export type SongCard = { kind: "version"; version: SongVersion } | { kind: "current" };
+
+const ARTIFACT_ID = /\b(?:wav|midi|mid|art)_[a-z0-9]{6,}\b/gi;
+
+/** Assistant text without raw artifact ids (and the byte/hash noise around them). Never returns an id. */
+export function stripArtifactIds(text: string, ids: string[] = []): string {
+  let t = text;
+  // "Rendered WAV artifact **wav_…**": the whole phrase goes at the end of a sentence; mid-sentence it reads "the WAV".
+  const idAlt = [...ids.filter(Boolean).map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), ARTIFACT_ID.source.replace(/\\b/g, "")].join("|");
+  const core = `(?:\\b(?:the|a|an)\\s+)?(?:\\b(?:WAV|MIDI)\\s+)?\\bartifacts?(?:\\s+id)?\\s*:?\\s*[*_\`]*(?:${idAlt})[*_\`]*`;
+  t = t.replace(new RegExp(`(?:\\b(?:rendered|saved|created)\\s+)?${core}(?=\\s*(?:[.!?,;:()]|$))`, "gi"), "")
+    .replace(new RegExp(core, "gi"), (_m, at: number, all: string) => (/(?:^|[.!?]\s*)$/.test(all.slice(0, at)) ? "The WAV" : "the WAV"));
+  for (const id of ids) if (id) t = t.split(id).join("");
+  t = t.replace(ARTIFACT_ID, "")
+    .replace(/\bsha-?256\s*[:=]?\s*[0-9a-f]{6,}…?/gi, "")
+    .replace(/\b\d[\d,]*\s*bytes\b/gi, "")
+    .replace(/\*\*\s*\*\*|__\s*__|`\s*`/g, "")
+    .replace(/\b(WAV|MIDI)\s+artifacts?(?:\s+id)?(?:\s*:)?/gi, "$1")
+    .replace(/\bartifacts?\s+id(?:\s*:)?/gi, "")
+    .replace(/\(\s*(?:[,;]\s*)+/g, "(").replace(/(?:\s*[,;])+\s*\)/g, ")").replace(/\(\s*\)/g, "")
+    .replace(/([.!?])\s*\(\s*[\d.]+\s*s\s*\)\s*[.!]?/g, "$1")
+    .replace(/[ \t]+([,.;:!?])/g, "$1").replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+$/gm, "").trim();
+  return /^(?:(?:rendered|the|your)\s+)?(?:WAV|MIDI)[.!:]?$/i.test(t) ? "" : t;
+}
+
+/** Id of the newest assistant item that produced a render artifact: the only one that may show a "current" card. */
+export function latestArtifactItemId(items: SongCardItem[]): string | null {
+  for (let i = items.length - 1; i >= 0; i--) { const m = items[i]; if (m.role === "assistant" && m.artifacts?.some((a) => a.kind === "wav" || a.kind === "midi")) return m.id; }
+  return null;
+}
+
+/** Map one chat item (a finished tool result) to what the chat shows: the text line and, maybe, a song card.
+ * - a run that made a version shows that version's card;
+ * - otherwise the newest item with a render artifact shows the current song's card (when a song exists);
+ * - disabled (STUDIO_SONG_CARD=0): the old behaviour, version cards only and the text untouched. */
+export function songCardFor(m: SongCardItem, o: { version: SongVersion | null; hasSong: boolean; latestArtifactId: string | null; enabled: boolean }): { card: SongCard | null; text: string } {
+  if (m.role !== "assistant") return { card: null, text: m.text };
+  if (!o.enabled) return { card: o.version ? { kind: "version", version: o.version } : null, text: m.text };
+  const card: SongCard | null = o.version ? { kind: "version", version: o.version } : o.hasSong && o.latestArtifactId === m.id ? { kind: "current" } : null;
+  const text = stripArtifactIds(m.text, (m.artifacts ?? []).map((a) => a.artifactId));
+  return { card, text: text || (card ? "Your song is ready." : "") };
+}
+
+/** Where a successful Publish lands: the For You feed with that song pinned first (one-shot, URL only). */
+export const publishedFeedPath = (slug: string) => `feed?pin=${encodeURIComponent(slug)}`;

@@ -80,6 +80,9 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(r(b + "/"), .link(.feed))   // studio ‹ Back (pushState "/"), via URL KVO
         XCTAssertEqual(r(b), .link(.feed))
         XCTAssertEqual(r(b + "/feed"), .link(.feed))
+        XCTAssertEqual(r(b + "/feed?pin=ember-crown-rmpaqyj8"), .link(.share(slug: "ember-crown-rmpaqyj8"))) // web Publish -> native feed card
+        XCTAssertEqual(r(b + "/feed?pin=x"), .link(.feed))
+        XCTAssertEqual(r(b + "/feed?pin=ember-crown/zz"), .link(.feed))
         XCTAssertEqual(r(b + "/inbox"), .tab(.inbox))
         XCTAssertEqual(r(b + "/profile"), .tab(.profile))
         XCTAssertEqual(r(b + "/u/maestroaria"), .link(.user(name: "maestroaria")))

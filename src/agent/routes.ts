@@ -13,7 +13,8 @@ export function parseRoute(pathname = location.pathname, search = location.searc
   const jam = /^jam(?:\/([A-Za-z0-9]{6,40}))?$/.exec(rel); if (jam) return { view: "jam", roomId: jam[1] ?? null };
   if (rel === "studio" || new URLSearchParams(search).has("player")) return { view: "studio" };
   const q = new URLSearchParams(search);
-  if (rel === "" || rel === "explore" || rel === "feed") return { view: "feed", sort: q.get("sort") ?? undefined, label: q.get("label") ?? undefined };
+  // ?pin=<slug>: one-shot pin after Publish (the new song first, then normal ranking). URL only, never stored.
+  if (rel === "" || rel === "explore" || rel === "feed") { const pin = q.get("pin"); return { view: "feed", sort: q.get("sort") ?? undefined, label: q.get("label") ?? undefined, ...(pin && /^[a-z0-9][a-z0-9-]{3,127}$/.test(pin) ? { focus: pin } : {}) }; }
   const t = /^t\/([a-z0-9-]{2,24})$/.exec(rel); if (t) return { view: "feed", tag: t[1] };
   const u = /^u\/([a-z0-9_]{3,20})$/.exec(rel); if (u) return { view: "profile", handle: u[1] };
   if (rel === "me") return { view: "profile", handle: null };

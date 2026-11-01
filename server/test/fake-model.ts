@@ -35,6 +35,14 @@ export function nextStep(msgs: Msg[]): { calls: Call[] } | { text: string } {
       default: { const t = resultFor(turn, "gbk_transform_notes"); const cm = resultFor(turn, "gbk_commit_proposal"); return { text: `Rewrote it in A major (remap ${t?.ok ? "ok" : "failed"}, commit ${cm?.ok ? "ok" : "failed"}).` }; }
     }
   }
+  if (userText.includes("song card check")) { // e2e: a short compose + render whose final reply carries a raw artifact id
+    switch (steps) {
+      case 0: return { calls: [{ name: "gbk_create_project", args: { name: "Card Check", tempo: 120, timeSignature: [4, 4], key: "C major" } }] };
+      case 1: return { calls: [{ name: "gbk_generate_arrangement", args: { style: "pop", key: "C major", bars: 2, voices: 2, complexity: 1, seed: 7, instrumentation: ["piano", "bass"] } }] };
+      case 2: return { calls: [{ name: "gbk_render_wav", args: { sampleRate: 44100, channels: 1, tailSeconds: 0.5, format: "pcm16", output: "artifact", download: false } }] };
+      default: return { text: `Here's your song. WAV artifact **${r("gbk_render_wav")?.data?.artifactId ?? "wav_missing00"}**` };
+    }
+  }
   if (userText.includes("darker")) {
     switch (steps) {
       case 0: return { calls: [{ name: "gbk_list_tracks", args: {} }, { name: "gbk_get_project_summary", args: {} }] };
