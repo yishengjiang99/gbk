@@ -10,6 +10,7 @@ import { currentSession, guardWrite } from "./agent.ts";
 import { RateLimiter as RL } from "../security/rate-limit.ts";
 import type { ModelClient } from "../agent/model-client.ts";
 import { llmConfigured } from "../config.ts";
+import { NO_PLAYABLE_MEDIA, deriveMidi } from "../persistence/share-media.ts";
 
 const RIFF = (b: Uint8Array) => b.length > 44 && String.fromCharCode(...b.subarray(0, 4)) === "RIFF" && String.fromCharCode(...b.subarray(8, 12)) === "WAVE";
 const MP3 = (b: Uint8Array) => b.length > 4 && ((b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0));
@@ -38,7 +39,10 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     try { project = sanitizeSharedProject(b.project); } catch (e) { if (e instanceof ShareValidationError) return reply.code(422).send({ code: e.code, message: e.message }); throw e; }
     const title = (typeof b.title === "string" && b.title.trim() ? b.title.trim() : project.name).slice(0, SHARE_LIMITS.titleChars);
     const parentSlug = typeof b.parentSlug === "string" ? b.parentSlug : null;
+    const midi = deriveMidi(JSON.stringify(project));
+    if (b.public === true && !midi) return reply.code(422).send(NO_PLAYABLE_MEDIA);
     const row = store.create({ owner: s.user, title, projectJson: JSON.stringify(project), parentSlug, public: b.public === true });
+    if (midi) store.setMedia(row.slug, "midi", midi);
     if (row.public) onPublish?.(row.id);
     req.log.info({ evt: "share_create", user: s.user, slug: row.slug, parent: row.parent_id });
     return { ...store.view(row), url: `${origin}/s/${row.slug}` };
@@ -111,8 +115,9 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const exists = store.list({ owner: s.user, limit: 1000, offset: 0 }).some((v) => v.projectId === projectId);
     if (!exists && store.countRecent(s.user, 86_400_000) >= 100) return reply.code(429).send({ code: "RATE_LIMITED", message: "too many songs today" });
     const { row, created } = store.upsertAutosave({ owner: s.user, projectId, title: (project.name || "Untitled").slice(0, SHARE_LIMITS.titleChars), projectJson: JSON.stringify(project), parentSlug: typeof b.parentSlug === "string" ? b.parentSlug : null });
+    store.refreshMidi(row.slug);
     if (created) req.log.info({ evt: "autosave_create", user: s.user, slug: row.slug });
-    return { ...store.view(row), url: `${origin}/s/${row.slug}`, created };
+    return { ...store.view(store.byId(row.id) ?? row), url: `${origin}/s/${row.slug}`, created };
   });
 
   // AI-suggested title for one of the caller's songs (falls back to a deterministic name when no LLM).
@@ -147,6 +152,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (b.public !== undefined && typeof b.public !== "boolean") return reply.code(400).send({ code: "INVALID_ARGUMENT", message: "public must be boolean" });
     if (b.public === true && isGuestAccount(s.user) && !guestPublishOk(req, reply, s.user)) return;
     if (b.title !== undefined && (typeof b.title !== "string" || !b.title.trim())) return reply.code(400).send({ code: "INVALID_ARGUMENT", message: "title must be a non-empty string" });
+    if (b.public === true && !store.ensurePlayable(row.slug)) { req.log.warn({ evt: "publish_no_media", user: s.user, slug: row.slug }); return reply.code(422).send(NO_PLAYABLE_MEDIA); }
     if (typeof b.title === "string") store.setTitle(row.slug, b.title.trim().slice(0, SHARE_LIMITS.titleChars));
     if (typeof b.public === "boolean") { store.setPublic(row.slug, b.public); if (b.public) onPublish?.(row.id); }
     req.log.info({ evt: "share_update", user: s.user, slug: row.slug, public: b.public });

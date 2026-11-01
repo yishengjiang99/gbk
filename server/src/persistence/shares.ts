@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { deriveMidi } from "./share-media.ts";
 
 export interface ShareRow { id: string; slug: string; owner: string; title: string; project_json: string; parent_id: string | null; created_at: number; public: number; midi: Uint8Array | null; wav: Uint8Array | null; mp3: Uint8Array | null; wav_meta: string | null; project_id: string | null; updated_at: number | null; short_id?: string | null }
 export interface ShareView { slug: string; title: string; owner: string; createdAt: string; public: boolean; parent: { slug: string; title: string; owner: string } | null; hasMidi: boolean; hasWav: boolean; hasMp3: boolean; wav: unknown; forks: number; updatedAt: string; projectId: string | null }
@@ -94,6 +95,15 @@ export class ShareStore {
     else if (kind === "wav") this.db.prepare("UPDATE shares SET wav = ?, wav_meta = ? WHERE id = ?").run(bytes, meta ? JSON.stringify(meta).slice(0, 4000) : null, this.idOf(slugv));
     else this.db.prepare("UPDATE shares SET midi = ? WHERE id = ?").run(bytes, this.idOf(slugv));
   }
+  /** Playable media for a song: true when it already has mp3/wav/midi or a MIDI could be derived from its notes (#189). */
+  ensurePlayable(slugv: string): boolean {
+    const r = this.bySlug(slugv); if (!r) return false;
+    if (r.midi || r.mp3 || r.wav) return true;
+    const midi = deriveMidi(r.project_json); if (!midi) return false;
+    this.setMedia(r.slug, "midi", midi); return true;
+  }
+  /** Auto-save rewrote the notes: refresh the server MIDI so it never plays a stale (or missing) version. */
+  refreshMidi(slugv: string) { const r = this.bySlug(slugv); const midi = r && deriveMidi(r.project_json); if (r && midi) this.setMedia(r.slug, "midi", midi); }
   setPublic(slugv: string, pub: boolean) { this.db.prepare("UPDATE shares SET public = ? WHERE id = ?").run(pub ? 1 : 0, this.idOf(slugv)); }
   /** MCP project lifecycle: drop or re-own the private Studio snapshot(s) of one MCP composition. */
   deleteByProject(owner: string, projectId: string) { this.db.prepare("DELETE FROM shares WHERE owner = ? AND project_id = ?").run(owner, projectId); }
