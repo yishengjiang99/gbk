@@ -17,3 +17,11 @@
 .jam-diag table { border-collapse: collapse; font-size: .85rem; } .jam-diag td, .jam-diag th { border: 1px solid #333; padding: 4px 6px; }
 @media (max-width: 600px) { .jam-kb { height: 120px; } }
 .jam-rec { color: #e53935; font-weight: 600; }
+/* Live Jam is a normal scrolling page: undo the studio/legacy-player mobile rules that pin html/body/#root. */
+html:has(.jam-page), html:has(.jam-page) body, html:has(.jam-page) #root { height: auto; overflow-x: clip; overflow-y: visible; }
+/* Phones: keep the keyboard on screen while the rest of the room scrolls behind it. */
+@media (max-width: 600px) {
+  .jam-kb-wrap { position: sticky; bottom: 0; z-index: 5; background: #15161a; padding: 6px 0 calc(6px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 12px rgba(0,0,0,.5); }
+  .jam-kb-wrap > .jam-row { margin: 0 0 4px; gap: 6px; }
+  .jam-kb-wrap label { font-size: .85rem; }
+}
