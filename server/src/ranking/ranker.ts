@@ -194,6 +194,10 @@ export class Ranker {
     if (imps.length < MIN_TRAIN) return { skipped: "few_impressions", impressions: imps.length, n: 0, holdout: 0, min: MIN_TRAIN };
     const { tr, ho } = this.dataset(imps, t - HOLDOUT_DAYS * 86_400_000);
     if (tr.length < MIN_TRAIN || !ho.length) return { skipped: tr.length < MIN_TRAIN ? "few_train_rows" : "no_holdout", impressions: imps.length, n: tr.length, holdout: ho.length, min: MIN_TRAIN };
+    // each head needs MIN_LABELS positives and negatives in train and holdout, else the AUC is noise
+    const cnt = (rs: Row[], k: "c" | "s") => { const p = rs.filter((d) => d[k]).length; return [p, rs.length - p]; };
+    const lc = { train_complete: cnt(tr, "c"), train_skip: cnt(tr, "s"), holdout_complete: cnt(ho, "c"), holdout_skip: cnt(ho, "s") };
+    if (Object.values(lc).flat().some((v) => v < MIN_LABELS)) return { skipped: "few_holdout_labels", impressions: imps.length, n: tr.length, holdout: ho.length, min: MIN_LABELS, labels: lc };
     const model: Model = { complete: fitLR(tr.map((d) => ({ x: d.x, y: d.c }))), skip: fitLR(tr.map((d) => ({ x: d.x, y: d.s }))) };
     const ev = (m: Model) => ({ c: aucOf(ho.map((d) => lin(d.x, m.complete)), ho.map((d) => d.c)), s: aucOf(ho.map((d) => lin(d.x, m.skip)), ho.map((d) => d.s)) });
     const a = ev(model); model.auc_skip = a.s; const cur = this.promoted(); const b = cur ? ev(cur.model) : null;
@@ -217,10 +221,12 @@ export class Ranker {
   }
 }
 /** train() did not fit a model (too little data); logged as rank_train_skipped so a skip is visible. */
-export interface TrainSkip { skipped: "few_impressions" | "few_train_rows" | "no_holdout"; impressions: number; n: number; holdout: number; min: number }
+export interface TrainSkip { skipped: "few_impressions" | "few_train_rows" | "no_holdout" | "few_holdout_labels"; impressions: number; n: number; holdout: number; min: number; labels?: Record<string, number[]> }
 export interface TrainResult { version: string; n: number; holdout: number; auc: number | null; auc_skip: number | null; promoted: boolean; previous: string | null; previous_auc: number | null; previous_auc_skip: number | null; ms: number; model: Model }
 export type Row = { x: number[]; c: number; s: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
 export const HOLDOUT_DAYS = 3;
+/** Min positives and negatives per head ([pos, neg]) in train and holdout before training or promoting. */
+export const MIN_LABELS = 30;
 export function lin(x: number[], w: Weights) { return w.bias + x.reduce((a, v, j) => a + v * (w[FEATURES[j]] ?? 0), 0); }
 function fitLR(data: { x: number[]; y: number }[]): Weights {
   const w = new Array(FEATURES.length + 1).fill(0); const lr = 0.1, l2 = 1e-3;

@@ -43,7 +43,7 @@ test("ranking: personalized For you learns from dwell/skips, session-aware, pagi
 });
 
 // ---- v2 unit tests on synthetic fixtures (rank-fixture.ts) ----
-import { Ranker, trainInWorker, MIN_TRAIN, type TrainResult, FEATURES, HEURISTIC, SKIP_LAMBDA, labels, projectSeconds, QUOTAS, SOURCES } from "../src/ranking/ranker.ts";
+import { Ranker, trainInWorker, MIN_TRAIN, MIN_LABELS, type TrainResult, FEATURES, HEURISTIC, SKIP_LAMBDA, labels, projectSeconds, QUOTAS, SOURCES } from "../src/ranking/ranker.ts";
 import { fixture, rand, H as HR, D } from "./rank-fixture.ts";
 
 const randomWorld = (fx: ReturnType<typeof fixture>, seed: number, n = 1600) => {
@@ -71,6 +71,16 @@ test("ranking: train() with too little data reports why it skipped (counts vs MI
   for (let k = 0; k < 600; k++) fx.imp({ actor: `a${k % 20}`, song: songs[k % 10], at: fx.now() - HR - (k < 300 ? 0 : 5 * D), good: k % 2 === 0 });
   const res = new Ranker(fx.db, fx.now).train();
   assert.ok(res && "skipped" in res, "skip is reported, not null"); assert.equal(res.skipped, "few_train_rows"); assert.equal(res.impressions, 600); assert.ok(res.n < MIN_TRAIN && res.holdout > 0); assert.equal(res.min, MIN_TRAIN);
+  assert.equal((fx.db.prepare("SELECT COUNT(*) AS c FROM rank_models").get() as { c: number }).c, 0);
+});
+
+test("ranking: first model is not promoted when the holdout has too few completions", () => {
+  const fx = fixture(); const songs = Array.from({ length: 10 }, (_, i) => fx.song({ owner: `o${i}`, score: i / 10 }));
+  // prod-like: plenty of training rows, holdout with 2 completions vs 235 fast skips
+  for (let k = 0; k < 800; k++) fx.imp({ actor: `a${k % 20}`, song: songs[k % 10], at: fx.now() - 5 * D - (k % 48) * HR, good: k % 2 === 0 });
+  for (let k = 0; k < 237; k++) fx.imp({ actor: `a${k % 20}`, song: songs[k % 10], at: fx.now() - HR - (k % 48) * HR, good: k < 2 });
+  const res = new Ranker(fx.db, fx.now).train();
+  assert.ok("skipped" in res); assert.equal(res.skipped, "few_holdout_labels"); assert.equal(res.min, MIN_LABELS); assert.deepEqual(res.labels!.holdout_complete, [2, 235]);
   assert.equal((fx.db.prepare("SELECT COUNT(*) AS c FROM rank_models").get() as { c: number }).c, 0);
 });
 
