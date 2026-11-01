@@ -118,3 +118,12 @@ test("ranking v2 / phase 7: account deletion removes every impression column (in
   fx.events.insert([{ actor: "u2", session: "s1", share_id: id, dwell_ms: 1, listen_ratio: 0, completed: false, fast_skip: true, replay: false, actions: [], position: 0, feed: "for_you", model_version: "v", client: "web", ts: 0, scroll_v: 5 }]);
   fx.events.purgeActor("u2"); assert.equal(fx.events.countActor("u2"), 0);
 });
+
+test("ranking: a song the actor saw in an earlier session does not lead their next session's feed", () => {
+  const fx = fixture(); const hit = fx.song({ owner: "o1", title: "Hit", score: 10 });
+  for (let i = 0; i < 20; i++) fx.song({ owner: `o${i % 5 + 2}`, title: `S${i}`, score: 0.1, ageH: 24 * 5 });
+  const rk = new Ranker(fx.db, fx.now);
+  assert.equal(rk.rank({ actor: "inst:viewer-0001", session: "s2", seed: 1 }).ids[0], hit, "unseen hit leads");
+  fx.imp({ actor: "inst:viewer-0001", session: "s1", song: hit, at: fx.now() - HR, good: true });
+  for (let seed = 0; seed < 20; seed++) assert.notEqual(rk.rank({ actor: "inst:viewer-0001", session: "s2", seed }).ids[0], hit, `seed ${seed}`);
+});

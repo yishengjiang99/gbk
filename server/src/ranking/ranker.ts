@@ -143,8 +143,10 @@ export class Ranker {
     const { pool, sources } = this.candidates(c, songs);
     // no repeats within a session (iOS passes ?session=; web does not, so this is a no-op there)
     if (o.actor && o.session) for (const x of this.db.prepare("SELECT DISTINCT share_id FROM impressions WHERE actor = ? AND session = ? AND created_at < ?").all(o.actor, o.session, t) as { share_id: string }[]) pool.delete(x.share_id);
-    const scored = songs.filter((s) => pool.has(s.id)).map((s) => ({ s, v: this.value(this.feat(c, s), s.dur) + (s.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
-    scored.sort((a, b) => b.v - a.v);
+    // Songs this actor already saw rank after every unseen one: their own impressions raise popularity and affinity
+    // more than the capped `seen` penalty lowers them, so a top song would otherwise lead every new session.
+    const scored = songs.filter((s) => pool.has(s.id)).map((s) => ({ s, seen: c.seen.has(s.id) ? 1 : 0, v: this.value(this.feat(c, s), s.dur) + (s.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
+    scored.sort((a, b) => a.seen - b.seen || b.v - a.v);
     // cold-start candidates: < FRESH_WINDOW_H old with < COLD_K impressions in total (as of t)
     const young = scored.filter((x) => t - x.s.published_at < FRESH_WINDOW_H * 3_600_000).map((x) => x.s.id);
     const imps = new Map<string, number>(); if (young.length) for (const x of this.db.prepare(`SELECT share_id, COUNT(*) AS n FROM impressions WHERE share_id IN (${young.map(() => "?").join(",")}) AND created_at < ? GROUP BY share_id`).all(...young, t) as { share_id: string; n: number }[]) imps.set(x.share_id, Number(x.n));
