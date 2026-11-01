@@ -1,6 +1,8 @@
 import SwiftUI
 import UIKit
 import CoreImage
+import OMRScanKit
+import OMRScanUI
 import XCTest
 @testable import GBKComposer
 
@@ -117,13 +119,16 @@ final class SnapshotTests: XCTestCase {
     }
 
     func testScanEntryAndErrorLightAndDark() throws {
-        let fixture = FixtureSheetRecognizer(result: .failure(.nothingRecognized))
-        let entry = ScanController(recognizer: fixture)
-        let failed = ScanController(recognizer: fixture)
-        failed.phase = .error(.nothingRecognized)
-        for (name, c) in [("scan-entry", entry), ("scan-error", failed)] {
-            let light = try render(ScanSheetView(controller: c), name: "\(name)-light", style: .light)
-            let dark = try render(ScanSheetView(controller: c), name: "\(name)-dark", style: .dark)
+        struct NoopHost: ScanHost { func didFinish(_ result: ScanResult) async throws {} }
+        func model(_ phase: ScanFlowModel.Phase) -> ScanFlowModel {
+            let m = ScanFlowModel(host: NoopHost()) { _ in }
+            m.phase = phase
+            return m
+        }
+        let nothing = ScanError(kind: .nothingRecognized, message: "no notes", reasonCode: "no_notes")
+        for (name, m) in [("scan-entry", model(.choose)), ("scan-error", model(.error(nothing)))] {
+            let light = try render(OMRScanFlow(model: m).scanTheme(.gbk), name: "\(name)-light", style: .light)
+            let dark = try render(OMRScanFlow(model: m).scanTheme(.gbk), name: "\(name)-dark", style: .dark)
             XCTAssertGreaterThan(averageLuminance(light), averageLuminance(dark) + 0.2, name)
         }
         let bar = VStack(spacing: 0) { StudioNativeBar(onScan: {}); Theme.background }

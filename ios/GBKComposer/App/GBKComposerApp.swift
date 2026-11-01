@@ -1,3 +1,4 @@
+import OMRScanKit
 import SwiftUI
 
 @main
@@ -24,7 +25,7 @@ struct GBKComposerApp: App {
                 .task { if !Self.isUnitTestHost { PaywallTriggerWatcher.shared.start() } }
                 // Background homr model warmup for Scan (Music Reader parity): detached inside
                 // `start()`, never on the main thread; a scan arriving mid-warmup attaches to it.
-                .task { if !Self.isUnitTestHost { ScanModelWarmup.shared.start() } }
+                .task { if !Self.isUnitTestHost { ScanKit.warmUp() } }
                 .onAppear { router.handleLaunchArguments(); consumePendingPushLink() }
                 // Push tap while the app is running (#137): AppDelegate enqueued the link.
                 .onChange(of: pushLinks.pendingURL) { _, url in if url != nil { consumePendingPushLink() } }
@@ -40,7 +41,7 @@ struct GBKComposerApp: App {
                 // Silent Scan model re-warm kick (GBK addition; Music Reader has none): no-op
                 // when ready or already warming, restarts after failure or a memory-warning
                 // release, so a later scan doesn't pay the cold load.
-                if !Self.isUnitTestHost { ScanModelWarmup.shared.startOnForeground() }
+                if !Self.isUnitTestHost { ScanKit.warmUpOnForeground() }
             }
             if phase == .background { BillingEventLogger.shared.suspend() }
         }

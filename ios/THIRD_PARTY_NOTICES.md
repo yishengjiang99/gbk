@@ -4,7 +4,7 @@ The iOS app (`ios/`) is licensed AGPL-3.0-or-later (`ios/LICENSE`). It includes 
 
 | Component | Use | License | Source |
 |---|---|---|---|
-| omr-homr-ios (`ios/Packages/omr-homr-ios`, vendored from yishengjiang99/omr-sheet-cam `Packages/omr-homr-ios` @ 467308a) | Sheet-music recognition (Scan) | AGPL-3.0 (`ios/Packages/omr-homr-ios/LICENSE`, `NOTICE`) | https://github.com/yishengjiang99/omr-sheet-cam/tree/467308a/Packages/omr-homr-ios |
+| omr-scan (OMRScanKit, OMRScanUI, omr-homr-ios) — SwiftPM package from yishengjiang99/omr-sheet-cam (pinned in `ios/project.yml`) | Sheet-music scan: recognition core, warmup, camera/import UI | AGPL-3.0 (`LICENSE`, `NOTICE` in that repo) | https://github.com/yishengjiang99/omr-sheet-cam |
 | liebharc/homr | Algorithms, tokenizers and vocabulary that omr-homr-ios ports | AGPL-3.0 | https://github.com/liebharc/homr |
 | homr ONNX checkpoints: SegNet `segnet_308-3296ccd…_fp16`, encoder `encoder_pytorch_model_465-597144c…_fp16`, decoder `decoder_pytorch_model_465-597144c…` (SHA-256 pinned in `ios/models.lock`, ~102 MB, bundled into the app at build time) | Recognition models | AGPL-3.0 (released with homr) | https://github.com/liebharc/homr/releases/tag/onnx_checkpoints |
 | BreezeWhite/oemer | Credited by homr / omr-homr-ios (segmentation approach) | MIT | https://github.com/BreezeWhite/oemer |
