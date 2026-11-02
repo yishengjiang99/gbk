@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "push = apply listing, then read back; verify = read back only"
+        description: "push = apply listing, then read back; verify = read back only; attach-build = attach TestFlight build 27 to v1.0 (never submits)"
         type: choice
-        options: [push, verify]
+        options: [push, verify, attach-build]
         default: push
 
 concurrency:
@@ -65,3 +65,7 @@ jobs:
       - name: Verify listing (read back only)
         if: inputs.mode == 'verify'
         run: python3 docs/asc/scripts/push_listing.py --verify
+
+      - name: Attach build 27 to version 1.0 (never submits)
+        if: inputs.mode == 'attach-build'
+        run: python3 docs/asc/scripts/attach_build.py
