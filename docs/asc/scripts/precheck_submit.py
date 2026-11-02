@@ -165,7 +165,7 @@ def main():
     for r in subs_r:
         a = r["attributes"]
         print(f"  SUBMISSION id {r['id']} platform {a.get('platform')} state {a.get('state')} submittedDate {a.get('submittedDate')}")
-        s_it, items_r = api_soft("GET", f"/v1/reviewSubmissions/{r['id']}/items?limit=200&include=appStoreVersion,inAppPurchaseV2,subscription")
+        s_it, items_r = api_soft("GET", f"/v1/reviewSubmissions/{r['id']}/items?limit=200&include=appStoreVersion")
         if s_it >= 300:
             print(f"    ITEMS unreadable -> {s_it}: {err_text(items_r)}")
             continue
@@ -174,9 +174,8 @@ def main():
         for inc in items_r.get("included", []):
             ia = inc.get("attributes") or {}
             print(f"    INCLUDED type {inc.get('type')} id {inc.get('id')} productId {ia.get('productId')} versionString {ia.get('versionString')} state {ia.get('state') or ia.get('appStoreState')}")
-        for it in items:
-            print(f"    ITEM id {it['id']} attributes {json.dumps(it.get('attributes') or {})}")
-            print(f"    ITEM id {it['id']} relationships {json.dumps(it.get('relationships') or {})[:1200]}")
+        for n, it in enumerate(items):
+            print(f"    ITEM {n} RAW {json.dumps(it)[:2000]}")
 
     print("PRECHECK DONE (read-only; nothing changed)")
 
