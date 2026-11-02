@@ -174,6 +174,7 @@ def main():
                                          "reviewSubmission": {"data": {"type": "reviewSubmissions", "id": sub_id}},
                                          "appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}})
         if s >= 300:
+            print(f"VERSION_ITEM_ERROR full response: {json.dumps(resp)[:4000]}")
             raise SystemExit(f"ABORT: add version item -> {errors_text(resp)}; nothing submitted")
         print("ITEM version added")
 
