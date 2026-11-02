@@ -112,7 +112,9 @@ def main():
     # Products: first-release items must ride this submission.
     first_timers = []   # (kind, id, productId, rel_key, rel_type)
     blockers = []
-    for p in api("GET", f"/v2/apps/{APP_ID}/inAppPurchasesV2?limit=200").get("data", []):
+    # NOTE: the app's IAP list is /v1/apps/{id}/inAppPurchasesV2 (single-IAP ops
+    # are /v2/inAppPurchases/{id}); /v2/apps/{id}/inAppPurchasesV2 404s.
+    for p in api("GET", f"/v1/apps/{APP_ID}/inAppPurchasesV2?limit=200").get("data", []):
         a = p["attributes"]; st = a.get("state")
         print(f"IAP productId {a.get('productId')} type {a.get('inAppPurchaseType')} state {st}")
         if st == "READY_TO_SUBMIT":

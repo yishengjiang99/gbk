@@ -122,7 +122,14 @@ def main():
             print(f"AVAILABILITY v1 -> {s1}: {err_text(av1)}")
             print("AVAILABILITY territories_available 0 (no availability resource found)")
 
-    iaps = api("GET", f"/v2/apps/{APP_ID}/inAppPurchasesV2?limit=200").get("data", [])
+    # NOTE: the app's IAP list lives under /v1/apps/{id}/inAppPurchasesV2 even
+    # though single-IAP operations are /v2/inAppPurchases/{id}; /v2/apps/... 404s.
+    si, iap_resp = api_soft("GET", f"/v1/apps/{APP_ID}/inAppPurchasesV2?limit=200")
+    if si >= 300:
+        print(f"IAPS unreadable -> {si}: {err_text(iap_resp)}")
+        iaps = []
+    else:
+        iaps = iap_resp.get("data", [])
     print(f"IAPS count {len(iaps)}")
     for p in iaps:
         a = p["attributes"]
