@@ -17,7 +17,7 @@ on:
       mode:
         description: "push = apply listing, then read back; verify = read back only; attach-build = attach a TestFlight build to v1.0 (never submits); precheck = read-only submission gates; submit = SUBMIT v1.0 for App Store review"
         type: choice
-        options: [push, verify, attach-build, precheck, probe, submit]
+        options: [push, verify, attach-build, precheck, probe, fix-age-rating, submit]
         default: push
       build_number:
         description: "TestFlight build number for attach-build, and the build the submit mode requires to be attached"
@@ -88,6 +88,10 @@ jobs:
         env:
           ASC_BUILD_NUMBER: ${{ inputs.build_number }}
         run: python3 docs/asc/scripts/probe_submit_error.py
+
+      - name: Complete the age rating declaration
+        if: inputs.mode == 'fix-age-rating'
+        run: python3 docs/asc/scripts/fix_age_rating.py
 
       - name: Submit version 1.0 for App Store review
         if: inputs.mode == 'submit'

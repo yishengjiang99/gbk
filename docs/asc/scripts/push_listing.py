@@ -76,15 +76,25 @@ def main():
     print("appInfo: name/subtitle/privacy/category MUSIC/content rights")
 
     # Age rating: everything NONE/false except UGC; no unrestricted web; no messaging.
+    # Field types come from the declaration schema, NOT from current values: the
+    # old value-derived version sent the string "NONE" for boolean fields
+    # (socialMedia, socialMediaAgeRestricted) once they existed, the PATCH 409'd,
+    # and the declaration stayed unanswered, which blocks review submission.
     ar = api("GET", f"/v1/appInfos/{info['id']}/ageRatingDeclaration")["data"]
+    ENUM_NONE = ("alcoholTobaccoOrDrugUseOrReferences", "contests", "gamblingSimulated",
+                 "gunsOrOtherWeapons", "horrorOrFearThemes", "matureOrSuggestiveThemes",
+                 "medicalOrTreatmentInformation", "profanityOrCrudeHumor",
+                 "sexualContentGraphicAndNudity", "sexualContentOrNudity",
+                 "violenceCartoonOrFantasy", "violenceRealistic",
+                 "violenceRealisticProlongedGraphicOrSadistic")
+    BOOL_FIELDS = ("advertising", "ageAssurance", "gambling", "healthOrWellnessTopics",
+                   "lootBox", "messagingAndChat", "parentalControls", "socialMedia",
+                   "socialMediaAgeRestricted", "unrestrictedWebAccess", "userGeneratedContent")
     attrs = {}
-    for k, v in ar["attributes"].items():
-        if k in ("kidsAgeBand", "ageRatingOverride", "ageRatingOverrideV2", "koreaAgeRatingOverride", "developerAgeRatingInfoUrl"): continue
-        if isinstance(v, bool) or v is None and k in ("gambling", "unrestrictedWebAccess", "lootBox", "messagingAndChat",
-                "userGeneratedContent", "advertising", "ageAssurance", "parentalControls", "healthOrWellnessTopics", "seventeenPlus"):
-            attrs[k] = (k == "userGeneratedContent")
-        else:
-            attrs[k] = "NONE"
+    for k in ENUM_NONE:
+        if k in ar["attributes"]: attrs[k] = "NONE"
+    for k in BOOL_FIELDS:
+        if k in ar["attributes"]: attrs[k] = (k == "userGeneratedContent")
     r = api("PATCH", f"/v1/ageRatingDeclarations/{ar['id']}", {"data": {"type": "ageRatingDeclarations", "id": ar["id"], "attributes": attrs}}, ok_fail=True)
     print("age rating", "ok" if r else "FAILED (see WARN)")
 
