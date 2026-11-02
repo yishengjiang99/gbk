@@ -1,0 +1,96 @@
+name: ASC status (read-only)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query GBK App Store state
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          BUNDLE_ID: com.grepawk.moviefone
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography
+          python3 <<'PY'
+          import json, os, time, urllib.request
+          import jwt
+          key_id = os.environ["APP_STORE_CONNECT_KEY_ID"].strip()
+          issuer = os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip()
+          p8 = os.environ['APP_STORE_CONNECT_API_KEY_P8'].replace('\\n', '\n').strip()
+          bundle_id = os.environ["BUNDLE_ID"].strip()
+          now = int(time.time())
+          token = jwt.encode({"iss": issuer, "iat": now, "exp": now + 1200, "aud": "appstoreconnect-v1"}, p8, algorithm="ES256", headers={"kid": key_id})
+          def api(path):
+            req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=90) as r:
+              return json.loads(r.read().decode() or "{}")
+          apps = api(f"/v1/apps?filter[bundleId]={bundle_id}")
+          app = apps["data"][0]
+          app_id = app["id"]
+          print("APP", app_id, app["attributes"].get("name"), app["attributes"].get("bundleId"))
+          print("contentRights:", app["attributes"].get("contentRightsDeclaration"))
+          import urllib.error
+          def trypath(path):
+            try:
+              return api(path)
+            except Exception as e:
+              return {"_error": str(e)[:200]}
+          sched = trypath(f"/v1/apps/{app_id}/appPriceSchedule")
+          sd = sched.get("data")
+          print("priceSchedule:", "present" if sd else ("MISSING " + json.dumps(sched)[:200]))
+          if sd:
+            print("  schedAttrs:", json.dumps(sd.get("attributes")))
+            for inc in (sched.get("included") or []):
+              print("  included:", inc.get("type"), inc.get("id"), json.dumps(inc.get("attributes")))
+            sched_id = sd.get("id")
+            prices = trypath(f"/v1/appPriceSchedules/{sched_id}/manualPrices?limit=100&include=appPricePoint")
+            print("  schedPrices:", json.dumps(prices.get("data"))[:1500] if prices.get("data") is not None else json.dumps(prices)[:200])
+            if prices.get("data"):
+              for p in prices["data"]:
+                pt = next((i for i in (prices.get("included") or []) if i.get("id") == (p.get("relationships", {}).get("appPricePoint", {}).get("data") or {}).get("id")), {})
+                print("    PRICE", p["id"], json.dumps(p.get("attributes")), "point:", json.dumps(pt.get("attributes")))
+          v2 = trypath(f"/v2/apps/{app_id}/appPrices?limit=50")
+          if v2.get("data") is not None:
+            print("v2 appPrices count:", len(v2["data"]))
+            for p in v2["data"]:
+              print("  V2PRICE", p["id"], json.dumps(p.get("attributes")))
+          else:
+            print("v2 appPrices:", json.dumps(v2)[:200])
+          vers = api(f"/v1/apps/{app_id}/appStoreVersions?filter[platform]=IOS&limit=10")
+          for v in vers.get("data", []):
+            a = v["attributes"]
+            print("VERSION", v["id"], a.get("versionString"), a.get("appStoreState"), a.get("appVersionState"), a.get("createdDate"))
+          if vers.get("data"):
+            vid = vers["data"][0]["id"]
+            rel = api(f"/v1/appStoreVersions/{vid}/build")
+            b = rel.get("data")
+            if b:
+              ba = b["attributes"]
+              print("ATTACHED_BUILD", b["id"], "cfBundleVersion=", ba.get("version"), "processing=", ba.get("processingState"), "uploaded=", ba.get("uploadedDate"))
+            else:
+              print("ATTACHED_BUILD none")
+          if vers.get("data"):
+              vid0 = vers["data"][0]["id"]
+              vstr = vers["data"][0]["attributes"].get("versionString")
+              locs = api(f"/v1/appStoreVersions/{vid0}/appStoreVersionLocalizations?limit=10")
+              for loc in locs.get("data", []):
+                  sets = api(f"/v1/appStoreVersionLocalizations/{loc['id']}/appScreenshotSets?limit=20")
+                  for st in sets.get("data", []):
+                      sa = st["attributes"]
+                      shots = api(f"/v1/appScreenshotSets/{st['id']}/appScreenshots?limit=30")
+                      dims = []
+                      for sh in shots.get("data", []):
+                          ia = (sh.get("attributes") or {}).get("imageAsset") or {}
+                          dims.append(f"{ia.get('width')}x{ia.get('height')}")
+                      print("SHOTSET", vstr, loc["attributes"].get("locale"), sa.get("screenshotDisplayType"), len(shots.get("data", [])), "shots:", ",".join(dims))
+          subs = api(f"/v1/apps/{app_id}/reviewSubmissions?filter[platform]=IOS&limit=15")
+          for s in subs.get("data", []):
+            a = s["attributes"]
+            print("SUBMISSION", s["id"], a.get("state"), "submitted=", a.get("submittedDate"), "platform=", a.get("platform"))
+          PY
