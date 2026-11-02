@@ -28,3 +28,5 @@ Payment is charged to your Apple account when you confirm the purchase. A subscr
 PRIVACY AND SOURCE
 Account data is used to run the app and is never used for tracking. Privacy policy: https://compose.grepawk.com/privacy
 GBK Music Composer is free software under the GNU AGPL v3 or later. Source code: https://github.com/yishengjiang99/gbk
+
+Terms of Use (EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
