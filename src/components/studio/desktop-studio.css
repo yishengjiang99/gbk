@@ -2,7 +2,7 @@
 .ds {
   --bg: #ffffff; --fg: #111111; --mut: #6b7280; --card: #f4f5f7; --line: #e5e7eb; --acc: #5b5bf6; --accfg: #ffffff; --rec: #dc2626; --roll: #fbfbfd;
   --mute: #f59e0b; --solo: #10b981; --pop: #ffffff; --shadow: 0 8px 24px rgba(0,0,0,.18);
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: 70px minmax(0, 1fr) 168px;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: 70px minmax(0, 1fr) var(--ds-foot-h, 168px);
   grid-template-areas: "h h h h" "a b b b" "c c c c";
   height: 100vh; height: var(--vvh, 100dvh); width: 100%; max-width: 100vw; overflow: hidden; box-sizing: border-box;
   background: var(--bg); color: var(--fg); font: 13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; color-scheme: light;
@@ -96,6 +96,13 @@ html:has(.ds), html:has(.ds) body { background: #ffffff; overflow: hidden; }
 
 /* C: footer */
 .ds-foot { grid-area: c; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 8px 14px; min-height: 0; min-width: 0; position: relative; }
+/* VS Code-style sash on the footer's top edge: a 6px hit area straddling the border; an accent line shows on
+   hover, keyboard focus, and while dragging. The whole grid gets the ns-resize cursor during a drag. */
+.ds-sash { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: ns-resize; touch-action: none; z-index: 25; }
+.ds-sash::after { content: ""; position: absolute; left: 0; right: 0; top: 2px; height: 2px; background: transparent; }
+.ds-sash:hover::after, .ds-sash:focus-visible::after, .ds-sashing .ds-sash::after { background: var(--acc); }
+.ds-sash:focus-visible { outline: none; }
+.ds-sashing, .ds-sashing * { cursor: ns-resize !important; user-select: none; }
 .ds-agent { display: flex; flex-direction: column; gap: 5px; min-height: 0; min-width: 0; position: relative; }
 .ds-steps { display: flex; gap: 6px; font-size: 11px; align-items: center; flex: none; min-width: 0; }
 .ds-steps > span:not(.ds-spacer):not(.ds-conn) { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--mut); white-space: nowrap; }

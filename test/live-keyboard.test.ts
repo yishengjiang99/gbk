@@ -36,11 +36,12 @@ test("DAW key mapping: A..K = C..C, Z/X octave, C/V velocity; out-of-range notes
   assert.equal(keyAction("KeyQ", 4), null); assert.equal(keyAction("KeyK", 9), null);
 });
 
-test("keys are ignored while typing (inputs, textareas, selects, contenteditable, composer prompt)", () => {
+test("keys are ignored while typing (text inputs, textareas, contenteditable, composer prompt) — but not after using a select", () => {
   assert.equal(isTypingTarget({ tagName: "INPUT", type: "text" }), true);
   assert.equal(isTypingTarget({ tagName: "INPUT", type: "search" }), true);
   assert.equal(isTypingTarget({ tagName: "TEXTAREA" }), true);
-  assert.equal(isTypingTarget({ tagName: "SELECT" }), true);
+  // A select keeps focus after a choice; it never consumes letter keys, so note keys must still play/record.
+  assert.equal(isTypingTarget({ tagName: "SELECT", closest: () => null }), false);
   assert.equal(isTypingTarget({ tagName: "DIV", isContentEditable: true }), true);
   assert.equal(isTypingTarget({ tagName: "SPAN", closest: (q: string) => (q.includes("data-no-live-keys") ? {} : null) }), true);
   assert.equal(isTypingTarget({ tagName: "INPUT", type: "checkbox" }), false);

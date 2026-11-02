@@ -90,6 +90,12 @@ function phaseOf(tool: string): number {
 const PHASES = ["Understand", "Plan", "Compose", "Arrange", "Done"];
 const trackProgram = (p: Project, trackId: string) => p.programs.filter((e) => e.trackId === trackId).sort((a, b) => a.tick - b.tick)[0];
 
+/* Footer sash, modeled on VS Code's Sash/SplitView: a thin drag handle on the boundary between the piano-roll row
+ * and the bottom panel. Dragging resizes the panel within [FOOT_MIN, total - header - FOOT_MAIN_MIN]; the size is
+ * persisted like SplitView view sizes, double-click resets (onDidSashReset), arrows resize from the keyboard. */
+const FOOT_DEFAULT = 168, FOOT_MIN = 88, FOOT_HEAD = 70, FOOT_MAIN_MIN = 200, FOOT_KEY = "gbk.dsFootH";
+const clampFoot = (h: number, total: number) => Math.max(FOOT_MIN, Math.min(h, Math.max(FOOT_MIN, total - FOOT_HEAD - FOOT_MAIN_MIN)));
+
 export function DesktopStudio(props: DesktopStudioProps) {
   const state = useWorkstation(); const p = state.project; const t = state.transport;
   const s = useAgentSession();
@@ -102,6 +108,29 @@ export function DesktopStudio(props: DesktopStudioProps) {
   useEffect(() => { if (!toast) return; const h = setTimeout(() => setToast(null), 5000); return () => clearTimeout(h); }, [toast]);
   const [busy, setBusy] = useState("");
   const [keysOn, setKeysOn] = useState(false); const [, bump] = useState(0);
+  // ---- footer sash state (see FOOT_* above) ----
+  const dsRef = useRef<HTMLDivElement | null>(null);
+  const [footH, setFootH] = useState<number>(() => { try { const v = Number(localStorage.getItem(FOOT_KEY)); return Number.isFinite(v) && v > 0 ? v : FOOT_DEFAULT; } catch { return FOOT_DEFAULT; } });
+  const [footDrag, setFootDrag] = useState(false);
+  const setFoot = useCallback((h: number) => {
+    const v = clampFoot(h, dsRef.current?.clientHeight ?? window.innerHeight);
+    setFootH(v); try { localStorage.setItem(FOOT_KEY, String(Math.round(v))); } catch { /* private mode */ }
+  }, []);
+  const onSashDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); (e.target as HTMLElement).focus?.();
+    const total = dsRef.current?.clientHeight ?? window.innerHeight, startY = e.clientY, startH = footH;
+    setFootDrag(true);
+    const move = (ev: PointerEvent) => { const v = clampFoot(startH + (startY - ev.clientY), total); setFootH(v); try { localStorage.setItem(FOOT_KEY, String(Math.round(v))); } catch { /* private mode */ } };
+    const up = () => { setFootDrag(false); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  const onSashKey = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowUp") { e.preventDefault(); setFoot(footH + step); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); setFoot(footH - step); }
+    else if (e.key === "Home") { e.preventDefault(); setFoot(FOOT_DEFAULT); }
+  };
   const sel = selectedTrackId(p); const selTrack = p.tracks.find((x) => x.id === sel) ?? null;
 
   // ---- roll: tools, snap, zoom, focus ------------------------------------------------------------------------------
@@ -373,7 +402,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
   const keyCtl = <select className="ds-sel" data-testid="key-select" aria-label="Key" title="Key" value={key} onChange={(e) => setKey(e.target.value)}>{!key && <option value="">Key…</option>}{(KEYS.includes(key) || !key ? KEYS : [key, ...KEYS]).map((k) => <option key={k}>{k}</option>)}</select>;
   const tapCtl = <button className="ds-btn" data-testid="bpm-tap" title="Tap 2+ times to set the tempo" onClick={tap}>Tap</button>;
   return (
-    <div className="ds" data-testid="workstation" data-compact="0" data-layout="grid">
+    <div className={`ds${footDrag ? " ds-sashing" : ""}`} ref={dsRef} style={{ "--ds-foot-h": `${footH}px` } as React.CSSProperties} data-testid="workstation" data-compact="0" data-layout="grid">
       {/* ================= header ================= */}
       <header className="ds-head">
         {props.onExplore && <button className="ds-logo" data-testid="nav-explore" title="Back to Explore" onClick={props.onExplore}>← gbk</button>}
@@ -519,6 +548,9 @@ export function DesktopStudio(props: DesktopStudioProps) {
 
       {/* ================= C: agent + automation ================= */}
       <footer className="ds-foot">
+        <div className="ds-sash" data-testid="ds-foot-sash" role="separator" aria-orientation="horizontal" aria-label="Resize bottom panel" aria-valuemin={FOOT_MIN} aria-valuenow={Math.round(footH)} tabIndex={0}
+          title="Drag to resize the bottom panel · double-click to reset"
+          onPointerDown={onSashDown} onDoubleClick={() => setFoot(FOOT_DEFAULT)} onKeyDown={onSashKey} />
         <section className="ds-agent" aria-label="AI Composer">
           <div className="ds-steps" data-testid="composer-phases">
             {PHASES.map((x, i) => <span key={x} className={i < phase || (phase === 4 && i === 4) ? "done" : i === phase && running ? "act" : ""}>{x}</span>)}

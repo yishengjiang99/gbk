@@ -181,3 +181,39 @@ test("desktop studio grid: plain wheel zooms time at the cursor, Shift+wheel zoo
     await page.mouse.move(cx, cy);
   }
 });
+
+test("desktop studio: QWERTY keys still record after choosing a track in the Keys panel's own select", async ({ page }) => {
+  // Regression: focus stays on the <select> after choosing a track; the live-key guard used to treat a select as a
+  // typing target, so every note key was silently swallowed and nothing was recorded to the chosen track.
+  await open(page, 1440, 900); await seed(page);
+  const playing = () => page.evaluate(() => (globalThis as any).__gbkWorkstation.getState().transport.playing as boolean);
+  await page.getByTestId("rec-toggle").click();
+  await expect(page.getByTestId("live-keyboard")).toBeVisible();
+  await page.getByTestId("ws-play").click(); await expect.poll(playing, { timeout: 120_000 }).toBe(true);
+  // Choose Bass the way a user does: open the dropdown, arrow to the option, Enter. Focus remains on the select.
+  await page.getByTestId("live-track").click();
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__gbkLive.session.snapshot().trackId)).toBe("t_bass");
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("SELECT");
+  await page.keyboard.down("KeyA"); await page.waitForTimeout(350); await page.keyboard.up("KeyA");
+  await page.getByTestId("ws-play").click(); await expect.poll(playing).toBe(false);
+  const rec = await page.evaluate(() => (globalThis as any).__gbkWorkstation.project.notes.filter((n: any) => n.trackId === "t_bass" && n.pitch === 60).length);
+  expect(rec).toBe(1);
+  await expect(page.getByTestId("last-take")).toContainText("1 notes");
+});
+
+test("desktop studio: the footer sash drags to resize the bottom panel, double-click resets, size persists", async ({ page }) => {
+  await open(page, 1440, 900);
+  const footH = () => page.evaluate(() => Math.round(document.querySelector(".ds-foot")!.getBoundingClientRect().height));
+  expect(await footH()).toBe(168);
+  const sash = page.getByTestId("ds-foot-sash");
+  const b = (await sash.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, b.y - 60, { steps: 6 }); await page.mouse.up();
+  await expect.poll(footH).toBeGreaterThan(215);
+  await sash.dblclick(); await expect.poll(footH).toBe(168);
+  await sash.focus(); await page.keyboard.press("ArrowUp"); await page.keyboard.press("ArrowUp");
+  await expect.poll(footH).toBe(184);
+  await open(page, 1440, 900); // reload: the SplitView-style size is restored
+  expect(await footH()).toBe(184);
+});

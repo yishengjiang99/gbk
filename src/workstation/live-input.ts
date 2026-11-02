@@ -24,11 +24,14 @@ export function keyAction(code: string, octave: number): KeyAction {
 
 const NON_TEXT_INPUTS = new Set(["checkbox", "radio", "range", "button", "submit", "reset", "color", "file", "image"]);
 interface ElementLike { tagName?: string; type?: string; isContentEditable?: boolean; closest?(sel: string): unknown }
-/** True when a key press belongs to a text field (inputs, textareas, selects, contenteditable, the composer prompt). */
+/** True when a key press belongs to a text-entry field (text inputs, textareas, contenteditable, the composer
+ * prompt). A SELECT is deliberately NOT a typing target: focus stays on it after a track/device is chosen, and it
+ * only consumes arrows/space (not note keys) — treating it as typing silently killed the computer keyboard right
+ * after the user picked a track in the Keys panel's own dropdown. */
 export function isTypingTarget(el: ElementLike | null | undefined): boolean {
   if (!el) return false;
   const tag = (el.tagName ?? "").toUpperCase();
-  if (tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "TEXTAREA") return true;
   if (tag === "INPUT") return !NON_TEXT_INPUTS.has((el.type ?? "text").toLowerCase());
   if (el.isContentEditable) return true;
   return !!el.closest?.("[contenteditable=''],[contenteditable='true'],[data-no-live-keys]");
