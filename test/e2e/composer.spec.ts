@@ -631,3 +631,19 @@ test("mobile composer view: song card — a finished compose shows a playable ca
   // Normal ranking resumes after the pinned song: a reload without ?pin= does not force it to the top by URL.
   expect(new URL(page.url()).searchParams.get("pin")).toBeNull();
 });
+
+test("mobile composer view: a finished scan opens straight into the editor as a new project, and its card offers Publish", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio");
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  const bytes = [...(await import("node:fs")).readFileSync(new URL("../fixtures/import-test.mid", import.meta.url).pathname)];
+  // Same hand-off as the iOS scanner (ScanCoordinator.swift): a gbk:midi-file event named "Scanned sheet music.mid".
+  await page.evaluate((b) => dispatchEvent(new CustomEvent("gbk:midi-file", { detail: { file: new File([new Uint8Array(b)], "Scanned sheet music.mid", { type: "audio/midi" }) } })), bytes);
+  await expect(page.getByTestId("midi-import-msg")).toHaveText("Imported 2 tracks, 3 notes.");
+  await expect(page.getByTestId("midi-import-new")).toHaveCount(0);
+  await expect(page.getByTestId("workstation")).toHaveAttribute("data-sheet", "editor");
+  const card = page.locator("[data-testid=version-card][data-version=current]");
+  await expect(card.getByTestId("version-open-editor")).toBeAttached();
+  await expect(card.getByTestId("version-publish")).toBeAttached();
+});

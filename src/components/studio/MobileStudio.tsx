@@ -17,7 +17,7 @@ import { AddTrackButton } from "../workstation/AddTrack.tsx";
 import { LiveKeyboard, liveRig } from "../workstation/LiveKeyboard.tsx";
 import { VideoExportButton } from "../workstation/VideoExport.tsx";
 import { useWebHum } from "../workstation/HumButton.tsx";
-import { openMidiFile } from "../workstation/MidiImportChooser.tsx";
+import { openMidiFile, SCAN_OPENED } from "../workstation/MidiImportChooser.tsx";
 import { ComposerSettings } from "../composer/ComposerSettings.tsx";
 import { saveForPublish } from "../composer/SharePanel.tsx";
 import { PublishDialog } from "../songs/PublishDialog.tsx";
@@ -140,6 +140,9 @@ export function MobileStudio(props: MobileStudioProps) {
       setPublish(saved); } catch (e) { reportError(e, { where: "studio.publish" }); say("Couldn't save your song. Check your connection and try again."); } finally { setBusy(""); }
   };
   const openEditor = (v: SongVersion | null = null) => { if (makeCurrent(v)) { setTab("Tracks"); setSheet("editor"); } };
+  // A finished scan opened as a new project: go to the editor; its card offers Publish.
+  const scanned = useRef(""); const openEditorRef = useRef(openEditor); openEditorRef.current = openEditor;
+  useEffect(() => { const f = () => { scanned.current = workstation.project.id; openEditorRef.current(); }; addEventListener(SCAN_OPENED, f); return () => removeEventListener(SCAN_OPENED, f); }, []);
   const newSong = async () => { setSheet(null); stopPreview(); if (await props.newProject()) { if (s.auth.authenticated) s.reset(); setText(""); } };
   const newSongRef = useRef(newSong); newSongRef.current = newSong;
   // Remix landing when the Studio mounts after the flag was set (the focus event may already have fired):
@@ -188,7 +191,7 @@ export function MobileStudio(props: MobileStudioProps) {
       const { isSupportedSheetMusicImageFile, parseSheetMusicToMidi } = await import("../../sheet-music-reader.ts");
       if (!isSupportedSheetMusicImageFile(f)) { say("Use a JPEG or PNG photo of the sheet music."); return; }
       const r = await parseSheetMusicToMidi(f);
-      openMidiFile(new File([r.midiData], `${r.fileName.replace(/\.(mid|midi)$/i, "")}.mid`, { type: "audio/midi" }));
+      openMidiFile(new File([r.midiData], `${r.fileName.replace(/\.(mid|midi)$/i, "")}.mid`, { type: "audio/midi" }), true);
     } catch (e) { reportError(e, { where: "studio.scanSheet" }); say("Couldn't read notes from that photo. Try a sharper, well-lit, straight-on photo of one page."); }
     finally { setBusy(""); }
   };
@@ -213,7 +216,7 @@ export function MobileStudio(props: MobileStudioProps) {
   // Publish on the "latest edits" card only when there is something new to publish: edits since the song (or remix
   // fork) loaded, or edits after a composer run. A freshly loaded song shows just Play and Open editor.
   const base = original?.revision ?? loaded.current.rev;
-  const currentPublishable = versions.some((v) => v.runId !== "remix-original") || p.revision !== base;
+  const currentPublishable = versions.some((v) => v.runId !== "remix-original") || p.revision !== base || scanned.current === p.id;
   // Song card in chat (STUDIO_SONG_CARD): a finished compose/render shows the song card inline, never a raw artifact id.
   const cardOn = s.auth.songCard !== false;
   const latestArt = latestArtifactItemId(s.items);

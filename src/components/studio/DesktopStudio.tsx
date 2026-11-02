@@ -18,7 +18,7 @@ import { LiveKeyboard, liveRig } from "../workstation/LiveKeyboard.tsx";
 import { FloatingWindow } from "../workstation/FloatingWindow.tsx";
 import { VideoExportButton } from "../workstation/VideoExport.tsx";
 import { useWebHum } from "../workstation/HumButton.tsx";
-import { openMidiFile } from "../workstation/MidiImportChooser.tsx";
+import { openMidiFile, SCAN_OPENED } from "../workstation/MidiImportChooser.tsx";
 import { ComposerSettings } from "../composer/ComposerSettings.tsx";
 import { ComposerProgress } from "../composer/ComposerProgress.tsx";
 import { ComposerArtifacts } from "../composer/ComposerArtifacts.tsx";
@@ -242,7 +242,9 @@ export function DesktopStudio(props: DesktopStudioProps) {
   const cardOn = s.auth.songCard !== false;
   const loadedRev = useRef({ id: p.id, rev: p.revision }); if (loadedRev.current.id !== p.id) loadedRev.current = { id: p.id, rev: p.revision };
   const versions = versionLog.list(p.id);
-  const publishable = versions.some((v) => v.runId !== "remix-original") || p.revision !== (versions.find((v) => v.label === "Original")?.revision ?? loadedRev.current.rev);
+  // A scan opened as a new project is publishable as-is.
+  const scanned = useRef(""); useEffect(() => { const f = () => { scanned.current = workstation.project.id; bump((x) => x + 1); }; addEventListener(SCAN_OPENED, f); return () => removeEventListener(SCAN_OPENED, f); }, []);
+  const publishable = scanned.current === p.id || versions.some((v) => v.runId !== "remix-original") || p.revision !== (versions.find((v) => v.label === "Original")?.revision ?? loadedRev.current.rev);
   const latestArt = latestArtifactItemId(s.items);
   const songCard = (c: SongCard) => {
     const v: SongVersion | undefined = c.kind === "version" ? c.version : undefined; const cur = !v || v.revision === p.revision;
@@ -312,7 +314,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
       const { isSupportedSheetMusicImageFile, parseSheetMusicToMidi } = await import("../../sheet-music-reader.ts");
       if (!isSupportedSheetMusicImageFile(f)) { say("Use a JPEG or PNG image of the sheet music."); return; }
       const r = await parseSheetMusicToMidi(f);
-      openMidiFile(new File([r.midiData], `${r.fileName.replace(/\.(mid|midi)$/i, "")}.mid`, { type: "audio/midi" }));
+      openMidiFile(new File([r.midiData], `${r.fileName.replace(/\.(mid|midi)$/i, "")}.mid`, { type: "audio/midi" }), true);
     } catch (e) { reportError(e, { where: "desktop.scanSheet" }); say("Couldn't read notes from that image. Try a sharper, straight-on image of one page."); }
     finally { setBusy(""); }
   };

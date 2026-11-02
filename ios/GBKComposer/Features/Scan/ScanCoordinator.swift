@@ -4,8 +4,8 @@ import SwiftUI
 import WebKit
 
 /// Hands a recognized score to the studio through its existing MIDI import (live since befdd00):
-/// the page's MidiImportChooser listens for `window` event `gbk:midi-file` with `{detail: {file}}` and asks the
-/// user "Open as new project" / "Add to current project" (read-only projects open as a new project).
+/// the page's MidiImportChooser listens for `window` event `gbk:midi-file` with `{detail: {file}}`; a file named
+/// `fileName` opens straight as a new project in the editor (no chooser) and shows its import status.
 /// No web change is needed; nothing here depends on a native-specific web API.
 enum StudioMIDIImport {
     static let fileName = "Scanned sheet music.mid"
@@ -22,7 +22,7 @@ enum StudioMIDIImport {
         """
     }
 
-    /// True once the page shows its import chooser (data-testid="midi-import").
+    /// True once the page shows its import UI (data-testid="midi-import": chooser or status).
     static let chooserVisibleScript = "!!document.querySelector('[data-testid=\"midi-import\"]')"
 
     static func jsString(_ s: String) -> String {
@@ -57,13 +57,13 @@ final class ScanCoordinator: ObservableObject {
 
     func start() { isPresented = true }
 
-    /// Studio import: dispatch the file event, then wait for the chooser to render.
+    /// Studio import: dispatch the file event, then wait for the import UI to render.
     func handOff(_ midi: Data) async throws {
         lastMIDI = midi
         guard let webView else { throw StudioNotReady() }
         let r = try? await webView.evaluateJavaScript(StudioMIDIImport.script(midi: midi)) as? String
         guard r == "dispatched" else { throw StudioNotReady() }
-        for _ in 0..<20 { // the chooser renders on the next React commit
+        for _ in 0..<20 { // the import UI renders on the next React commit
             if (try? await webView.evaluateJavaScript(StudioMIDIImport.chooserVisibleScript)) as? Bool == true { return }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
