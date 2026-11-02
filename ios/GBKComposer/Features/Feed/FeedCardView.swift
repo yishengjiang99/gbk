@@ -37,6 +37,8 @@ struct FeedCardView: View {
     var onRated: (Song) -> Void = { _ in }
     var onComments: () -> Void = {}
     var onReport: () -> Void = {}
+    /// Own songs only: replaces the report action in the rail (you can't report your own song).
+    var onDelete: () -> Void = {}
     var onTag: (String) -> Void = { _ in }
     /// Open this song in the Studio (web card's "open").
     var onOpen: () -> Void = {}
@@ -140,7 +142,10 @@ struct FeedCardView: View {
                     .accessibilityIdentifier("feed-share")
                     railButton(icon: "arrow.triangle.branch", label: "\(song.forkCount)", action: onFork)
                         .accessibilityLabel("Remix (fork)")
-                    if !song.isMine {
+                    if song.isMine {
+                        railButton(icon: "trash", label: nil, action: onDelete)
+                            .accessibilityLabel("Delete song")
+                    } else {
                         railButton(icon: "flag", label: nil, action: onReport)
                             .accessibilityLabel("Report")
                     }
