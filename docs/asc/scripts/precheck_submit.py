@@ -165,25 +165,18 @@ def main():
     for r in subs_r:
         a = r["attributes"]
         print(f"  SUBMISSION id {r['id']} platform {a.get('platform')} state {a.get('state')} submittedDate {a.get('submittedDate')}")
-        s_it, items_r = api_soft("GET", f"/v1/reviewSubmissions/{r['id']}/items?limit=200")
+        s_it, items_r = api_soft("GET", f"/v1/reviewSubmissions/{r['id']}/items?limit=200&include=appStoreVersion,inAppPurchaseV2,subscription")
         if s_it >= 300:
             print(f"    ITEMS unreadable -> {s_it}: {err_text(items_r)}")
             continue
         items = items_r.get("data", [])
         print(f"    ITEMS count {len(items)}")
+        for inc in items_r.get("included", []):
+            ia = inc.get("attributes") or {}
+            print(f"    INCLUDED type {inc.get('type')} id {inc.get('id')} productId {ia.get('productId')} versionString {ia.get('versionString')} state {ia.get('state') or ia.get('appStoreState')}")
         for it in items:
-            parts = []
-            for key, rel in (it.get("relationships") or {}).items():
-                data = (rel or {}).get("data")
-                if not data:
-                    continue
-                entries = data if isinstance(data, list) else [data]
-                for e in entries:
-                    label = prod_label.get(e.get("id"), "")
-                    if e.get("type") == "appStoreVersions":
-                        label = "VERSION (appStoreVersion)"
-                    parts.append(f"{key} type {e.get('type')} id {e.get('id')} {label}".rstrip())
-            print(f"    ITEM id {it['id']} state {it.get('attributes', {}).get('state')}: " + ("; ".join(parts) if parts else "no relationships"))
+            print(f"    ITEM id {it['id']} attributes {json.dumps(it.get('attributes') or {})}")
+            print(f"    ITEM id {it['id']} relationships {json.dumps(it.get('relationships') or {})[:1200]}")
 
     print("PRECHECK DONE (read-only; nothing changed)")
 
