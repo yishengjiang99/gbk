@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Attach TestFlight build 27 to GBK Music Composer version 1.0 in App Store Connect.
+"""Attach a TestFlight build to GBK Music Composer version 1.0 in App Store Connect.
 
 Attach ONLY: never creates a reviewSubmission and never submits for review.
+Target build: env ASC_BUILD_NUMBER, else argv[1], else "29".
 Env: ASC_ISSUER_ID (or APP_STORE_CONNECT_ISSUER_ID), ASC_KEY_ID (default 95M27GJTV7),
      ASC_KEY_PATH or ASC_API_PRIVATE_KEY (same conventions as push_listing.py).
-Behavior: lists the app's builds; if build 27 is missing or not processingState VALID,
-prints the available builds and exits 1 WITHOUT attaching anything. On success it
-PATCHes the appStoreVersion's build relationship, then reads the version back with
-?include=build and prints the attached build number, the version state, and the
-en-US description length (to confirm listing edits are intact).
+Behavior: lists the app's builds; if the target build is missing or not
+processingState VALID, prints the available builds and exits 1 WITHOUT attaching
+anything. On success it PATCHes the appStoreVersion's build relationship, then
+reads the version back with ?include=build and prints the attached build number,
+the version state, and the en-US description length (to confirm listing edits
+are intact).
 """
 import json, os, sys, time
 from pathlib import Path
 import jwt, requests
 
-APP_ID = "6826906431"; VERSION = "1.0"; TARGET_BUILD = "27"; LOCALE = "en-US"
+APP_ID = "6826906431"; VERSION = "1.0"; LOCALE = "en-US"
+TARGET_BUILD = os.environ.get("ASC_BUILD_NUMBER") or (sys.argv[1] if len(sys.argv) > 1 else "29")
 BASE = "https://api.appstoreconnect.apple.com"
 
 def token():

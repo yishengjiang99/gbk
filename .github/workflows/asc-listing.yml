@@ -1,8 +1,11 @@
 name: ASC Listing (metadata + screenshots)
 
-# Manual only. Applies the docs/asc listing (copy + screenshots) to App Store Connect
-# via docs/asc/scripts/push_listing.py. NEVER submits for review, and App Privacy is
-# not touched (Apple exposes no API for it).
+# Manual only. Modes push/verify apply or read back the docs/asc listing (copy +
+# screenshots) via docs/asc/scripts/push_listing.py; attach-build attaches a
+# TestFlight build to v1.0; precheck runs read-only submission gates; submit
+# submits v1.0 for App Store review via docs/asc/scripts/submit_review.py.
+# Only the submit mode submits anything. App Privacy is not touched (Apple
+# exposes no API for it).
 # Secrets mirror ios-release.yml: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
 # APP_STORE_CONNECT_API_KEY_P8. push_listing.py reads ASC_ISSUER_ID / ASC_KEY_ID / ASC_KEY_PATH.
 # Optional secrets, passed through only if set: REVIEW_CONTACT_FIRST, REVIEW_CONTACT_LAST,
@@ -12,10 +15,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "push = apply listing, then read back; verify = read back only; attach-build = attach TestFlight build 27 to v1.0 (never submits)"
+        description: "push = apply listing, then read back; verify = read back only; attach-build = attach a TestFlight build to v1.0 (never submits); precheck = read-only submission gates; submit = SUBMIT v1.0 for App Store review"
         type: choice
-        options: [push, verify, attach-build]
+        options: [push, verify, attach-build, precheck, submit]
         default: push
+      build_number:
+        description: "TestFlight build number for attach-build, and the build the submit mode requires to be attached"
+        type: string
+        default: "29"
 
 concurrency:
   group: asc-listing
@@ -66,6 +73,18 @@ jobs:
         if: inputs.mode == 'verify'
         run: python3 docs/asc/scripts/push_listing.py --verify
 
-      - name: Attach build 27 to version 1.0 (never submits)
+      - name: Attach build to version 1.0 (never submits)
         if: inputs.mode == 'attach-build'
+        env:
+          ASC_BUILD_NUMBER: ${{ inputs.build_number }}
         run: python3 docs/asc/scripts/attach_build.py
+
+      - name: Pre-submit checks (read-only)
+        if: inputs.mode == 'precheck'
+        run: python3 docs/asc/scripts/precheck_submit.py
+
+      - name: Submit version 1.0 for App Store review
+        if: inputs.mode == 'submit'
+        env:
+          ASC_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: python3 docs/asc/scripts/submit_review.py
