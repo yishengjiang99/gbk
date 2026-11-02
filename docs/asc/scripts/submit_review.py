@@ -157,7 +157,9 @@ def main():
     sub_id = draft["id"]
 
     # Version item (skip if already in the draft).
-    items = api("GET", f"/v1/reviewSubmissions/{sub_id}/reviewSubmissionItems?include=appStoreVersion&limit=200")
+    # The items relationship on a reviewSubmission is "items"
+    # (/v1/reviewSubmissions/{id}/items); .../reviewSubmissionItems 404s.
+    items = api("GET", f"/v1/reviewSubmissions/{sub_id}/items?include=appStoreVersion&limit=200")
     have_version = False
     for it in items.get("data", []):
         rel = ((it.get("relationships") or {}).get("appStoreVersion") or {}).get("data") or {}
