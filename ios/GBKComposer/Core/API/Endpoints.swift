@@ -41,6 +41,9 @@ enum Endpoints {
     static func topTags(limit: Int = 20) -> Endpoint { Endpoint(path: "/api/tags/top", query: q("limit", String(limit))) }
     static func song(_ slug: String) -> Endpoint { Endpoint(path: "/api/songs/\(slug)") }
     static func play(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(slug)/play", method: .post, body: [:]) }
+    /// Owner-only (server 404s for anyone else): deletes the published song (the share) from the feed.
+    /// The Studio project it was published from is NOT deleted. Same route the web's My Songs uses.
+    static func deleteSong(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(slug)", method: .delete) }
 
     // MARK: Ratings & comments (P1, live)
     static func rate(_ slug: String, stars: Int) -> Endpoint {

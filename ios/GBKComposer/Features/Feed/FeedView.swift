@@ -67,6 +67,13 @@ final class FeedViewModel: ObservableObject {
     func update(_ song: Song) {
         if let i = items.firstIndex(where: { $0.slug == song.slug }) { items[i] = song }
     }
+
+    /// Drop a song the signed-in user just deleted (also unpins it as the deep-link card).
+    func remove(slug: String) {
+        if pinned?.slug == slug { pinned = nil }
+        items.removeAll { $0.slug == slug }
+        modelVersions[slug] = nil
+    }
 }
 
 struct FeedView: View {
@@ -79,6 +86,8 @@ struct FeedView: View {
     @State private var visibleSlug: String?
     @State private var commentsFor: Song?
     @State private var reportFor: Song?
+    @State private var deleteFor: Song?
+    @State private var deleteError: String?
     @State private var tagText = ""
 
     var body: some View {
@@ -94,6 +103,7 @@ struct FeedView: View {
                                          onRated: { model.update($0) },
                                          onComments: { commentsFor = song },
                                          onReport: { auth.gate("Sign in to report.", prompt: requestSignIn) { reportFor = song } },
+                                         onDelete: { deleteFor = song },
                                          onTag: { model.query.tag = $0; tagText = $0 },
                                          onOpen: { router.openInStudio(slug: song.slug, fork: false) },
                                          onFork: { router.openInStudio(slug: song.slug, fork: true) },
@@ -122,6 +132,15 @@ struct FeedView: View {
             }
         }
         .alert(model.focusError ?? "", isPresented: Binding(get: { model.focusError != nil }, set: { if !$0 { model.focusError = nil } })) {}
+        .confirmationDialog("Delete this song?", isPresented: Binding(get: { deleteFor != nil }, set: { if !$0 { deleteFor = nil } })) {
+            Button("Delete", role: .destructive) {
+                if let song = deleteFor { deleteFor = nil; Task { await delete(song) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the song from the feed for everyone. Your project in the Studio is not deleted, so you can publish it again.")
+        }
+        .alert(deleteError ?? "", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {}
         .sheet(item: $commentsFor) { song in
             CommentsSheet(song: song) { delta in
                 var s = song; s.commentCount = max(0, s.commentCount + delta); model.update(s)
@@ -186,6 +205,18 @@ struct FeedView: View {
         }
         .scrollIndicators(.hidden)
         .foregroundStyle(Theme.accent)
+    }
+
+    /// Delete the signed-in user's own published song (DELETE /api/shares/:slug, owner-only on the server).
+    /// On success the card leaves the feed at once; on failure the card stays and an error is shown.
+    private func delete(_ song: Song) async {
+        do {
+            _ = try await APIClient.shared.send(Endpoints.deleteSong(song.slug), as: OKResult.self)
+            if player.currentSlug == song.slug { player.stop() }
+            model.remove(slug: song.slug)
+        } catch {
+            deleteError = "Couldn't delete the song. Please try again."
+        }
     }
 
     private func open(_ link: DeepLink) async {
