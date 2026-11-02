@@ -635,8 +635,7 @@ test("mobile composer view: song card — a finished compose shows a playable ca
 test("mobile composer view: a finished scan opens straight into the editor as a new project, and its card offers Publish", async ({ page }) => {
   test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/studio");
-  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await page.goto("/studio"); await signIn(page); await dismissLandingPaywall(page);
   const bytes = [...(await import("node:fs")).readFileSync(new URL("../fixtures/import-test.mid", import.meta.url).pathname)];
   // Same hand-off as the iOS scanner (ScanCoordinator.swift): a gbk:midi-file event named "Scanned sheet music.mid".
   await page.evaluate((b) => dispatchEvent(new CustomEvent("gbk:midi-file", { detail: { file: new File([new Uint8Array(b)], "Scanned sheet music.mid", { type: "audio/midi" }) } })), bytes);
@@ -646,4 +645,13 @@ test("mobile composer view: a finished scan opens straight into the editor as a 
   const card = page.locator("[data-testid=version-card][data-version=current]");
   await expect(card.getByTestId("version-open-editor")).toBeAttached();
   await expect(card.getByTestId("version-publish")).toBeAttached();
+  // iPhone checks: no horizontal overflow; Publish is a real touch target and opens the shared PublishDialog.
+  await page.getByTestId("editor-close").tap();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const pub = card.getByTestId("version-publish"); await pub.scrollIntoViewIfNeeded();
+  const box = (await pub.boundingBox())!; expect(box.height).toBeGreaterThanOrEqual(28); expect(box.x + box.width).toBeLessThanOrEqual(390);
+  await pub.tap();
+  await expect(page.getByTestId("publish-dialog")).toBeVisible();
+  expect(await page.getByTestId("publish-title").evaluate((e) => getComputedStyle(e).fontSize)).toBe("16px");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
