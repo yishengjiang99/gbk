@@ -169,6 +169,8 @@ export class SocialStore {
 
   // ---- blocks / reports ----
   blocked(blocker: string, blocked: string) { return !!this.db.prepare("SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?").get(blocker, blocked); }
+  block(blocker: string, blocked: string) { this.db.prepare("INSERT OR IGNORE INTO blocks (blocker, blocked, created_at) VALUES (?,?,?)").run(blocker, blocked, this.now()); }
+  unblock(blocker: string, blocked: string) { this.db.prepare("DELETE FROM blocks WHERE blocker = ? AND blocked = ?").run(blocker, blocked); }
   report(o: { reporter: string; kind: string; target: string; reason: string }): number {
     const r = this.db.prepare("INSERT INTO reports (reporter, kind, target_id, reason, created_at) VALUES (?,?,?,?,?)").run(o.reporter, o.kind, o.target, o.reason, this.now());
     if (o.kind === "comment") {

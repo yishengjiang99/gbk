@@ -87,3 +87,30 @@ test("owner 'delete' report shortcut: only @yishengjiang (by user id) hides; adm
     assert.equal((await fetch(`${s.base}/api/songs/${slug}`)).status, 200);
   } finally { await s.app.close(); }
 });
+
+test("blocks: POST/DELETE /api/blocks/:handle hides the blocked author's comments for the blocker only", async () => {
+  const s = await startServer(new ScriptModel([() => reply("x")]), {});
+  try {
+    const alice = await login(s.base, "code-a"), bob = await login(s.base, "code-b");
+    await fetch(`${s.base}/api/me`, { headers: H(alice) }); await fetch(`${s.base}/api/me`, { headers: H(bob) }); // profiles are ensured lazily; the app fetches /api/me at launch
+    const r0 = await fetch(`${s.base}/api/shares`, { method: "POST", headers: H(alice), body: JSON.stringify({ title: "Blocktest", project: await project("Blocktest"), public: true }) });
+    const slug = (await r0.json()).slug as string;
+    await fetch(`${s.base}/api/shares/${slug}/comments`, { method: "POST", headers: H(bob), body: JSON.stringify({ body: "bob was here" }) });
+    const list = async (who?: typeof alice) => (await (await fetch(`${s.base}/api/shares/${slug}/comments`, who ? { headers: H(who) } : {})).json()).items.length;
+    assert.equal(await list(alice), 1, "before block: alice sees bob's comment");
+    // unauthenticated, unknown user, self-block
+    assert.equal((await fetch(`${s.base}/api/blocks/bob`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 401);
+    assert.equal((await fetch(`${s.base}/api/blocks/nobody_here`, { method: "POST", headers: H(alice), body: "{}" })).status, 404);
+    assert.equal((await fetch(`${s.base}/api/blocks/alice`, { method: "POST", headers: H(alice), body: "{}" })).status, 422);
+    // block is idempotent; the comment vanishes for alice only
+    assert.equal((await fetch(`${s.base}/api/blocks/bob`, { method: "POST", headers: H(alice), body: "{}" })).status, 200);
+    assert.equal((await fetch(`${s.base}/api/blocks/bob`, { method: "POST", headers: H(alice), body: "{}" })).status, 200);
+    assert.equal(await list(alice), 0, "after block: bob's comments hidden for alice");
+    assert.equal(await list(), 1, "guests still see the comment");
+    assert.equal(await list(bob), 1, "bob still sees his own comment");
+    // unblock restores it (body-less DELETE: no JSON content-type, like the native client — Fastify 400s on an empty JSON body)
+    const delH = { ...H(alice) } as Record<string, string>; delete delH["content-type"];
+    assert.equal((await fetch(`${s.base}/api/blocks/bob`, { method: "DELETE", headers: delH })).status, 200);
+    assert.equal(await list(alice), 1, "after unblock: comment visible again");
+  } finally { await s.app.close(); }
+});

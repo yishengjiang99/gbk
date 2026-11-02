@@ -236,6 +236,25 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     }
     return { ok: true, id: String(id) };
   });
+
+  // ---- blocks (Guideline 1.2): the native report sheet's Block button posts here. The effect is already wired
+  // through the read paths: comments() hides a blocked author's comments from the blocker, and the comment
+  // notification already respects blocks. Unblock is idempotent, like block.
+  app.post("/api/blocks/:handle", async (req, reply) => {
+    const s = auth(req, reply); if (!s) return;
+    const p = social.byHandle((req.params as { handle: string }).handle);
+    if (!p) return reply.code(404).send({ code: "NOT_FOUND", message: "no such user" });
+    if (p.user_id === s.user) return reply.code(422).send({ code: "INVALID_ARGUMENT", message: "you can't block yourself" });
+    social.block(s.user, p.user_id); req.log.info({ evt: "block_create", user: s.user, blocked: p.handle });
+    return { ok: true };
+  });
+  app.delete("/api/blocks/:handle", async (req, reply) => {
+    const s = auth(req, reply); if (!s) return;
+    const p = social.byHandle((req.params as { handle: string }).handle);
+    if (!p) return reply.code(404).send({ code: "NOT_FOUND", message: "no such user" });
+    social.unblock(s.user, p.user_id); req.log.info({ evt: "block_remove", user: s.user, blocked: p.handle });
+    return { ok: true };
+  });
   const admin = (req: FastifyRequest, reply: FastifyReply, write: boolean) => { const s = auth(req, reply, write); if (!s) return null; if (!cfg.adminUsers.includes(s.user)) { void reply.code(403).send({ code: "FORBIDDEN", message: "admin only" }); return null; } return s; };
   const preview = (kind: string, target: string) => {
     if (kind === "comment") { const c = social.comment(Number(target)); return c ? { text: c.body, by: prof(c.user_id).handle, song: shares.byId(c.share_id)?.slug ?? null, hidden: !!c.hidden || !!c.deleted_at } : null; }
