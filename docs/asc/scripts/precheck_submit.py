@@ -154,11 +154,36 @@ def main():
     else:
         print(f"AGREEMENTS not readable -> {s}: {err_text(ag)}")
 
+    prod_label = {}
+    for p in iaps:
+        prod_label[p["id"]] = f"IAP {p['attributes'].get('productId')}"
+    for sub in subs:
+        prod_label[sub["id"]] = f"SUB {sub['attributes'].get('productId')}"
+
     subs_r = api("GET", f"/v1/apps/{APP_ID}/reviewSubmissions?limit=50").get("data", [])
     print(f"REVIEW_SUBMISSIONS count {len(subs_r)}")
     for r in subs_r:
         a = r["attributes"]
         print(f"  SUBMISSION id {r['id']} platform {a.get('platform')} state {a.get('state')} submittedDate {a.get('submittedDate')}")
+        s_it, items_r = api_soft("GET", f"/v1/reviewSubmissions/{r['id']}/items?limit=200")
+        if s_it >= 300:
+            print(f"    ITEMS unreadable -> {s_it}: {err_text(items_r)}")
+            continue
+        items = items_r.get("data", [])
+        print(f"    ITEMS count {len(items)}")
+        for it in items:
+            parts = []
+            for key, rel in (it.get("relationships") or {}).items():
+                data = (rel or {}).get("data")
+                if not data:
+                    continue
+                entries = data if isinstance(data, list) else [data]
+                for e in entries:
+                    label = prod_label.get(e.get("id"), "")
+                    if e.get("type") == "appStoreVersions":
+                        label = "VERSION (appStoreVersion)"
+                    parts.append(f"{key} type {e.get('type')} id {e.get('id')} {label}".rstrip())
+            print(f"    ITEM id {it['id']} state {it.get('attributes', {}).get('state')}: " + ("; ".join(parts) if parts else "no relationships"))
 
     print("PRECHECK DONE (read-only; nothing changed)")
 
