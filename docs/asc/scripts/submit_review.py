@@ -94,7 +94,7 @@ def main():
     if vstate in ("WAITING_FOR_REVIEW", "IN_REVIEW"):
         print(f"ALREADY_SUBMITTED version state {vstate}; nothing to do")
         return
-    if vstate not in ("PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW"):
+    if vstate not in ("PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED"):
         raise SystemExit(f"ABORT: version state is {vstate}, not an editable pre-submission state; nothing submitted")
 
     rb = api("GET", f"/v1/appStoreVersions/{vid}?include=build")
