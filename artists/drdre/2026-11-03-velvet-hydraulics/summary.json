@@ -1,0 +1,179 @@
+{
+ "name": "Velvet Hydraulics",
+ "ppq": 480,
+ "revision": 23,
+ "endTick": 122860,
+ "durationSec": 182.827,
+ "bars": 64,
+ "tempos": [
+  {
+   "tick": 0,
+   "microPerQuarter": 714286
+  }
+ ],
+ "timeSigs": [
+  {
+   "tick": 0,
+   "numerator": 4,
+   "denominator": 4
+  }
+ ],
+ "trackCount": 7,
+ "noteCount": 3053,
+ "ccCount": 0,
+ "pendingProposals": [],
+ "key": {
+  "name": "D minor",
+  "estimated": false
+ },
+ "sections": [
+  {
+   "name": "Intro",
+   "startBar": 1,
+   "bars": 4,
+   "energy": 0.3
+  },
+  {
+   "name": "Verse 1",
+   "startBar": 5,
+   "bars": 16,
+   "energy": 0.6
+  },
+  {
+   "name": "Hook",
+   "startBar": 21,
+   "bars": 8,
+   "energy": 0.85
+  },
+  {
+   "name": "Verse 2",
+   "startBar": 29,
+   "bars": 12,
+   "energy": 0.65
+  },
+  {
+   "name": "Hook 2",
+   "startBar": 41,
+   "bars": 8,
+   "energy": 0.9
+  },
+  {
+   "name": "Bridge",
+   "startBar": 49,
+   "bars": 4,
+   "energy": 0.45
+  },
+  {
+   "name": "Hook 3",
+   "startBar": 53,
+   "bars": 8,
+   "energy": 0.95
+  },
+  {
+   "name": "Outro",
+   "startBar": 61,
+   "bars": 4,
+   "energy": 0.35
+  }
+ ],
+ "tracks": [
+  {
+   "id": "trk_mw0ydf1b372ka",
+   "name": "Solo Vox Lead",
+   "channel": 0,
+   "program": {
+    "program": 85,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 182,
+   "minPitch": 60,
+   "maxPitch": 81
+  },
+  {
+   "id": "trk_mw0ydf245ey6d",
+   "name": "FM Electric Piano",
+   "channel": 1,
+   "program": {
+    "program": 5,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 690,
+   "minPitch": 57,
+   "maxPitch": 67
+  },
+  {
+   "id": "trk_mw0ydf2n7hkt7",
+   "name": "Voice Oohs",
+   "channel": 2,
+   "program": {
+    "program": 53,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 256,
+   "minPitch": 52,
+   "maxPitch": 65
+  },
+  {
+   "id": "trk_mw0ydf4198j0w",
+   "name": "Clean Guitar",
+   "channel": 3,
+   "program": {
+    "program": 27,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 260,
+   "minPitch": 70,
+   "maxPitch": 77
+  },
+  {
+   "id": "trk_mw0ydf5vbad1i",
+   "name": "Glockenspiel",
+   "channel": 4,
+   "program": {
+    "program": 9,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 96,
+   "minPitch": 76,
+   "maxPitch": 89
+  },
+  {
+   "id": "trk_mw0ydf7adgfyv",
+   "name": "Fretless Bass",
+   "channel": 5,
+   "program": {
+    "program": 35,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 349,
+   "minPitch": 36,
+   "maxPitch": 57
+  },
+  {
+   "id": "trk_mw0ydf80fbxk8",
+   "name": "Dance Kit",
+   "channel": 9,
+   "program": {
+    "program": 26,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": true,
+   "noteCount": 1220,
+   "minPitch": 36,
+   "maxPitch": 70
+  }
+ ]
+}
