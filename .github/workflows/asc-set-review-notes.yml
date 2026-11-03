@@ -1,0 +1,44 @@
+name: ASC Set Review Notes (GBK)
+
+# Manual only. Writes ONLY the App Review Information Notes for v1.0 from
+# docs/asc/review-notes.txt via docs/asc/scripts/set_review_notes.py
+# (PATCH + read-back verify). Contact fields and the demo account are not
+# touched. Never creates or modifies a review submission.
+# Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
+# APP_STORE_CONNECT_API_KEY_P8.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: asc-listing
+  cancel-in-progress: false
+
+jobs:
+  set-notes:
+    name: Set App Review notes for v1.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_KEY_PATH: ${{ github.workspace }}/private_keys/AuthKey.p8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ASC client deps
+        run: python3 -m pip install --break-system-packages PyJWT cryptography requests
+      - name: Write ASC private key
+        env:
+          P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "${ASC_ISSUER_ID:-}"
+          test -n "${ASC_KEY_ID:-}"
+          test -n "${P8:-}"
+          mkdir -p "$(dirname "$ASC_KEY_PATH")"
+          printf '%s\n' "$P8" > "$ASC_KEY_PATH"
+      - name: Set review notes from docs/asc/review-notes.txt
+        run: python3 docs/asc/scripts/set_review_notes.py

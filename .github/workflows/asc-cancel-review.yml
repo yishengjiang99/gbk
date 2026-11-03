@@ -1,0 +1,116 @@
+name: ASC Cancel Review Submission (GBK)
+
+# Manual only. Cancels the app's OPEN review submission(s) (the dead one left
+# UNRESOLVED_ISSUES after a rejection holds the version and its product items
+# hostage until it reaches COMPLETE) by setting canceled=true, then polls
+# until the submission is COMPLETE/gone and the version is editable again.
+# Nothing is submitted. Submissions are listed FIRST: an editable-looking
+# version must not skip cancelling a still-open submission.
+# Run on: 2026-11-02 at the user's explicit direction ("Redo gbk submission
+# too. Clean start.") — supersedes the earlier hold on the GBK submission.
+# Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
+# APP_STORE_CONNECT_API_KEY_P8 (same as asc-status.yml).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_string:
+        description: "App Store version to pull from review"
+        type: string
+        default: "1.0"
+      allow_in_review:
+        description: "Also cancel a submission that is actively IN_REVIEW"
+        type: boolean
+        default: false
+
+concurrency:
+  group: asc-listing
+  cancel-in-progress: false
+
+jobs:
+  cancel:
+    name: Cancel open review submission
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+      BUNDLE_ID: com.grepawk.moviefone
+      VERSION_STRING: ${{ inputs.version_string }}
+      ALLOW_IN_REVIEW: ${{ inputs.allow_in_review }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ASC client deps
+        run: python3 -m pip install --break-system-packages PyJWT cryptography requests
+      - name: Cancel the open review submission
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time
+          import jwt, requests
+          BASE = "https://api.appstoreconnect.apple.com"
+          def token():
+              n = int(time.time())
+              return jwt.encode({"iss": os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip(), "iat": n, "exp": n + 1100, "aud": "appstoreconnect-v1"},
+                                os.environ["APP_STORE_CONNECT_API_KEY_P8"].replace("\\n", "\n"), algorithm="ES256",
+                                headers={"kid": os.environ["APP_STORE_CONNECT_KEY_ID"], "typ": "JWT"})
+          def api(method, path, body=None):
+              r = requests.request(method, path if path.startswith("http") else BASE + path, json=body,
+                                   headers={"Authorization": "Bearer " + token()}, timeout=60)
+              if r.status_code == 404:
+                  return 404, {}
+              try:
+                  j = r.json()
+              except Exception:
+                  j = {}
+              if r.status_code >= 300:
+                  raise SystemExit(f"{method} {path} -> {r.status_code}: {json.dumps(j)[:800]}")
+              return r.status_code, j
+          def vstate_of(vid):
+              _, v = api("GET", f"/v1/appStoreVersions/{vid}")
+              return (v.get("data") or {}).get("attributes", {}).get("appStoreState")
+          EDITABLE = ("PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED")
+          _, apps = api("GET", f"/v1/apps?filter[bundleId]={os.environ['BUNDLE_ID']}")
+          app = apps["data"][0]
+          _, vers = api("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter[platform]=IOS")
+          ver = next(v for v in vers["data"] if v["attributes"]["versionString"] == os.environ["VERSION_STRING"])
+          vid = ver["id"]; vstate = ver["attributes"]["appStoreState"]
+          print("APP", app["id"], "VERSION", vid, os.environ["VERSION_STRING"], vstate)
+          if vstate in ("READY_FOR_SALE", "PENDING_DEVELOPER_RELEASE"):
+              raise SystemExit(f"RESULT version is {vstate} (approved/released); cannot pull from review")
+          _, subs = api("GET", f"/v1/apps/{app['id']}/reviewSubmissions?filter[platform]=IOS&limit=50")
+          for s in subs.get("data", []):
+              a = s.get("attributes") or {}
+              print("SUBMISSION", s["id"], a.get("state"), "submitted=", a.get("submittedDate"))
+          open_ = [s for s in subs.get("data", []) if (s.get("attributes") or {}).get("state") in ("WAITING_FOR_REVIEW", "UNRESOLVED_ISSUES", "IN_REVIEW", "CANCELING")]
+          if not open_:
+              if vstate in EDITABLE:
+                  print("RESULT version already editable and no open submission:", vstate); sys.exit(0)
+              raise SystemExit(f"RESULT no open review submission found, version is {vstate}")
+          allow_in_review = os.environ.get("ALLOW_IN_REVIEW", "false") == "true"
+          acted = []
+          for s in open_:
+              st = (s.get("attributes") or {}).get("state")
+              if st == "IN_REVIEW" and not allow_in_review:
+                  raise SystemExit(f"RESULT submission {s['id']} is IN_REVIEW; not cancelled (re-run with allow_in_review to force)")
+              if st == "CANCELING":
+                  print("ALREADY_CANCELING", s["id"]); acted.append(s["id"]); continue
+              _, resp = api("PATCH", f"/v1/reviewSubmissions/{s['id']}",
+                            {"data": {"type": "reviewSubmissions", "id": s["id"], "attributes": {"canceled": True}}})
+              print("PATCH canceled=true", s["id"], "->", (resp.get("data") or {}).get("attributes"))
+              acted.append(s["id"])
+          settled_states = ("COMPLETE", "GONE")
+          for i in range(18):
+              time.sleep(10)
+              _, subs2 = api("GET", f"/v1/apps/{app['id']}/reviewSubmissions?filter[platform]=IOS&limit=50")
+              cur = {s["id"]: (s.get("attributes") or {}).get("state") for s in subs2.get("data", [])}
+              sst = [(sid, cur.get(sid, "GONE")) for sid in acted]
+              vstate = vstate_of(vid)
+              print(f"poll {i+1}: submissions={sst} version={vstate}")
+              bad = [x for _, x in sst if x not in ("COMPLETE", "GONE")]
+              if vstate in ("DEVELOPER_REJECTED", "PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW", "REJECTED", "METADATA_REJECTED") and not bad:
+                  print("RESULT pulled from review; version now", vstate); sys.exit(0)
+          raise SystemExit(f"RESULT cancel did not settle after polling; submissions={sst} version={vstate}")
+          PY

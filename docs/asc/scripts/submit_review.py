@@ -94,8 +94,8 @@ def main():
     if vstate in ("WAITING_FOR_REVIEW", "IN_REVIEW"):
         print(f"ALREADY_SUBMITTED version state {vstate}; nothing to do")
         return
-    if vstate != "PREPARE_FOR_SUBMISSION":
-        raise SystemExit(f"ABORT: version state is {vstate}, not PREPARE_FOR_SUBMISSION; nothing submitted")
+    if vstate not in ("PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW"):
+        raise SystemExit(f"ABORT: version state is {vstate}, not an editable pre-submission state; nothing submitted")
 
     rb = api("GET", f"/v1/appStoreVersions/{vid}?include=build")
     inc = [i for i in rb.get("included", []) if i["type"] == "builds"]
