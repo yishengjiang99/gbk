@@ -1,0 +1,3 @@
+# Prompt — Satellite Lullaby (Nova Drift)
+
+Wistful zero-gravity synthwave lullaby: C# minor, 84 BPM, 4/4, 56 bars. Warm pad and a space-voice choir drifting in orbit, a music-box lullaby melody, a square-lead 16th arpeggio with a dotted-8th echo, octave-pulse synth bass and soft TR-808 drums. Four sections: Launch Window (pads swell, music box sings the lullaby), Low Orbit (arp, bass and drums lock in, a calliope lead takes the melody), Dark Side (drums drop to a heartbeat kick, Amaj9-F#m9-Dmaj7#11-G#7sus, choir swells), Earthrise (fullest point, the melody an octave up, then a slow fade as the planet comes into view).
