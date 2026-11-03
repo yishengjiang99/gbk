@@ -28,14 +28,6 @@ struct SignInView: View {
             .signInWithAppleButtonStyle(scheme == .dark ? .white : .black)
             .id(scheme)
             .frame(height: 48)
-            Button {
-                Task { await run { try await GoogleSignIn.signIn(auth: auth) } }
-            } label: {
-                Text("Continue with Google").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-            }
-            .foregroundStyle(Theme.text)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surfaceRaised))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
             if let message { Text(message).font(.footnote).foregroundStyle(Theme.destructive) }
             Button("Reviewer sign-in") { showReviewer = true }
                 .font(.subheadline).underline().foregroundStyle(Theme.textSecondary)
