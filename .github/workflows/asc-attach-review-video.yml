@@ -1,0 +1,44 @@
+name: ASC Attach Review Video (GBK)
+
+# Manual only. Uploads docs/asc/review-video.mp4 (the user's on-device screen
+# recording) to the v1.0 App Review details via
+# docs/asc/scripts/attach_review_video.py and waits for Apple's delivery state
+# to reach COMPLETE. Idempotent by file name + MD5. Never submits anything.
+# Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
+# APP_STORE_CONNECT_API_KEY_P8.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: asc-listing
+  cancel-in-progress: false
+
+jobs:
+  attach:
+    name: Attach review recording to v1.0 review details
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_KEY_PATH: ${{ github.workspace }}/private_keys/AuthKey.p8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ASC client deps
+        run: python3 -m pip install --break-system-packages PyJWT cryptography requests
+      - name: Write ASC private key
+        env:
+          P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "${ASC_ISSUER_ID:-}"
+          test -n "${ASC_KEY_ID:-}"
+          test -n "${P8:-}"
+          mkdir -p "$(dirname "$ASC_KEY_PATH")"
+          printf '%s\n' "$P8" > "$ASC_KEY_PATH"
+      - name: Attach review recording
+        run: python3 docs/asc/scripts/attach_review_video.py
