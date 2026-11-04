@@ -202,15 +202,18 @@ export class AgentRuntime {
           let callArgs = args;
           const schemaProps = (this.catalog.get(tool)?.inputSchema?.properties ?? {}) as Record<string, unknown>;
           if (pol.cls !== "read" && "baseRevision" in schemaProps && callArgs.baseRevision === undefined && conv.lastRevision != null) callArgs = { ...callArgs, baseRevision: conv.lastRevision };
-          tc0 = Date.now(); slow = setTimeout(() => log({ evt: "tool_slow", runId: o.runId, tool, ms: Date.now() - tc0 }), SLOW_TOOL_MS); slow.unref?.();
+          // Monotonic clock; timers can fire a little early, so re-arm until the threshold has really passed.
+          tc0 = performance.now();
+          const checkSlow = (): void => { const ms = performance.now() - tc0; if (ms < SLOW_TOOL_MS) { slow = setTimeout(checkSlow, Math.ceil(SLOW_TOOL_MS - ms)); slow.unref?.(); } else log({ evt: "tool_slow", runId: o.runId, tool, ms: Math.floor(ms) }); };
+          slow = setTimeout(checkSlow, SLOW_TOOL_MS); slow.unref?.();
           const r = await link.callTool(o.runId, callId, tool, callArgs, { expectProjectId: pol.createsProject ? null : (conv.projectId ?? link.projectId), consent: { newProject: mode === "new" }, timeoutMs: pol.cls === "render" ? cfg.agent.renderTimeoutMs : cfg.agent.toolTimeoutMs });
-          clearTimeout(slow); callMs.set(callId, Date.now() - tc0);
+          clearTimeout(slow); callMs.set(callId, Math.round(performance.now() - tc0));
           if (r.ok && pol.createsProject) conv.projectId = r.projectId;
           if (!r.ok && r.error?.code === "PROJECT_CHANGED") { conv.projectId = r.projectId || link.projectId; projectSwitched = true; }
           if (r.ok) { conv.lastRevision = r.revision; if (pol.cls !== "read") conv.recentEdits = [...conv.recentEdits.slice(-19), `${tool} -> rev ${r.revision}`]; }
           return r;
         } catch (e) {
-          clearTimeout(slow); if (tc0) callMs.set(callId, Date.now() - tc0);
+          clearTimeout(slow); if (tc0) callMs.set(callId, Math.round(performance.now() - tc0));
           if (e instanceof BridgeCallError && e.code === "BROWSER_DISCONNECTED") disconnected = true;
           if (e instanceof BridgeCallError && e.code === "TOOL_TIMEOUT") link.emit({ type: "cancel_call", runId: o.runId, callId });
           throw e;
