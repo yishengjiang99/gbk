@@ -1,0 +1,151 @@
+{
+ "name": "Cypress After Hours",
+ "ppq": 480,
+ "revision": 17,
+ "endTick": 122860,
+ "durationSec": 178.575,
+ "bars": 64,
+ "tempos": [
+  {
+   "tick": 0,
+   "microPerQuarter": 697674
+  }
+ ],
+ "timeSigs": [
+  {
+   "tick": 0,
+   "numerator": 4,
+   "denominator": 4
+  }
+ ],
+ "trackCount": 5,
+ "noteCount": 2563,
+ "ccCount": 0,
+ "pendingProposals": [],
+ "key": {
+  "name": "C minor",
+  "estimated": false
+ },
+ "sections": [
+  {
+   "name": "Intro",
+   "startBar": 1,
+   "bars": 4,
+   "energy": 0.3
+  },
+  {
+   "name": "Verse 1",
+   "startBar": 5,
+   "bars": 16,
+   "energy": 0.55
+  },
+  {
+   "name": "Hook",
+   "startBar": 21,
+   "bars": 8,
+   "energy": 0.8
+  },
+  {
+   "name": "Verse 2",
+   "startBar": 29,
+   "bars": 12,
+   "energy": 0.6
+  },
+  {
+   "name": "Hook 2",
+   "startBar": 41,
+   "bars": 8,
+   "energy": 0.85
+  },
+  {
+   "name": "Bridge",
+   "startBar": 49,
+   "bars": 4,
+   "energy": 0.35
+  },
+  {
+   "name": "Hook 3",
+   "startBar": 53,
+   "bars": 8,
+   "energy": 0.9
+  },
+  {
+   "name": "Outro",
+   "startBar": 61,
+   "bars": 4,
+   "energy": 0.3
+  }
+ ],
+ "tracks": [
+  {
+   "id": "trk_mw3tadgn3gf44",
+   "name": "Muted Trumpet",
+   "channel": 0,
+   "program": {
+    "program": 59,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 182,
+   "minPitch": 60,
+   "maxPitch": 79
+  },
+  {
+   "id": "trk_mw3tadhk5ie4c",
+   "name": "Acoustic Grand Piano",
+   "channel": 1,
+   "program": {
+    "program": 0,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 732,
+   "minPitch": 48,
+   "maxPitch": 74
+  },
+  {
+   "id": "trk_mw3tadhu7dxgi",
+   "name": "Halo Pad",
+   "channel": 2,
+   "program": {
+    "program": 94,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 256,
+   "minPitch": 48,
+   "maxPitch": 63
+  },
+  {
+   "id": "trk_mw3tadi791tq0",
+   "name": "Picked Bass",
+   "channel": 5,
+   "program": {
+    "program": 34,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 312,
+   "minPitch": 36,
+   "maxPitch": 58
+  },
+  {
+   "id": "trk_mw3tadimbhkpq",
+   "name": "Standard Kit",
+   "channel": 9,
+   "program": {
+    "program": 0,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": true,
+   "noteCount": 1081,
+   "minPitch": 36,
+   "maxPitch": 70
+  }
+ ]
+}
