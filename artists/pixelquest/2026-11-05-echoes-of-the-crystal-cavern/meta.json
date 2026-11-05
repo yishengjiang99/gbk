@@ -1,0 +1,20 @@
+{
+  "labels": [
+    "game",
+    "electronic"
+  ],
+  "tags": [
+    "chiptune",
+    "crystal-cave",
+    "ice-cavern",
+    "8-bit",
+    "video-game-music",
+    "loop",
+    "a-minor",
+    "112-bpm",
+    "retro",
+    "pixelquest"
+  ],
+  "prompt_shared": true,
+  "prompt_text": "Original chiptune ice / crystal cavern exploration theme: A minor with Dorian color (F# natural), cold and shimmering at 112 BPM. Glassy pulse-wave lead, sparkling high-register 16th arpeggios, soft triangle-ish bass, sparse noise hats with occasional soft tom rolls. Form: drum-soft Intro, A, A2, brighter B climb, quiet Whisper breakdown, A loop (~96s). Not a boss battle."
+}
