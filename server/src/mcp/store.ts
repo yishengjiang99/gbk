@@ -20,6 +20,15 @@ export interface RenderJobRow {
   id: string; composition_id: string; owner: string; revision: number; status: JobStatus; progress: number;
   config_json: string; error: string | null; created_at: number; finished_at: number | null;
 }
+export type JobPatch = Partial<Pick<RenderJobRow, "status" | "progress" | "error" | "finished_at">>;
+const TERMINAL_JOB: readonly JobStatus[] = ["completed", "failed", "cancelled"];
+const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
+  queued: ["running", ...TERMINAL_JOB],
+  running: TERMINAL_JOB,
+  completed: [],
+  failed: [],
+  cancelled: [],
+};
 export interface ArtifactRow {
   id: string; job_id: string | null; composition_id: string; owner: string; revision: number;
   kind: "wav" | "midi"; filename: string; mime_type: string; size_bytes: number; sha256: string;
@@ -258,23 +267,42 @@ export class McpStore {
   listJobsByStatus(status: JobStatus): RenderJobRow[] {
     return this.db.prepare("SELECT * FROM mcp_render_jobs WHERE status=? ORDER BY created_at ASC").all(status) as unknown as RenderJobRow[];
   }
-  patchJob(id: string, p: Partial<Pick<RenderJobRow, "status" | "progress" | "error" | "finished_at">>) {
-    const sets: string[] = []; const vals: unknown[] = [];
-    for (const [k, v] of Object.entries(p)) { sets.push(`${k}=?`); vals.push(v as never); }
-    if (!sets.length) return;
-    this.db.prepare(`UPDATE mcp_render_jobs SET ${sets.join(",")} WHERE id=?`).run(...vals as never[], id);
+  /** Progress only — status changes must go through transitionJob / publishAndTransition so a late patch cannot revive a terminal job. */
+  patchJob(id: string, p: { progress: number }) {
+    this.db.prepare("UPDATE mcp_render_jobs SET progress=? WHERE id=?").run(p.progress, id);
   }
   /**
-   * Guarded job transition: applies the patch only while the job is in one of `from`. Returns false
-   * (and changes nothing) when the job already left those states — this is what makes terminal states
+   * Guarded job transition: applies the patch only while the job is in one of `from` and the to-status
+   * (when set) is a legal successor. Returns false (and changes nothing) when the job already left
+   * those states or the transition is illegal — this is what makes terminal states
    * (completed/failed/cancelled) final against racing worker exits, timeouts and cancels.
    */
-  transitionJob(id: string, from: JobStatus[], p: Partial<Pick<RenderJobRow, "status" | "progress" | "error" | "finished_at">>): boolean {
+  transitionJob(id: string, from: JobStatus[], p: JobPatch): boolean {
+    return this.applyJobPatch(id, from, p);
+  }
+  /**
+   * Publish artifact rows and move the job to a terminal status in one transaction.
+   * Returns the inserted rows, or null when the job was no longer in `from` / the transition is
+   * illegal (nothing is written — terminal jobs stay terminal and get no new artifacts).
+   * A failed insert rolls the status change back too, so a completion never lands without its rows.
+   */
+  publishAndTransition(id: string, from: JobStatus[], p: JobPatch, list: Omit<ArtifactRow, "id" | "created_at">[]): ArtifactRow[] | null {
+    this.db.exec("BEGIN");
+    try {
+      if (!this.applyJobPatch(id, from, p)) { this.db.exec("ROLLBACK"); return null; }
+      const ids = list.map((o) => this.insertArtifact(o));
+      this.db.exec("COMMIT");
+      return ids.map((artId, i) => this.getArtifact(artId, list[i].owner)!);
+    } catch (e) { this.db.exec("ROLLBACK"); throw e; }
+  }
+  private applyJobPatch(id: string, from: JobStatus[], p: JobPatch): boolean {
+    const to = p.status;
+    const allowed = to ? from.filter((s) => JOB_TRANSITIONS[s].includes(to)) : from;
     const sets: string[] = []; const vals: unknown[] = [];
     for (const [k, v] of Object.entries(p)) { sets.push(`${k}=?`); vals.push(v as never); }
-    if (!sets.length || !from.length) return false;
-    const ph = from.map(() => "?").join(",");
-    return Number(this.db.prepare(`UPDATE mcp_render_jobs SET ${sets.join(",")} WHERE id=? AND status IN (${ph})`).run(...vals as never[], id, ...(from as never[])).changes) === 1;
+    if (!sets.length || !allowed.length) return false;
+    const ph = allowed.map(() => "?").join(",");
+    return Number(this.db.prepare(`UPDATE mcp_render_jobs SET ${sets.join(",")} WHERE id=? AND status IN (${ph})`).run(...vals as never[], id, ...(allowed as never[])).changes) === 1;
   }
   countJobsSince(owner: string, sinceMs: number) {
     return Number((this.db.prepare("SELECT COUNT(*) AS n FROM mcp_render_jobs WHERE owner=? AND created_at>?").get(owner, Date.now() - sinceMs) as { n: number }).n);

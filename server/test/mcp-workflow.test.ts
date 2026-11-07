@@ -125,7 +125,7 @@ test("E: worker interruption fails explicitly (no false completion); an empty pr
   const file = join(dir, "mcp.sqlite");
   const st1 = new McpStore(file, dir);
   const job = st1.createJob({ compositionId: "cmp_x", owner: "alice", revision: 1, config: {} });
-  st1.patchJob(job.id, { status: "running" });
+  assert.equal(st1.transitionJob(job.id, ["queued"], { status: "running" }), true);
   st1.close();
   const st2 = new McpStore(file, dir);
   const after = st2.getJob(job.id, "alice")!;
