@@ -1,0 +1,151 @@
+{
+ "name": "Sunlit Crenshaw",
+ "ppq": 480,
+ "revision": 17,
+ "endTick": 122760,
+ "durationSec": 187.134,
+ "bars": 64,
+ "tempos": [
+  {
+   "tick": 0,
+   "microPerQuarter": 731707
+  }
+ ],
+ "timeSigs": [
+  {
+   "tick": 0,
+   "numerator": 4,
+   "denominator": 4
+  }
+ ],
+ "trackCount": 5,
+ "noteCount": 2567,
+ "ccCount": 0,
+ "pendingProposals": [],
+ "key": {
+  "name": "D major",
+  "estimated": false
+ },
+ "sections": [
+  {
+   "name": "Intro",
+   "startBar": 1,
+   "bars": 4,
+   "energy": 0.3
+  },
+  {
+   "name": "Verse 1",
+   "startBar": 5,
+   "bars": 16,
+   "energy": 0.55
+  },
+  {
+   "name": "Hook",
+   "startBar": 21,
+   "bars": 8,
+   "energy": 0.8
+  },
+  {
+   "name": "Verse 2",
+   "startBar": 29,
+   "bars": 12,
+   "energy": 0.6
+  },
+  {
+   "name": "Hook 2",
+   "startBar": 41,
+   "bars": 8,
+   "energy": 0.85
+  },
+  {
+   "name": "Bridge",
+   "startBar": 49,
+   "bars": 4,
+   "energy": 0.35
+  },
+  {
+   "name": "Hook 3",
+   "startBar": 53,
+   "bars": 8,
+   "energy": 0.9
+  },
+  {
+   "name": "Outro",
+   "startBar": 61,
+   "bars": 4,
+   "energy": 0.3
+  }
+ ],
+ "tracks": [
+  {
+   "id": "trk_mw6oa59c33rsk",
+   "name": "Electric Piano 2",
+   "channel": 0,
+   "program": {
+    "program": 5,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 944,
+   "minPitch": 50,
+   "maxPitch": 78
+  },
+  {
+   "id": "trk_mw6oa5aa5cn51",
+   "name": "Finger Bass",
+   "channel": 1,
+   "program": {
+    "program": 33,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 243,
+   "minPitch": 35,
+   "maxPitch": 52
+  },
+  {
+   "id": "trk_mw6oa5as77udl",
+   "name": "Alto Sax",
+   "channel": 2,
+   "program": {
+    "program": 65,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 90,
+   "minPitch": 62,
+   "maxPitch": 83
+  },
+  {
+   "id": "trk_mw6oa5bc931iz",
+   "name": "Pad 2 (warm)",
+   "channel": 3,
+   "program": {
+    "program": 89,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 256,
+   "minPitch": 50,
+   "maxPitch": 67
+  },
+  {
+   "id": "trk_mw6oa5c0b11jb",
+   "name": "Standard Kit",
+   "channel": 9,
+   "program": {
+    "program": 0,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": true,
+   "noteCount": 1034,
+   "minPitch": 36,
+   "maxPitch": 70
+  }
+ ]
+}
