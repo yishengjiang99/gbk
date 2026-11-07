@@ -1,0 +1,6 @@
+{
+  "labels": ["game", "electronic"],
+  "tags": ["chiptune", "town-theme", "market", "shuffle", "8-bit", "video-game-music", "loop", "bb-major", "132-bpm", "pixelquest"],
+  "prompt_shared": true,
+  "prompt_text": "Original chiptune town / market-square theme: Bb major, bouncy and busy at 132 BPM with a 2:1 shuffle swing. Catchy square-wave lead with a repeated-note 'market cry' hook, oom-pah bass on 1 and 3, offbeat pulse chord stabs, shuffle noise kit with woodblock tick-tock and cowbell. Form: Intro, A (half cadence), A2, B lift to Eb, A loop (~67s). Cheerful NPC-bustle feel, not a battle."
+}
