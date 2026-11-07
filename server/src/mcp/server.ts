@@ -400,6 +400,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
         snapshot = JSON.parse(old.project_json); rev = a.revision;
       }
       const s = renders.submitWidget(user, { ...got.row, revision: rev }, snapshot, { ...DEFAULT_RENDER_CONFIG }, p!.via === "guest" ? cfg.mcp.guestRendersPerDay : undefined, p!.family);
+      if (!("token" in s)) return { ...renders.jobView(user, s.job), compositionId: a.compositionId, revision: rev };
       return { jobId: s.job.id, compositionId: a.compositionId, revision: rev, token: s.token, snapshotUrl: s.snapshotUrl, uploadUrl: s.uploadUrl, chunkBytes: s.chunkBytes, options: s.options };
     });
     return r;

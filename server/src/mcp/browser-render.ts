@@ -137,7 +137,10 @@ export class RenderService {
     mkdirSync(this.store.artifactsDir, { recursive: true });
     const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config: cfgFull, tokenHash: hash(randomBytes(24).toString("base64url")), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
     this.active.set(job.id, a);
-    this.store.patchJob(job.id, { status: "running", progress: 0 });
+    if (!this.store.transitionJob(job.id, ["queued"], { status: "running", progress: 0 })) {
+      this.releaseActive(job.id);
+      return this.store.getJob(job.id, owner)!;
+    }
     const options = { sampleRate: cfgFull.sampleRate, channels: cfgFull.channels, format: cfgFull.format, normalize: cfgFull.normalize, targetLufs: cfgFull.targetLufs, tailSeconds: cfgFull.tailSeconds ?? 3, maxSeconds,
       timeoutMs: sr.timeoutMs, stallMs: sr.timeoutMs };
     this.log({ evt: "mcp_server_render_started", user: owner, jobId: job.id, compositionId: row.id, revision: row.revision, seconds: Math.round(seconds) });
@@ -170,7 +173,10 @@ export class RenderService {
     const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config, tokenHash: hash(token), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
     writeFileSync(a.partPath, new Uint8Array(0));
     this.active.set(job.id, a);
-    this.store.patchJob(job.id, { status: "running", progress: 0 });
+    if (!this.store.transitionJob(job.id, ["queued"], { status: "running", progress: 0 })) {
+      this.releaseActive(job.id);
+      return { job: this.store.getJob(job.id, owner)! };
+    }
     a.timer = setTimeout(() => this.failJob(job.id, "RENDER_TIMEOUT", `the Studio tab did not finish within ${this.cfg.mcp.renderTimeoutMs} ms; no artifact was published`), this.cfg.mcp.renderTimeoutMs);
     a.timer.unref?.();
     const base = `${this.cfg.publicOrigin}/api/mcp/render-jobs/${job.id}`;
@@ -202,11 +208,13 @@ export class RenderService {
     writeFileSync(tmp, midi); renameSync(tmp, join(this.store.artifactsDir, rel));
     const fname = row.title.replace(/[^\w\- .]/g, "_").slice(0, 60) || "gbk";
     try {
-      this.store.addArtifacts([{ job_id: job.id, composition_id: row.id, owner, revision: row.revision, kind: "midi", filename: `${fname}.mid`, mime_type: "audio/midi",
-        size_bytes: midi.length, sha256: createHash("sha256").update(midi).digest("hex"), rel_path: rel,
-        meta_json: JSON.stringify({ validated: true, format: "SMF type 1", preserves: ["tempo map", "meter map", "program changes", "CC events", "pitch bend", "section markers"], rendererVersion: RENDERER_VERSION, sourceRevision: row.revision, audio: "browser-only" }) }]);
+      const published = this.store.publishAndTransition(job.id, ["queued", "running"], { status: "completed", error: null, finished_at: Date.now(), progress: 1 },
+        [{ job_id: job.id, composition_id: row.id, owner, revision: row.revision, kind: "midi", filename: `${fname}.mid`, mime_type: "audio/midi",
+          size_bytes: midi.length, sha256: createHash("sha256").update(midi).digest("hex"), rel_path: rel,
+          meta_json: JSON.stringify({ validated: true, format: "SMF type 1", preserves: ["tempo map", "meter map", "program changes", "CC events", "pitch bend", "section markers"], rendererVersion: RENDERER_VERSION, sourceRevision: row.revision, audio: "browser-only" }) }]);
+      if (!published) { try { rmSync(join(this.store.artifactsDir, rel)); } catch { /* gone */ } return this.store.getJob(job.id, owner)!; }
     } catch (e) { try { rmSync(join(this.store.artifactsDir, rel)); } catch { /* gone */ } this.failJob(job.id, "RENDER_FAILED", (e as Error).message); throw e; }
-    this.finish(job.id, "completed", null, 1);
+    this.notifyWaiters(job.id);
     this.log({ evt: "mcp_guest_midi_export", jobId: job.id, compositionId: row.id, revision: row.revision, bytes: midi.length });
     void snapshot;
     return this.store.getJob(job.id, owner)!;
@@ -225,7 +233,10 @@ export class RenderService {
     const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config, tokenHash: hash(token), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
     writeFileSync(a.partPath, new Uint8Array(0));
     this.active.set(job.id, a);
-    this.store.patchJob(job.id, { status: "running", progress: 0 });
+    if (!this.store.transitionJob(job.id, ["queued"], { status: "running", progress: 0 })) {
+      this.releaseActive(job.id);
+      return { job: this.store.getJob(job.id, owner)! };
+    }
     a.timer = setTimeout(() => this.failJob(job.id, "RENDER_TIMEOUT", `the in-chat player did not finish within ${this.cfg.mcp.renderTimeoutMs} ms; no artifact was published`), this.cfg.mcp.renderTimeoutMs);
     a.timer.unref?.();
     const base = `${this.cfg.publicOrigin}/api/mcp/render-jobs/${job.id}`;
@@ -324,21 +335,35 @@ export class RenderService {
     }
     renameSync(a.partPath, join(dir, wavRel));
     if (midi) write(`${a.jobId}.mid`, midi);
-    try { this.store.addArtifacts(rows); }
-    catch (e) { for (const r of rows) { try { rmSync(join(dir, r.rel_path)); } catch { /* gone */ } } throw e; }
-    this.finish(a.jobId, "completed", null, 1);
+    try {
+      const published = this.store.publishAndTransition(a.jobId, ["queued", "running"], { status: "completed", error: null, finished_at: Date.now(), progress: 1 }, rows);
+      if (!published) {
+        // Refused: the job already reached a terminal state, and whoever put it there already notified waiters.
+        for (const r of rows) { try { rmSync(join(dir, r.rel_path)); } catch { /* gone */ } }
+        this.releaseActive(a.jobId);
+        return;
+      }
+    } catch (e) { for (const r of rows) { try { rmSync(join(dir, r.rel_path)); } catch { /* gone */ } } throw e; }
+    this.settle(a.jobId);
     this.log({ evt: "mcp_render_completed", user: a.owner, jobId: a.jobId, compositionId: a.row.id, revision: a.row.revision, bytes: wavBytes.length, sha256: sha, executor });
   }
   private failJob(jobId: string, code: string, message: string) {
     this.finish(jobId, "failed", JSON.stringify({ code, message }));
     this.log({ evt: "mcp_render_failed", jobId, code, message });
   }
-  private finish(jobId: string, status: "completed" | "failed" | "cancelled", error: string | null, progress?: number) {
+  private releaseActive(jobId: string) {
     const a = this.active.get(jobId);
     if (a) { clearTimeout(a.timer); this.active.delete(jobId); try { if (existsSync(a.partPath)) rmSync(a.partPath); } catch { /* gone */ } }
-    // Terminal states are final: a late tab reply, timeout or cancel never overwrites one.
-    if (!this.store.transitionJob(jobId, ["queued", "running"], { status, error, finished_at: Date.now(), ...(progress !== undefined ? { progress } : {}) })) return;
+  }
+  private notifyWaiters(jobId: string) {
     const waiters = this.waiters.get(jobId);
     if (waiters) { this.waiters.delete(jobId); for (const w of waiters) { const row = this.store.getJob(jobId, w.owner); if (row) w.fn(row); } }
+  }
+  private settle(jobId: string) { this.releaseActive(jobId); this.notifyWaiters(jobId); }
+  private finish(jobId: string, status: "completed" | "failed" | "cancelled", error: string | null, progress?: number) {
+    this.releaseActive(jobId);
+    // Terminal states are final: a late tab reply, timeout or cancel never overwrites one.
+    if (!this.store.transitionJob(jobId, ["queued", "running"], { status, error, finished_at: Date.now(), ...(progress !== undefined ? { progress } : {}) })) return;
+    this.notifyWaiters(jobId);
   }
 }
