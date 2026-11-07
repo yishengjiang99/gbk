@@ -53,3 +53,26 @@ test("bridge client: sends while CONNECTING are queued and flushed FIFO ahead of
   assert.equal((JSON.parse(ws.sent[ws.sent.length - 1]!) as { type: string }).type, "ping");
   c.close();
 });
+
+test("bridge client: keeps retrying after maxReconnects while an active run is held", async () => {
+  const n0 = FakeWS.all.length;
+  const listeners: Record<string, (() => void)[]> = {};
+  const add = (k: string, f: () => void) => { (listeners[k] ??= []).push(f); };
+  const g = globalThis as Record<string, unknown>;
+  g.WebSocket = FakeWS; g.location = { protocol: "https:", host: "x" };
+  g.document = { visibilityState: "visible", addEventListener: add, removeEventListener: () => undefined };
+  g.window = { addEventListener: add, removeEventListener: () => undefined };
+  const ctrl = { project: { id: "prj_1", revision: 0 }, subscribe: () => () => undefined } as never;
+  const states: string[] = [];
+  const c = new BridgeClient(ctrl, () => undefined, (s) => states.push(s), { manifest: [], cancel: () => undefined } as never);
+  c.maxReconnects = 0;
+  c.activeRunId = "run_held";
+  c.connect();
+  const ws = FakeWS.all[FakeWS.all.length - 1]!;
+  ws.open(); ws.close(1006);
+  assert.notEqual(states[states.length - 1], "offline");
+  assert.match(states[states.length - 1] ?? "", /reconnect/);
+  await new Promise((r) => setTimeout(r, 700));
+  assert.ok(FakeWS.all.length >= n0 + 2, "an held run keeps the client retrying past maxReconnects");
+  c.close();
+});

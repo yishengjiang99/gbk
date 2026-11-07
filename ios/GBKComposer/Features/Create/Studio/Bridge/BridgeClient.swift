@@ -157,8 +157,9 @@ final class BridgeClient: ObservableObject {
         if activeRunId == nil { executor.cancel() }
         if code == 4401 { setState(.unauthorized); return }
         if intentionalClose { setState(.offline); return }
-        if attempts >= maxReconnects { setState(.offline, "could not reconnect"); return }
-        let delayMs = min(15000, 500 * (1 << attempts))
+        // Keep retrying while a run is held, matching web BridgeClient (a paused run is waiting for this tab).
+        if attempts >= maxReconnects && activeRunId == nil { setState(.offline, "could not reconnect"); return }
+        let delayMs = min(15000, 500 * (1 << min(attempts, 5)))
         attempts += 1
         setState(.reconnecting)
         reconnectTask = Task { [weak self] in
