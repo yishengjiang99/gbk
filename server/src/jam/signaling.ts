@@ -90,7 +90,19 @@ export class JamSignaling {
         try { this.rooms.setTransport(c.roomId, c.pid, f, performance.now()); } catch { return this.sendTo(c, { type: "error", code: "NOT_HOST", message: "only the host can change the metronome" }); }
         return this.broadcastSnapshot(c.roomId);
       }
-      case "state": { const p = this.rooms.presenceOf(c.pid); p.state = f.state; if (f.instrumentRevision !== undefined) p.instrumentRevision = f.instrumentRevision; return this.broadcastSnapshot(c.roomId); }
+      case "state": {
+        // Presence authority: leave/kick/expire own `left`; a connected member cannot self-report it.
+        // `degraded` stays accepted (unused) so unused enum values keep their current no-op-of-policy behavior.
+        const p = this.rooms.presenceOf(c.pid);
+        if (f.state === "left") {
+          if (f.instrumentRevision !== undefined) p.instrumentRevision = f.instrumentRevision;
+          this.sendTo(c, { type: "error", code: "BAD_FRAME", message: "a connected member cannot self-report left" });
+          return f.instrumentRevision !== undefined ? this.broadcastSnapshot(c.roomId) : undefined;
+        }
+        p.state = f.state;
+        if (f.instrumentRevision !== undefined) p.instrumentRevision = f.instrumentRevision;
+        return this.broadcastSnapshot(c.roomId);
+      }
       case "signal": {
         const snap = this.rooms.snapshot(c.roomId);
         if (f.epoch !== snap.epoch) return this.sendTo(c, { type: "error", code: "STALE", message: "room epoch changed; refresh snapshot" });
