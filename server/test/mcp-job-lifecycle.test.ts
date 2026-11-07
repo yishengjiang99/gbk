@@ -154,24 +154,28 @@ test("cancel vs late widget finish cannot publish; stop discards the partial upl
   const renders = new RenderService(testConfig(), store, () => null);
   try {
     const stopped = renders.submitWidget("alice", row, snapshot, DEFAULT_RENDER_CONFIG);
+    if (!("token" in stopped)) assert.fail("promotion succeeded so token is present");
+    const stoppedTok = stopped.token!;
     assert.equal(existsSync(join(store.artifactsDir, `${stopped.job.id}.wav.part`)), true);
-    renders.acceptChunk(stopped.job.id, stopped.token, 0, new Uint8Array([1, 2, 3, 4]));
-    const fin = renders.finishWidget("alice", stopped.job.id, stopped.token, { ok: false, code: "OPERATION_CANCELLED", message: "stopped" });
+    renders.acceptChunk(stopped.job.id, stoppedTok, 0, new Uint8Array([1, 2, 3, 4]));
+    const fin = renders.finishWidget("alice", stopped.job.id, stoppedTok, { ok: false, code: "OPERATION_CANCELLED", message: "stopped" });
     assert.equal(fin.status, "failed");
     assert.equal(JSON.parse(fin.error ?? "{}").code, "OPERATION_CANCELLED");
     assert.equal(store.listArtifacts(row.id, "alice").length, 0);
     assert.equal(existsSync(join(store.artifactsDir, `${stopped.job.id}.wav.part`)), false);
-    assert.throws(() => renders.finishWidget("alice", stopped.job.id, stopped.token, { ok: false, code: "OPERATION_CANCELLED", message: "stopped" }),
+    assert.throws(() => renders.finishWidget("alice", stopped.job.id, stoppedTok, { ok: false, code: "OPERATION_CANCELLED", message: "stopped" }),
       (e: unknown) => e instanceof McpError && e.code === "NOT_FOUND");
 
     const live = renders.submitWidget("alice", row, snapshot, DEFAULT_RENDER_CONFIG);
-    renders.acceptChunk(live.job.id, live.token, 0, new Uint8Array([1, 2, 3, 4]));
+    if (!("token" in live)) assert.fail("promotion succeeded so token is present");
+    const liveTok = live.token!;
+    renders.acceptChunk(live.job.id, liveTok, 0, new Uint8Array([1, 2, 3, 4]));
     const c1 = renders.cancel("alice", live.job.id);
     const c2 = renders.cancel("alice", live.job.id);
     assert.equal(c1.status, "cancelled");
     assert.equal(c2.status, "cancelled");
     assert.equal(existsSync(join(store.artifactsDir, `${live.job.id}.wav.part`)), false);
-    assert.throws(() => renders.finishWidget("alice", live.job.id, live.token, { ok: true, meta: { sha256: "x", validated: true } }),
+    assert.throws(() => renders.finishWidget("alice", live.job.id, liveTok, { ok: true, meta: { sha256: "x", validated: true } }),
       (e: unknown) => e instanceof McpError && e.code === "NOT_FOUND");
     assert.equal(renders.status("alice", live.job.id).status, "cancelled");
     assert.equal(store.listArtifacts(row.id, "alice").length, 0);
