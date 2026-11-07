@@ -481,7 +481,8 @@ final class WorkstationStore: ObservableObject {
     }
 
     func discardProposal(_ id: String, source: String = "user") throws {
-        _ = try getProposal(id)
+        let p = try getProposal(id)
+        guard p.status == "pending" else { return }
         setProposal(id) { $0.status = "discarded" }
         log(source, "discard \(id)", true)
     }

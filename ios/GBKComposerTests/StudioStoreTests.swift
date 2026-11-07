@@ -72,4 +72,36 @@ final class StudioStoreTests: XCTestCase {
         XCTAssertFalse(restoreLatestProject(into: s2, files: files))
         XCTAssertEqual(s2.project.name, "Song")
     }
+
+    func testDiscardProposalOnlyMovesPending() async throws {
+        let s = storeWithTrack()
+        let pending = try s.propose([.addNotes([note("n1")])], source: "agent", summary: "add a note")
+        XCTAssertEqual(pending.status, "pending")
+        try s.discardProposal(pending.id)
+        XCTAssertEqual(s.proposals.first { $0.id == pending.id }?.status, "discarded")
+        try s.discardProposal(pending.id)
+        XCTAssertEqual(s.proposals.first { $0.id == pending.id }?.status, "discarded")
+
+        let committed = try s.propose([.addNotes([note("n2")])], source: "agent", summary: "add another")
+        _ = try await s.commitProposal(committed.id, source: "user")
+        XCTAssertEqual(s.proposals.first { $0.id == committed.id }?.status, "committed")
+        let rev = s.project.revision
+        let notes = s.project.notes.count
+        try s.discardProposal(committed.id)
+        XCTAssertEqual(s.proposals.first { $0.id == committed.id }?.status, "committed")
+        XCTAssertEqual(s.project.revision, rev)
+        XCTAssertEqual(s.project.notes.count, notes)
+
+        let stale = try s.propose([.addNotes([note("n3", tick: 1920)])], source: "agent", summary: "will stale")
+        _ = try s.edit([.addNotes([note("u1", tick: 2400)])], source: "user")
+        XCTAssertEqual(s.proposals.first { $0.id == stale.id }?.status, "stale")
+        try s.discardProposal(stale.id)
+        XCTAssertEqual(s.proposals.first { $0.id == stale.id }?.status, "stale")
+
+        let expiring = try s.propose([.addNotes([note("n4", tick: 2880)])], source: "agent", summary: "will expire")
+        XCTAssertTrue(s.expirePendingProposals(now: 1e15).contains(expiring.id))
+        XCTAssertEqual(s.proposals.first { $0.id == expiring.id }?.status, "expired")
+        try s.discardProposal(expiring.id)
+        XCTAssertEqual(s.proposals.first { $0.id == expiring.id }?.status, "expired")
+    }
 }
