@@ -269,7 +269,7 @@ export class McpStore {
   }
   /** Progress only — status changes must go through transitionJob / publishAndTransition so a late patch cannot revive a terminal job. */
   patchJob(id: string, p: { progress: number }) {
-    this.db.prepare("UPDATE mcp_render_jobs SET progress=? WHERE id=?").run(p.progress, id);
+    this.db.prepare("UPDATE mcp_render_jobs SET progress=? WHERE id=? AND status IN ('queued','running')").run(p.progress, id);
   }
   /**
    * Guarded job transition: applies the patch only while the job is in one of `from` and the to-status

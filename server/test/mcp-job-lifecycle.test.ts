@@ -38,18 +38,20 @@ function hungPool(): ServerRenderPool {
   return { enabled: true, inFlight: () => 0, depth: () => 0, run: () => new Promise(() => {}), cancel() {} } as unknown as ServerRenderPool;
 }
 
-test("patchJob cannot change status or revive a cancelled job", () => {
+test("patchJob cannot change status or touch a cancelled job", () => {
   const { store } = openStore();
   try {
     const job = store.createJob({ compositionId: "cmp_x", owner: "alice", revision: 1, config: {} });
+    store.patchJob(job.id, { progress: 0.2 });
+    assert.equal(store.getJob(job.id, "alice")!.progress, 0.2);
     assert.equal(store.transitionJob(job.id, ["queued"], { status: "cancelled", finished_at: Date.now() }), true);
     store.patchJob(job.id, { progress: 0.4 });
     assert.equal(store.getJob(job.id, "alice")!.status, "cancelled");
-    assert.equal(store.getJob(job.id, "alice")!.progress, 0.4);
+    assert.equal(store.getJob(job.id, "alice")!.progress, 0.2);
     const forged = { progress: 0.9, status: "running" as const };
     store.patchJob(job.id, forged);
     assert.equal(store.getJob(job.id, "alice")!.status, "cancelled");
-    assert.equal(store.getJob(job.id, "alice")!.progress, 0.9);
+    assert.equal(store.getJob(job.id, "alice")!.progress, 0.2);
   } finally { store.close(); }
 });
 

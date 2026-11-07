@@ -233,11 +233,12 @@ export class RenderService {
     const a: Active = { jobId: job.id, owner, row, snapshot: structuredClone(snapshot), config, tokenHash: hash(token), partPath: join(this.store.artifactsDir, `${job.id}.wav.part`), received: 0 };
     writeFileSync(a.partPath, new Uint8Array(0));
     this.active.set(job.id, a);
-    if (!this.store.transitionJob(job.id, ["queued"], { status: "running", progress: 0 })) this.releaseActive(job.id);
-    else {
-      a.timer = setTimeout(() => this.failJob(job.id, "RENDER_TIMEOUT", `the in-chat player did not finish within ${this.cfg.mcp.renderTimeoutMs} ms; no artifact was published`), this.cfg.mcp.renderTimeoutMs);
-      a.timer.unref?.();
+    if (!this.store.transitionJob(job.id, ["queued"], { status: "running", progress: 0 })) {
+      this.releaseActive(job.id);
+      return { job: this.store.getJob(job.id, owner)! };
     }
+    a.timer = setTimeout(() => this.failJob(job.id, "RENDER_TIMEOUT", `the in-chat player did not finish within ${this.cfg.mcp.renderTimeoutMs} ms; no artifact was published`), this.cfg.mcp.renderTimeoutMs);
+    a.timer.unref?.();
     const base = `${this.cfg.publicOrigin}/api/mcp/render-jobs/${job.id}`;
     const options = { sampleRate: config.sampleRate, channels: config.channels, format: config.format, normalize: config.normalize, targetLufs: config.targetLufs, tailSeconds: config.tailSeconds ?? 3, maxSeconds: this.cfg.mcp.maxRenderSeconds };
     this.log({ evt: "mcp_widget_render_started", user: owner, jobId: job.id, compositionId: row.id, revision: row.revision });
@@ -337,6 +338,7 @@ export class RenderService {
     try {
       const published = this.store.publishAndTransition(a.jobId, ["queued", "running"], { status: "completed", error: null, finished_at: Date.now(), progress: 1 }, rows);
       if (!published) {
+        // Refused: the job already reached a terminal state, and whoever put it there already notified waiters.
         for (const r of rows) { try { rmSync(join(dir, r.rel_path)); } catch { /* gone */ } }
         this.releaseActive(a.jobId);
         return;
