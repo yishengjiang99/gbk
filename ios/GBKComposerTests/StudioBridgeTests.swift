@@ -68,4 +68,19 @@ final class StudioBridgeTests: XCTestCase {
         XCTAssertEqual(session.items.first?.id, "h0")
         XCTAssertEqual(session.items.first?.text, "old")
     }
+
+    // MARK: - Reconnect while a run is held
+
+    func testReconnectKeepsTryingWhileRunHeldAndCapsBackoffShift() {
+        XCTAssertTrue(BridgeClient.shouldGiveUpReconnect(attempts: 8, maxReconnects: 8, activeRunId: nil))
+        XCTAssertFalse(BridgeClient.shouldGiveUpReconnect(attempts: 8, maxReconnects: 8, activeRunId: "run_1"))
+        XCTAssertFalse(BridgeClient.shouldGiveUpReconnect(attempts: 0, maxReconnects: 0, activeRunId: "run_held"))
+        XCTAssertTrue(BridgeClient.shouldGiveUpReconnect(attempts: 0, maxReconnects: 0, activeRunId: nil))
+
+        XCTAssertEqual(BridgeClient.reconnectDelayMs(attempts: 0), 500)
+        XCTAssertEqual(BridgeClient.reconnectDelayMs(attempts: 1), 1000)
+        XCTAssertEqual(BridgeClient.reconnectDelayMs(attempts: 4), 8000)
+        XCTAssertEqual(BridgeClient.reconnectDelayMs(attempts: 5), 15000)
+        XCTAssertEqual(BridgeClient.reconnectDelayMs(attempts: 40), 15000, "unclamped 1 << 40-plus would overflow Int; cap keeps delay at 15s")
+    }
 }

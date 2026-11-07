@@ -150,6 +150,15 @@ final class BridgeClient: ObservableObject {
         connect()
     }
 
+    /// Give up only when retries are exhausted and no run is waiting for this tab.
+    static func shouldGiveUpReconnect(attempts: Int, maxReconnects: Int, activeRunId: String?) -> Bool {
+        attempts >= maxReconnects && activeRunId == nil
+    }
+    /// Cap the shift so unbounded retries while a run is held cannot overflow Int.
+    static func reconnectDelayMs(attempts: Int) -> Int {
+        min(15000, 500 * (1 << min(attempts, 5)))
+    }
+
     private func handleSocketDown(code: Int) {
         guard task != nil else { return }
         task = nil; socketOpen = false
@@ -158,8 +167,10 @@ final class BridgeClient: ObservableObject {
         if code == 4401 { setState(.unauthorized); return }
         if intentionalClose { setState(.offline); return }
         // Keep retrying while a run is held, matching web BridgeClient (a paused run is waiting for this tab).
-        if attempts >= maxReconnects && activeRunId == nil { setState(.offline, "could not reconnect"); return }
-        let delayMs = min(15000, 500 * (1 << min(attempts, 5)))
+        if Self.shouldGiveUpReconnect(attempts: attempts, maxReconnects: maxReconnects, activeRunId: activeRunId) {
+            setState(.offline, "could not reconnect"); return
+        }
+        let delayMs = Self.reconnectDelayMs(attempts: attempts)
         attempts += 1
         setState(.reconnecting)
         reconnectTask = Task { [weak self] in
