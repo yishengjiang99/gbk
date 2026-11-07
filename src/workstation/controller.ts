@@ -464,7 +464,8 @@ export class WorkstationController {
     return { revision: this.project.revision };
   }
   discardProposal(id: string, source: "user" | "agent" = "user") {
-    this.getProposal(id);
+    const p = this.getProposal(id);
+    if (p.status !== "pending") return;
     this.setProposal(id, { status: "discarded" });
     this.log(source, `discard ${id}`, true);
   }
