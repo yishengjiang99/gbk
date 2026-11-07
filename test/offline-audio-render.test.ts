@@ -132,3 +132,36 @@ test("audit: no synthesis outside the AudioWorklet; on the server only the rende
   }
   assert.doesNotMatch(readFileSync("src/audio/offline-renderer.ts", "utf8"), /renderRange|renderScheduled|dispatchEvent/);
 });
+
+test("render jobs walk queued → loading → rendering → encoding → validating → saving → completed", async () => {
+  const jobs = new RenderJobManager(() => new ArtifactStore(new MemoryArtifactBackend()), { soundFont: SF });
+  const seen: string[] = [];
+  const off = jobs.subscribe((j) => { if (seen[seen.length - 1] !== j.status) seen.push(j.status); });
+  const j = jobs.submit(song(1), OPT);
+  assert.equal((await jobs.wait(j.id)).status, "completed");
+  off();
+  assert.deepEqual(seen, ["queued", "loading", "rendering", "encoding", "validating", "saving", "completed"]);
+  assert.equal(jobs.cancel(j.id), false, "cancel is a no-op once the job is terminal");
+  assert.equal(jobs.get(j.id).status, "completed");
+});
+
+test("cancel while queued leaves the job cancelled; a later fail stays failed", async () => {
+  const jobs = new RenderJobManager(() => new ArtifactStore(new MemoryArtifactBackend()), { soundFont: SF });
+  const running = jobs.submit(song(8), OPT);
+  const queued = jobs.submit(song(1), OPT);
+  assert.equal(queued.status, "queued");
+  assert.equal(jobs.cancel(queued.id), true);
+  assert.equal((await jobs.wait(queued.id)).status, "cancelled");
+  assert.equal(jobs.get(queued.id).status, "cancelled");
+  jobs.cancel(running.id);
+  await jobs.wait(running.id);
+
+  const failed = await withGlobals({ OfflineAudioContext: undefined, webkitOfflineAudioContext: undefined }, async () => {
+    const f = jobs.submit(song(1), OPT, { saveArtifact: false });
+    return jobs.wait(f.id);
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error?.code, "RENDER_UNSUPPORTED");
+  assert.equal(jobs.cancel(failed.id), false);
+  assert.equal(jobs.get(failed.id).status, "failed");
+});
