@@ -26,7 +26,13 @@ export class RenderJobManager {
   private seq = 0;
   constructor(private store: () => ArtifactStore = artifactStore, private deps: { soundFont?: LoadedSoundFont } = {}) {}
   subscribe(f: (j: RenderJob) => void) { this.listeners.add(f); return () => { this.listeners.delete(f); }; }
-  private patch(id: string, p: Partial<RenderJob>) { const j = { ...this.jobs.get(id)!, ...p }; this.jobs.set(id, j); for (const f of this.listeners) f(j); return j; }
+  private patch(id: string, p: Partial<RenderJob>) {
+    const cur = this.jobs.get(id)!;
+    if (["completed", "failed", "cancelled"].includes(cur.status) && p.status && p.status !== cur.status) {
+      const { status: _ignore, ...rest } = p; p = rest;
+    }
+    const j = { ...cur, ...p }; this.jobs.set(id, j); for (const f of this.listeners) f(j); return j;
+  }
   get(id: string): RenderJob { const j = this.jobs.get(id); if (!j) throw new RenderError("INVALID_ARGUMENT", `unknown render job ${id}`); return j; }
   list(): RenderJob[] { return [...this.jobs.values()].sort((a, b) => b.createdAt - a.createdAt); }
   /** In-memory result (bytes) of a completed job in this page; null after reload or eviction. */
