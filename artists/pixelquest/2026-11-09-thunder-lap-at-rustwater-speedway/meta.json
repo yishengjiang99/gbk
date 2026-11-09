@@ -1,0 +1,6 @@
+{
+  "labels": ["game", "electronic"],
+  "tags": ["chiptune", "racing-stage", "8-bit", "video-game-music", "loop", "f-sharp-minor", "176-bpm", "countdown", "driving", "pixelquest"],
+  "prompt_shared": true,
+  "prompt_text": "Original chiptune racing-stage theme: F# minor, frantic and driving at 176 BPM. 3-2-1-GO countdown beeps over an idling engine pulse, then a square-wave lead with a fast repeated-note hook, 16th saw arpeggios, octave-bouncing bass and a racing kit with fills every 8 bars. Form: Intro countdown, A (half cadence on C#), A2, B straightaway lift to A major, C breakdown with 16th bass, A loop (~60s)."
+}
