@@ -1,0 +1,151 @@
+{
+ "name": "Slauson Switchback",
+ "ppq": 480,
+ "revision": 17,
+ "endTick": 122760,
+ "durationSec": 156.582,
+ "bars": 64,
+ "tempos": [
+  {
+   "tick": 0,
+   "microPerQuarter": 612245
+  }
+ ],
+ "timeSigs": [
+  {
+   "tick": 0,
+   "numerator": 4,
+   "denominator": 4
+  }
+ ],
+ "trackCount": 5,
+ "noteCount": 2788,
+ "ccCount": 0,
+ "pendingProposals": [],
+ "key": {
+  "name": "G minor",
+  "estimated": false
+ },
+ "sections": [
+  {
+   "name": "Intro",
+   "startBar": 1,
+   "bars": 4,
+   "energy": 0.3
+  },
+  {
+   "name": "Verse 1",
+   "startBar": 5,
+   "bars": 16,
+   "energy": 0.55
+  },
+  {
+   "name": "Hook",
+   "startBar": 21,
+   "bars": 8,
+   "energy": 0.8
+  },
+  {
+   "name": "Verse 2",
+   "startBar": 29,
+   "bars": 12,
+   "energy": 0.6
+  },
+  {
+   "name": "Hook 2",
+   "startBar": 41,
+   "bars": 8,
+   "energy": 0.85
+  },
+  {
+   "name": "Break",
+   "startBar": 49,
+   "bars": 4,
+   "energy": 0.4
+  },
+  {
+   "name": "Hook 3",
+   "startBar": 53,
+   "bars": 8,
+   "energy": 0.9
+  },
+  {
+   "name": "Outro",
+   "startBar": 61,
+   "bars": 4,
+   "energy": 0.3
+  }
+ ],
+ "tracks": [
+  {
+   "id": "trk_mw9j7n993epon",
+   "name": "Harmonica",
+   "channel": 0,
+   "program": {
+    "program": 22,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 165,
+   "minPitch": 55,
+   "maxPitch": 82
+  },
+  {
+   "id": "trk_mw9j7n9o591ik",
+   "name": "Jazz Guitar",
+   "channel": 1,
+   "program": {
+    "program": 26,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 780,
+   "minPitch": 62,
+   "maxPitch": 72
+  },
+  {
+   "id": "trk_mw9j7n9z7jf5k",
+   "name": "Slap Bass 1",
+   "channel": 2,
+   "program": {
+    "program": 36,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 428,
+   "minPitch": 34,
+   "maxPitch": 57
+  },
+  {
+   "id": "trk_mw9j7naa9d6pe",
+   "name": "Synth Strings 1",
+   "channel": 3,
+   "program": {
+    "program": 50,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": false,
+   "noteCount": 256,
+   "minPitch": 54,
+   "maxPitch": 70
+  },
+  {
+   "id": "trk_mw9j7nawbd7d4",
+   "name": "Power Kit",
+   "channel": 9,
+   "program": {
+    "program": 16,
+    "bankMsb": 0,
+    "bankLsb": 0
+   },
+   "isPercussion": true,
+   "noteCount": 1159,
+   "minPitch": 36,
+   "maxPitch": 54
+  }
+ ]
+}
