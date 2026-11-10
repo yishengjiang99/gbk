@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0"
     DEVELOPMENT_TEAM: 83D36RPMUM
     CURRENT_PROJECT_VERSION: "1"
     # Google sign-in (iOS OAuth client). Placeholder until Yisheng creates the iOS client in Google Cloud Console:

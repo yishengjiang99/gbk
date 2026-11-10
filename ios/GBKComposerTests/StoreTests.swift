@@ -18,9 +18,19 @@ final class StoreTests: XCTestCase {
     func testPurchaseLinksOpenPaywall() {
         let yes = ["https://compose.grepawk.com/pricing", "https://grepawk.com/api/compose/checkout?plan=pro_monthly",
                    "https://checkout.stripe.com/c/pay/cs_live_x"]
-        let no = ["https://compose.grepawk.com/studio", "https://compose.grepawk.com/plans", "https://example.com/pricing"]
+        let no = ["https://compose.grepawk.com/studio", "https://compose.grepawk.com/plans", "https://example.com/pricing",
+                  "https://notstripe.com/pay", "https://evilgrepawk.com/pricing", "https://compose.grepawk.com/pricingfaq",
+                  "https://compose.grepawk.com/api/compose/checkoutx"]
         for s in yes { XCTAssertTrue(WebView.Coordinator.isPurchaseLink(URL(string: s)), s) }
         for s in no { XCTAssertFalse(WebView.Coordinator.isPurchaseLink(URL(string: s)), s) }
+    }
+
+    func testPaywallOnlyForMainFrameAndDebounced() {
+        let t = Date()
+        XCTAssertTrue(WebView.Coordinator.shouldPresentPaywall(mainFrame: true, last: nil, now: t))
+        XCTAssertFalse(WebView.Coordinator.shouldPresentPaywall(mainFrame: false, last: nil, now: t))
+        XCTAssertFalse(WebView.Coordinator.shouldPresentPaywall(mainFrame: true, last: t, now: t.addingTimeInterval(0.5)))
+        XCTAssertTrue(WebView.Coordinator.shouldPresentPaywall(mainFrame: true, last: t, now: t.addingTimeInterval(3)))
     }
 
     func testAppAccountTokenUsesAccountUUIDElseStableInstallUUID() {
@@ -61,5 +71,17 @@ final class StoreTests: XCTestCase {
         store.presentPaywall(reason: "profile")
         XCTAssertTrue(store.showPaywall)
         XCTAssertEqual(store.proStatus?.source, .stripe)
+    }
+
+    /// #154: trial copy comes from the StoreKit offer, and the CTA only promises a trial when one is redeemable.
+    @MainActor
+    func testIntroCopyFromStoreKitOffer() {
+        XCTAssertEqual(PurchaseStore.introText(mode: .freeTrial, unit: .day, value: 7, periodCount: 1, price: "$0"), "7-day free trial")
+        XCTAssertEqual(PurchaseStore.introText(mode: .payUpFront, unit: .month, value: 1, periodCount: 3, price: "€1,99"), "€1,99 for 3 months")
+        XCTAssertEqual(PaywallView.ctaTitle(isSubscription: true, freeTrial: false), "Subscribe")
+        XCTAssertEqual(PaywallView.ctaTitle(isSubscription: true, freeTrial: true), "Start free trial")
+        let store = PurchaseStore(verifier: MockIAPVerifier(), accountId: { nil })
+        XCTAssertNil(store.price(for: StoreCatalog.proYearly), "no hardcoded fallback price")
+        XCTAssertNil(store.introText(for: StoreCatalog.proYearly))
     }
 }
