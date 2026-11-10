@@ -79,4 +79,16 @@ final class StoreTests: XCTestCase {
         XCTAssertTrue(store.showPaywall)
         XCTAssertEqual(store.proStatus?.source, .stripe)
     }
+
+    /// #154: trial copy comes from the StoreKit offer, and the CTA only promises a trial when one is redeemable.
+    @MainActor
+    func testIntroCopyFromStoreKitOffer() {
+        XCTAssertEqual(PurchaseStore.introText(mode: .freeTrial, unit: .day, value: 7, periodCount: 1, price: "$0"), "7-day free trial")
+        XCTAssertEqual(PurchaseStore.introText(mode: .payUpFront, unit: .month, value: 1, periodCount: 3, price: "€1,99"), "€1,99 for 3 months")
+        XCTAssertEqual(PaywallView.ctaTitle(isSubscription: true, freeTrial: false), "Subscribe")
+        XCTAssertEqual(PaywallView.ctaTitle(isSubscription: true, freeTrial: true), "Start free trial")
+        let store = PurchaseStore(verifier: MockIAPVerifier(), accountId: { nil })
+        XCTAssertNil(store.price(for: StoreCatalog.proYearly), "no hardcoded fallback price")
+        XCTAssertNil(store.introText(for: StoreCatalog.proYearly))
+    }
 }

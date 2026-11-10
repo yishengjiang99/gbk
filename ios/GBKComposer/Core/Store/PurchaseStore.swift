@@ -16,6 +16,9 @@ final class PurchaseStore: ObservableObject {
     @Published private(set) var proStatus: ProStatus?
     /// Products didn't load (network / StoreKit); the paywall shows an error with Retry, not a dead button.
     @Published private(set) var productsFailed = false
+    @Published private(set) var loadingProducts = false
+    /// Product id → whether this Apple ID can still redeem that subscription's introductory offer.
+    @Published private(set) var introEligible: [String: Bool] = [:]
     /// Drives the app-wide paywall sheet (RootTabView).
     @Published var showPaywall = false
     /// Why the paywall was opened (the `paywall_view` event's `reason`, #119); set by presentPaywall.
@@ -68,12 +71,49 @@ final class PurchaseStore: ObservableObject {
         Task { await loadProducts(); await refreshEntitlements() }
     }
 
-    func price(for item: StoreCatalog.Item) -> String { products[item.id]?.displayPrice ?? item.fallbackPrice }
+    /// StoreKit's localized price; nil until products load (no hardcoded fallback).
+    func price(for item: StoreCatalog.Item) -> String? { products[item.id]?.displayPrice }
+
+    /// The intro offer this user can redeem for `item`, if any.
+    func introOffer(for item: StoreCatalog.Item) -> Product.SubscriptionOffer? {
+        guard introEligible[item.id] == true else { return nil }
+        return products[item.id]?.subscription?.introductoryOffer
+    }
+
+    /// "7-day free trial" / "$0.99 for 3 months", from the StoreKit offer.
+    func introText(for item: StoreCatalog.Item) -> String? {
+        introOffer(for: item).flatMap {
+            Self.introText(mode: $0.paymentMode, unit: $0.period.unit, value: $0.period.value, periodCount: $0.periodCount, price: $0.displayPrice)
+        }
+    }
+
+    static func introText(mode: Product.SubscriptionOffer.PaymentMode, unit: Product.SubscriptionPeriod.Unit,
+                          value: Int, periodCount: Int, price: String) -> String? {
+        let n = value * max(periodCount, 1)
+        let name: String
+        switch unit {
+        case .day: name = "day"
+        case .week: name = "week"
+        case .month: name = "month"
+        case .year: name = "year"
+        @unknown default: return nil
+        }
+        switch mode {
+        case .freeTrial: return "\(n)-\(name) free trial"
+        case .payAsYouGo, .payUpFront: return "\(price) for \(n) \(name)\(n == 1 ? "" : "s")"
+        default: return nil
+        }
+    }
 
     func loadProducts() async {
+        loadingProducts = true; productsFailed = false
+        defer { loadingProducts = false }
         do {
             let list = try await Product.products(for: StoreCatalog.ids)
+            var eligible: [String: Bool] = [:]
+            for p in list { if let sub = p.subscription { eligible[p.id] = await sub.isEligibleForIntroOffer } }
             products = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+            introEligible = eligible
             productsFailed = list.isEmpty
         } catch { productsFailed = true }
     }
