@@ -107,35 +107,81 @@ final class PurchaseStore: ObservableObject {
             billing.restore(.failed)
             message = "Couldn't reach the App Store."; return
         }
-        await refreshEntitlements(resubmit: true)
+        let outcomes = await refreshEntitlements(resubmit: true)
         billing.restore(isPro ? .success : .none)
-        message = isPro ? "Purchases restored." : "No purchases to restore."
+        message = Self.restoreMessage(isPro: isPro, outcomes: outcomes)
     }
 
-    func refreshEntitlements(resubmit: Bool = false) async {
+    /// Restore copy: a server refusal (e.g. 409 IAP_OWNED_BY_OTHER) wins over the local Pro flag.
+    static func restoreMessage(isPro: Bool, outcomes: [VerifyOutcome]) -> String {
+        for o in outcomes { if case .refused(let m) = o { return m } }
+        if outcomes.contains(.transient) { return "Restored on this device. We'll finish syncing Pro shortly." }
+        return isPro ? "Purchases restored." : "No purchases to restore."
+    }
+
+    /// Re-reads StoreKit entitlements; with `resubmit`, sends each to the server under the transaction's own account token.
+    @discardableResult
+    func refreshEntitlements(resubmit: Bool = false) async -> [VerifyOutcome] {
         var pro = false
         var expiry: Date?
+        var outcomes: [VerifyOutcome] = []
         for await result in Transaction.currentEntitlements {
             guard case .verified(let t) = result, StoreCatalog.ids.contains(t.productID), t.revocationDate == nil else { continue }
             pro = true
             if let e = t.expirationDate { expiry = max(expiry ?? e, e) }
-            if resubmit { _ = try? await verifier.submit(signedTransaction: result.jwsRepresentation, appAccountToken: appAccountToken) }
+            if resubmit { outcomes.append(await verify(jws: result.jwsRepresentation, token: t.appAccountToken ?? appAccountToken)) }
         }
         localPro = pro
         localExpiry = expiry
         recompute()
+        return outcomes
+    }
+
+    /// Server verdict on one signed transaction.
+    enum VerifyOutcome: Equatable {
+        case granted
+        /// 2xx without the `pro` entitlement.
+        case notGranted
+        /// Permanent 4xx (invalid JWS, owned by another account…): retrying won't help.
+        case refused(String)
+        /// Network, 5xx, 401, 404/503, 429: StoreKit should redeliver.
+        case transient
+
+        /// Finish only when the server granted Pro or refused permanently.
+        var shouldFinish: Bool {
+            switch self { case .granted, .refused: return true; case .notGranted, .transient: return false }
+        }
+    }
+
+    func verify(jws: String, token: UUID) async -> VerifyOutcome {
+        do {
+            let r = try await verifier.submit(signedTransaction: jws, appAccountToken: token)
+            return r.entitlements.contains(StoreCatalog.proEntitlement) ? .granted : .notGranted
+        } catch let e as APIError {
+            if case .badStatus(let code, let body) = e, (400..<500).contains(code), code != 408 {
+                return .refused(Self.refusalMessage(code: code, body: body))
+            }
+            return .transient
+        } catch { return .transient }
+    }
+
+    static func refusalMessage(code: Int, body: APIErrorBody?) -> String {
+        if code == 409 || body?.code == "IAP_OWNED_BY_OTHER" {
+            return "This purchase belongs to another GBK account. Sign in to that account, or contact support."
+        }
+        return (body?.message).map { "Couldn't activate Pro: \($0)" } ?? "Couldn't activate Pro. Please contact support."
     }
 
     private func handle(_ result: VerificationResult<Transaction>) async {
         guard case .verified(let t) = result else { message = "Purchase couldn't be verified."; return }
-        do {
-            let r = try await verifier.submit(signedTransaction: result.jwsRepresentation, appAccountToken: t.appAccountToken ?? appAccountToken)
-            if r.entitlements.contains(StoreCatalog.proEntitlement) { localPro = true; recompute() }
-            await t.finish()
+        let outcome = await verify(jws: result.jwsRepresentation, token: t.appAccountToken ?? appAccountToken)
+        if outcome.shouldFinish { await t.finish() } // else StoreKit redelivers via Transaction.updates
+        switch outcome {
+        case .granted:
+            localPro = true; recompute()
             await AuthStore.shared.loadMe() // pick up pro / pro_source / pro_expires_at / pro_environment
-        } catch {
-            // Leave unfinished so StoreKit redelivers via Transaction.updates; unlock locally meanwhile.
-            message = "Purchased. We'll finish activating Pro shortly."
+        case .refused(let m): message = m
+        case .notGranted, .transient: message = "Purchased. We'll finish activating Pro shortly."
         }
         await refreshEntitlements()
     }
