@@ -9,19 +9,18 @@ enum StoreCatalog {
     struct Item: Identifiable, Hashable {
         let id: String
         let title: String
+        /// Billing line; trial terms and prices come from StoreKit (PurchaseStore), never from here.
         let detail: String
-        /// Fallback price label used before StoreKit returns localized prices (and in snapshots).
-        let fallbackPrice: String
         let period: String?
         let isSubscription: Bool
     }
 
     static let proMonthly = Item(id: "com.grepawk.moviefone.pro_monthly", title: "Pro Monthly",
-                                 detail: "7-day free trial, then billed monthly", fallbackPrice: "$5.99", period: "month", isSubscription: true)
+                                 detail: "Billed monthly", period: "month", isSubscription: true)
     static let proYearly = Item(id: "com.grepawk.moviefone.pro_yearly", title: "Pro Yearly",
-                                detail: "7-day free trial, then billed yearly — save 33%", fallbackPrice: "$47.99", period: "year", isSubscription: true)
+                                detail: "Billed yearly", period: "year", isSubscription: true)
     static let lifetime = Item(id: "com.grepawk.moviefone.lifetime", title: "Pro Lifetime",
-                               detail: "One payment, Pro forever", fallbackPrice: "$99.99", period: nil, isSubscription: false)
+                               detail: "One payment, Pro forever", period: nil, isSubscription: false)
 
     static let all = [proYearly, proMonthly, lifetime]
     static var ids: Set<String> { Set(all.map(\.id)) }

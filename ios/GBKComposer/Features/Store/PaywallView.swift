@@ -24,6 +24,9 @@ struct PaywallView: View {
                         proCard(status)
                     } else if store.productsFailed {
                         productsError
+                    } else if store.products.isEmpty {
+                        ProgressView("Loading plans…").frame(maxWidth: .infinity, minHeight: 120)
+                            .accessibilityIdentifier("paywallLoading")
                     } else {
                         VStack(spacing: 10) { ForEach(StoreCatalog.all) { option($0) } }
                         buyButton
@@ -35,6 +38,7 @@ struct PaywallView: View {
             }
             .background(Theme.background.ignoresSafeArea())
             .onAppear { BillingEventLogger.shared.paywallView(reason: store.paywallReason) }
+            .task { await store.loadProducts() } // launch load may have failed; also refreshes intro eligibility
             .onDisappear { BillingEventLogger.shared.paywallDismiss() }
             .task { isUSStorefront = await Storefront.current?.countryCode == "USA" }
             .toolbar {
@@ -60,11 +64,12 @@ struct PaywallView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title).font(.headline).foregroundStyle(Theme.text)
-                    Text(item.detail).font(.caption).foregroundStyle(Theme.textSecondary)
+                    Text(detail(item)).font(.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Spacer()
-                Text(store.price(for: item) + (item.period.map { " / \($0)" } ?? ""))
-                    .font(.subheadline.bold()).foregroundStyle(Theme.text)
+                if let price = store.price(for: item) {
+                    Text(price + (item.period.map { " / \($0)" } ?? "")).font(.subheadline.bold()).foregroundStyle(Theme.text)
+                } else { ProgressView() }
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
@@ -74,19 +79,29 @@ struct PaywallView: View {
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
+    /// "7-day free trial, then billed monthly" only when StoreKit has an offer this user can redeem.
+    private func detail(_ item: StoreCatalog.Item) -> String {
+        guard let intro = store.introText(for: item) else { return item.detail }
+        return "\(intro), then \(item.detail.prefix(1).lowercased() + item.detail.dropFirst())"
+    }
+
     private var buyButton: some View {
         let item = StoreCatalog.all.first { $0.id == selected } ?? StoreCatalog.proYearly
         return Button { Task { await store.buy(item) } } label: {
             Group {
                 if store.purchasing != nil { ProgressView().tint(Theme.onAccent) }
-                else { Text(item.isSubscription ? "Start free trial" : "Buy lifetime") }
+                else { Text(Self.ctaTitle(isSubscription: item.isSubscription, freeTrial: store.introOffer(for: item)?.paymentMode == .freeTrial)) }
             }
             .font(.headline).frame(maxWidth: .infinity, minHeight: 50)
         }
         .buttonStyle(.borderedProminent)
         .tint(Theme.accent)
         .foregroundStyle(Theme.onAccent)
-        .disabled(store.purchasing != nil)
+        .disabled(store.purchasing != nil || store.price(for: item) == nil)
+    }
+
+    static func ctaTitle(isSubscription: Bool, freeTrial: Bool) -> String {
+        isSubscription ? (freeTrial ? "Start free trial" : "Subscribe") : "Buy lifetime"
     }
 
     /// Pro users see their plan, not a greyed-out purchase list.
