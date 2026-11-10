@@ -18,9 +18,19 @@ final class StoreTests: XCTestCase {
     func testPurchaseLinksOpenPaywall() {
         let yes = ["https://compose.grepawk.com/pricing", "https://grepawk.com/api/compose/checkout?plan=pro_monthly",
                    "https://checkout.stripe.com/c/pay/cs_live_x"]
-        let no = ["https://compose.grepawk.com/studio", "https://compose.grepawk.com/plans", "https://example.com/pricing"]
+        let no = ["https://compose.grepawk.com/studio", "https://compose.grepawk.com/plans", "https://example.com/pricing",
+                  "https://notstripe.com/pay", "https://evilgrepawk.com/pricing", "https://compose.grepawk.com/pricingfaq",
+                  "https://compose.grepawk.com/api/compose/checkoutx"]
         for s in yes { XCTAssertTrue(WebView.Coordinator.isPurchaseLink(URL(string: s)), s) }
         for s in no { XCTAssertFalse(WebView.Coordinator.isPurchaseLink(URL(string: s)), s) }
+    }
+
+    func testPaywallOnlyForMainFrameAndDebounced() {
+        let t = Date()
+        XCTAssertTrue(WebView.Coordinator.shouldPresentPaywall(mainFrame: true, last: nil, now: t))
+        XCTAssertFalse(WebView.Coordinator.shouldPresentPaywall(mainFrame: false, last: nil, now: t))
+        XCTAssertFalse(WebView.Coordinator.shouldPresentPaywall(mainFrame: true, last: t, now: t.addingTimeInterval(0.5)))
+        XCTAssertTrue(WebView.Coordinator.shouldPresentPaywall(mainFrame: true, last: t, now: t.addingTimeInterval(3)))
     }
 
     func testAppAccountTokenUsesAccountUUIDElseStableInstallUUID() {
