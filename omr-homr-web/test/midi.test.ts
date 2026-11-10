@@ -209,3 +209,25 @@ describe("lower-clef detection anywhere in the stream (SymbolCleanup port)", () 
     assert.ok(out.every((s) => s.position !== "lower"));
   });
 });
+
+describe("pageVoiceNoteEvents interleaved grand staff (spike)", () => {
+  const sym = (rhythm: string, pitch = "_", position = "_"): DecodedSymbol =>
+    ({ rhythm, pitch, lift: "_", articulation: "_", slur: "_", position }) as DecodedSymbol;
+  const chord = sym("chord", "nonote", "nonote");
+  it("keeps each hand on its own clock (BWV Anh. 114, bar 1)", () => {
+    // homr emits hands interleaved by x: RH D5 q + LH half chord, RH eighths, LH A3 q under RH B4.
+    const row = [
+      sym("note_4", "D5", "upper"), chord, sym("note_2", "D4", "lower"), chord, sym("note_2", "G3", "lower2"),
+      sym("note_8", "G4", "upper"), sym("note_8", "A4", "upper"), sym("note_8", "B4", "upper"), chord, sym("note_4", "A3", "lower2"),
+      sym("note_8", "C5", "upper"), sym("barline", ".", "."),
+      sym("note_4", "D5", "upper"), chord, sym("note_2.", "B3", "lower"),
+    ];
+    const { events, endTick } = pageVoiceNoteEvents(row, 0, { grandstaff: true });
+    const at = (midi: number) => events.filter((e) => e.midi === midi).map((e) => e.tick / 480);
+    assert.deepEqual(at(67), [1]); // G4 on beat 1, not after the LH half note
+    assert.deepEqual(at(57), [2]); // A3 under B4 on beat 2
+    assert.deepEqual(at(72), [2.5]);
+    assert.deepEqual(at(74), [0, 3]); // bar 2 starts at beat 3
+    assert.equal(endTick / 480, 6);
+  });
+});

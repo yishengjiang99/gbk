@@ -233,6 +233,36 @@ export function staffSymbolsToNoteEvents(
  * by clef token: the page cleanup drops repeated clefs, and a mid-piece clef
  * change inside one hand must not move time.
  */
+
+/**
+ * SPIKE: interleaved grand-staff row (homr emits hands interleaved by x, joined
+ * with "chord"). One cursor per position voice (upper, upper2, lower, lower2);
+ * every barline resyncs all voices to the furthest one.
+ */
+function interleavedRowEvents(row: DecodedSymbol[], staff: number, startTick: number): { events: MidiNoteEvent[]; endTick: number } {
+  const events: MidiNoteEvent[] = [];
+  const cur = new Map<string, number>();
+  let barStart = startTick;
+  const at = (k: string) => cur.get(k) ?? barStart;
+  for (const group of groupIntoChords(row)) {
+    if (group.some((s) => s.rhythm === "barline" || s.rhythm.startsWith("repeat"))) {
+      barStart = Math.max(barStart, ...cur.values()); cur.clear(); continue;
+    }
+    const adv = new Map<string, number>();
+    for (const s of group) {
+      const dur = parseKernDuration(s.rhythm);
+      if (!dur) continue;
+      const k = s.position && s.position !== "_" && s.position !== "." ? s.position : "upper";
+      const t = at(k);
+      const midi = dur.isRest ? null : pitchToMidi(s.pitch, s.lift);
+      if (midi !== null) events.push({ tick: t, midi, durationTicks: Math.max(1, dur.ticks), staff, attention: s.attention ?? null });
+      if (!dur.grace) adv.set(k, Math.max(adv.get(k) ?? 0, dur.ticks));
+    }
+    for (const [k, d] of adv) cur.set(k, at(k) + d);
+  }
+  return { events, endTick: Math.max(barStart, ...cur.values()) };
+}
+
 export function pageVoiceNoteEvents(
   symbols: DecodedSymbol[],
   staff: number,
@@ -251,7 +281,12 @@ export function pageVoiceNoteEvents(
     const split = opts.grandstaff
       ? current.findIndex((s) => isLowerPosition(s.position))
       : -1;
-    if (split >= 0) {
+    const interleaved = split >= 0 && current.slice(split).some((x) => x.position === "upper" || x.position === "upper2");
+    if (interleaved) {
+      const r = interleavedRowEvents(current, staff, rowTick);
+      events.push(...r.events);
+      rowTick = r.endTick;
+    } else if (split >= 0) {
       const upper = staffSymbolsToNoteEvents(current.slice(0, split), staff, {
         startTick: rowTick,
         resetCursorOnClef: false,

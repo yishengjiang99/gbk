@@ -98,6 +98,8 @@ export type WorkerResponse =
         pageHeight: number;
       };
       /** Raw decoded symbols (demo/diagnostics; sheet-cam consumes midi + noteLayout). One entry per voice for transcribe-page. */
+      /** Spike: per-voice grand-staff flags (page path). */
+      grandstaff?: boolean[];
       symbols: Array<Record<string, string>> | Array<Array<Record<string, string>>>;
     }
   | { type: "error"; message: string };
@@ -250,6 +252,7 @@ async function handleTranscribePage(
         pageWidth: page.preprocessed.width,
         pageHeight: page.preprocessed.height,
       },
+      grandstaff: voices.map((v) => v.grandstaff),
       symbols: voiceSymbols.map((symbols) =>
         symbols.map((s) => ({
           rhythm: s.rhythm,
