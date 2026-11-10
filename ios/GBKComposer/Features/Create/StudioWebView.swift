@@ -487,11 +487,36 @@ struct WebView: UIViewRepresentable {
         }
 
         /// Web upgrade/buy links (/pricing, Stripe checkout) open the App Store paywall instead (guideline 3.1.1).
+        /// Exact host or dot-boundary subdomain; exact leading path segments.
         static func isPurchaseLink(_ url: URL?) -> Bool {
             guard let url, let host = url.host?.lowercased() else { return false }
-            if host.hasSuffix("stripe.com") { return true }
-            let path = url.path.lowercased()
-            return (host.hasSuffix("grepawk.com") && (path.hasPrefix("/pricing") || path.hasPrefix("/api/compose/checkout")))
+            func on(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
+            if on("stripe.com") { return true }
+            guard on("grepawk.com") else { return false }
+            let parts = url.pathComponents.filter { $0 != "/" }.map { $0.lowercased() }
+            return parts.first == "pricing" || parts.starts(with: ["api", "compose", "checkout"])
+        }
+
+        /// Purchase navigations are blocked in every frame; only a main-frame one opens the paywall, at most once per window.
+        private var lastPaywallAt: Date?
+        static let paywallDebounce: TimeInterval = 2
+        static func shouldPresentPaywall(mainFrame: Bool, last: Date?, now: Date) -> Bool {
+            mainFrame && (last.map { now.timeIntervalSince($0) >= paywallDebounce } ?? true)
+        }
+
+        private func interceptPurchase(mainFrame: Bool) {
+            let now = Date()
+            guard Self.shouldPresentPaywall(mainFrame: mainFrame, last: lastPaywallAt, now: now) else { return }
+            lastPaywallAt = now
+            Task { @MainActor in PurchaseStore.shared.presentPaywall(reason: "studio_link") }
+        }
+
+        /// Server redirects can land on checkout after an allowed request: check the final response URL too.
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                     decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            guard Self.isPurchaseLink(navigationResponse.response.url) else { return decisionHandler(.allow) }
+            decisionHandler(.cancel)
+            interceptPurchase(mainFrame: navigationResponse.isForMainFrame)
         }
 
         /// A main-frame navigation to a song page (/s/<slug>) becomes the native share deep link.
@@ -504,7 +529,7 @@ struct WebView: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if Self.isPurchaseLink(action.request.url) {
                 decisionHandler(.cancel)
-                Task { @MainActor in PurchaseStore.shared.presentPaywall(reason: "studio_link") }
+                interceptPurchase(mainFrame: action.targetFrame?.isMainFrame == true)
             } else if allowSongPageOnce, Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) != nil {
                 allowSongPageOnce = false
                 decisionHandler(.allow)
