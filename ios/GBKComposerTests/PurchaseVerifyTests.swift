@@ -39,4 +39,12 @@ final class PurchaseVerifyTests: XCTestCase {
         }
         XCTAssertNotEqual(PurchaseStore.restoreMessage(isPro: true, outcomes: [.transient]), "Purchases restored.")
     }
+
+    func testRevokedOrExpiredFinishesSilently() {
+        let now = Date()
+        XCTAssertTrue(PurchaseStore.isInactive(revoked: now.addingTimeInterval(-60), expires: nil, now: now))
+        XCTAssertTrue(PurchaseStore.isInactive(revoked: nil, expires: now.addingTimeInterval(-1), now: now))
+        XCTAssertFalse(PurchaseStore.isInactive(revoked: nil, expires: now.addingTimeInterval(3600), now: now))
+        XCTAssertFalse(PurchaseStore.isInactive(revoked: nil, expires: nil, now: now))
+    }
 }

@@ -172,8 +172,16 @@ final class PurchaseStore: ObservableObject {
         return (body?.message).map { "Couldn't activate Pro: \($0)" } ?? "Couldn't activate Pro. Please contact support."
     }
 
+    static func isInactive(revoked: Date?, expires: Date?, now: Date = Date()) -> Bool {
+        revoked != nil || (expires.map { $0 <= now } ?? false)
+    }
+
     private func handle(_ result: VerificationResult<Transaction>) async {
         guard case .verified(let t) = result else { message = "Purchase couldn't be verified."; return }
+        // Refunds/revocations and lapsed renewals arrive here too; the server grants nothing for them, so just finish.
+        if Self.isInactive(revoked: t.revocationDate, expires: t.expirationDate) {
+            await t.finish(); await refreshEntitlements(); return
+        }
         let outcome = await verify(jws: result.jwsRepresentation, token: t.appAccountToken ?? appAccountToken)
         if outcome.shouldFinish { await t.finish() } // else StoreKit redelivers via Transaction.updates
         switch outcome {
