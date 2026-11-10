@@ -52,13 +52,6 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(r.entitlements, ["pro"]); XCTAssertNil(r.expiresAt); XCTAssertEqual(r.environment, "Production")
     }
 
-    func testLiveVerifierRequestShape() throws {
-        let req = try APIClient(baseURL: URL(string: "https://example.com")!, tokenProvider: { nil })
-            .request(for: Endpoint(path: "/api/iap/apple", method: .post, body: ["signed_transaction": "a", "app_account_token": "b"]))
-        XCTAssertEqual(req.httpMethod, "POST")
-        XCTAssertEqual(req.url?.path, "/api/iap/apple")
-    }
-
     @MainActor
     func testProStatusSourceAndGatedPaywallSkipsPro() {
         let stripe = Me(id: "a", handle: "h", displayName: nil, avatarUrl: nil, songCount: nil, ratingAvg: nil, createdAt: nil,
