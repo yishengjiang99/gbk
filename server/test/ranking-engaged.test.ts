@@ -1,7 +1,7 @@
 // Ranker "engaged" label, training-row filters and point-in-time popularity (docs/social/ranking.md).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Ranker, engaged, engagedSql, trainable, BURST_MIN, CI_IMPRESSIONS_STOPPED, type Imp } from "../src/ranking/ranker.ts";
+import { Ranker, engaged, engagedSql, trainable, BURST_MIN, FEATURES, CI_IMPRESSIONS_STOPPED, type Imp } from "../src/ranking/ranker.ts";
 import { fixture, H, D } from "./rank-fixture.ts";
 
 const base = { completed: 0, replay: 0, listen_ratio: 0, dwell_ms: 5000, fast_skip: 0, actions: "[]" };
@@ -40,6 +40,7 @@ test("dataset: features as of the impression's exact time, so earlier plays in t
   const rows = fx.db.prepare("SELECT * FROM impressions ORDER BY created_at").all() as Imp[];
   const { tr } = new Ranker(fx.db, fx.now).dataset(rows, Infinity); const si = 4; // FEATURES.indexOf("session")
   assert.equal(tr[0].x[si], 0, "no peeking at itself"); assert.ok(tr[1].x[si] > 0, `same-hour session signal ${tr[1].x[si]}`);
+  const full = new Ranker(fx.db, fx.now).features("v", "s1", t + 5 * 60_000).find((x) => x.song.id === b)!; assert.deepEqual(tr[1].x, FEATURES.map((k) => full.f[k]), "same as the full-catalog features");
 });
 
 test("dataset drops self-impressions", () => {

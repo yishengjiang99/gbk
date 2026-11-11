@@ -1,7 +1,7 @@
 // Nightly lr-eng training: minimums, forward-chained out-of-time eval, gate vs heur-2 (margin + seeded actor resamples), demotion, fallback.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Ranker, trainInWorker, aucOf, bootWin, fitLR, lin, chooseL2, grade, FEATURES, HEURISTIC, MIN_TRAIN, MIN_TRAIN_LABELS, MIN_HOLDOUT_LABELS, type TrainResult, type Weights } from "../src/ranking/ranker.ts";
+import { Ranker, trainInWorker, trainable, IMP_COLS, type Imp, aucOf, bootWin, fitLR, lin, chooseL2, grade, FEATURES, HEURISTIC, MIN_TRAIN, MIN_TRAIN_LABELS, MIN_HOLDOUT_LABELS, type TrainResult, type Weights } from "../src/ranking/ranker.ts";
 import { preview } from "../src/ranking/eval.ts";
 import { fixture, rand, H, D } from "./rank-fixture.ts";
 
@@ -99,10 +99,27 @@ test("train: a newer winner retires the old model; a model that now loses to heu
   let fx = fixture(); repeatWorld(fx); put(fx, "lr-eng-old", { engaged: w({ bias: 0 }) }); // constant scorer: AUC 0.5
   let rk = new Ranker(fx.db, fx.now); assert.equal(rk.version, "lr-eng-old"); const res = rk.train() as TrainResult;
   assert.equal(res.promoted, true); assert.equal(res.previous, "lr-eng-old"); assert.deepEqual(models(fx).map((m) => [m.version, m.promoted]), [["lr-eng-old", 0], [res.version, 1]]);
-  fx = fixture(); noiseWorld(fx, 6); put(fx, "lr-eng-bad", { engaged: w({ bias: 0, ...Object.fromEntries(Object.entries(HEURISTIC).map(([k, v]) => [k, -v])) }) }); // anti-heur-2
+  fx = fixture(); noiseWorld(fx, 6); put(fx, "lr-eng-bad", { engaged: w({ bias: 0, ...Object.fromEntries(Object.entries(HEURISTIC).map(([k, v]) => [k, -v])) }) }, 8); // anti-heur-2, 8 days of fresh rows
   rk = new Ranker(fx.db, fx.now); const g = rk.gate(); assert.ok(!("skipped" in g));
   assert.ok(!g.promote && g.auc_prev! < g.auc_heur!, JSON.stringify({ prev: g.auc_prev, heur: g.auc_heur }));
   const r2 = rk.train() as TrainResult; assert.equal(r2.demoted, "lr-eng-bad"); assert.equal(rk.version, "heur-2"); assert.equal(new Ranker(fx.db, fx.now).version, "heur-2");
+});
+
+test("gate judges the current model only on rows after its created_at; too few of them -> not compared, not demoted", () => {
+  // replays are engaged for 14 days, then first plays are; the incumbent (seen > 0) was fit on the first part
+  const world = (fx: Fx, flipD: number) => { const r = rand(3); const songs = Array.from({ length: 60 }, (_, i) => fx.song({ owner: `o${i}`, ageH: 24 * 40 }));
+    for (let a = 0; a < 80; a++) for (let k = 0; k < 6; k++) { const s = songs[Math.floor(r() * songs.length)]; const at = fx.now() - D - Math.floor(r() * 19 * D); const late = at >= fx.now() - flipD * D;
+      fx.imp({ actor: `a${a}`, song: s, at, good: late, skip: false }); fx.imp({ actor: `a${a}`, song: s, at: at + 2 * H, good: !late }); } };
+  const inc = { engaged: w({ seen: 3 }) };
+  let fx = fixture(); world(fx, 6); put(fx, "lr-eng-inc", inc, 6); let g = new Ranker(fx.db, fx.now).gate(); assert.ok(!("skipped" in g));
+  assert.ok(g.prev!.n > 0 && g.prev!.n < g.holdout, `prev rows ${g.prev!.n} of ${g.holdout}`); assert.equal(g.prev!.labels[0] + g.prev!.labels[1], g.prev!.n);
+  const rows = new Ranker(fx.db, fx.now).dataset(trainable(fx.db.prepare(`SELECT ${IMP_COLS} FROM impressions`).all() as Imp[]), Infinity).tr.sort((p, q) => p.at - q.at).slice(-g.holdout);
+  const after = rows.filter((r) => r.at >= fx.now() - 6 * D), sc = (rs: typeof rows, m: Weights) => aucOf(rs.map((r) => lin(r.x, m)), rs.map((r) => r.y));
+  assert.equal(g.prev!.n, after.length); assert.equal(g.auc_prev, sc(after, inc.engaged));
+  assert.ok(sc(rows, inc.engaged)! > g.auc_heur!, "on all evaluated rows (its own training rows included) it would look better than heur-2");
+  assert.ok(g.auc_prev! < g.prev!.auc_heur!, JSON.stringify(g.prev)); assert.ok(g.promote || g.demote, "out of its own sample it loses, so it is not kept");
+  fx = fixture(); world(fx, 6); put(fx, "lr-eng-inc", inc, 0.5); g = new Ranker(fx.db, fx.now).gate(); assert.ok(!("skipped" in g));
+  assert.equal(g.auc_prev, null); assert.ok(g.prev!.labels.some((v) => v < MIN_HOLDOUT_LABELS)); assert.equal(g.demote, false, "not judged yet");
 });
 
 test("serving falls back to heur-2 on NaN weights, legacy rows, or no promoted model", () => {

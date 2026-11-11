@@ -90,8 +90,8 @@ export class Ranker {
   /** Serve the latest promoted model; none, a legacy row or bad (NaN) weights fall back to heur-2. */
   reload() { const p = this.promoted(); this.weights = { ...HEURISTIC }; this.model = p?.model ?? null; this.version = p?.version ?? "heur-2"; }
   promoted() {
-    const r = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined;
-    const model = r ? parseModel(r.weights) : null; return r && model ? { version: r.version, model } : null;
+    const r = this.db.prepare("SELECT version, weights, created_at FROM rank_models WHERE promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string; created_at: number } | undefined;
+    const model = r ? parseModel(r.weights) : null; return r && model ? { version: r.version, model, at: Number(r.created_at) } : null;
   }
   /** Catalog: public non-wip songs, the top CATALOG_MAX by score plus every song published in the last FRESH_WINDOW_H. */
   private songs(): Song[] {
@@ -149,9 +149,9 @@ export class Ranker {
     return { affinity: sq(c.pref, s), coeng: (c.co.get(s.id) ?? 0) / c.maxCo, popularity: c.pop.get(s.id) ?? 0, freshness: Math.pow(0.5, Math.max(0, c.t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000)), session: sq(c.sess, s), seen: Math.min(1, (c.seen.get(s.id) ?? 0) / 2) };
   }
   /** Per-song feature vectors for one actor (and current session), point-in-time: only impressions before `asOf`. */
-  features(actor: string | null, session: string | null, asOf?: number, songs = this.songs()) {
+  features(actor: string | null, session: string | null, asOf?: number, songs = this.songs(), only?: Song) {
     const c = this.context(actor, session, asOf ?? this.now(), songs);
-    return songs.map((s) => ({ song: s, f: this.feat(c, s), history: c.history }));
+    return (only ? [only] : songs).map((s) => ({ song: s, f: this.feat(c, s), history: c.history }));
   }
   /** Candidate generation: named sources, each capped by its QUOTAS entry; `fresh` always contributes in full.
    *  Union capped at POOL_MAX (fresh first), backfilled by score. Returns the pool and a song -> sources map. */
@@ -236,13 +236,16 @@ export class Ranker {
     // promoted = 1 marks the one served model: a new winner retires the old one; a demoted one goes back to heur-2
     if (promote || demote) this.db.prepare("UPDATE rank_models SET promoted = 0 WHERE promoted = 1 AND version <> ?").run(promote ? version : "");
     this.reload();
-    return { version, n: g.n, holdout: g.holdout, labels: g.labels, auc: g.auc, auc_heur: g.auc_heur, auc_prev: g.auc_prev, win: g.win, lift: g.lift, lift_ci: g.lift_ci, l2: g.l2, cv: g.cv, folds: g.folds, promoted: promote, demoted: demote ? cur!.version : null, previous: cur?.version ?? null, ms: Date.now() - t0, model };
+    return { version, n: g.n, holdout: g.holdout, labels: g.labels, auc: g.auc, auc_heur: g.auc_heur, auc_prev: g.auc_prev, win: g.win, lift: g.lift, lift_ci: g.lift_ci, l2: g.l2, cv: g.cv, folds: g.folds, prev: g.prev, promoted: promote, demoted: demote ? cur!.version : null, previous: cur?.version ?? null, ms: Date.now() - t0, model };
   }
   /** Fit + gate decision without writing (train() and the rank-eval --preview). Out-of-time evaluation by forward
    *  chaining: the last EVAL_FRAC of rows by time (at least HOLDOUT_MIN_DAYS) is cut into EVAL_FOLDS consecutive blocks,
    *  each scored by a model fit only on earlier rows (its L2 chosen by CV on those rows), and the blocks are pooled.
-   *  Promote iff pooled AUC >= max(heur-2, current) + PROMOTE_MARGIN and the candidate beats heur-2 in >= BOOT_WIN of
-   *  BOOT_N seeded resamples of evaluated actors, with the 95% lift interval above 0. The stored model is fit on all rows. */
+   *  Promote iff pooled AUC >= heur-2 + PROMOTE_MARGIN and the candidate beats heur-2 in >= BOOT_WIN of BOOT_N seeded
+   *  resamples of evaluated actors, with the 95% lift interval above 0. The stored model is fit on all rows.
+   *  The current model was fit on rows before its created_at, so it is judged only on evaluated rows after that (`prev`),
+   *  once they hold MIN_HOLDOUT_LABELS of each label: there the candidate must also beat it by PROMOTE_MARGIN, and it is
+   *  demoted if it loses to heur-2. Until then it is neither compared nor demoted. */
   gate(): Gate | TrainSkip {
     const t = this.now();
     const imps = trainable(this.db.prepare(`SELECT ${IMP_COLS} FROM impressions WHERE created_at > ? AND created_at < ? ORDER BY id DESC LIMIT 20000`).all(t - 30 * 86_400_000, t) as Imp[]);
@@ -258,21 +261,27 @@ export class Ranker {
     for (let k = 0; k * size < ho.length; k++) { const fit = rows.slice(0, tr.length + k * size); const w = fitLR(fit, chooseL2(fit).l2); folds.push(fit.length); sC.push(...ho.slice(k * size, (k + 1) * size).map((d) => lin(d.x, w))); }
     // fit on the graded target, shrunk toward heur-2; L2 picked by forward-chaining CV
     const { l2, cv } = chooseL2(rows); const w = fitLR(rows, l2); const cur = this.promoted();
-    const y = ho.map((d) => d.y), sH = ho.map((d) => lin(d.x, HEURISTIC)), sP = cur ? ho.map((d) => lin(d.x, cur.model.engaged)) : null;
-    const auc = aucOf(sC, y), auc_heur = aucOf(sH, y), auc_prev = sP ? aucOf(sP, y) : null;
+    const y = ho.map((d) => d.y), sH = ho.map((d) => lin(d.x, HEURISTIC));
+    const auc = aucOf(sC, y), auc_heur = aucOf(sH, y);
     const { win, lift, lift_ci } = bootWin(ho.map((d) => d.actor), y, sC, sH);
+    // the current model, out of its own sample only
+    const ix = cur ? ho.flatMap((d, i) => (d.at >= cur.at ? [i] : [])) : []; const at = (v: number[]) => ix.map((i) => v[i]); const fy = at(y);
+    const pl = cnt(ix.map((i) => ho[i])); const judged = !!cur && pl.every((v) => v >= MIN_HOLDOUT_LABELS);
+    const prev = cur ? { n: ix.length, labels: pl, auc: judged ? aucOf(fy.map((_, k) => lin(ho[ix[k]].x, cur.model.engaged)), fy) : null, auc_cand: judged ? aucOf(at(sC), fy) : null, auc_heur: judged ? aucOf(at(sH), fy) : null } : null;
+    const auc_prev = prev?.auc ?? null;
     // approved bar (+0.02, >= 90% wins), and the 95% lift interval must exclude 0 so a lucky holdout cannot promote
-    const promote = auc !== null && auc_heur !== null && auc >= Math.max(auc_heur, auc_prev ?? -Infinity) + PROMOTE_MARGIN && win >= BOOT_WIN && !!lift_ci && lift_ci[0] > 0;
-    const demote = !promote && !!cur && auc_prev !== null && auc_heur !== null && auc_prev < auc_heur;
-    return { ...base, model: { engaged: w, auc, auc_heur, win, l2 }, cur, auc, auc_heur, auc_prev, win, lift, lift_ci, l2, cv, folds, promote, demote };
+    const promote = auc !== null && auc_heur !== null && auc >= auc_heur + PROMOTE_MARGIN && win >= BOOT_WIN && !!lift_ci && lift_ci[0] > 0
+      && (auc_prev === null || (prev!.auc_cand !== null && prev!.auc_cand >= auc_prev + PROMOTE_MARGIN));
+    const demote = !promote && auc_prev !== null && prev!.auc_heur !== null && auc_prev < prev!.auc_heur;
+    return { ...base, model: { engaged: w, auc, auc_heur, win, l2 }, cur, auc, auc_heur, auc_prev, prev, win, lift, lift_ci, l2, cv, folds, promote, demote };
   }
   /** Point-in-time training rows: features as of the impression's own time (so same-session history counts, as when
    *  serving) with its session, split at `split`. The catalog is read once. */
   dataset(imps: Omit<Imp, "feed" | "position">[], split: number) {
-    const songs = this.songs(); const tr: Row[] = [], ho: Row[] = [];
+    const songs = this.songs(); const byId = new Map(songs.map((s) => [s.id, s])); const tr: Row[] = [], ho: Row[] = [];
     for (const i of imps) {
-      const at = Number(i.created_at); const e = this.features(i.actor, i.session, at, songs).find((x) => x.song.id === i.share_id);
-      if (!e || e.song.owner === i.actor) continue;
+      const at = Number(i.created_at); const song = byId.get(i.share_id); if (!song || song.owner === i.actor) continue;
+      const [e] = this.features(i.actor, i.session, at, songs, song);
       (at >= split ? ho : tr).push({ x: FEATURES.map((k) => e.f[k]), y: engaged(i), t: grade(i), g: signal(i), dur: e.song.dur, fresh: at - e.song.published_at < FRESH_WINDOW_H * 3_600_000, at, actor: i.actor, session: i.session, share_id: i.share_id });
     }
     return { tr, ho };
@@ -281,8 +290,10 @@ export class Ranker {
 /** train() did not fit a model (too little data); logged as rank_train_skipped so a skip is visible. labels = [pos, neg]. */
 export interface TrainSkip { skipped: "few_impressions" | "few_train_rows" | "few_train_labels" | "few_holdout_labels"; impressions: number; n: number; holdout: number; min: number; labels?: { train: number[]; holdout: number[] } }
 type Stats = { auc: number | null; auc_heur: number | null; auc_prev: number | null; win: number; lift: number | null; lift_ci: [number, number] | null; l2: number; cv: Record<string, number | null> };
-export interface Gate extends Stats { folds: number[]; impressions: number; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; model: Model; cur: { version: string; model: Model } | null; promote: boolean; demote: boolean }
-export interface TrainResult extends Stats { folds: number[]; version: string; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; promoted: boolean; demoted: string | null; previous: string | null; ms: number; model: Model }
+/** The current model on evaluated rows after its created_at: auc (null until both labels >= MIN_HOLDOUT_LABELS), the candidate's and heur-2's AUC there. */
+export type Prev = { n: number; labels: number[]; auc: number | null; auc_cand: number | null; auc_heur: number | null };
+export interface Gate extends Stats { folds: number[]; prev: Prev | null; impressions: number; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; model: Model; cur: { version: string; model: Model; at: number } | null; promote: boolean; demote: boolean }
+export interface TrainResult extends Stats { folds: number[]; prev: Prev | null; version: string; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; promoted: boolean; demoted: string | null; previous: string | null; ms: number; model: Model }
 /** y = binary engaged (eval/gate label), t = graded target (fit). */
 export type Row = { x: number[]; y: number; t: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
 /** Sized to the ~370 clean rows / ~76 engaged per 30 days left once CI rows are dropped (2026-11-11): train labels
