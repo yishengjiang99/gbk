@@ -49,7 +49,7 @@ Read-only (opens the DB with `readOnly: true`). Dev: `node --disable-warning=Exp
 - `--from YYYY-MM-DD --to YYYY-MM-DD [--json]` (default last 3 days): the promoted model, the latest candidate and heur-2 on trainable impressions in the range: engaged AUC, NDCG@10 per session (gain = `signal()`), share of < 48 h songs in the top 10.
 
 ## Online metrics
-`GET /api/admin/metrics?days=7` (admin only), unchanged: impressions, sessions, actors, avg dwell, watch time per session, completion/skip/action rates, D1 retention, and `by_model`.
+`GET /api/admin/metrics?days=7` (admin only): impressions, sessions, actors, avg dwell, watch time per session, completion/skip/action rates, `engaged_rate`, D1 retention, and `by_model` (each with `engaged`, the training label). After a promotion, compare `by_model` `engaged` for `lr-eng-*` vs `heur-2` over 7 days.
 
 ## Privacy
 The privacy page (`/privacy`, "Listening activity and your feed") lists what is recorded: song, play time, finished/skipped, scroll speed, and actions (rating, liking, commenting, following, sharing, artist profile taps). It is used only to personalize the feed and measure feed quality in aggregate, not sold or shared with advertisers, kept at most 60 days, and deleted with the account.
