@@ -39,6 +39,6 @@ test("events: impressions batch (guest cookie, user, bearer-less origin check), 
     assert.equal(m.impressions, 3); assert.equal(m.sessions, 2); assert.equal(m.actors, 2);
     assert.ok(Math.abs(m.skip_rate - 1 / 3) < 1e-9); assert.ok(Math.abs(m.completion_rate - 1 / 3) < 1e-9); assert.ok(Math.abs(m.positive_action_rate - 1 / 3) < 1e-9);
     assert.equal(m.avg_dwell_ms, Math.round((800 + 5000 + 3000) / 3)); assert.equal(m.avg_watch_ms_per_session, Math.round((800 + 8000) / 2));
-    assert.equal(m.by_model[0].model_version, "heur-1");
+    assert.equal(m.by_model[0].model_version, "heur-1"); assert.ok(Math.abs(m.engaged_rate - 2 / 3) < 1e-9); assert.ok(Math.abs(m.by_model[0].engaged - 2 / 3) < 1e-9);
   } finally { await s.app.close(); }
 });

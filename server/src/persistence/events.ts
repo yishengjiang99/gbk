@@ -1,6 +1,7 @@
 // Feed impression log for personalization (docs/social/ranking.md). One row per song impression, with the
 // model version that ranked it, so offline eval can compare models. Lives in shares.sqlite.
 import type { DatabaseSync } from "node:sqlite";
+import { engagedSql } from "../ranking/ranker.ts";
 
 export const ACTIONS = ["rate", "comment", "remix", "open_studio", "share", "like", "follow", "profile_tap"] as const;
 export const MAX_ACTIONS = 8, MAX_SCROLL_V = 20000;
@@ -25,15 +26,16 @@ export class EventStore {
   /** Aggregate metrics over [since, now). */
   metrics(since: number) {
     const q = <T>(sql: string, ...a: (string | number)[]) => this.db.prepare(sql).get(...a) as T;
-    const base = q<{ n: number; dwell: number | null; skip: number | null; comp: number | null; pos: number | null; sessions: number; actors: number }>(
-      `SELECT COUNT(*) AS n, AVG(dwell_ms) AS dwell, AVG(fast_skip) AS skip, AVG(completed) AS comp, AVG(actions <> '[]') AS pos, COUNT(DISTINCT session) AS sessions, COUNT(DISTINCT actor) AS actors FROM impressions WHERE created_at >= ?`, since);
+    const base = q<{ n: number; dwell: number | null; skip: number | null; comp: number | null; pos: number | null; eng: number | null; sessions: number; actors: number }>(
+      `SELECT COUNT(*) AS n, AVG(dwell_ms) AS dwell, AVG(fast_skip) AS skip, AVG(completed) AS comp, AVG(actions <> '[]') AS pos, AVG(${engagedSql()}) AS eng, COUNT(DISTINCT session) AS sessions, COUNT(DISTINCT actor) AS actors FROM impressions WHERE created_at >= ?`, since);
     const perSession = q<{ w: number | null }>(`SELECT AVG(w) AS w FROM (SELECT SUM(dwell_ms) AS w FROM impressions WHERE created_at >= ? GROUP BY session)`, since).w;
     // D1 retention: actors active on day d who are active again on day d+1 (days fully inside the window).
     const ret = q<{ r: number | null }>(`WITH d AS (SELECT DISTINCT actor, created_at / 86400000 AS day FROM impressions WHERE created_at >= ?)
       SELECT AVG(CASE WHEN EXISTS (SELECT 1 FROM d d2 WHERE d2.actor = d.actor AND d2.day = d.day + 1) THEN 1.0 ELSE 0 END) AS r FROM d WHERE d.day < (SELECT MAX(day) FROM d)`, since).r;
-    const byModel = this.db.prepare(`SELECT model_version, COUNT(*) AS n, AVG(dwell_ms) AS dwell, AVG(fast_skip) AS skip, AVG(completed) AS comp FROM impressions WHERE created_at >= ? GROUP BY model_version ORDER BY n DESC`).all(since);
+    // engaged = the ranker's training label (lr-eng vs heur-2 is the comparison to watch after a promotion)
+    const byModel = this.db.prepare(`SELECT model_version, COUNT(*) AS n, AVG(dwell_ms) AS dwell, AVG(fast_skip) AS skip, AVG(completed) AS comp, AVG(${engagedSql()}) AS engaged FROM impressions WHERE created_at >= ? GROUP BY model_version ORDER BY n DESC`).all(since);
     return { impressions: base.n, sessions: base.sessions, actors: base.actors, avg_dwell_ms: Math.round(base.dwell ?? 0), skip_rate: base.skip ?? 0, completion_rate: base.comp ?? 0,
-      positive_action_rate: base.pos ?? 0, avg_watch_ms_per_session: Math.round(perSession ?? 0), d1_retention: ret, by_model: byModel };
+      positive_action_rate: base.pos ?? 0, engaged_rate: base.eng ?? 0, avg_watch_ms_per_session: Math.round(perSession ?? 0), d1_retention: ret, by_model: byModel };
   }
   purgeActor(actor: string) { this.db.prepare("DELETE FROM impressions WHERE actor = ?").run(actor); }
   /** Retention: listening events older than 60 days are deleted (privacy policy). */
