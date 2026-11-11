@@ -1,8 +1,8 @@
 // Personalized "For you" ranking (docs/social/ranking.md). Small and in-process:
 //   1. candidate generation: named sources with quotas (coeng, affinity, artists, trending, fresh < 48 h always in,
 //      cold = popularity + freshness for actors with no history); union capped at POOL_MAX.
-//   2. pointwise value: expected listen value from two nightly LR heads (lr2: P(complete), P(fast skip)) once a
-//      model passes the promotion gate, otherwise HEURISTIC weights · features.
+//   2. pointwise value: P(engaged) from the nightly LR model (lr-eng) once it beats heur-2 on the holdout,
+//      otherwise HEURISTIC weights · features (heur-2).
 //   3. re-rank: freshness boost, ~12% epsilon exploration, diversity (max 2 in a row per artist, max 3 per label).
 //   4. session-aware: impressions from the current session (fast skips / long dwell) steer tags and artists.
 import type { DatabaseSync } from "node:sqlite";
@@ -10,12 +10,13 @@ import type { DatabaseSync } from "node:sqlite";
 export const FEATURES = ["affinity", "coeng", "popularity", "freshness", "session", "seen"] as const;
 export type Weights = Record<(typeof FEATURES)[number], number> & { bias: number };
 export const HEURISTIC: Weights = { bias: 0, affinity: 1.0, coeng: 0.8, popularity: 0.6, freshness: 0.4, session: 1.2, seen: -0.6 };
-/** Learned model (lr2): two pointwise LR heads on the same features; value = expected listen value. */
-export interface Model { complete: Weights; skip: Weights; auc_skip?: number | null }
-export const SKIP_LAMBDA = 1.0, DUR_CAP_S = 180;
+/** Learned model (lr-eng): one L2-regularized LR on raw features; value = P(engaged). Gate stats are stored with it. */
+export interface Model { engaged: Weights; auc?: number | null; auc_heur?: number | null; win?: number | null }
 const sig = (z: number) => 1 / (1 + Math.exp(-z));
-/** Labels: completion = completed, replay, or listen_ratio >= 0.9; fast skip = dwell < 2 s (as logged). */
-export const labels = (i: { completed: number; replay?: number; listen_ratio?: number; fast_skip: number }) => ({ complete: i.completed || i.replay || (i.listen_ratio ?? 0) >= 0.9 ? 1 : 0, skip: i.fast_skip ? 1 : 0 });
+/** A stored model is usable only with an `engaged` head whose weights are all finite (else heur-2). */
+export function parseModel(json: string): Model | null {
+  try { const m = JSON.parse(json) as Partial<Model>; const w = m.engaged; return w && ["bias", ...FEATURES].every((k) => Number.isFinite(w[k as keyof Weights])) ? (m as Model) : null; } catch { return null; }
+}
 /** Engaged (approved 2026-11-10): completed, replay, >= 25% listened, >= 10 s on the card without a fast skip, or any action. */
 export const engaged = (i: { completed: number | boolean; replay?: number | boolean; listen_ratio?: number; dwell_ms: number; fast_skip: number | boolean; actions: string }) =>
   i.completed || i.replay || (i.listen_ratio ?? 0) >= 0.25 || (i.dwell_ms >= 10_000 && !i.fast_skip) || i.actions !== "[]" ? 1 : 0;
@@ -34,7 +35,7 @@ export function trainable(imps: Imp[]): Imp[] {
   return out.sort((a, b) => Number(a.created_at) - Number(b.created_at));
 }
 export const IMP_COLS = "actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at, feed, position";
-export const EPSILON = 0.12, MAX_AUTHOR_RUN = 2, MAX_LABEL_RUN = 3, MIN_TRAIN = 500, FRESH_HALF_LIFE_H = 48;
+export const EPSILON = 0.12, MAX_AUTHOR_RUN = 2, MAX_LABEL_RUN = 3, FRESH_HALF_LIFE_H = 48;
 
 /** Signal weight of one impression: completion/dwell/actions positive, fast skip negative. */
 export const signal = (i: { dwell_ms: number; completed: number; fast_skip: number; actions: string }) =>
@@ -63,19 +64,18 @@ const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Ma
 export class Ranker {
   weights: Weights = { ...HEURISTIC }; model: Model | null = null; version = "heur-2"; private cache: { at: number; key: string; songs: Song[] } | null = null;
   constructor(private db: DatabaseSync, private now: () => number = Date.now) {
-    this.db.exec("CREATE TABLE IF NOT EXISTS rank_models (version TEXT PRIMARY KEY, weights TEXT NOT NULL, n INTEGER NOT NULL, auc REAL, created_at INTEGER NOT NULL)");
-    // promoted: 1 = served, 0 = candidate that lost the gate. Pre-gate rows (NULL) were served, so they count as promoted.
-    if (!(this.db.prepare("PRAGMA table_info(rank_models)").all() as { name: string }[]).some((c) => c.name === "promoted")) this.db.exec("ALTER TABLE rank_models ADD COLUMN promoted INTEGER");
+    // promoted: 1 = the served model (at most one), 0 = lost the gate, retired or demoted. No write when the schema exists (read-only eval).
+    const cols = (this.db.prepare("PRAGMA table_info(rank_models)").all() as { name: string }[]).map((c) => c.name);
+    if (!cols.length) this.db.exec("CREATE TABLE rank_models (version TEXT PRIMARY KEY, weights TEXT NOT NULL, n INTEGER NOT NULL, auc REAL, created_at INTEGER NOT NULL, promoted INTEGER)");
+    else if (!cols.includes("promoted")) this.db.exec("ALTER TABLE rank_models ADD COLUMN promoted INTEGER");
     this.reload();
   }
-  /** Load the latest promoted model (or stay on HEURISTIC). */
-  reload() {
-    const m = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted IS NULL OR promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined;
-    this.weights = { ...HEURISTIC }; this.model = null; this.version = "heur-2";
-    if (m) { const w = JSON.parse(m.weights) as Weights | Model; this.version = m.version; if ("complete" in w) this.model = w; else this.weights = w; }
+  /** Serve the latest promoted model; none, a legacy row or bad (NaN) weights fall back to heur-2. */
+  reload() { const p = this.promoted(); this.weights = { ...HEURISTIC }; this.model = p?.model ?? null; this.version = p?.version ?? "heur-2"; }
+  promoted() {
+    const r = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined;
+    const model = r ? parseModel(r.weights) : null; return r && model ? { version: r.version, model } : null;
   }
-  /** Latest promoted model (lr2 two-head); a legacy single-head row or none counts as "no model" for the gate. */
-  private promoted() { const m = this.db.prepare("SELECT version, weights FROM rank_models WHERE promoted IS NULL OR promoted = 1 ORDER BY created_at DESC LIMIT 1").get() as { version: string; weights: string } | undefined; const w = m ? JSON.parse(m.weights) as Weights | Model : null; return m && w && "complete" in w ? { version: m.version, model: w } : null; }
   /** Catalog: public non-wip songs, the top CATALOG_MAX by score plus every song published in the last FRESH_WINDOW_H. */
   private songs(): Song[] {
     // Cheap freshness key so a just-published / unpublished song shows up (or disappears) immediately.
@@ -153,11 +153,9 @@ export class Ranker {
     for (const s of songs) { if (pool.size >= POOL_MAX) break; if (!pool.has(s.id)) { pool.add(s.id); (src.get(s.id) ?? src.set(s.id, []).get(s.id)!).push("trending"); } }
     return { pool, sources: src };
   }
-  /** Score: with a learned model, expected listen value P(complete)·min(dur,180)/180 − SKIP_LAMBDA·P(fast skip); else HEURISTIC w·f. */
-  value(f: Record<string, number>, durS = 60, m: Model | null = this.model, w = this.weights) {
-    const x = FEATURES.map((k) => f[k] ?? 0);
-    if (m) return sig(lin(x, m.complete)) * (Math.min(durS, DUR_CAP_S) / DUR_CAP_S) - SKIP_LAMBDA * sig(lin(x, m.skip));
-    return lin(x, w);
+  /** Score: P(engaged) with a learned model, else HEURISTIC w·f. */
+  value(f: Record<string, number>, m: Model | null = this.model, w = this.weights) {
+    const x = FEATURES.map((k) => f[k] ?? 0); return m ? sig(lin(x, m.engaged)) : lin(x, w);
   }
 
   /** Full ranked id list for an actor; deterministic for (seed, asOf) so pages never duplicate or drop songs: the
@@ -171,7 +169,7 @@ export class Ranker {
     if (o.actor && o.session) for (const x of this.db.prepare("SELECT DISTINCT share_id FROM impressions WHERE actor = ? AND session = ? AND created_at < ?").all(o.actor, o.session, t) as { share_id: string }[]) pool.delete(x.share_id);
     // Songs this actor already saw rank after every unseen one: their own impressions raise popularity and affinity
     // more than the capped `seen` penalty lowers them, so a top song would otherwise lead every new session.
-    const scored = songs.filter((s) => pool.has(s.id)).map((s) => ({ s, seen: c.seen.has(s.id) ? 1 : 0, v: this.value(this.feat(c, s), s.dur) + (s.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
+    const scored = songs.filter((s) => pool.has(s.id)).map((s) => ({ s, seen: c.seen.has(s.id) ? 1 : 0, v: this.value(this.feat(c, s)) + (s.owner === o.viewer ? -0.5 : 0) + r() * 1e-3 }));
     scored.sort((a, b) => a.seen - b.seen || b.v - a.v);
     // cold-start candidates: < FRESH_WINDOW_H old with < COLD_K impressions in total (as of t)
     const young = scored.filter((x) => t - x.s.published_at < FRESH_WINDOW_H * 3_600_000).map((x) => x.s.id);
@@ -211,28 +209,38 @@ export class Ranker {
     return { ids: res.map((s) => s.id), owners: new Map(res.map((s) => [s.id, s.owner])), version: this.version, cold, sources };
   }
 
-  /** Nightly: fit two LR heads, P(complete) and P(fast skip), on point-in-time features (as of each impression's
-   *  hour, with its own session); the last HOLDOUT_DAYS are held out. The candidate is always stored, and promoted
-   *  only if both heads' holdout AUC are >= the promoted model's on the same holdout (HEURISTIC = no model). */
+  /** Nightly: fit, gate, store. Every fitted candidate is stored; promoted only if it clearly beats heur-2 and the
+   *  current model on the holdout (see gate()). A current model that now loses to heur-2 is demoted. */
   train(): TrainResult | TrainSkip {
-    const t0 = Date.now(); const t = this.now();
+    const t0 = Date.now(); const g = this.gate(); if ("skipped" in g) return g;
+    const { model, cur, promote, demote } = g; const t = this.now();
+    let version = `lr-eng-${new Date(t).toISOString().slice(0, 10).replace(/-/g, "")}`; if (cur?.version === version && !promote) version += "-c";
+    this.db.prepare("INSERT OR REPLACE INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES (?,?,?,?,?,?)").run(version, JSON.stringify(model), g.n, model.auc ?? null, t, promote ? 1 : 0);
+    // promoted = 1 marks the one served model: a new winner retires the old one; a demoted one goes back to heur-2
+    if (promote || demote) this.db.prepare("UPDATE rank_models SET promoted = 0 WHERE promoted = 1 AND version <> ?").run(promote ? version : "");
+    this.reload();
+    return { version, n: g.n, holdout: g.holdout, labels: g.labels, auc: g.auc, auc_heur: g.auc_heur, auc_prev: g.auc_prev, win: g.win, promoted: promote, demoted: demote ? cur!.version : null, previous: cur?.version ?? null, ms: Date.now() - t0, model };
+  }
+  /** Fit + gate decision without writing (train() and the rank-eval --preview). Holdout = last HOLDOUT_FRAC of rows
+   *  by time, at least HOLDOUT_MIN_DAYS. Promote iff AUC >= max(heur-2, current) + PROMOTE_MARGIN and the candidate
+   *  beats heur-2 in >= BOOT_WIN of BOOT_N seeded resamples of holdout actors. */
+  gate(): Gate | TrainSkip {
+    const t = this.now();
     const imps = trainable(this.db.prepare(`SELECT ${IMP_COLS} FROM impressions WHERE created_at > ? AND created_at < ? ORDER BY id DESC LIMIT 20000`).all(t - 30 * 86_400_000, t) as Imp[]);
     if (imps.length < MIN_TRAIN) return { skipped: "few_impressions", impressions: imps.length, n: 0, holdout: 0, min: MIN_TRAIN };
-    const { tr, ho } = this.dataset(imps, t - HOLDOUT_DAYS * 86_400_000);
-    if (tr.length < MIN_TRAIN || !ho.length) return { skipped: tr.length < MIN_TRAIN ? "few_train_rows" : "no_holdout", impressions: imps.length, n: tr.length, holdout: ho.length, min: MIN_TRAIN };
-    // each head needs MIN_LABELS positives and negatives in train and holdout, else the AUC is noise
-    const cnt = (rs: Row[], k: "c" | "s") => { const p = rs.filter((d) => d[k]).length; return [p, rs.length - p]; };
-    const lc = { train_complete: cnt(tr, "c"), train_skip: cnt(tr, "s"), holdout_complete: cnt(ho, "c"), holdout_skip: cnt(ho, "s") };
-    if (Object.values(lc).flat().some((v) => v < MIN_LABELS)) return { skipped: "few_holdout_labels", impressions: imps.length, n: tr.length, holdout: ho.length, min: MIN_LABELS, labels: lc };
-    const model: Model = { complete: fitLR(tr.map((d) => ({ x: d.x, y: d.c }))), skip: fitLR(tr.map((d) => ({ x: d.x, y: d.s }))) };
-    const ev = (m: Model) => ({ c: aucOf(ho.map((d) => lin(d.x, m.complete)), ho.map((d) => d.c)), s: aucOf(ho.map((d) => lin(d.x, m.skip)), ho.map((d) => d.s)) });
-    const a = ev(model); model.auc_skip = a.s; const cur = this.promoted(); const b = cur ? ev(cur.model) : null;
-    const ge = (x: number | null, y: number | null | undefined) => y === null || y === undefined || (x !== null && x >= y);
-    const promote = !cur || (ge(a.c, b!.c) && ge(a.s, b!.s));
-    let version = `lr2-${new Date(t).toISOString().slice(0, 10).replace(/-/g, "")}`; if (cur?.version === version && !promote) version += "-c";
-    this.db.prepare("INSERT OR REPLACE INTO rank_models (version, weights, n, auc, created_at, promoted) VALUES (?,?,?,?,?,?)").run(version, JSON.stringify(model), tr.length, a.c, t, promote ? 1 : 0);
-    if (promote) { this.model = model; this.version = version; }
-    return { version, n: tr.length, holdout: ho.length, auc: a.c, auc_skip: a.s, promoted: promote, previous: cur?.version ?? null, previous_auc: b?.c ?? null, previous_auc_skip: b?.s ?? null, ms: Date.now() - t0, model };
+    const split = Math.min(Number(imps[Math.floor(imps.length * (1 - HOLDOUT_FRAC))].created_at), t - HOLDOUT_MIN_DAYS * 86_400_000);
+    const { tr, ho } = this.dataset(imps, split); const cnt = (rs: Row[]) => { const p = rs.filter((d) => d.y).length; return [p, rs.length - p]; };
+    const labels = { train: cnt(tr), holdout: cnt(ho) }; const base = { impressions: imps.length, n: tr.length, holdout: ho.length, labels };
+    if (tr.length < MIN_TRAIN) return { skipped: "few_train_rows", ...base, min: MIN_TRAIN };
+    if (labels.train.some((v) => v < MIN_TRAIN_LABELS)) return { skipped: "few_train_labels", ...base, min: MIN_TRAIN_LABELS };
+    if (labels.holdout.some((v) => v < MIN_HOLDOUT_LABELS)) return { skipped: "few_holdout_labels", ...base, min: MIN_HOLDOUT_LABELS };
+    const w = fitLR(tr.map((d) => ({ x: d.x, y: d.y }))); const cur = this.promoted();
+    const y = ho.map((d) => d.y), sC = ho.map((d) => lin(d.x, w)), sH = ho.map((d) => lin(d.x, HEURISTIC)), sP = cur ? ho.map((d) => lin(d.x, cur.model.engaged)) : null;
+    const auc = aucOf(sC, y), auc_heur = aucOf(sH, y), auc_prev = sP ? aucOf(sP, y) : null;
+    const win = bootWin(ho.map((d) => d.actor), y, sC, sH);
+    const promote = auc !== null && auc_heur !== null && auc >= Math.max(auc_heur, auc_prev ?? -Infinity) + PROMOTE_MARGIN && win >= BOOT_WIN;
+    const demote = !promote && !!cur && auc_prev !== null && auc_heur !== null && auc_prev < auc_heur;
+    return { ...base, model: { engaged: w, auc, auc_heur, win }, cur, auc, auc_heur, auc_prev, win, promote, demote };
   }
   /** Point-in-time training rows (features as of each impression's hour + its session), split at `split`. */
   dataset(imps: Omit<Imp, "feed" | "position">[], split: number) {
@@ -240,24 +248,45 @@ export class Ranker {
     for (const i of imps) {
       const hr = Math.floor(Number(i.created_at) / 3_600_000) * 3_600_000; const key = `${i.actor}\u0001${i.session}\u0001${hr}`;
       let m = cache.get(key); if (!m) { if (cache.size > 2000) cache.clear(); m = new Map(this.features(i.actor, i.session, hr).map((x) => [x.song.id, { f: x.f as Record<string, number>, song: x.song }])); cache.set(key, m); }
-      const e = m.get(i.share_id); if (!e || e.song.owner === i.actor) continue; const l = labels(i); const at = Number(i.created_at);
-      (at >= split ? ho : tr).push({ x: FEATURES.map((k) => e.f[k]), c: l.complete, s: l.skip, g: signal(i), dur: e.song.dur, fresh: at - e.song.published_at < FRESH_WINDOW_H * 3_600_000, at, actor: i.actor, session: i.session, share_id: i.share_id });
+      const e = m.get(i.share_id); if (!e || e.song.owner === i.actor) continue; const at = Number(i.created_at);
+      (at >= split ? ho : tr).push({ x: FEATURES.map((k) => e.f[k]), y: engaged(i), g: signal(i), dur: e.song.dur, fresh: at - e.song.published_at < FRESH_WINDOW_H * 3_600_000, at, actor: i.actor, session: i.session, share_id: i.share_id });
     }
     return { tr, ho };
   }
 }
-/** train() did not fit a model (too little data); logged as rank_train_skipped so a skip is visible. */
-export interface TrainSkip { skipped: "few_impressions" | "few_train_rows" | "no_holdout" | "few_holdout_labels"; impressions: number; n: number; holdout: number; min: number; labels?: Record<string, number[]> }
-export interface TrainResult { version: string; n: number; holdout: number; auc: number | null; auc_skip: number | null; promoted: boolean; previous: string | null; previous_auc: number | null; previous_auc_skip: number | null; ms: number; model: Model }
-export type Row = { x: number[]; c: number; s: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
-export const HOLDOUT_DAYS = 3;
-/** Min positives and negatives per head ([pos, neg]) in train and holdout before training or promoting. */
-export const MIN_LABELS = 30;
+/** train() did not fit a model (too little data); logged as rank_train_skipped so a skip is visible. labels = [pos, neg]. */
+export interface TrainSkip { skipped: "few_impressions" | "few_train_rows" | "few_train_labels" | "few_holdout_labels"; impressions: number; n: number; holdout: number; min: number; labels?: { train: number[]; holdout: number[] } }
+export interface Gate { impressions: number; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; model: Model; cur: { version: string; model: Model } | null; auc: number | null; auc_heur: number | null; auc_prev: number | null; win: number; promote: boolean; demote: boolean }
+export interface TrainResult { version: string; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; auc: number | null; auc_heur: number | null; auc_prev: number | null; win: number; promoted: boolean; demoted: string | null; previous: string | null; ms: number; model: Model }
+export type Row = { x: number[]; y: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
+/** Approved 2026-11-10, sized to ~800 clean rows / ~200 engaged per 30 days. */
+export const MIN_TRAIN = 300, MIN_TRAIN_LABELS = 100, MIN_HOLDOUT_LABELS = 30, HOLDOUT_FRAC = 0.2, HOLDOUT_MIN_DAYS = 3;
+export const PROMOTE_MARGIN = 0.02, BOOT_N = 1000, BOOT_WIN = 0.9, L2 = 1.0;
 export function lin(x: number[], w: Weights) { return w.bias + x.reduce((a, v, j) => a + v * (w[FEATURES[j]] ?? 0), 0); }
-function fitLR(data: { x: number[]; y: number }[]): Weights {
-  const w = new Array(FEATURES.length + 1).fill(0); const lr = 0.1, l2 = 1e-3;
-  for (let ep = 0; ep < 200; ep++) { const g = new Array(w.length).fill(0); for (const d of data) { const z = w[0] + d.x.reduce((a, v, j) => a + v * w[j + 1], 0); const e = 1 / (1 + Math.exp(-z)) - d.y; g[0] += e; d.x.forEach((v, j) => { g[j + 1] += e * v; }); } for (let j = 0; j < w.length; j++) w[j] -= lr * (g[j] / data.length + (j ? l2 * w[j] : 0)); }
-  return { bias: w[0], ...Object.fromEntries(FEATURES.map((k, j) => [k, w[j + 1]])) } as Weights;
+/** Logistic regression, fit on standardized features with an L2 penalty (L2 · ||w||² / 2, bias free), returned in raw-feature weights. */
+export function fitLR(data: { x: number[]; y: number }[]): Weights {
+  const d = FEATURES.length, n = data.length || 1;
+  const mu = FEATURES.map((_, j) => data.reduce((a, r) => a + r.x[j], 0) / n);
+  const sd = FEATURES.map((_, j) => Math.sqrt(data.reduce((a, r) => a + (r.x[j] - mu[j]) ** 2, 0) / n)); const live = sd.map((v) => v > 1e-3); // features are in [0, 1]: a near-constant one would get a huge raw weight
+  const z = data.map((r) => r.x.map((v, j) => (live[j] ? (v - mu[j]) / sd[j] : 0))); const w = new Array(d + 1).fill(0); // (near-)constant features keep weight 0
+  for (let ep = 0; ep < 500; ep++) {
+    const g = new Array(d + 1).fill(0);
+    data.forEach((r, i) => { const e = sig(w[0] + z[i].reduce((a, v, j) => a + v * w[j + 1], 0)) - r.y; g[0] += e; z[i].forEach((v, j) => { g[j + 1] += e * v; }); });
+    for (let j = 0; j <= d; j++) w[j] -= 0.5 * (g[j] + (j ? L2 * w[j] : 0)) / n;
+  }
+  const raw = FEATURES.map((_, j) => (live[j] ? w[j + 1] / sd[j] : 0));
+  return { bias: w[0] - raw.reduce((a, v, j) => a + v * mu[j], 0), ...Object.fromEntries(FEATURES.map((k, j) => [k, raw[j]])) } as Weights;
+}
+/** Share of BOOT_N seeded resamples of actors (with replacement) where AUC(a) > AUC(b); resamples without both labels are skipped. */
+export function bootWin(actors: string[], y: number[], a: number[], b: number[], n = BOOT_N, seed = 1) {
+  const by = new Map<string, number[]>(); actors.forEach((x, i) => (by.get(x) ?? by.set(x, []).get(x)!).push(i)); const groups = [...by.values()]; const r = rng(seed);
+  let wins = 0, valid = 0;
+  for (let k = 0; k < n; k++) {
+    const idx: number[] = []; for (let j = 0; j < groups.length; j++) idx.push(...groups[Math.floor(r() * groups.length)]);
+    const yy = idx.map((i) => y[i]), x = aucOf(idx.map((i) => a[i]), yy), z = aucOf(idx.map((i) => b[i]), yy); if (x === null || z === null) continue;
+    valid++; if (x > z) wins++;
+  }
+  return valid ? wins / valid : 0;
 }
 /** Run train() in a worker thread on its own connection to the same database file; resolves with the result
  *  (the caller then calls ranker.reload()). In-memory databases train in-process. */
@@ -269,8 +298,10 @@ export async function trainInWorker(ranker: Ranker, file: string | null, now?: n
     : new Worker(`import("tsx/esm/api").then((m) => { m.register(); return import(${JSON.stringify(`file://${ts}`)}); });`, { eval: true, workerData: { file, now } });
   return new Promise((res, rej) => { w.once("message", (m: { ok: boolean; result?: TrainResult | TrainSkip | null; error?: string }) => { void w.terminate(); if (m.ok) { ranker.reload(); res(m.result ?? null); } else rej(new Error(m.error)); }); w.once("error", rej); });
 }
+/** ROC AUC (Mann-Whitney); tied scores share their mean rank, so a constant scorer gets 0.5. */
 export function aucOf(score: number[], y: number[]): number | null {
   const pos = y.filter((v) => v).length, neg = y.length - pos; if (!pos || !neg) return null;
-  const idx = score.map((s, i) => [s, y[i]] as const).sort((a, b) => a[0] - b[0]); let rank = 0, sum = 0;
-  for (const [, l] of idx) { rank++; if (l) sum += rank; } return (sum - (pos * (pos + 1)) / 2) / (pos * neg);
+  const idx = score.map((s, i) => [s, y[i]] as const).sort((a, b) => a[0] - b[0]); let sum = 0;
+  for (let i = 0; i < idx.length;) { let j = i; while (j < idx.length && idx[j][0] === idx[i][0]) j++; const mid = (i + 1 + j) / 2; for (let k = i; k < j; k++) if (idx[k][1]) sum += mid; i = j; }
+  return (sum - (pos * (pos + 1)) / 2) / (pos * neg);
 }
