@@ -11,10 +11,11 @@ export function sharePayload(s: ShareTarget): { line: string; text: string; x: s
 }
 
 export function webShare(s: ShareTarget) {
-  const { line, url, text } = sharePayload(s);
+  const { text } = sharePayload(s);
   if (s.slug) markAction(s.slug, "share");
+  // iOS drops text when a URL is also passed (Copy, X, etc.). Share one string only.
   const n = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
-  if (n.share) void n.share({ title: line, text: line, url }).catch(() => undefined);
+  if (n.share) void n.share({ text }).catch(() => undefined);
   else void navigator.clipboard?.writeText(text);
 }
 

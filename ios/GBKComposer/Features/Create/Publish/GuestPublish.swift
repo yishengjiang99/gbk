@@ -30,7 +30,11 @@ struct PublishDraft: Equatable {
     var canPublish: Bool { !title.trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
-struct PublishResult: Equatable { let slug: String; let url: URL; let author: String; let title: String }
+struct PublishResult: Equatable {
+    let slug: String; let url: URL; let author: String; let title: String
+    /// Full share body for ShareLink: `"Title" by @handle` then the /s/<slug> URL.
+    var shareText: String { SongShareText.text(title: title, handle: author, url: url) }
+}
 
 enum PublishError: Error, Equatable {
     case limit(retryAfter: Int?)          // 429 GUEST_PUBLISH_LIMIT

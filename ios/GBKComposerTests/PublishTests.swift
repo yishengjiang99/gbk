@@ -55,5 +55,6 @@ final class PublishDraftTests: XCTestCase {
         XCTAssertEqual(r.author, "mellowfox")
         XCTAssertEqual(r.title, "Gentle Piano")
         XCTAssertTrue(r.url.absoluteString.hasPrefix("https://compose.grepawk.com/s/"))
+        XCTAssertEqual(r.shareText, "\"Gentle Piano\" by @mellowfox\n\(r.url.absoluteString)")
     }
 }

@@ -118,9 +118,10 @@ struct Song: Codable, Hashable, Identifiable {
     var xIntentUrl: String? = nil
 
     var id: String { slug }
-    /// `"Title" by @handle` for ShareLink subject/message; prefers the server field, else builds the same wording.
+    /// `"Title" by @handle`; prefers the server `share_title`, else builds the same wording.
     var shareLine: String { shareTitle?.isEmpty == false ? shareTitle! : SongShareText.line(title: title, handle: author.handle) }
-    var shareMessage: String { shareText?.isEmpty == false ? shareText! : "\(shareLine)\n\(shareURL.absoluteString)" }
+    /// Full share body for ShareLink (title + author + URL). Prefer the server `share_text`.
+    var shareMessage: String { shareText?.isEmpty == false ? shareText! : SongShareText.text(title: title, handle: author.handle, url: shareURL) }
     var mp3URL: URL? { media?.mp3.flatMap(URL.init(string:)) }
     /// What the feed plays: the song's MIDI, sequenced live through SF2Engine (no MP3/WAV playback).
     var midiURL: URL? { media?.midi.flatMap(URL.init(string:)) }
@@ -226,5 +227,10 @@ enum SongShareText {
         if h.hasPrefix("@") { h = String(h.dropFirst()) }
         let ok = (1...15).contains(h.count) && h.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "_" }
         return ok ? h : nil
+    }
+
+    /// Share body: the line, then the /s/<slug> URL. Used as the ShareLink item so Copy/X/Messages keep the text.
+    static func text(title: String?, handle: String?, url: URL, xHandle: String? = nil, forX: Bool = false) -> String {
+        "\(line(title: title, handle: handle, xHandle: xHandle, forX: forX))\n\(url.absoluteString)"
     }
 }

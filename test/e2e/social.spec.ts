@@ -514,7 +514,7 @@ test("social remix fallback: a share that fails to load still lands in a FRESH s
   } finally { await owner.request.delete(`/api/shares/${shA.slug}`, { headers: oh }).catch(() => undefined); await owner.close(); }
 });
 
-test("social share: copy text and X intent include song title and author", async ({ page, browser, baseURL }) => {
+test("social share: copy text, X intent, and navigator.share include song title and author", async ({ page, browser, baseURL }) => {
   const base = new URL(baseURL!).origin;
   const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
   const me = await (await owner.request.get("/api/me")).json() as { handle: string };
@@ -528,11 +528,27 @@ test("social share: copy text and X intent include song title and author", async
     expect(song.url).toContain(`/s/${sh.slug}`);
     expect(decodeURIComponent(new URL(song.x_intent_url).searchParams.get("text")!)).toBe(song.share_text);
 
+    // iOS drops text when a URL is also passed; stub share and assert we send only text.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __gbkShares: Array<{ text?: string; title?: string; url?: string; keys: string[] }> };
+      w.__gbkShares = [];
+      const n = navigator as Navigator & { share: (d: ShareData) => Promise<void> };
+      n.share = async (d: ShareData) => { w.__gbkShares.push({ text: d.text, title: d.title, url: d.url, keys: Object.keys(d) }); };
+    });
     await page.goto(`/feed?sort=new`);
     const card = page.getByTestId("feed-card").filter({ hasText: title });
     await expect(card).toBeVisible();
     const share = card.getByTestId("card-share");
     await expect(share).toHaveAttribute("data-share-text", song.share_text);
+    await share.click();
+    const payload = await page.evaluate(() => (window as unknown as { __gbkShares: Array<{ text?: string; title?: string; url?: string; keys: string[] }> }).__gbkShares);
+    expect(payload).toHaveLength(1);
+    expect(payload[0].text).toBe(song.share_text);
+    expect(payload[0].text).toContain(title);
+    expect(payload[0].text).toContain(`@${me.handle}`);
+    expect(payload[0].text).toContain(song.url);
+    expect(payload[0].url).toBeUndefined();
+    expect(payload[0].keys).toEqual(["text"]);
     const x = card.getByTestId("card-share-x");
     await expect(x).toHaveAttribute("href", song.x_intent_url);
     await expect(x).toHaveText("Share to 𝕏");
