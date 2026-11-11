@@ -101,6 +101,7 @@ test("ranking v2 / phase 4: candidate sources with quotas; a fresh 0-score song 
 test("ranking v2 / phase 5: no repeats within a session over 5 pages, no dup/drop; label runs <= 3 on any label; near-dups 1 per page; cold slot in the first 8", () => {
   const fx = fixture(); const r = rand(11); const L = ["lofi", "jazz", "classical", "pop", "ambient"];
   const ids = Array.from({ length: 120 }, (_, i) => fx.song({ owner: `o${i % 12}`, title: `T${i}`, labels: [L[i % 5], L[(i + 1) % 5]], tags: [`t${i % 7}`], score: r() * 3, ageH: 24 * 5 + i }));
+  for (const id of ids) fx.crowd(id, Math.floor(r() * 4));
   // near-duplicates: same owner + same title, and same owner + same remix source
   const d1 = fx.song({ owner: "dup", title: "Same", score: 9 }), d2 = fx.song({ owner: "dup", title: "same ", score: 9 }), d3 = fx.song({ owner: "dup", title: "X", parent: ids[0], score: 9 }), d4 = fx.song({ owner: "dup", title: "Y", parent: ids[0], score: 9 });
   const newSong = fx.song({ owner: "fresh", title: "Brand new", labels: ["jazz"], score: 0, ageH: 2 });
@@ -138,7 +139,7 @@ test("ranking v2 / phase 7: account deletion removes every impression column (in
 });
 
 test("ranking: a song the actor saw in an earlier session does not lead their next session's feed", () => {
-  const fx = fixture(); const hit = fx.song({ owner: "o1", title: "Hit", score: 10 });
+  const fx = fixture(); const hit = fx.song({ owner: "o1", title: "Hit", score: 10 }); fx.crowd(hit, 5);
   for (let i = 0; i < 20; i++) fx.song({ owner: `o${i % 5 + 2}`, title: `S${i}`, score: 0.1, ageH: 24 * 5 });
   const rk = new Ranker(fx.db, fx.now);
   assert.equal(rk.rank({ actor: "inst:viewer-0001", session: "s2", seed: 1 }).ids[0], hit, "unseen hit leads");

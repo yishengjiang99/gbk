@@ -1,7 +1,7 @@
 // Offline ranking eval (docs/social/ranking.md "Offline eval"): replays logged impressions with point-in-time
 // features and compares models. Used by scripts/rank-eval.ts and the tests.
 import type { DatabaseSync } from "node:sqlite";
-import { Ranker, HEURISTIC, FEATURES, aucOf, lin, type Model, type Row, type Weights } from "./ranker.ts";
+import { Ranker, HEURISTIC, FEATURES, IMP_COLS, aucOf, lin, trainable, type Imp, type Model, type Row, type Weights } from "./ranker.ts";
 
 export type Scorer = { name: string; version: string; complete: (x: number[]) => number; skip: (x: number[]) => number; value: (r: Row) => number };
 export function scorers(rk: Ranker, db: DatabaseSync): Scorer[] {
@@ -37,7 +37,7 @@ export function evaluate(rows: Row[], ss: Scorer[]): EvalReport[] {
 /** Load impressions in [from, to) and build point-in-time rows. */
 export function evalRange(db: DatabaseSync, from: number, to: number, now = Date.now()) {
   const rk = new Ranker(db, () => now);
-  const imps = db.prepare("SELECT actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at FROM impressions WHERE created_at >= ? AND created_at < ? AND position >= 0 ORDER BY id").all(from, to) as Parameters<Ranker["dataset"]>[0];
+  const imps = trainable(db.prepare(`SELECT ${IMP_COLS} FROM impressions WHERE created_at >= ? AND created_at < ?`).all(from, to) as Imp[]);
   const { ho } = rk.dataset(imps, -Infinity);
   return evaluate(ho, scorers(rk, db));
 }

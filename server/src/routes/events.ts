@@ -60,7 +60,7 @@ export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: Session
       const dwell = Math.round(num(e.dwell_ms, 0, 3_600_000));
       rows.push({ actor, session, share_id: r.id, dwell_ms: dwell, listen_ratio: num(e.listen_ratio, 0, 50), completed: !!e.completed, fast_skip: e.fast_skip === undefined ? dwell < 2000 : !!e.fast_skip,
         replay: !!e.replay, actions: (Array.isArray(e.actions) ? e.actions : []).map(String).filter((a) => (ACTIONS as readonly string[]).includes(a)).slice(0, MAX_ACTIONS),
-        position: Math.round(num(e.position, 0, 100000)), feed: typeof e.feed === "string" ? e.feed.slice(0, 32) : "for_you",
+        position: e.position === undefined ? 0 : Math.round(num(e.position, -1, 100000)) /* -1 = action-only row */, feed: typeof e.feed === "string" ? e.feed.slice(0, 32) : "for_you",
         model_version: typeof e.model_version === "string" ? e.model_version.slice(0, 32) : "unknown", client, ts: Math.round(num(e.ts, 0, 9e15)),
         scroll_v: e.scroll_v === undefined || e.scroll_v === null || !Number.isFinite(Number(e.scroll_v)) ? null : Math.round(num(e.scroll_v, 0, MAX_SCROLL_V)) });
     }

@@ -70,12 +70,17 @@ final class ImpressionLogger {
     private var clock: (time: @MainActor () -> Double?, duration: @MainActor () -> Double?)?
     private var sampler: Timer?
     private var flusher: Timer?
+    /// Simulator runs (CI, UI tests, ios-sim-checks) never send impressions to the server.
     var send: ([Impression]) async -> Void = { events in
+        #if targetEnvironment(simulator)
+        _ = events
+        #else
         let body: [String: Any] = ["session": ImpressionLogger.session, "client": "ios",
                                    "events": events.map(ImpressionLogger.json)]
         var ep = Endpoint(path: "/api/events", method: .post, body: body)
         ep.headers["x-gbk-install"] = AnonymousIdentity.deviceID
         _ = try? await APIClient.shared.send(ep, as: OKResult.self)
+        #endif
     }
     var now: () -> Date = Date.init
     private var lastScroll: (y: Double, at: Date)?

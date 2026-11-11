@@ -16,6 +16,24 @@ export const SKIP_LAMBDA = 1.0, DUR_CAP_S = 180;
 const sig = (z: number) => 1 / (1 + Math.exp(-z));
 /** Labels: completion = completed, replay, or listen_ratio >= 0.9; fast skip = dwell < 2 s (as logged). */
 export const labels = (i: { completed: number; replay?: number; listen_ratio?: number; fast_skip: number }) => ({ complete: i.completed || i.replay || (i.listen_ratio ?? 0) >= 0.9 ? 1 : 0, skip: i.fast_skip ? 1 : 0 });
+/** Engaged (approved 2026-11-10): completed, replay, >= 25% listened, >= 10 s on the card without a fast skip, or any action. */
+export const engaged = (i: { completed: number | boolean; replay?: number | boolean; listen_ratio?: number; dwell_ms: number; fast_skip: number | boolean; actions: string }) =>
+  i.completed || i.replay || (i.listen_ratio ?? 0) >= 0.25 || (i.dwell_ms >= 10_000 && !i.fast_skip) || i.actions !== "[]" ? 1 : 0;
+/** Same rule in SQL; `p` is the table alias prefix, e.g. "i.". */
+export const engagedSql = (p = "") => `(${p}completed = 1 OR ${p}replay = 1 OR ${p}listen_ratio >= 0.25 OR (${p}dwell_ms >= 10000 AND ${p}fast_skip = 0) OR ${p}actions <> '[]')`;
+/** Popularity feature: engaged impressions by others in the POP_WINDOW_D days before t. */
+export const POP_WINDOW_D = 14;
+/** Scripted swipe bursts (CI/UI tests): a session with >= BURST_MIN impressions averaging < BURST_GAP_MS apart. */
+export const BURST_MIN = 20, BURST_GAP_MS = 5000;
+export type Imp = { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number; feed: string; position: number };
+/** Training/eval rows: For you only, dwell > 0 (not action-only), no scripted bursts. Self-impressions are dropped in dataset(). */
+export function trainable(imps: Imp[]): Imp[] {
+  const by = new Map<string, Imp[]>(); for (const i of imps) if (i.feed === "for_you" && i.position >= 0 && i.dwell_ms > 0) (by.get(`${i.actor}\u0001${i.session}`) ?? by.set(`${i.actor}\u0001${i.session}`, []).get(`${i.actor}\u0001${i.session}`)!).push(i);
+  const out: Imp[] = [];
+  for (const g of by.values()) { const ts = g.map((i) => Number(i.created_at)); if (g.length >= BURST_MIN && Math.max(...ts) - Math.min(...ts) < g.length * BURST_GAP_MS) continue; out.push(...g); }
+  return out.sort((a, b) => Number(a.created_at) - Number(b.created_at));
+}
+export const IMP_COLS = "actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at, feed, position";
 export const EPSILON = 0.12, MAX_AUTHOR_RUN = 2, MAX_LABEL_RUN = 3, MIN_TRAIN = 500, FRESH_HALF_LIFE_H = 48;
 
 /** Signal weight of one impression: completion/dwell/actions positive, fast skip negative. */
@@ -29,7 +47,7 @@ export const QUOTAS: Record<Source, number> = { coeng: 200, affinity: 250, artis
 /** Cold start: one slot per COLD_BLOCK for a song < 48 h old with < COLD_K impressions. Near-dups: >= NEAR_DUP_GAP apart (max page size), so at most 1 per page. */
 export const COLD_K = 50, COLD_BLOCK = 8, NEAR_DUP_GAP = 50;
 export const POOL_MAX = 1000, CATALOG_MAX = 5000, FRESH_WINDOW_H = 48;
-interface Ctx { t: number; pref: Map<string, number>; sess: Map<string, number>; seen: Map<string, number>; co: Map<string, number>; artists: Map<string, number>; history: number; maxScore: number; maxCo: number }
+interface Ctx { t: number; pop: Map<string, number>; pref: Map<string, number>; sess: Map<string, number>; seen: Map<string, number>; co: Map<string, number>; artists: Map<string, number>; history: number; maxScore: number; maxCo: number }
 const keysOf = (s: Song) => [...s.tags.map((x) => `t:${x}`), ...s.labels.map((x) => `l:${x}`), `a:${s.owner}`, ...s.fam.map((x) => `f:${x}`)];
 const sq = (m: Map<string, number>, s: Song) => { let v = 0; for (const k of keysOf(s)) v += m.get(k) ?? 0; return Math.tanh(v / 3); };
 interface Song { id: string; owner: string; title: string; parent: string | null; score: number; published_at: number; tags: string[]; labels: string[]; fam: string[]; dur: number }
@@ -100,10 +118,18 @@ export class Ranker {
       for (const r of this.db.prepare(`SELECT i2.share_id AS id, COUNT(DISTINCT i2.actor) AS n FROM impressions i1 JOIN impressions i2 ON i2.actor = i1.actor AND i2.share_id <> i1.share_id
         WHERE i1.share_id IN (${ph}) AND i1.actor <> ? AND (i1.completed = 1 OR i1.actions <> '[]') AND (i2.completed = 1 OR i2.actions <> '[]') AND i1.created_at > ? AND i1.created_at < ? AND i2.created_at < ? GROUP BY i2.share_id ORDER BY n DESC LIMIT 200`).all(...ids, actor!, t - 30 * 86_400_000, t, t) as { id: string; n: number }[]) co.set(r.id, Number(r.n));
     }
-    return { t, pref, sess, seen, co, artists, history: hist.length, maxScore: Math.max(1e-9, ...songs.map((s) => s.score)), maxCo: Math.max(1, ...co.values()) };
+    return { t, pop: this.popularity(t), pref, sess, seen, co, artists, history: hist.length, maxScore: Math.max(1e-9, ...songs.map((s) => s.score)), maxCo: Math.max(1, ...co.values()) };
+  }
+  private popCache = new Map<number, Map<string, number>>();
+  /** Point-in-time popularity: log1p(engaged impressions by non-owners in [t - POP_WINDOW_D, t)) / max over songs. */
+  private popularity(t: number) {
+    let m = this.popCache.get(t); if (m) return m;
+    const rows = this.db.prepare(`SELECT i.share_id AS id, COUNT(*) AS n FROM impressions i JOIN shares s ON s.id = i.share_id WHERE i.created_at >= ? AND i.created_at < ? AND i.actor <> s.owner AND ${engagedSql("i.")} GROUP BY i.share_id`).all(t - POP_WINDOW_D * 86_400_000, t) as { id: string; n: number }[];
+    const max = Math.log1p(Math.max(0, ...rows.map((r) => Number(r.n)))); m = new Map(rows.map((r) => [r.id, max > 0 ? Math.log1p(Number(r.n)) / max : 0]));
+    if (this.popCache.size > 256) this.popCache.clear(); this.popCache.set(t, m); return m;
   }
   private feat(c: Ctx, s: Song) {
-    return { affinity: sq(c.pref, s), coeng: (c.co.get(s.id) ?? 0) / c.maxCo, popularity: s.score / c.maxScore, freshness: Math.pow(0.5, Math.max(0, c.t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000)), session: sq(c.sess, s), seen: Math.min(1, (c.seen.get(s.id) ?? 0) / 2) };
+    return { affinity: sq(c.pref, s), coeng: (c.co.get(s.id) ?? 0) / c.maxCo, popularity: c.pop.get(s.id) ?? 0, freshness: Math.pow(0.5, Math.max(0, c.t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000)), session: sq(c.sess, s), seen: Math.min(1, (c.seen.get(s.id) ?? 0) / 2) };
   }
   /** Per-song feature vectors for one actor (and current session), point-in-time: only impressions before `asOf`. */
   features(actor: string | null, session: string | null, asOf?: number) {
@@ -190,7 +216,7 @@ export class Ranker {
    *  only if both heads' holdout AUC are >= the promoted model's on the same holdout (HEURISTIC = no model). */
   train(): TrainResult | TrainSkip {
     const t0 = Date.now(); const t = this.now();
-    const imps = this.db.prepare("SELECT actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at FROM impressions WHERE created_at > ? AND position >= 0 ORDER BY id DESC LIMIT 20000").all(t - 30 * 86_400_000) as { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number }[];
+    const imps = trainable(this.db.prepare(`SELECT ${IMP_COLS} FROM impressions WHERE created_at > ? AND created_at < ? ORDER BY id DESC LIMIT 20000`).all(t - 30 * 86_400_000, t) as Imp[]);
     if (imps.length < MIN_TRAIN) return { skipped: "few_impressions", impressions: imps.length, n: 0, holdout: 0, min: MIN_TRAIN };
     const { tr, ho } = this.dataset(imps, t - HOLDOUT_DAYS * 86_400_000);
     if (tr.length < MIN_TRAIN || !ho.length) return { skipped: tr.length < MIN_TRAIN ? "few_train_rows" : "no_holdout", impressions: imps.length, n: tr.length, holdout: ho.length, min: MIN_TRAIN };
@@ -209,12 +235,12 @@ export class Ranker {
     return { version, n: tr.length, holdout: ho.length, auc: a.c, auc_skip: a.s, promoted: promote, previous: cur?.version ?? null, previous_auc: b?.c ?? null, previous_auc_skip: b?.s ?? null, ms: Date.now() - t0, model };
   }
   /** Point-in-time training rows (features as of each impression's hour + its session), split at `split`. */
-  dataset(imps: { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number }[], split: number) {
+  dataset(imps: Omit<Imp, "feed" | "position">[], split: number) {
     const cache = new Map<string, Map<string, { f: Record<string, number>; song: Song }>>(); const tr: Row[] = [], ho: Row[] = [];
     for (const i of imps) {
       const hr = Math.floor(Number(i.created_at) / 3_600_000) * 3_600_000; const key = `${i.actor}\u0001${i.session}\u0001${hr}`;
       let m = cache.get(key); if (!m) { if (cache.size > 2000) cache.clear(); m = new Map(this.features(i.actor, i.session, hr).map((x) => [x.song.id, { f: x.f as Record<string, number>, song: x.song }])); cache.set(key, m); }
-      const e = m.get(i.share_id); if (!e) continue; const l = labels(i); const at = Number(i.created_at);
+      const e = m.get(i.share_id); if (!e || e.song.owner === i.actor) continue; const l = labels(i); const at = Number(i.created_at);
       (at >= split ? ho : tr).push({ x: FEATURES.map((k) => e.f[k]), c: l.complete, s: l.skip, g: signal(i), dur: e.song.dur, fresh: at - e.song.published_at < FRESH_WINDOW_H * 3_600_000, at, actor: i.actor, session: i.session, share_id: i.share_id });
     }
     return { tr, ho };
