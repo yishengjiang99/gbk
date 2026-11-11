@@ -81,7 +81,14 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(s.shareTitle, "\"Minuet in G\" by @yisheng")
         XCTAssertEqual(s.shareLine, "\"Minuet in G\" by @yisheng")
         XCTAssertEqual(s.shareText, "\"Minuet in G\" by @yisheng\nhttps://compose.grepawk.com/s/minuet-in-g-a1b2c3")
+        XCTAssertEqual(s.shareMessage, s.shareText)
         XCTAssertEqual(s.xIntentUrl, "https://x.com/intent/tweet?text=hello")
+
+        let fallback = try decode(Song.self, Self.docSong)
+        XCTAssertNil(fallback.shareText)
+        let expected = "\"Minuet in G\" by @yisheng\nhttps://compose.grepawk.com/s/minuet-in-g-a1b2c3"
+        XCTAssertEqual(fallback.shareMessage, expected)
+        XCTAssertEqual(SongShareText.text(title: "Minuet in G", handle: "yisheng", url: fallback.shareURL), expected)
     }
 
     func testDecodesProfileCommentsRatingMe() throws {
