@@ -41,7 +41,7 @@ jobs:
           mkdir -p snapshots
           for mode in light dark; do
             xcrun simctl ui "$U" appearance $mode
-            xcrun simctl openurl "$U" https://compose.grepawk.com/feed
+            xcrun simctl openurl "$U" "https://compose.grepawk.com/feed?noimpressions=1"
             sleep 10
             xcrun simctl io "$U" screenshot "snapshots/web-feed-simctl-$mode.png"
             TEST_RUNNER_SIM_CHECKS=1 TEST_RUNNER_APPEARANCE=$mode TEST_RUNNER_SNAPSHOT_DIR="$PWD/snapshots" \

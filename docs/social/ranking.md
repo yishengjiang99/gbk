@@ -7,6 +7,8 @@ Code: `server/src/ranking/ranker.ts` (candidates, model, re-rank, training), `se
 - Each carries `model_version` (of the feed response), `position`, `feed`, `client`, `session` (per tab / per launch), `dwell_ms`, `listen_ratio`, `completed`, `fast_skip` (default dwell < 2 s), `replay`, `actions`, and optional `scroll_v`.
 - `actions` (max `MAX_ACTIONS = 8` per event; unknown ones dropped): `rate`, `comment`, `remix`, `open_studio`, `share`, `like` (a rating of 4+ stars, logged in addition to `rate`), `follow` (reserved: no follow feature yet), `profile_tap` (artist name on a feed card).
 - `scroll_v`: scroll speed when the user left the card, px/s (web) or pt/s (iOS, iOS 18+), clamped 0–`MAX_SCROLL_V = 20000`, column `impressions.scroll_v`. Stored only; not a model feature yet.
+- Action-only rows (an action outside an open impression) are sent with `position: -1`, `feed: "detail"` and stored as -1.
+- Not logged: iOS Simulator builds (CI, UI tests, ios-sim-checks), and web tabs opened with `?noimpressions` (kept for the tab; used by ios-sim-checks' prod screenshots).
 - Actor: signed-in user id, else the `gbk_gid` cookie, else the `x-gbk-install` header (iOS guests).
 - Limits: 50 events per batch, 30 batches/min per actor, 120/min per IP. Origin is checked for cookie posts.
 - Retention: 60 days (nightly prune). Deleted with the account (`SocialStore.purgeUser` deletes every impression row of the actor, all columns).
@@ -19,7 +21,7 @@ Catalog: public non-`wip` songs, top `CATALOG_MAX = 5000` by score plus every so
    - `session`: the same over the current session (unchanged from v1);
    - `seen`: prior impressions of the song;
    - `coeng`: songs positively engaged by other actors who engaged what this actor liked (30 d).
-   Plus `popularity` (score / max) and `freshness` (48 h half-life). `FEATURES = [affinity, coeng, popularity, freshness, session, seen]`.
+   Plus `popularity` (point-in-time: `log1p(engaged plays by non-owners in the POP_WINDOW_D = 14 days before t)`, divided by the catalog max) and `freshness` (48 h half-life). `FEATURES = [affinity, coeng, popularity, freshness, session, seen]`.
 2. **Candidates: named sources with quotas** (`QUOTAS`): `coeng` 200, `affinity` 250, `artists` 150 (artists the actor engaged positively, liked or followed), `trending` 300 (score), `fresh` (all songs < 48 h, always in, never cut by the cap), `cold` 400 (popularity + freshness, only for actors with no history). Union capped at `POOL_MAX = 1000` (fresh first), backfilled by score. `rank()` returns a song → sources map for debugging; it is not logged.
 3. **Session dedup.** With `?session=` (iOS), songs this actor already has impressions for in that session are excluded. Web sends no session, so this is a no-op there.
 4. **Value.** Before any model exists: `HEURISTIC · f` (version `heur-2`). With a promoted model (`lr2-YYYYMMDD`): `P(complete) · min(duration_s, 180)/180 − SKIP_LAMBDA · P(fast_skip)`, `SKIP_LAMBDA = 1.0`. Duration comes from `project_json` (last note end through the tempo map), median duration as fallback. The viewer's own songs get −0.5.
@@ -31,8 +33,9 @@ Filtered feeds (`label`, `tag`, or a non-`for_you` sort) keep the SQL path and r
 
 ## Training (nightly, 03:30 server time)
 - Runs in a `worker_thread` (`trainInWorker`; bundle `server/dist/rank-train.mjs`) with its own `DatabaseSync` on the shares file, once per day (last-run date guard). On success the main `Ranker` reloads the promoted model. In-memory databases (tests) train in-process.
-- Data: last 30 days, ≤ 20k impressions, at least `MIN_TRAIN = 500`. Features are **point-in-time**: computed as of the impression's hour (only earlier impressions, both for history and co-engagement) with the impression's own session; cached per (actor, session, hour). Training duration is logged (`rank_train` log event, `ms`).
+- Data: last 30 days, ≤ 20k impressions, at least `MIN_TRAIN = 500`. Rows (`trainable`): `feed = for_you`, `position ≥ 0`, `dwell_ms > 0`, not the song's owner, and no scripted swipe bursts (a session with ≥ `BURST_MIN = 20` impressions averaging < 5 s apart). Features are **point-in-time**: computed as of the impression's hour (only earlier impressions, both for history and co-engagement) with the impression's own session; cached per (actor, session, hour). Training duration is logged (`rank_train` log event, `ms`).
 - Labels: complete = `completed` or `replay` or `listen_ratio ≥ 0.9`; fast skip = `fast_skip` (dwell < 2 s).
+- `engaged` (`engaged()` / `engagedSql()`): completed, replay, `listen_ratio ≥ 0.25`, `dwell_ms ≥ 10 000` without a fast skip, or any action. Used by the popularity feature.
 - Two pointwise logistic-regression heads on the same features: P(complete), P(fast skip).
 - **Time-split holdout:** the last `HOLDOUT_DAYS = 3` are held out; the rest trains. `rank_models.auc` stores the holdout AUC of the complete head (the skip head's is in the stored model as `auc_skip`).
 - **Promotion gate:** every candidate is stored (`rank_models.promoted` 0/1). It is promoted only if there is no promoted lr2 model yet, or both heads' holdout AUC are ≥ the promoted model's AUC on the same holdout (HEURISTIC and legacy single-head rows count as no model). Startup loads the latest promoted model.

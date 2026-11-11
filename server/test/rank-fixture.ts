@@ -24,6 +24,8 @@ export function fixture(o: { file?: boolean; now?: number } = {}) {
     db.prepare("INSERT INTO impressions (actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, position, feed, model_version, client, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .run(i.actor, i.session ?? `s-${i.actor}-${Math.floor(i.at / D)}`, i.song, i.dwell ?? (skip ? 800 : good ? 40000 : 5000), i.ratio ?? (good ? 1 : 0.05), (i.completed ?? good) ? 1 : 0, skip ? 1 : 0, i.replay ? 1 : 0, JSON.stringify(i.actions ?? []), 0, "for_you", "heur-2", "web", i.at);
   };
-  return { db, file, shares, social, events, song, imp, now, set: (v: number) => { t = v; } };
+  /** `n` engaged plays of `song` by distinct crowd actors at `at` (drives the point-in-time popularity feature). */
+  const crowd = (song: string, n: number, at = t - D) => { for (let k = 0; k < n; k++) imp({ actor: `crowd-${k}`, session: `crowd-${k}`, song, at, good: true }); };
+  return { db, file, shares, social, events, song, imp, crowd, now, set: (v: number) => { t = v; } };
 }
 export const rand = (seed: number) => () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };

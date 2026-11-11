@@ -8,11 +8,13 @@ interface Ev { song: string; dwell_ms: number; listen_ratio: number; completed: 
 interface Open { song: string; position: number; feed: string; model_version: string; t0: number; actions: Set<Action>; el: HTMLAudioElement | null; listened: number; lastT: number | null; replay: boolean; dur: number }
 
 const session = (() => { try { let s = sessionStorage.getItem("gbk.feedSession"); if (!s) { s = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join(""); sessionStorage.setItem("gbk.feedSession", s); } return s; } catch { return "nosession0"; } })();
+// `?noimpressions` (CI screenshots of prod, e.g. ios-sim-checks) turns logging off for this tab.
+const off = (() => { try { if (new URLSearchParams(location.search).has("noimpressions")) sessionStorage.setItem("gbk.noImpressions", "1"); return sessionStorage.getItem("gbk.noImpressions") === "1"; } catch { return false; } })();
 let queue: Ev[] = []; let cur: Open | null = null; let timer: ReturnType<typeof setInterval> | null = null;
 export const sentLog: Ev[] = []; // test hook (window.__gbkImpressions)
 
 function flush() {
-  if (!queue.length) return; const body = JSON.stringify({ session, client: "web", events: queue }); sentLog.push(...queue); queue = [];
+  if (!queue.length) return; if (off) { queue = []; return; } const body = JSON.stringify({ session, client: "web", events: queue }); sentLog.push(...queue); queue = [];
   const url = `${apiBase()}/events`; const blob = new Blob([body], { type: "application/json" });
   if (!(navigator.sendBeacon && navigator.sendBeacon(url, blob))) void fetch(url, { method: "POST", body, headers: { "content-type": "application/json" }, credentials: "same-origin", keepalive: true }).catch(() => undefined);
 }
