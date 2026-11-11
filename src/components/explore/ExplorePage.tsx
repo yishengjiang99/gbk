@@ -7,6 +7,7 @@ import { STARTER_PROMPTS } from "../composer/ComposerPanel.tsx";
 import { MySongs } from "../songs/MySongs.tsx";
 import { apiBase } from "../../agent/bridge-client.ts";
 import { markAction } from "../social/impressions.ts";
+import { copyShare, sharePayload } from "../social/share-song.ts";
 import type { PianoRollPreview } from "../../agent/piano-roll-preview.ts";
 
 /** Tiny SVG piano roll: one bar per (downsampled) note, colored by track. */
@@ -74,7 +75,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
               <div className="ws-dim">by {s.owner} · {s.forks} fork{s.forks === 1 ? "" : "s"}</div>
               <a className="xp-link" data-testid="top-link" href={link} title={link}>/s/{s.slug}</a>
               <Preview s={s} />
-              <div className="ws-row"><button data-testid="top-open" onClick={() => onOpen(s.slug, false)}>Open</button><button onClick={() => { markAction(s.slug, "share"); void navigator.clipboard?.writeText(link); }}>Copy link</button></div>
+              <div className="ws-row"><button data-testid="top-open" onClick={() => onOpen(s.slug, false)}>Open</button><button data-testid="top-copy" data-share-text={sharePayload({ title: s.title, handle: s.handle, url: link, slug: s.slug, share_text: s.share_text, share_title: s.share_title, x_intent_url: s.x_intent_url }).text} onClick={() => copyShare({ title: s.title, handle: s.handle, url: link, slug: s.slug, share_text: s.share_text, share_title: s.share_title, x_intent_url: s.x_intent_url })}>Copy link</button><a data-testid="top-share-x" href={sharePayload({ title: s.title, handle: s.handle, url: link, slug: s.slug, share_text: s.share_text, share_title: s.share_title, x_intent_url: s.x_intent_url }).x} target="_blank" rel="noopener noreferrer">Share to 𝕏</a></div>
             </article>
           );
         })}
@@ -90,7 +91,7 @@ export function ExplorePage({ onCompose, onOpen }: { onCompose: (prompt?: string
             <div className="ws-dim">by {s.owner} · {new Date(s.createdAt).toLocaleDateString()}{s.wav?.durationSeconds ? ` · ${Math.floor(s.wav.durationSeconds / 60)}:${String(Math.round(s.wav.durationSeconds % 60)).padStart(2, "0")}` : ""}</div>
             <div className="ws-dim">{s.forks} fork{s.forks === 1 ? "" : "s"}{s.parent ? <> · forked from <a href={`#`} onClick={(e) => { e.preventDefault(); onOpen(s.parent!.slug, false); }}>{s.parent.title}</a></> : null}</div>
             <Preview s={s} />
-            <div className="ws-row"><button data-testid="card-open" onClick={() => onOpen(s.slug, false)}>Open</button><button data-testid="card-fork" onClick={() => onOpen(s.slug, true)}>Fork</button></div>
+            <div className="ws-row"><button data-testid="card-open" onClick={() => onOpen(s.slug, false)}>Open</button><button data-testid="card-fork" onClick={() => onOpen(s.slug, true)}>Fork</button><button data-testid="card-copy" data-share-text={sharePayload({ title: s.title, handle: s.handle, url: `${location.origin}/s/${s.slug}`, slug: s.slug, share_text: s.share_text, share_title: s.share_title, x_intent_url: s.x_intent_url }).text} onClick={() => copyShare({ title: s.title, handle: s.handle, url: `${location.origin}/s/${s.slug}`, slug: s.slug, share_text: s.share_text, share_title: s.share_title, x_intent_url: s.x_intent_url })}>Copy link</button><a data-testid="card-share-x" href={sharePayload({ title: s.title, handle: s.handle, url: `${location.origin}/s/${s.slug}`, slug: s.slug, share_text: s.share_text, share_title: s.share_title, x_intent_url: s.x_intent_url }).x} target="_blank" rel="noopener noreferrer">Share to 𝕏</a></div>
           </article>
         ))}
       </div>

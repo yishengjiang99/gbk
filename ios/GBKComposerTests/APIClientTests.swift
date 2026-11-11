@@ -55,6 +55,33 @@ final class APIClientTests: XCTestCase {
         XCTAssertNil(s.ratingAvg)
         XCTAssertEqual(s.preview?.end, 61440)
         XCTAssertEqual(s.preview?.notes?.first, [4, 0, 4, 46])
+        XCTAssertNil(s.shareTitle)
+        XCTAssertEqual(s.shareLine, "\"The Clockwork Cathedral\" by @yisheng")
+    }
+
+    func testShareTextUsesServerFieldsAndFallsBack() throws {
+        XCTAssertEqual(SongShareText.line(title: "Minuet in G", handle: "yisheng"), "\"Minuet in G\" by @yisheng")
+        XCTAssertEqual(SongShareText.line(title: "Night \"Drive\"", handle: "@alice"), "\"Night 'Drive'\" by @alice")
+        XCTAssertEqual(SongShareText.line(title: "  ", handle: nil), "\"Untitled\"")
+        XCTAssertEqual(SongShareText.line(title: "Solo", handle: ""), "\"Solo\"")
+        XCTAssertEqual(SongShareText.line(title: "Song", handle: "alice", xHandle: "alice_x"), "\"Song\" by @alice")
+        XCTAssertEqual(SongShareText.line(title: "Song", handle: "alice", xHandle: "alice_x", forX: true), "\"Song\" by @alice_x")
+        XCTAssertEqual(SongShareText.storedXHandle("nope!!"), nil)
+        let json = """
+        { "slug": "minuet-in-g-a1b2c3", "title": "Minuet in G", "url": "https://compose.grepawk.com/s/minuet-in-g-a1b2c3",
+          "author": \(Self.docUser), "created_at": 0, "published_at": 0, "labels": [], "tags": [],
+          "rating_avg": null, "rating_count": 0, "comment_count": 0, "play_count": 0, "fork_count": 0,
+          "my_rating": null, "media": { "mp3": null, "wav": null, "midi": null }, "preview": null,
+          "prompt_shared": false, "prompt_text": null, "parent_slug": null, "is_mine": false,
+          "share_title": "\\"Minuet in G\\" by @yisheng",
+          "share_text": "\\"Minuet in G\\" by @yisheng\\nhttps://compose.grepawk.com/s/minuet-in-g-a1b2c3",
+          "x_intent_url": "https://x.com/intent/tweet?text=hello" }
+        """
+        let s = try decode(Song.self, json)
+        XCTAssertEqual(s.shareTitle, "\"Minuet in G\" by @yisheng")
+        XCTAssertEqual(s.shareLine, "\"Minuet in G\" by @yisheng")
+        XCTAssertEqual(s.shareText, "\"Minuet in G\" by @yisheng\nhttps://compose.grepawk.com/s/minuet-in-g-a1b2c3")
+        XCTAssertEqual(s.xIntentUrl, "https://x.com/intent/tweet?text=hello")
     }
 
     func testDecodesProfileCommentsRatingMe() throws {

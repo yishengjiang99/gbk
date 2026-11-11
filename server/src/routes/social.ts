@@ -11,6 +11,7 @@ import { RateLimiter } from "../security/rate-limit.ts";
 import { currentSession, guardWrite } from "./agent.ts";
 import { parseCookies } from "../security/authentication.ts";
 import { isGuest } from "../mcp/guest.ts";
+import { songShareFields } from "../../../src/agent/share-text.ts";
 
 /** Ranker that produced the feed; clients echo it on every impression (docs/social/ranking.md). */
 export const MODEL_VERSION = "heur-1";
@@ -45,13 +46,15 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
   };
   const song = (r: ShareRow, viewer: string | null) => {
     const x = social.social(r.id); const parent = r.parent_id ? shares.byId(r.parent_id) : null;
-    return { slug: r.slug, title: r.title, url: `${origin}/s/${r.slug}`, author: user(r.owner), created_at: r.created_at, published_at: x.published_at,
+    const url = `${origin}/s/${r.slug}`; const author = user(r.owner);
+    return { slug: r.slug, title: r.title, url, author, created_at: r.created_at, published_at: x.published_at,
       labels: JSON.parse(x.labels || "[]") as string[], tags: social.tagsOf(r.id),
       rating_avg: x.rating_count ? Math.round((x.rating_sum / x.rating_count) * 10) / 10 : null, rating_count: x.rating_count, comment_count: x.comment_count, play_count: x.play_count, fork_count: Number(x.forks),
       my_rating: viewer ? social.myRating(r.id, viewer) : null,
       media: { mp3: r.mp3 ? `${origin}/api/shares/${r.slug}/media/mp3` : null, wav: r.wav ? `${origin}/api/shares/${r.slug}/media/wav` : null, midi: r.midi ? `${origin}/api/shares/${r.slug}/media/midi` : null },
       preview: shares.preview(r.id), prompt_shared: !!x.prompt_shared, prompt_text: x.prompt_shared ? x.prompt_text : null,
-      parent_slug: parent?.public ? parent.slug : null, is_mine: viewer === r.owner };
+      parent_slug: parent?.public ? parent.slug : null, is_mine: viewer === r.owner,
+      ...songShareFields({ title: r.title, url, handle: author.handle, displayName: author.display_name }) };
   };
   const viewerOf = (req: FastifyRequest) => { const s = currentSession(req, sessions); return s && !isGuest(s.user) ? s.user : null; };
   const pubSong = (slug: string) => { const r = shares.bySlug(slug); return r && r.public ? r : null; };

@@ -112,8 +112,15 @@ struct Song: Codable, Hashable, Identifiable {
     let promptText: String?
     let parentSlug: String?
     let isMine: Bool
+    /// Canonical share wording from the server (`share_title` / `share_text` / `x_intent_url`).
+    var shareTitle: String? = nil
+    var shareText: String? = nil
+    var xIntentUrl: String? = nil
 
     var id: String { slug }
+    /// `"Title" by @handle` for ShareLink subject/message; prefers the server field, else builds the same wording.
+    var shareLine: String { shareTitle?.isEmpty == false ? shareTitle! : SongShareText.line(title: title, handle: author.handle) }
+    var shareMessage: String { shareText?.isEmpty == false ? shareText! : "\(shareLine)\n\(shareURL.absoluteString)" }
     var mp3URL: URL? { media?.mp3.flatMap(URL.init(string:)) }
     /// What the feed plays: the song's MIDI, sequenced live through SF2Engine (no MP3/WAV playback).
     var midiURL: URL? { media?.midi.flatMap(URL.init(string:)) }
@@ -199,3 +206,25 @@ enum SongLabel {
 }
 
 struct APIErrorBody: Codable, Hashable { let code: String?; let message: String? }
+
+/// Same wording as `src/agent/share-text.ts`: `"Title" by @handle`, Untitled if the title is missing.
+enum SongShareText {
+    static func line(title: String?, handle: String?, xHandle: String? = nil, forX: Bool = false) -> String {
+        let raw = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = raw.isEmpty ? "Untitled" : raw.replacingOccurrences(of: "\"", with: "'")
+        let quoted = "\"\(name)\""
+        if forX, let x = storedXHandle(xHandle) { return "\(quoted) by @\(x)" }
+        var h = (handle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if h.hasPrefix("@") { h = String(h.dropFirst()) }
+        if !h.isEmpty { return "\(quoted) by @\(h)" }
+        return quoted
+    }
+
+    /// X handle only when already stored and valid (1-15 letters, digits, or underscore). Never guessed.
+    static func storedXHandle(_ raw: String?) -> String? {
+        guard var h = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !h.isEmpty else { return nil }
+        if h.hasPrefix("@") { h = String(h.dropFirst()) }
+        let ok = (1...15).contains(h.count) && h.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "_" }
+        return ok ? h : nil
+    }
+}

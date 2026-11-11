@@ -6,7 +6,7 @@ import { artifactStore } from "../audio/artifact-store.ts";
 import { sanitizeSharedProject } from "./share-schema.ts";
 import type { Project } from "../workstation/model.ts";
 
-export interface ShareInfo { slug: string; title: string; owner: string; createdAt: string; public: boolean; parent: { slug: string; title: string; owner: string } | null; hasMidi: boolean; hasWav: boolean; hasMp3?: boolean; wav: { durationSeconds?: number; bytes?: number } | null; forks: number; url?: string; mine?: boolean }
+export interface ShareInfo { slug: string; title: string; owner: string; createdAt: string; public: boolean; parent: { slug: string; title: string; owner: string } | null; hasMidi: boolean; hasWav: boolean; hasMp3?: boolean; wav: { durationSeconds?: number; bytes?: number } | null; forks: number; url?: string; mine?: boolean; handle?: string | null; share_title?: string; share_text?: string; x_intent_url?: string }
 const csrf = () => document.cookie.split("; ").find((c) => c.startsWith("gbk_csrf="))?.slice(9) ?? "";
 const H = (json = true): Record<string, string> => ({ ...(json ? { "content-type": "application/json" } : {}), "x-gbk-csrf": decodeURIComponent(csrf()) });
 async function ok<T>(r: Response): Promise<T> { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.message ?? `HTTP ${r.status}`); return b as T; }

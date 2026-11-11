@@ -11,6 +11,7 @@ import { RateLimiter as RL } from "../security/rate-limit.ts";
 import type { ModelClient } from "../agent/model-client.ts";
 import { llmConfigured } from "../config.ts";
 import { NO_PLAYABLE_MEDIA, deriveMidi } from "../persistence/share-media.ts";
+import { songShareFields, type ShareAuthor } from "../../../src/agent/share-text.ts";
 
 const RIFF = (b: Uint8Array) => b.length > 44 && String.fromCharCode(...b.subarray(0, 4)) === "RIFF" && String.fromCharCode(...b.subarray(8, 12)) === "WAVE";
 const MP3 = (b: Uint8Array) => b.length > 4 && ((b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0));
@@ -18,6 +19,17 @@ const MTHD = (b: Uint8Array) => b.length > 14 && String.fromCharCode(...b.subarr
 
 export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, store: ShareStore, uploadLimiter: RateLimiter, model?: ModelClient, guestCanRead?: (token: string, projectId: string, owner: string) => boolean, onPublish?: (id: string) => void) {
   const origin = cfg.publicOrigin;
+  const authorOf = (owner: string): ShareAuthor => {
+    try {
+      const p = store.database.prepare("SELECT handle, display_name FROM profiles WHERE user_id = ?").get(owner) as { handle: string; display_name: string } | undefined;
+      return p ? { handle: p.handle, displayName: p.display_name } : {};
+    } catch { return {}; }
+  };
+  const shareOf = <T extends { slug: string; title: string; owner: string; url?: string }>(v: T) => {
+    const url = v.url ?? `${origin}/s/${v.slug}`; const a = authorOf(v.owner);
+    return { ...v, url, handle: a.handle ?? null, ...songShareFields({ title: v.title, url, ...a }) };
+  };
+
   const autosaveLimiter = new RL(40), titleLimiter = new RL(10);
   // Guest publishing (docs/social-api.md): 10 public songs per guest account (= per device) and 30 per IP, per 24 h.
   const guestPubUser = new RL(10, 86_400_000), guestPubIp = new RL(30, 86_400_000);
@@ -45,7 +57,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (midi) store.setMedia(row.slug, "midi", midi);
     if (row.public) onPublish?.(row.id);
     req.log.info({ evt: "share_create", user: s.user, slug: row.slug, parent: row.parent_id });
-    return { ...store.view(row), url: `${origin}/s/${row.slug}` };
+    return shareOf({ ...store.view(row), url: `${origin}/s/${row.slug}` });
   });
 
   app.put("/api/shares/:slug/media/:kind", { bodyLimit: SHARE_LIMITS.wavBytes }, async (req, reply) => {
@@ -71,13 +83,13 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const q = req.query as { mine?: string; limit?: string; offset?: string };
     const limit = Math.min(100, Math.max(1, Number(q.limit) || 30)); const offset = Math.max(0, Number(q.offset) || 0);
     const s = q.mine ? currentSession(req, sessions) : null;
-    return { shares: store.list({ owner: q.mine ? (s?.user ?? "\u0000none") : undefined, limit, offset }) };
+    return { shares: store.list({ owner: q.mine ? (s?.user ?? "\u0000none") : undefined, limit, offset }).map(shareOf) };
   });
 
   app.get("/api/shares/top", async (req, reply) => {
     const limit = Math.min(10, Math.max(1, Number((req.query as { limit?: string }).limit) || 10));
     reply.header("cache-control", "no-cache");
-    return { rank: "forks", shares: store.top(limit) };
+    return { rank: "forks", shares: store.top(limit).map(shareOf) };
   });
 
   const visible = (req: FastifyRequest, slug: string) => {
@@ -91,7 +103,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const row = visible(req, (req.params as { slug: string }).slug);
     if (!row) return reply.code(404).send({ code: "NOT_FOUND", message: "this song is not shared (or was removed)" });
     const s = currentSession(req, sessions);
-    return { ...store.view(row), url: `${origin}/s/${row.slug}`, mine: !!s && s.user === row.owner, project: JSON.parse(row.project_json) };
+    return shareOf({ ...store.view(row), url: `${origin}/s/${row.slug}`, mine: !!s && s.user === row.owner, project: JSON.parse(row.project_json) });
   });
   app.get("/api/shares/:slug/media/:kind", async (req, reply) => {
     const { slug, kind } = req.params as { slug: string; kind: string };
@@ -117,7 +129,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const { row, created } = store.upsertAutosave({ owner: s.user, projectId, title: (project.name || "Untitled").slice(0, SHARE_LIMITS.titleChars), projectJson: JSON.stringify(project), parentSlug: typeof b.parentSlug === "string" ? b.parentSlug : null });
     store.refreshMidi(row.slug);
     if (created) req.log.info({ evt: "autosave_create", user: s.user, slug: row.slug });
-    return { ...store.view(store.byId(row.id) ?? row), url: `${origin}/s/${row.slug}`, created };
+    return shareOf({ ...store.view(store.byId(row.id) ?? row), url: `${origin}/s/${row.slug}`, created });
   });
 
   // AI-suggested title for one of the caller's songs (falls back to a deterministic name when no LLM).
@@ -156,7 +168,7 @@ export function shareRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     if (typeof b.title === "string") store.setTitle(row.slug, b.title.trim().slice(0, SHARE_LIMITS.titleChars));
     if (typeof b.public === "boolean") { store.setPublic(row.slug, b.public); if (b.public) onPublish?.(row.id); }
     req.log.info({ evt: "share_update", user: s.user, slug: row.slug, public: b.public });
-    const fresh = store.byId(row.id)!; return { ...store.view(fresh), url: `${origin}/s/${fresh.slug}` };
+    const fresh = store.byId(row.id)!; return shareOf({ ...store.view(fresh), url: `${origin}/s/${fresh.slug}` });
   });
   app.delete("/api/shares/:slug", async (req, reply) => {
     const s = currentSession(req, sessions);

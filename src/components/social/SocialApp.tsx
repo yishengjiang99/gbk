@@ -4,6 +4,7 @@ import { createPath } from "../../workstation/studio-api.ts";
 import { Crossfader, type FadeState } from "./crossfade.ts";
 import { loadWorklet, prepare, preparedCount, songProject, warmSoundFont } from "./live-song.ts";
 import { startImpression, endImpression, attachAudio, markAction, markRate, noteScroll } from "./impressions.ts";
+import { sharePayload, webShare, type ShareTarget } from "./share-song.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { social, LABELS, type Me, type Song, type SComment, type SUser } from "../../agent/social-client.ts";
 import { PianoRoll } from "../explore/ExplorePage.tsx";
@@ -18,6 +19,7 @@ type Sheet = null | { kind: "comments"; song: Song; draft?: string } | { kind: "
  * the user's editable fork, exactly like the card's fork button) and let the Studio landing start a
  * FRESH conversation with the original prompt prefilled (never auto-run). The slug travels as the bare
  * gbk.remixSlug value; the prompt travels as the ordinary composer draft. */
+const target = (song: Song): ShareTarget => ({ title: song.title, handle: song.author.handle, displayName: song.author.display_name, url: song.url || new URL(`/s/${song.slug}`, location.origin).href, slug: song.slug, share_text: song.share_text, share_title: song.share_title, x_intent_url: song.x_intent_url });
 export const remix = (slug: string, prompt: string) => { sessionStorage.setItem("gbk.focusComposer", "1"); sessionStorage.setItem("gbk.remixSlug", slug); sessionStorage.setItem("gbk.composerDraft", prompt.slice(0, 4000)); navigate(`s/${slug}?fork=1`); setTimeout(() => window.dispatchEvent(new Event("gbk:focus-composer")), 50); };
 const ago = (t: number) => { const s = (Date.now() - t) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
 
@@ -47,13 +49,13 @@ function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter
       <div className="so-side">
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
         <button aria-label="Open in Studio" data-testid="card-open" onClick={() => { markAction(song.slug, "open_studio"); onOpen(song.slug, false); }}>✎<small>open</small></button>
-        <button aria-label="Share" data-testid="card-share" onClick={() => { markAction(song.slug, "share"); const url = new URL(`/s/${song.slug}`, location.origin).href; const n = navigator as Navigator & { share?: (d: ShareData) => Promise<void> }; if (n.share) void n.share({ title: song.title, url }).catch(() => undefined); else void navigator.clipboard?.writeText(url); }}>↗<small>share</small></button>
+        <button aria-label="Share" data-testid="card-share" data-share-text={sharePayload(target(song)).text} onClick={() => webShare(target(song))}>↗<small>share</small></button>
         <button aria-label="Remix (fork)" data-testid="card-fork" onClick={() => { markAction(song.slug, "remix"); onOpen(song.slug, true); }}>⑂<small>{song.fork_count}</small></button>
         <button aria-label="Report song" data-testid="card-report" onClick={() => (me ? onSheet({ kind: "report", what: "song", target: song.slug, label: song.title }) : needSignIn("Sign in to report.", { kind: "report", what: "song", target: song.slug, label: song.title }))}>⚑</button>
       </div>
       <div className="so-meta">
         <h2 data-testid="card-title">{song.title}</h2>
-        <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); markAction(song.slug, "profile_tap"); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a>{song.author.badge && <span className="so-badge">{song.author.badge}</span>}{song.author.pro && <span className="so-badge so-pro" data-testid="card-pro">Pro</span>} · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""}</div>
+        <div className="so-dim"><a href={`/u/${song.author.handle}`} onClick={(e) => { e.preventDefault(); markAction(song.slug, "profile_tap"); navigate(`u/${song.author.handle}`); }} data-testid="card-author">@{song.author.handle}</a>{song.author.badge && <span className="so-badge">{song.author.badge}</span>}{song.author.pro && <span className="so-badge so-pro" data-testid="card-pro">Pro</span>} · {song.play_count} plays{song.published_at ? ` · ${ago(song.published_at)}` : ""} · <a href={sharePayload(target(song)).x} target="_blank" rel="noopener noreferrer" data-testid="card-share-x" aria-label="Share to 𝕏" onClick={() => markAction(song.slug, "share")}>Share to 𝕏</a></div>
         <Stars song={song} me={me} onChange={onUpdate} />
         <Chips song={song} onFilter={onFilter} />
         {song.prompt_shared && song.prompt_text && <div className="so-prompt" data-testid="card-prompt"><span className="so-clamp">“{song.prompt_text}”</span><button className="so-btn" data-testid="card-remix" onClick={() => remix(song.slug, song.prompt_text!)}>Remix this prompt</button></div>}
