@@ -8,7 +8,7 @@ import { MySongs } from "../songs/MySongs.tsx";
 import type { Project } from "../../workstation/model.ts";
 import { appUrl } from "../../agent/routes.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
-import { markAction } from "../social/impressions.ts";
+import { copyShare, sharePayload } from "../social/share-song.ts";
 
 /** Save the current song privately (auto-saved or this explicit click) so the Publish dialog can open on it. */
 export async function saveForPublish(): Promise<SavedSong> {
@@ -48,7 +48,7 @@ export function SharePanel({ project, readOnly, authenticated, publishRequest = 
         </button>
       )}
       {authenticated && !readOnly && <span className="ws-dim"> songs you make with the Composer are saved privately in My songs; Publish puts one on Explore</span>}
-      {last && <div data-testid="share-link">Link: <a href={last.url} target="_blank" rel="noreferrer">{last.url}</a> <button onClick={() => { if (last.slug) markAction(last.slug, "share"); void navigator.clipboard?.writeText(last.url ?? ""); }}>Copy</button></div>}
+      {last && last.url && <div data-testid="share-link">Link: <a href={last.url} target="_blank" rel="noreferrer">{last.url}</a> <button data-testid="share-copy" data-share-text={sharePayload({ title: last.title, handle: last.handle, url: last.url, slug: last.slug, share_text: last.share_text, share_title: last.share_title, x_intent_url: last.x_intent_url }).text} onClick={() => copyShare({ title: last.title, handle: last.handle, url: last.url!, slug: last.slug, share_text: last.share_text, share_title: last.share_title, x_intent_url: last.x_intent_url })}>Copy</button> <a data-testid="share-x" href={sharePayload({ title: last.title, handle: last.handle, url: last.url, slug: last.slug, share_text: last.share_text, share_title: last.share_title, x_intent_url: last.x_intent_url }).x} target="_blank" rel="noopener noreferrer">Share to 𝕏</a></div>}
       {err && <div className="cmp-error">{err}</div>}
       {authenticated && <details data-testid="my-songs-studio"><summary>My songs</summary><MySongs compact refreshKey={rk} /></details>}
       {dialog && <PublishDialog song={dialog} onClose={() => { setDialog(null); setRk((x) => x + 1); }} onPublished={(s) => { setDialog(null); setLast(s); setRk((x) => x + 1); }} />}

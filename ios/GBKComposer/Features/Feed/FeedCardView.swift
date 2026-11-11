@@ -134,7 +134,7 @@ struct FeedCardView: View {
                         .accessibilityLabel("Comments")
                     railButton(icon: "pencil", label: "open", action: onOpen)
                         .accessibilityLabel("Open in Studio")
-                    ShareLink(item: song.shareURL, subject: Text(song.title), message: Text(song.title)) {
+                    ShareLink(item: song.shareURL, subject: Text(song.shareLine), message: Text(song.shareLine)) {
                         railLabel(icon: "arrow.up.right", label: "share")
                     }
                     .buttonStyle(.plain)

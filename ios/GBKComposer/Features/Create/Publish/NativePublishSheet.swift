@@ -106,7 +106,7 @@ struct NativePublishSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Published!").font(.title2.bold()).accessibilityIdentifier("publish-done")
             Text("Your song is on the Feed as @\(r.author).").foregroundStyle(.secondary)
-            ShareLink(item: r.url) { Label("Share link", systemImage: "square.and.arrow.up") }
+            ShareLink(item: r.url, subject: Text(SongShareText.line(title: r.title, handle: r.author)), message: Text(SongShareText.line(title: r.title, handle: r.author))) { Label("Share link", systemImage: "square.and.arrow.up") }
         }
     }
 

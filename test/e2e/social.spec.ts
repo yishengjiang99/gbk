@@ -513,3 +513,29 @@ test("social remix fallback: a share that fails to load still lands in a FRESH s
     expect(after.forkOf).toBeNull(); expect(after.notes).toBe(0);
   } finally { await owner.request.delete(`/api/shares/${shA.slug}`, { headers: oh }).catch(() => undefined); await owner.close(); }
 });
+
+test("social share: copy text and X intent include song title and author", async ({ page, browser, baseURL }) => {
+  const base = new URL(baseURL!).origin;
+  const owner = await browser.newContext({ baseURL }); const oh = await apiLogin(owner.request, base, "e2e-code");
+  const me = await (await owner.request.get("/api/me")).json() as { handle: string };
+  const title = `Share E2E ${test.info().project.name} ${Date.now() % 100000}`;
+  const sh = await createShare(owner.request, oh, { title, project, public: true });
+  try {
+    const song = await (await owner.request.get(`/api/songs/${sh.slug}`)).json() as { share_title: string; share_text: string; x_intent_url: string; url: string; author: { handle: string } };
+    expect(song.author.handle).toBe(me.handle);
+    expect(song.share_title).toBe(`"${title}" by @${me.handle}`);
+    expect(song.share_text).toBe(`"${title}" by @${me.handle}\n${song.url}`);
+    expect(song.url).toContain(`/s/${sh.slug}`);
+    expect(decodeURIComponent(new URL(song.x_intent_url).searchParams.get("text")!)).toBe(song.share_text);
+
+    await page.goto(`/feed?sort=new`);
+    const card = page.getByTestId("feed-card").filter({ hasText: title });
+    await expect(card).toBeVisible();
+    const share = card.getByTestId("card-share");
+    await expect(share).toHaveAttribute("data-share-text", song.share_text);
+    const x = card.getByTestId("card-share-x");
+    await expect(x).toHaveAttribute("href", song.x_intent_url);
+    await expect(x).toHaveText("Share to 𝕏");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  } finally { await owner.request.delete(`/api/shares/${sh.slug}`, { headers: oh }); await owner.close(); }
+});

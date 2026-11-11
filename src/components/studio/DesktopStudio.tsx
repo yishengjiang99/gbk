@@ -24,6 +24,7 @@ import { ComposerProgress } from "../composer/ComposerProgress.tsx";
 import { ComposerArtifacts } from "../composer/ComposerArtifacts.tsx";
 import { STARTER_PROMPTS } from "../composer/ComposerPanel.tsx";
 import { saveForPublish } from "../composer/SharePanel.tsx";
+import { copyShare, sharePayload } from "../social/share-song.ts";
 import { RecentProjects } from "./RecentProjects.tsx";
 import { startNew } from "../../workstation/studio-api.ts";
 import { PublishDialog } from "../songs/PublishDialog.tsx";
@@ -564,7 +565,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
               return <LogItem key={m.id} m={m} text={c.text} card={cardOn ? (c.card ? songCard(c.card) : null) : undefined} onRetry={(x) => send(x)} onResume={(r) => s.resume(r)} />; })}
             {s.run && <div className="ds-run" data-testid="composer-run" role="status">● {s.run.task}{s.run.maxSteps ? ` · step ${s.run.step}/${s.run.maxSteps}` : ""}</div>}
             {s.paused ? <div className="ds-err ds-paused" data-testid="run-paused" role="status">Paused – reconnecting…</div> : s.auth.authenticated && s.conn.state !== "connected" && s.conn.state !== "connecting" && s.conn.state !== "idle" && <div className="ds-err">{s.conn.state === "reconnecting" ? "Reconnecting to the composer…" : "The composer is offline right now."} {s.conn.state !== "reconnecting" && <button className="ds-btn" onClick={s.reconnect}>Try again</button>}</div>}
-            {shared && <div data-testid="share-link">Published: <a href={shared.url} target="_blank" rel="noreferrer">{shared.url}</a> <button className="ds-btn" onClick={() => void navigator.clipboard?.writeText(shared.url ?? "")}>Copy</button></div>}
+            {shared && shared.url && <div data-testid="share-link">Published: <a href={shared.url} target="_blank" rel="noreferrer">{shared.url}</a> <button className="ds-btn" data-testid="share-copy" data-share-text={sharePayload({ title: shared.title, handle: shared.handle, url: shared.url, slug: shared.slug, share_text: shared.share_text, share_title: shared.share_title, x_intent_url: shared.x_intent_url }).text} onClick={() => copyShare({ title: shared.title, handle: shared.handle, url: shared.url!, slug: shared.slug, share_text: shared.share_text, share_title: shared.share_title, x_intent_url: shared.x_intent_url })}>Copy</button> <a className="ds-btn" data-testid="share-x" href={sharePayload({ title: shared.title, handle: shared.handle, url: shared.url, slug: shared.slug, share_text: shared.share_text, share_title: shared.share_title, x_intent_url: shared.x_intent_url }).x} target="_blank" rel="noopener noreferrer">Share to 𝕏</a></div>}
             {busy && <div className="ds-run" role="status" data-testid="studio-busy">{busy}</div>}
             {hum.phase !== "idle" && <div className="ds-run" role="status" data-testid="hum-strip">{hum.phase === "recording" ? `● Listening… ${Math.floor(hum.elapsed)}s, press Stop humming when done` : `Turning your melody into notes${hum.progress > 0 ? ` ${Math.round(hum.progress * 100)}%` : "…"}`}</div>}
             {stick.showJump && <button type="button" className="ds-jump" data-jump-pill data-testid="jump-latest" onClick={stick.repin}>↓ Jump to latest</button>}

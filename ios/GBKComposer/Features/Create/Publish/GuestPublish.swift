@@ -30,7 +30,7 @@ struct PublishDraft: Equatable {
     var canPublish: Bool { !title.trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
-struct PublishResult: Equatable { let slug: String; let url: URL; let author: String }
+struct PublishResult: Equatable { let slug: String; let url: URL; let author: String; let title: String }
 
 enum PublishError: Error, Equatable {
     case limit(retryAfter: Int?)          // 429 GUEST_PUBLISH_LIMIT
@@ -94,7 +94,7 @@ struct WebViewGuestPublishService: GuestPublishing {
     if (!p.ok) return await fail(p);
     const m = await fetch("/api/songs/" + slug + "/meta", { method: "PATCH", credentials: "same-origin", headers: H(), body: JSON.stringify({ labels, tags, prompt_shared: sharePrompt }) });
     if (!m.ok) return await fail(m);
-    return { ok: true, slug, handle: handle || "" };
+    return { ok: true, slug, handle: handle || "", title };
     """#
 
     @MainActor func publish(_ draft: PublishDraft, projectId: String, slug: String?, as username: String) async throws -> PublishResult {
@@ -111,7 +111,7 @@ struct WebViewGuestPublishService: GuestPublishing {
     nonisolated static func result(_ raw: Any?) throws -> PublishResult {
         guard let d = raw as? [String: Any] else { throw PublishError.failed("") }
         if d["ok"] as? Bool == true, let slug = d["slug"] as? String, let url = URL(string: "https://compose.grepawk.com/s/\(slug)") {
-            return PublishResult(slug: slug, url: url, author: d["handle"] as? String ?? "")
+            return PublishResult(slug: slug, url: url, author: d["handle"] as? String ?? "", title: d["title"] as? String ?? "")
         }
         let status = (d["status"] as? NSNumber)?.intValue ?? 0, code = d["code"] as? String ?? ""
         let retry = (d["retryAfter"] as? NSNumber)?.intValue
@@ -128,6 +128,6 @@ struct MockGuestPublishService: GuestPublishing {
     func publish(_ draft: PublishDraft, projectId: String, slug: String?, as username: String) async throws -> PublishResult {
         try? await Task.sleep(nanoseconds: 400_000_000)
         let slug = "mock-" + String(projectId.prefix(8))
-        return PublishResult(slug: slug, url: URL(string: "https://compose.grepawk.com/s/\(slug)")!, author: username.lowercased())
+        return PublishResult(slug: slug, url: URL(string: "https://compose.grepawk.com/s/\(slug)")!, author: username.lowercased(), title: draft.title)
     }
 }

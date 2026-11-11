@@ -47,6 +47,11 @@ test("social P1: publish meta, feed cursor, ratings, comments, bearer, reports, 
     assert.equal((await fetch(`${s.base}/api/shares/${a}/comments`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer bogus.sig" }, body: JSON.stringify({ body: "x" }) })).status, 401);
     const cl = await (await fetch(`${s.base}/api/shares/${a}/comments`)).json(); assert.equal(cl.items.length, 1); assert.equal(cl.items[0].can_delete, false);
     const song = await (await fetch(`${s.base}/api/songs/${a}`)).json(); assert.equal(song.comment_count, 1); assert.equal(song.rating_avg, 2); assert.equal(song.author.handle, "alice");
+    assert.equal(song.share_title, `"Fugue One" by @alice`);
+    assert.equal(song.share_text, `"Fugue One" by @alice\n${song.url}`);
+    assert.ok(String(song.url).endsWith(`/s/${a}`));
+    assert.ok(String(song.x_intent_url).startsWith("https://x.com/intent/tweet?text="));
+    assert.equal(decodeURIComponent(new URL(song.x_intent_url).searchParams.get("text")!), song.share_text);
     // profile
     const u = await (await fetch(`${s.base}/api/users/alice`)).json(); assert.equal(u.user.song_count, 5); assert.equal(u.songs.length, 5);
     r = await fetch(`${s.base}/api/me/settings`, { method: "PATCH", headers: H(bob), body: JSON.stringify({ handle: "alice" }) }); assert.equal(r.status, 409);

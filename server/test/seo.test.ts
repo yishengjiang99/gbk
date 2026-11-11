@@ -55,9 +55,9 @@ test("/s/<slug> and /u/<handle> get server-injected title, description, canonica
   const pub = shares.create({ owner: "u1", title: `Night "Drive"`, projectJson: proj, public: true });
   const priv = shares.create({ owner: "u1", title: "Secret", projectJson: proj, public: false });
   const h = (await app.inject(`/s/${pub.slug}`)).body;
-  assert.match(h, /<title>Night &quot;Drive&quot; by Alice · GBK Composer<\/title>/);
+  assert.match(h, /<title>&quot;Night &#39;Drive&#39;&quot; by @alice · GBK Composer<\/title>/);
   assert.ok(h.includes(`<link rel="canonical" href="https://compose.test/s/${pub.slug}" />`));
-  assert.match(h, /og:title" content="Night &quot;Drive&quot;/); assert.match(h, /name="description" content="Night/); assert.match(h, /index,follow/); assert.match(h, /id="root"/);
+  assert.match(h, /og:title" content="&quot;Night &#39;Drive&#39;&quot; by @alice"/); assert.match(h, /twitter:title" content="&quot;Night &#39;Drive&#39;&quot; by @alice"/); assert.match(h, /name="description" content="&quot;Night &#39;Drive&#39;&quot; by @alice/); assert.match(h, /index,follow/); assert.match(h, /id="root"/);
   const p = (await app.inject(`/s/${priv.slug}`)).body; assert.ok(!p.includes("Secret")); assert.match(p, /noindex/);
   const u = (await app.inject(`/u/${social.profile("u1")!.handle}`)).body; assert.match(u, /<title>Alice \(@/); assert.match(u, /1 public song by Alice/);
 });
@@ -118,4 +118,14 @@ test("/s/<unknown-slug> is a 404 'Song not found' page (escaped); private songs 
   const evil = await app.inject("/s/%3Cscript%3Ealert(1)%3C%2Fscript%3E");
   assert.equal(evil.statusCode, 404); assert.ok(!evil.body.includes("<script>alert(1)")); assert.match(evil.body, /&lt;script&gt;/);
   const p = await app.inject(`/s/${priv.slug}`); assert.equal(p.statusCode, 200); assert.ok(!p.body.includes("Secret"));
+});
+
+test("/s/<slug> falls back to Untitled and omits by-line when title or author is missing", async () => {
+  const { app, shares } = await setup();
+  const none = shares.create({ owner: "ghost", title: "   ", projectJson: proj, public: true });
+  const h = (await app.inject(`/s/${none.slug}`)).body;
+  assert.match(h, /<title>&quot;Untitled&quot; · GBK Composer<\/title>/);
+  assert.match(h, /og:title" content="&quot;Untitled&quot;"/);
+  assert.match(h, /twitter:title" content="&quot;Untitled&quot;"/);
+  assert.match(h, /<h1>Untitled<\/h1>/);
 });

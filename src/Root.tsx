@@ -13,6 +13,7 @@ import { openShared } from "./agent/share-client.ts";
 import { beginShareOpen, settleShareOpen } from "./agent/share-open.ts";
 import { reportError } from "./telemetry/error-reporter.ts";
 import { lazy, Suspense } from "react";
+import { songShareLine } from "./agent/share-text.ts";
 const JamApp = lazy(() => import("./components/jam/JamApp.tsx"));
 
 /** Is the Composer server (same-origin /api) present? Not on the GitHub Pages build: then GBK behaves as before. */
@@ -38,7 +39,7 @@ export default function Root() {
     if (route.view !== "share") return;
     setShareErr("");
     beginShareOpen(route.slug);
-    void openShared(route.slug, route.fork).then((sh) => { setShareTitle(sh.title); if (sh.slug && sh.slug !== route.slug && location.pathname.includes("/s/")) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); settleShareOpen(route.slug, { ok: true, title: sh.title }); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); if (!settleShareOpen(route.slug, { ok: false, error: e })) setShareErr(`Could not open shared song: ${(e as Error).message}`); });
+    void openShared(route.slug, route.fork).then((sh) => { setShareTitle(sh.title, { handle: sh.handle }); if (sh.slug && sh.slug !== route.slug && location.pathname.includes("/s/")) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); settleShareOpen(route.slug, { ok: true, title: sh.title }); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); if (!settleShareOpen(route.slug, { ok: false, error: e })) setShareErr(`Could not open shared song: ${(e as Error).message}`); });
   }, [route]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && playerOpen) setPlayerOpen(false); };
@@ -75,11 +76,13 @@ export default function Root() {
   );
 }
 
-/** Share pages (/s/<slug>): "<song title> · GBK Composer" in the tab and og:title (SPA; nginx serves static index.html). */
-export function setShareTitle(title: string) {
-  const t = `${(title || "Untitled").trim()} · GBK Composer`;
-  document.title = t;
-  let m = document.querySelector<HTMLMetaElement>('meta[property="og:title"]');
-  if (!m) { m = document.createElement("meta"); m.setAttribute("property", "og:title"); document.head.appendChild(m); }
-  m.content = t;
+/** Share pages (/s/<slug>): `"<title>" by @<handle>` in og/twitter:title; the tab keeps " · GBK Composer". */
+export function setShareTitle(title: string, author?: { handle?: string | null; displayName?: string | null }) {
+  const line = songShareLine({ title, handle: author?.handle, displayName: author?.displayName });
+  document.title = `${line} · GBK Composer`;
+  for (const [attr, name] of [["property", "og:title"], ["name", "twitter:title"]] as const) {
+    let el = document.querySelector<HTMLMetaElement>(`meta[${attr}="${name}"]`);
+    if (!el) { el = document.createElement("meta"); el.setAttribute(attr, name); document.head.appendChild(el); }
+    el.content = line;
+  }
 }

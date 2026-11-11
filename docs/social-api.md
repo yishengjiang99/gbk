@@ -39,12 +39,17 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
   "media": { "mp3": "https://…/api/shares/<slug>/media/mp3", "wav": "https://…/media/wav", "midi": "https://…/media/midi" }, // null when absent
   "preview": { "notes": [[pitch, start, dur, track]], "duration": 32.0 }, // piano-roll preview, may be null
   "prompt_shared": false, "prompt_text": null,   // P3; text only when owner opted in
-  "parent_slug": null, "is_mine": false
+  "parent_slug": null, "is_mine": false,
+  "share_title": "\"Minuet in G\" by @yisheng",
+  "share_text": "\"Minuet in G\" by @yisheng\nhttps://compose.grepawk.com/s/minuet-in-g-a1b2c3",
+  "x_intent_url": "https://x.com/intent/tweet?text=..."
 }
 
 // Comment
 { "id": "17", "author": User, "body": "nice", "created_at": 0, "can_delete": false }
 ```
+
+`share_title`, `share_text`, and `x_intent_url` are the canonical share wording so GBK iOS and the web app stay in sync: `share_title` is `"<title>" by @<handle>` (title falls back to `Untitled`; the by-clause is omitted when the author is missing). `share_text` is that line plus a newline and the `/s/<slug>` URL. `x_intent_url` is the X/Twitter intent with the same text; it uses a stored X handle only when one exists, otherwise the gbk handle. iOS should use `share_title` as the ShareLink subject and `share_text` as the message (or the line without the URL if the share item is already the song URL).
 
 Labels (fixed set, max 3): `ambient lofi classical jazz rnb electronic cinematic game pop experimental wip`.
 Tags: max 10, lowercase `a-z0-9-`, 2–24 chars.

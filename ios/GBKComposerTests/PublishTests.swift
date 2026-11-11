@@ -45,13 +45,15 @@ final class PublishDraftTests: XCTestCase {
         XCTAssertThrowsError(try WebViewGuestPublishService.result(["ok": false, "status": 404, "code": "NOT_SAVED"])) {
             XCTAssertEqual($0 as? PublishError, .notSaved)
         }
-        let r = try? WebViewGuestPublishService.result(["ok": true, "slug": "abc", "handle": "mellowfox2"])
+        let r = try? WebViewGuestPublishService.result(["ok": true, "slug": "abc", "handle": "mellowfox2", "title": "Gentle Piano"])
         XCTAssertEqual(r?.author, "mellowfox2")
+        XCTAssertEqual(r?.title, "Gentle Piano")
     }
 
     func testMockGuestPublishUsesUsername() async throws {
         let r = try await MockGuestPublishService().publish(PublishDraft(title: "Gentle Piano"), projectId: "p1", slug: "abc", as: "MellowFox")
         XCTAssertEqual(r.author, "mellowfox")
+        XCTAssertEqual(r.title, "Gentle Piano")
         XCTAssertTrue(r.url.absoluteString.hasPrefix("https://compose.grepawk.com/s/"))
     }
 }

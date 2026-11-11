@@ -11,6 +11,7 @@ import { PAGE_PATHS } from "./pages.ts";
 import { ogImage, OG_W, OG_H } from "../og-image.ts";
 import { ogVideo, ogVideoEnabled } from "../og-video.ts";
 import { RateLimiter } from "../security/rate-limit.ts";
+import { songOgTitle, songTitleOf } from "../../../src/agent/share-text.ts";
 
 export const SITEMAP_CHUNK = 45_000;
 export const STATIC_PATHS = ["/", "/feed", "/explore", ...PAGE_PATHS, "/chatgpt/gallery", "/pricing", "/plans"];
@@ -71,18 +72,18 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
     return shell;
   };
   const ogDir = opts.ogDir ?? join(cfg.dataDir, "og-cache");
-  interface Meta { title: string; description: string; url: string; index: boolean; type?: string; image?: string; extraHead?: string; jsonLd?: object; body?: string }
+  interface Meta { title: string; description: string; url: string; index: boolean; type?: string; image?: string; extraHead?: string; jsonLd?: object; body?: string; ogTitle?: string }
   const render = (reply: FastifyReply, m: Meta, req?: FastifyRequest) => {
     const base = loadShell();
     if (!base) return reply.code(503).send("shell unavailable");
-    const t = htmlEsc(m.title), d = htmlEsc(m.description), u = htmlEsc(m.url);
+    const t = htmlEsc(m.title), og = htmlEsc(m.ogTitle ?? m.title), d = htmlEsc(m.description), u = htmlEsc(m.url);
     let html = base
       .replace(/<title>[\s\S]*?<\/title>/, `<title>${t}</title>`)
       .replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${d}" />`)
       .replace(/<meta property="og:type"[^>]*>/, `<meta property="og:type" content="${m.type ?? "website"}" />`)
-      .replace(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${t}" />`)
+      .replace(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${og}" />`)
       .replace(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${d}" />`)
-      .replace(/<meta name="twitter:title"[^>]*>/, `<meta name="twitter:title" content="${t}" />`)
+      .replace(/<meta name="twitter:title"[^>]*>/, `<meta name="twitter:title" content="${og}" />`)
       .replace(/<meta name="twitter:description"[^>]*>/, `<meta name="twitter:description" content="${d}" />`)
       // Smart App Banner "OPEN" hands app-argument to the app: the full URL of this page (query kept, e.g. ?edit=1).
       .replace(/(<meta name="apple-itunes-app" content="[^"]*?app-argument=)[^"]*"/, (_, pre: string) => `${pre}${htmlEsc(bannerArg(origin, req?.url, m.url))}"`)
@@ -90,7 +91,7 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
     if (m.image) {
       const img = htmlEsc(m.image);
       html = html.replace(/<meta property="og:image(:width|:height)?"[^>]*>\s*/g, "").replace(/<meta name="twitter:image"[^>]*>\s*/g, "")
-        .replace("</head>", `  <meta property="og:image" content="${img}" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="630" />\n    <meta property="og:image:alt" content="${t}" />\n    <meta name="twitter:image" content="${img}" />\n  </head>`);
+        .replace("</head>", `  <meta property="og:image" content="${img}" />\n    <meta property="og:image:width" content="1200" />\n    <meta property="og:image:height" content="630" />\n    <meta property="og:image:alt" content="${og}" />\n    <meta name="twitter:image" content="${img}" />\n  </head>`);
     }
     if (m.jsonLd) html = html.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/, `<script type="application/ld+json">${JSON.stringify(m.jsonLd).replace(/</g, "\\u003c")}</script>`);
     html = html.replace("</head>", `  <link rel="canonical" href="${u}" />\n    <meta property="og:url" content="${u}" />\n    <meta name="robots" content="${m.index ? "index,follow" : "noindex"}" />\n${m.extraHead ?? ""}${m.body ? `    <style>${SSR_CSS}</style>\n` : ""}  </head>`);
@@ -147,10 +148,11 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
     }
     const url = `${origin}/s/${encodeURIComponent(r.slug)}`, labels = labelsOf(r.labels), tags = (tagsQ.all(r.id) as { tag: string }[]).map((x) => x.tag);
     const artist = r.display_name ?? "GBK Composer", artistUrl = r.handle ? `${origin}/u/${encodeURIComponent(r.handle)}` : null;
-    const by = r.display_name ? ` by ${r.display_name}` : "";
+    const share = { title: r.title, handle: r.handle, displayName: r.display_name };
+    const ogTitle = songOgTitle(share);
     const prompt = r.prompt_shared && r.prompt_text ? r.prompt_text : null;
     const secs = durationSeconds(r.wav_meta, r.project_json), published = new Date(r.published_at ?? r.created_at);
-    const desc = [`${r.title}${by}: an original song made with GBK Composer. Listen, remix, and download the MIDI.`, labels.length ? `Genre: ${labels.join(", ")}.` : "", prompt ? `Prompt: ${prompt}` : ""].filter(Boolean).join(" ").slice(0, 300);
+    const desc = [`${ogTitle}: an original song made with GBK Composer. Listen, remix, and download the MIDI.`, labels.length ? `Genre: ${labels.join(", ")}.` : "", prompt ? `Prompt: ${prompt}` : ""].filter(Boolean).join(" ").slice(0, 300);
     const image = `${origin}/og/s/${encodeURIComponent(r.slug)}.png`, audio = r.h3 ? `${origin}/api/shares/${encodeURIComponent(r.slug)}/media/mp3` : null;
     const video = `${origin}/og/s/${encodeURIComponent(r.slug)}.mp4`;
     const more = r.owner ? (byOwnerQ.all(r.owner, 11) as { slug: string; title: string }[]).filter((x) => x.slug !== r.slug).slice(0, 10) : [];
@@ -164,11 +166,11 @@ export function seoRoutes(app: FastifyInstance, cfg: Config, db: DatabaseSync, o
       ...(labels.length ? { genre: labels } : {}), ...(tags.length ? { keywords: tags.join(", ") } : {}), ...(prompt ? { description: prompt } : {}),
       ...(audio ? { audio: { "@type": "AudioObject", contentUrl: audio, encodingFormat: "audio/mpeg", ...(secs ? { duration: isoDuration(secs) } : {}) } } : {}) };
     const a = (href: string, txt: string) => `<a href="${htmlEsc(href)}">${htmlEsc(txt)}</a>`;
-    const body = `<h1>${htmlEsc(r.title)}</h1><p class="by">by ${artistUrl ? a(`/u/${encodeURIComponent(r.handle!)}`, artist) : htmlEsc(artist)}</p>
+    const body = `<h1>${htmlEsc(songTitleOf(r.title))}</h1><p class="by">by ${artistUrl ? a(`/u/${encodeURIComponent(r.handle!)}`, artist) : htmlEsc(artist)}</p>
 <dl>${labels.length ? `<dt>Genre</dt><dd>${htmlEsc(labels.join(", "))}</dd>` : ""}${tags.length ? `<dt>Tags</dt><dd>${tags.map((x) => `#${htmlEsc(x)}`).join(" ")}</dd>` : ""}${secs ? `<dt>Duration</dt><dd><time datetime="${isoDuration(secs)}">${clock(secs)}</time></dd>` : ""}<dt>Published</dt><dd><time datetime="${published.toISOString()}">${published.toISOString().slice(0, 10)}</time></dd></dl>
 ${prompt ? `<h2>Prompt</h2><blockquote>${htmlEsc(prompt)}</blockquote>` : ""}<p>${a(`/s/${encodeURIComponent(r.slug)}`, "Listen and remix in GBK Composer")}</p>
 ${more.length ? `<h2>More by ${htmlEsc(artist)}</h2><ul>${more.map((x) => `<li>${a(`/s/${encodeURIComponent(x.slug)}`, x.title)}</li>`).join("")}</ul>` : ""}`;
-    return render(reply, { title: `${r.title}${by} · GBK Composer`, description: desc, url, index: true, type: "music.song", image, extraHead, jsonLd, body }, req);
+    return render(reply, { title: `${ogTitle} · GBK Composer`, ogTitle, description: desc, url, index: true, type: "music.song", image, extraHead, jsonLd, body }, req);
   });
 
   const profQ = db.prepare(`SELECT p.user_id, p.handle, p.display_name, p.bio, p.badge, (SELECT COUNT(*) FROM shares s WHERE s.owner = p.user_id AND s.public = 1) AS n FROM profiles p WHERE p.handle = ?`);
