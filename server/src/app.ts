@@ -161,11 +161,13 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const nativeApi = nativeRoutes(app, cfg, { sessions, accounts, native, shares, social, iap, usage, me: socialApi.me, fetch: deps.fetch });
   authExtraRoutes(app, cfg, { sessions, accounts, pair: nativeApi.pair, fetch: deps.fetch });
   // Nightly (03:30 server time) retrain of the ranking model in a worker thread; one run per day (lastTrain guard).
+  // Every tick also re-reads the promoted model, so a manual train run is served within 10 minutes without a restart.
   let lastTrain = ""; let training = false;
   const trainTimer = setInterval(() => { const d = new Date(); const day = d.toISOString().slice(0, 10);
+    if (!training) { const was = ranker.version; try { ranker.reload(); } catch { /* best effort */ } if (ranker.version !== was) app.log.info({ evt: "rank_model_reloaded", version: ranker.version, previous: was }); }
     if (d.getHours() !== 3 || d.getMinutes() < 30 || d.getMinutes() >= 40 || lastTrain === day || training) return; lastTrain = day; training = true;
     try { events.prune(); } catch { /* best effort */ }
-    trainInWorker(ranker, shares.database.location()).then((r) => { if (r && "skipped" in r) app.log.info({ evt: "rank_train_skipped", reason: r.skipped, impressions: r.impressions, n: r.n, holdout: r.holdout, min: r.min, labels: r.labels }); else if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, holdout: r.holdout, labels: r.labels, auc: r.auc, auc_heur: r.auc_heur, auc_prev: r.auc_prev, win: r.win, promoted: r.promoted, demoted: r.demoted, previous: r.previous, serving: ranker.version, ms: r.ms }); })
+    trainInWorker(ranker, shares.database.location()).then((r) => { if (r && "skipped" in r) app.log.info({ evt: "rank_train_skipped", reason: r.skipped, impressions: r.impressions, n: r.n, holdout: r.holdout, min: r.min, labels: r.labels }); else if (r) app.log.info({ evt: "rank_train", version: r.version, n: r.n, holdout: r.holdout, labels: r.labels, auc: r.auc, auc_heur: r.auc_heur, auc_prev: r.auc_prev, win: r.win, lift: r.lift, lift_ci: r.lift_ci, l2: r.l2, cv: r.cv, folds: r.folds, promoted: r.promoted, demoted: r.demoted, previous: r.previous, serving: ranker.version, ms: r.ms }); })
       .catch((e) => app.log.warn({ evt: "rank_train_error", message: (e as Error).message })).finally(() => { training = false; }); }, 600_000); trainTimer.unref();
   const rescoreTimer = setInterval(() => { try { social.rescoreAll(); } catch { /* best effort */ } }, 600_000); rescoreTimer.unref();
   const mcpService = new CompositionService(cfg, mcpStore, shares, (o) => app.log.info(o));

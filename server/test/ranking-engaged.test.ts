@@ -1,7 +1,7 @@
 // Ranker "engaged" label, training-row filters and point-in-time popularity (docs/social/ranking.md).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Ranker, engaged, engagedSql, trainable, BURST_MIN, type Imp } from "../src/ranking/ranker.ts";
+import { Ranker, engaged, engagedSql, trainable, BURST_MIN, CI_IMPRESSIONS_STOPPED, type Imp } from "../src/ranking/ranker.ts";
 import { fixture, H, D } from "./rank-fixture.ts";
 
 const base = { completed: 0, replay: 0, listen_ratio: 0, dwell_ms: 5000, fast_skip: 0, actions: "[]" };
@@ -25,6 +25,21 @@ test("trainable: For you only, no action-only rows, no scripted swipe bursts; a 
   const out = trainable([...burst, ...slow, imp({ feed: "new" }), imp({ position: -1, feed: "for_you" }), imp({ dwell_ms: 0, actions: '["rate"]' }), imp({ session: "one", created_at: 5 })]);
   assert.deepEqual([...new Set(out.map((i) => i.session))].sort(), ["one", "slow"]); assert.equal(out.length, BURST_MIN + 1);
   assert.ok(out.every((x, i) => i === 0 || out[i - 1].created_at <= x.created_at), "time-ordered");
+});
+
+test("trainable: drops pre-fix iOS CI installs (one impression in the window); real iOS users and later rows stay", () => {
+  const pre = CI_IMPRESSIONS_STOPPED - H, post = CI_IMPRESSIONS_STOPPED + H;
+  const out = trainable([imp({ actor: "ci", client: "ios", created_at: pre }), imp({ actor: "web1", client: "web", created_at: pre }), imp({ actor: "new", client: "ios", created_at: post }),
+    ...[0, 1].map((k) => imp({ actor: "me", client: "ios", session: `m${k}`, created_at: pre - k * D }))]);
+  assert.deepEqual(out.map((i) => i.actor).sort(), ["me", "me", "new", "web1"]);
+});
+
+test("dataset: features as of the impression's exact time, so earlier plays in the same session count (as when serving)", () => {
+  const fx = fixture(); const a = fx.song({ owner: "oa", tags: ["lofi"] }), b = fx.song({ owner: "ob", tags: ["lofi"] }); const t = Math.floor(fx.now() / H) * H - 2 * H + 60_000;
+  fx.imp({ actor: "v", session: "s1", song: a, at: t, good: true }); fx.imp({ actor: "v", session: "s1", song: b, at: t + 5 * 60_000, good: true });
+  const rows = fx.db.prepare("SELECT * FROM impressions ORDER BY created_at").all() as Imp[];
+  const { tr } = new Ranker(fx.db, fx.now).dataset(rows, Infinity); const si = 4; // FEATURES.indexOf("session")
+  assert.equal(tr[0].x[si], 0, "no peeking at itself"); assert.ok(tr[1].x[si] > 0, `same-hour session signal ${tr[1].x[si]}`);
 });
 
 test("dataset drops self-impressions", () => {

@@ -11,7 +11,7 @@ export const FEATURES = ["affinity", "coeng", "popularity", "freshness", "sessio
 export type Weights = Record<(typeof FEATURES)[number], number> & { bias: number };
 export const HEURISTIC: Weights = { bias: 0, affinity: 1.0, coeng: 0.8, popularity: 0.6, freshness: 0.4, session: 1.2, seen: -0.6 };
 /** Learned model (lr-eng): one L2-regularized LR on raw features; value = P(engaged). Gate stats are stored with it. */
-export interface Model { engaged: Weights; auc?: number | null; auc_heur?: number | null; win?: number | null }
+export interface Model { engaged: Weights; auc?: number | null; auc_heur?: number | null; win?: number | null; l2?: number }
 const sig = (z: number) => 1 / (1 + Math.exp(-z));
 /** A stored model is usable only with an `engaged` head whose weights are all finite (else heur-2). */
 export function parseModel(json: string): Model | null {
@@ -20,21 +20,38 @@ export function parseModel(json: string): Model | null {
 /** Engaged (approved 2026-11-10): completed, replay, >= 25% listened, >= 10 s on the card without a fast skip, or any action. */
 export const engaged = (i: { completed: number | boolean; replay?: number | boolean; listen_ratio?: number; dwell_ms: number; fast_skip: number | boolean; actions: string }) =>
   i.completed || i.replay || (i.listen_ratio ?? 0) >= 0.25 || (i.dwell_ms >= 10_000 && !i.fast_skip) || i.actions !== "[]" ? 1 : 0;
+/** Graded training target in [0, 1], monotonic in dwell and in listen_ratio (the binary `engaged` stays the eval label):
+ *  completion, replay or any action = 1; else max(dwell grade, listen grade). Dwell grade: 0 on a fast skip, else
+ *  log(dwell / 2 s) / log(60 s / 2 s) clamped to [0, 1] (3 s 0.12, 5 s 0.27, 10 s 0.47, 30 s 0.80, >= 60 s 1).
+ *  Listen grade: listen_ratio / 0.5 clamped (25% 0.5, >= 50% 1). */
+export const GRADE_DWELL_MIN_MS = 2000, GRADE_DWELL_CAP_MS = 60_000, GRADE_RATIO_CAP = 0.5;
+export function grade(i: { completed: number | boolean; replay?: number | boolean; listen_ratio?: number; dwell_ms: number; fast_skip: number | boolean; actions: string }) {
+  if (i.completed || i.replay || i.actions !== "[]") return 1;
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  const d = i.fast_skip || i.dwell_ms <= GRADE_DWELL_MIN_MS ? 0 : clamp(Math.log(i.dwell_ms / GRADE_DWELL_MIN_MS) / Math.log(GRADE_DWELL_CAP_MS / GRADE_DWELL_MIN_MS));
+  return Math.max(d, clamp((i.listen_ratio ?? 0) / GRADE_RATIO_CAP));
+}
 /** Same rule in SQL; `p` is the table alias prefix, e.g. "i.". */
 export const engagedSql = (p = "") => `(${p}completed = 1 OR ${p}replay = 1 OR ${p}listen_ratio >= 0.25 OR (${p}dwell_ms >= 10000 AND ${p}fast_skip = 0) OR ${p}actions <> '[]')`;
 /** Popularity feature: engaged impressions by others in the POP_WINDOW_D days before t. */
 export const POP_WINDOW_D = 14;
 /** Scripted swipe bursts (CI/UI tests): a session with >= BURST_MIN impressions averaging < BURST_GAP_MS apart. */
 export const BURST_MIN = 20, BURST_GAP_MS = 5000;
-export type Imp = { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number; feed: string; position: number };
-/** Training/eval rows: For you only, dwell > 0 (not action-only), no scripted bursts. Self-impressions are dropped in dataset(). */
+export type Imp = { actor: string; session: string; share_id: string; dwell_ms: number; listen_ratio: number; completed: number; fast_skip: number; replay: number; actions: string; created_at: number; feed: string; position: number; client?: string };
+/** iOS Simulator builds (CI, UI tests) logged prod impressions until release 5c9e6ca (2026-11-11 03:09 UTC): every run was a
+ *  fresh install with one first-card impression whose dwell is test timing, and they were ~60% of earlier rows. Such
+ *  rows (an iOS actor with one impression in the window, before this time) are not trainable. Ages out by 2026-12-11. */
+export const CI_IMPRESSIONS_STOPPED = Date.UTC(2026, 10, 11, 3, 10);
+/** Training/eval rows: For you only, dwell > 0 (not action-only), no scripted bursts, no pre-fix iOS CI installs. Self-impressions are dropped in dataset(). */
 export function trainable(imps: Imp[]): Imp[] {
-  const by = new Map<string, Imp[]>(); for (const i of imps) if (i.feed === "for_you" && i.position >= 0 && i.dwell_ms > 0) (by.get(`${i.actor}\u0001${i.session}`) ?? by.set(`${i.actor}\u0001${i.session}`, []).get(`${i.actor}\u0001${i.session}`)!).push(i);
+  const per = new Map<string, number>(); for (const i of imps) per.set(i.actor, (per.get(i.actor) ?? 0) + 1);
+  const ci = (i: Imp) => i.client === "ios" && Number(i.created_at) < CI_IMPRESSIONS_STOPPED && per.get(i.actor) === 1;
+  const by = new Map<string, Imp[]>(); for (const i of imps) if (!ci(i) && i.feed === "for_you" && i.position >= 0 && i.dwell_ms > 0) (by.get(`${i.actor}\u0001${i.session}`) ?? by.set(`${i.actor}\u0001${i.session}`, []).get(`${i.actor}\u0001${i.session}`)!).push(i);
   const out: Imp[] = [];
   for (const g of by.values()) { const ts = g.map((i) => Number(i.created_at)); if (g.length >= BURST_MIN && Math.max(...ts) - Math.min(...ts) < g.length * BURST_GAP_MS) continue; out.push(...g); }
   return out.sort((a, b) => Number(a.created_at) - Number(b.created_at));
 }
-export const IMP_COLS = "actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at, feed, position";
+export const IMP_COLS = "actor, session, share_id, dwell_ms, listen_ratio, completed, fast_skip, replay, actions, created_at, feed, position, client";
 export const EPSILON = 0.12, MAX_AUTHOR_RUN = 2, MAX_LABEL_RUN = 3, FRESH_HALF_LIFE_H = 48;
 
 /** Signal weight of one impression: completion/dwell/actions positive, fast skip negative. */
@@ -132,8 +149,8 @@ export class Ranker {
     return { affinity: sq(c.pref, s), coeng: (c.co.get(s.id) ?? 0) / c.maxCo, popularity: c.pop.get(s.id) ?? 0, freshness: Math.pow(0.5, Math.max(0, c.t - s.published_at) / (FRESH_HALF_LIFE_H * 3_600_000)), session: sq(c.sess, s), seen: Math.min(1, (c.seen.get(s.id) ?? 0) / 2) };
   }
   /** Per-song feature vectors for one actor (and current session), point-in-time: only impressions before `asOf`. */
-  features(actor: string | null, session: string | null, asOf?: number) {
-    const songs = this.songs(); const c = this.context(actor, session, asOf ?? this.now(), songs);
+  features(actor: string | null, session: string | null, asOf?: number, songs = this.songs()) {
+    const c = this.context(actor, session, asOf ?? this.now(), songs);
     return songs.map((s) => ({ song: s, f: this.feat(c, s), history: c.history }));
   }
   /** Candidate generation: named sources, each capped by its QUOTAS entry; `fresh` always contributes in full.
@@ -219,74 +236,106 @@ export class Ranker {
     // promoted = 1 marks the one served model: a new winner retires the old one; a demoted one goes back to heur-2
     if (promote || demote) this.db.prepare("UPDATE rank_models SET promoted = 0 WHERE promoted = 1 AND version <> ?").run(promote ? version : "");
     this.reload();
-    return { version, n: g.n, holdout: g.holdout, labels: g.labels, auc: g.auc, auc_heur: g.auc_heur, auc_prev: g.auc_prev, win: g.win, promoted: promote, demoted: demote ? cur!.version : null, previous: cur?.version ?? null, ms: Date.now() - t0, model };
+    return { version, n: g.n, holdout: g.holdout, labels: g.labels, auc: g.auc, auc_heur: g.auc_heur, auc_prev: g.auc_prev, win: g.win, lift: g.lift, lift_ci: g.lift_ci, l2: g.l2, cv: g.cv, folds: g.folds, promoted: promote, demoted: demote ? cur!.version : null, previous: cur?.version ?? null, ms: Date.now() - t0, model };
   }
-  /** Fit + gate decision without writing (train() and the rank-eval --preview). Holdout = last HOLDOUT_FRAC of rows
-   *  by time, at least HOLDOUT_MIN_DAYS. Promote iff AUC >= max(heur-2, current) + PROMOTE_MARGIN and the candidate
-   *  beats heur-2 in >= BOOT_WIN of BOOT_N seeded resamples of holdout actors. */
+  /** Fit + gate decision without writing (train() and the rank-eval --preview). Out-of-time evaluation by forward
+   *  chaining: the last EVAL_FRAC of rows by time (at least HOLDOUT_MIN_DAYS) is cut into EVAL_FOLDS consecutive blocks,
+   *  each scored by a model fit only on earlier rows (its L2 chosen by CV on those rows), and the blocks are pooled.
+   *  Promote iff pooled AUC >= max(heur-2, current) + PROMOTE_MARGIN and the candidate beats heur-2 in >= BOOT_WIN of
+   *  BOOT_N seeded resamples of evaluated actors, with the 95% lift interval above 0. The stored model is fit on all rows. */
   gate(): Gate | TrainSkip {
     const t = this.now();
     const imps = trainable(this.db.prepare(`SELECT ${IMP_COLS} FROM impressions WHERE created_at > ? AND created_at < ? ORDER BY id DESC LIMIT 20000`).all(t - 30 * 86_400_000, t) as Imp[]);
     if (imps.length < MIN_TRAIN) return { skipped: "few_impressions", impressions: imps.length, n: 0, holdout: 0, min: MIN_TRAIN };
-    const split = Math.min(Number(imps[Math.floor(imps.length * (1 - HOLDOUT_FRAC))].created_at), t - HOLDOUT_MIN_DAYS * 86_400_000);
-    const { tr, ho } = this.dataset(imps, split); const cnt = (rs: Row[]) => { const p = rs.filter((d) => d.y).length; return [p, rs.length - p]; };
-    const labels = { train: cnt(tr), holdout: cnt(ho) }; const base = { impressions: imps.length, n: tr.length, holdout: ho.length, labels };
-    if (tr.length < MIN_TRAIN) return { skipped: "few_train_rows", ...base, min: MIN_TRAIN };
+    const rows = this.dataset(imps, Infinity).tr.sort((a, b) => a.at - b.at);
+    const start = rows.length ? Math.min(rows[Math.floor(rows.length * (1 - EVAL_FRAC))].at, t - HOLDOUT_MIN_DAYS * 86_400_000) : t;
+    const tr = rows.filter((r) => r.at < start), ho = rows.filter((r) => r.at >= start); const cnt = (rs: Row[]) => { const p = rs.filter((d) => d.y).length; return [p, rs.length - p]; };
+    const labels = { train: cnt(tr), holdout: cnt(ho) }; const base = { impressions: imps.length, n: rows.length, holdout: ho.length, labels };
+    if (rows.length < MIN_TRAIN) return { skipped: "few_train_rows", ...base, min: MIN_TRAIN };
     if (labels.train.some((v) => v < MIN_TRAIN_LABELS)) return { skipped: "few_train_labels", ...base, min: MIN_TRAIN_LABELS };
     if (labels.holdout.some((v) => v < MIN_HOLDOUT_LABELS)) return { skipped: "few_holdout_labels", ...base, min: MIN_HOLDOUT_LABELS };
-    const w = fitLR(tr.map((d) => ({ x: d.x, y: d.y }))); const cur = this.promoted();
-    const y = ho.map((d) => d.y), sC = ho.map((d) => lin(d.x, w)), sH = ho.map((d) => lin(d.x, HEURISTIC)), sP = cur ? ho.map((d) => lin(d.x, cur.model.engaged)) : null;
+    const sC: number[] = [], folds: number[] = []; const size = Math.ceil(ho.length / EVAL_FOLDS);
+    for (let k = 0; k * size < ho.length; k++) { const fit = rows.slice(0, tr.length + k * size); const w = fitLR(fit, chooseL2(fit).l2); folds.push(fit.length); sC.push(...ho.slice(k * size, (k + 1) * size).map((d) => lin(d.x, w))); }
+    // fit on the graded target, shrunk toward heur-2; L2 picked by forward-chaining CV
+    const { l2, cv } = chooseL2(rows); const w = fitLR(rows, l2); const cur = this.promoted();
+    const y = ho.map((d) => d.y), sH = ho.map((d) => lin(d.x, HEURISTIC)), sP = cur ? ho.map((d) => lin(d.x, cur.model.engaged)) : null;
     const auc = aucOf(sC, y), auc_heur = aucOf(sH, y), auc_prev = sP ? aucOf(sP, y) : null;
-    const win = bootWin(ho.map((d) => d.actor), y, sC, sH);
-    const promote = auc !== null && auc_heur !== null && auc >= Math.max(auc_heur, auc_prev ?? -Infinity) + PROMOTE_MARGIN && win >= BOOT_WIN;
+    const { win, lift, lift_ci } = bootWin(ho.map((d) => d.actor), y, sC, sH);
+    // approved bar (+0.02, >= 90% wins), and the 95% lift interval must exclude 0 so a lucky holdout cannot promote
+    const promote = auc !== null && auc_heur !== null && auc >= Math.max(auc_heur, auc_prev ?? -Infinity) + PROMOTE_MARGIN && win >= BOOT_WIN && !!lift_ci && lift_ci[0] > 0;
     const demote = !promote && !!cur && auc_prev !== null && auc_heur !== null && auc_prev < auc_heur;
-    return { ...base, model: { engaged: w, auc, auc_heur, win }, cur, auc, auc_heur, auc_prev, win, promote, demote };
+    return { ...base, model: { engaged: w, auc, auc_heur, win, l2 }, cur, auc, auc_heur, auc_prev, win, lift, lift_ci, l2, cv, folds, promote, demote };
   }
-  /** Point-in-time training rows (features as of each impression's hour + its session), split at `split`. */
+  /** Point-in-time training rows: features as of the impression's own time (so same-session history counts, as when
+   *  serving) with its session, split at `split`. The catalog is read once. */
   dataset(imps: Omit<Imp, "feed" | "position">[], split: number) {
-    const cache = new Map<string, Map<string, { f: Record<string, number>; song: Song }>>(); const tr: Row[] = [], ho: Row[] = [];
+    const songs = this.songs(); const tr: Row[] = [], ho: Row[] = [];
     for (const i of imps) {
-      const hr = Math.floor(Number(i.created_at) / 3_600_000) * 3_600_000; const key = `${i.actor}\u0001${i.session}\u0001${hr}`;
-      let m = cache.get(key); if (!m) { if (cache.size > 2000) cache.clear(); m = new Map(this.features(i.actor, i.session, hr).map((x) => [x.song.id, { f: x.f as Record<string, number>, song: x.song }])); cache.set(key, m); }
-      const e = m.get(i.share_id); if (!e || e.song.owner === i.actor) continue; const at = Number(i.created_at);
-      (at >= split ? ho : tr).push({ x: FEATURES.map((k) => e.f[k]), y: engaged(i), g: signal(i), dur: e.song.dur, fresh: at - e.song.published_at < FRESH_WINDOW_H * 3_600_000, at, actor: i.actor, session: i.session, share_id: i.share_id });
+      const at = Number(i.created_at); const e = this.features(i.actor, i.session, at, songs).find((x) => x.song.id === i.share_id);
+      if (!e || e.song.owner === i.actor) continue;
+      (at >= split ? ho : tr).push({ x: FEATURES.map((k) => e.f[k]), y: engaged(i), t: grade(i), g: signal(i), dur: e.song.dur, fresh: at - e.song.published_at < FRESH_WINDOW_H * 3_600_000, at, actor: i.actor, session: i.session, share_id: i.share_id });
     }
     return { tr, ho };
   }
 }
 /** train() did not fit a model (too little data); logged as rank_train_skipped so a skip is visible. labels = [pos, neg]. */
 export interface TrainSkip { skipped: "few_impressions" | "few_train_rows" | "few_train_labels" | "few_holdout_labels"; impressions: number; n: number; holdout: number; min: number; labels?: { train: number[]; holdout: number[] } }
-export interface Gate { impressions: number; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; model: Model; cur: { version: string; model: Model } | null; auc: number | null; auc_heur: number | null; auc_prev: number | null; win: number; promote: boolean; demote: boolean }
-export interface TrainResult { version: string; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; auc: number | null; auc_heur: number | null; auc_prev: number | null; win: number; promoted: boolean; demoted: string | null; previous: string | null; ms: number; model: Model }
-export type Row = { x: number[]; y: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
-/** Approved 2026-11-10, sized to ~800 clean rows / ~200 engaged per 30 days. */
-export const MIN_TRAIN = 300, MIN_TRAIN_LABELS = 100, MIN_HOLDOUT_LABELS = 30, HOLDOUT_FRAC = 0.2, HOLDOUT_MIN_DAYS = 3;
-export const PROMOTE_MARGIN = 0.02, BOOT_N = 1000, BOOT_WIN = 0.9, L2 = 1.0;
+type Stats = { auc: number | null; auc_heur: number | null; auc_prev: number | null; win: number; lift: number | null; lift_ci: [number, number] | null; l2: number; cv: Record<string, number | null> };
+export interface Gate extends Stats { folds: number[]; impressions: number; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; model: Model; cur: { version: string; model: Model } | null; promote: boolean; demote: boolean }
+export interface TrainResult extends Stats { folds: number[]; version: string; n: number; holdout: number; labels: { train: number[]; holdout: number[] }; promoted: boolean; demoted: string | null; previous: string | null; ms: number; model: Model }
+/** y = binary engaged (eval/gate label), t = graded target (fit). */
+export type Row = { x: number[]; y: number; t: number; g: number; dur: number; fresh: boolean; at: number; actor: string; session: string; share_id: string };
+/** Sized to the ~370 clean rows / ~76 engaged per 30 days left once CI rows are dropped (2026-11-11): train labels
+ *  count rows before the evaluated span, holdout labels the pooled evaluated rows. */
+export const MIN_TRAIN = 300, MIN_TRAIN_LABELS = 30, MIN_HOLDOUT_LABELS = 30, EVAL_FRAC = 0.6, EVAL_FOLDS = 4, HOLDOUT_MIN_DAYS = 3;
+export const PROMOTE_MARGIN = 0.02, BOOT_N = 1000, BOOT_WIN = 0.9, L2_GRID = [0.1, 1, 10, 100, 1000];
 export function lin(x: number[], w: Weights) { return w.bias + x.reduce((a, v, j) => a + v * (w[FEATURES[j]] ?? 0), 0); }
-/** Logistic regression, fit on standardized features with an L2 penalty (L2 · ||w||² / 2, bias free), returned in raw-feature weights. */
-export function fitLR(data: { x: number[]; y: number }[]): Weights {
-  const d = FEATURES.length, n = data.length || 1;
-  const mu = FEATURES.map((_, j) => data.reduce((a, r) => a + r.x[j], 0) / n);
-  const sd = FEATURES.map((_, j) => Math.sqrt(data.reduce((a, r) => a + (r.x[j] - mu[j]) ** 2, 0) / n)); const live = sd.map((v) => v > 1e-3); // features are in [0, 1]: a near-constant one would get a huge raw weight
-  const z = data.map((r) => r.x.map((v, j) => (live[j] ? (v - mu[j]) / sd[j] : 0))); const w = new Array(d + 1).fill(0); // (near-)constant features keep weight 0
-  for (let ep = 0; ep < 500; ep++) {
-    const g = new Array(d + 1).fill(0);
-    data.forEach((r, i) => { const e = sig(w[0] + z[i].reduce((a, v, j) => a + v * w[j + 1], 0)) - r.y; g[0] += e; z[i].forEach((v, j) => { g[j + 1] += e * v; }); });
-    for (let j = 0; j <= d; j++) w[j] -= 0.5 * (g[j] + (j ? L2 * w[j] : 0)) / n;
+/** Logistic regression on a graded target t in [0, 1] (cross-entropy), shrunk toward heur-2: the standardized heur-2
+ *  score is an unpenalized input and the standardized features carry the L2 penalty (l2 · ||w||² / 2), so a large l2
+ *  gives a rescaled heur-2 and a small one a free fit. (Near-)constant features (sd <= 1e-3) get no own weight.
+ *  Returned as raw-feature weights. */
+export function fitLR(data: { x: number[]; t: number }[], l2 = 10): Weights {
+  const d = FEATURES.length, n = data.length || 1; const hOf = (x: number[]) => lin(x, HEURISTIC);
+  const mean = (f: (r: { x: number[] }) => number) => data.reduce((a, r) => a + f(r), 0) / n;
+  const mu = FEATURES.map((_, j) => mean((r) => r.x[j])), mh = mean((r) => hOf(r.x));
+  const sd = FEATURES.map((_, j) => Math.sqrt(mean((r) => (r.x[j] - mu[j]) ** 2))), sh = Math.sqrt(mean((r) => (hOf(r.x) - mh) ** 2)) || 1;
+  const live = sd.map((v) => v > 1e-3); // features are in [0, 1]: a near-constant one would get a huge raw weight
+  const z = data.map((r) => [(hOf(r.x) - mh) / sh, ...r.x.map((v, j) => (live[j] ? (v - mu[j]) / sd[j] : 0))]);
+  const w = new Array(d + 2).fill(0); // [bias, heur-2, ...features]
+  for (let ep = 0; ep < 800; ep++) {
+    const g = new Array(d + 2).fill(0);
+    data.forEach((r, i) => { const e = sig(w[0] + z[i].reduce((a, v, j) => a + v * w[j + 1], 0)) - r.t; g[0] += e; z[i].forEach((v, j) => { g[j + 1] += e * v; }); });
+    for (let j = 0; j < w.length; j++) w[j] -= (0.5 * (g[j] + (j > 1 ? l2 * w[j] : 0))) / (n + (j > 1 ? l2 : 0)); // diagonal step: stable for any l2
+    if (w[1] < 0) w[1] = 0; // shrink toward heur-2, never toward its inverse
   }
-  const raw = FEATURES.map((_, j) => (live[j] ? w[j + 1] / sd[j] : 0));
-  return { bias: w[0] - raw.reduce((a, v, j) => a + v * mu[j], 0), ...Object.fromEntries(FEATURES.map((k, j) => [k, raw[j]])) } as Weights;
+  const s = w[1] / sh; const raw = FEATURES.map((k, j) => s * HEURISTIC[k] + (live[j] ? w[j + 2] / sd[j] : 0));
+  return { bias: w[0] + s * (HEURISTIC.bias - mh) - FEATURES.reduce((a, _, j) => a + (live[j] ? (w[j + 2] / sd[j]) * mu[j] : 0), 0), ...Object.fromEntries(FEATURES.map((k, j) => [k, raw[j]])) } as Weights;
 }
-/** Share of BOOT_N seeded resamples of actors (with replacement) where AUC(a) > AUC(b); resamples without both labels are skipped. */
+/** L2 from L2_GRID by forward-chaining CV on the (time-ordered) training rows: fit on the first 50% / 75%, score the
+ *  next 25% by binary-engaged AUC; best mean wins, ties go to the larger l2 (closer to heur-2). */
+export function chooseL2(tr: Row[]) {
+  const rows = [...tr].sort((a, b) => a.at - b.at); const n = rows.length; const folds = [[0.5, 0.75], [0.75, 1]].map(([a, b]) => [rows.slice(0, Math.floor(n * a)), rows.slice(Math.floor(n * a), Math.floor(n * b))]);
+  const cv: Record<string, number | null> = {}; let best = L2_GRID[L2_GRID.length - 1], bestAuc = -Infinity;
+  for (const l2 of [...L2_GRID].reverse()) {
+    const aucs = folds.map(([fit, val]) => { const w = fitLR(fit, l2); return aucOf(val.map((r) => lin(r.x, w)), val.map((r) => r.y)); }).filter((v): v is number => v !== null);
+    const m = aucs.length ? aucs.reduce((a, v) => a + v, 0) / aucs.length : null; cv[String(l2)] = m;
+    if (m !== null && m > bestAuc + 1e-9) { best = l2; bestAuc = m; }
+  }
+  return { l2: best, cv };
+}
+/** BOOT_N seeded resamples of actors (with replacement): share where AUC(a) > AUC(b), mean AUC lift a − b and its 95%
+ *  percentile interval. Resamples without both labels are skipped. */
 export function bootWin(actors: string[], y: number[], a: number[], b: number[], n = BOOT_N, seed = 1) {
   const by = new Map<string, number[]>(); actors.forEach((x, i) => (by.get(x) ?? by.set(x, []).get(x)!).push(i)); const groups = [...by.values()]; const r = rng(seed);
-  let wins = 0, valid = 0;
+  let wins = 0; const lifts: number[] = [];
   for (let k = 0; k < n; k++) {
     const idx: number[] = []; for (let j = 0; j < groups.length; j++) idx.push(...groups[Math.floor(r() * groups.length)]);
     const yy = idx.map((i) => y[i]), x = aucOf(idx.map((i) => a[i]), yy), z = aucOf(idx.map((i) => b[i]), yy); if (x === null || z === null) continue;
-    valid++; if (x > z) wins++;
+    lifts.push(x - z); if (x > z) wins++;
   }
-  return valid ? wins / valid : 0;
+  if (!lifts.length) return { win: 0, lift: null, lift_ci: null };
+  lifts.sort((p, q) => p - q); const q = (p: number) => lifts[Math.min(lifts.length - 1, Math.floor(p * lifts.length))];
+  return { win: wins / lifts.length, lift: lifts.reduce((s, v) => s + v, 0) / lifts.length, lift_ci: [q(0.025), q(0.975)] as [number, number] };
 }
 /** Run train() in a worker thread on its own connection to the same database file; resolves with the result
  *  (the caller then calls ranker.reload()). In-memory databases train in-process. */
