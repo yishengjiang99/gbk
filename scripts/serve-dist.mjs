@@ -44,6 +44,9 @@ createServer(async (req, res) => {
     res.writeHead(200, {
       "Content-Type": TYPES[extname(p)] || "application/octet-stream",
       "Content-Length": data.length,
+      // Cross-origin isolation, like deploy/nginx.conf (ONNX Runtime threads).
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "credentialless",
     });
     res.end(req.method === "HEAD" ? undefined : data);
   } catch {
