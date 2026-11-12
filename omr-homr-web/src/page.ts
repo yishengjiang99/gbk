@@ -378,9 +378,8 @@ export interface ParsedVoice {
   /** Per-staff crop->page mappings, aligned with the non-empty staffs. */
   cropToPage: Array<(x: number, y: number) => [number, number]>;
   /**
-   * True when this voice's staffs are grand staffs: the MIDI walk must split
-   * each row's stream at the first lower-position symbol so the two hands
-   * sound simultaneously (see pageVoiceNoteEvents in midi.ts).
+   * True when this voice's staffs are grand staffs (keeps lower-position
+   * symbols; the MIDI walk gives each hand its own cursor either way).
    */
   grandstaff: boolean;
 }
@@ -524,12 +523,9 @@ export function buildPageNoteLayout(
     }
     let cursor = 0;
     groups.forEach((group, groupIdx) => {
-      // Page walk with the cursor as startTick: grand-staff hands restart at
-      // the group start (simultaneous), and endTick chains the next group.
-      const { events, endTick } = pageVoiceNoteEvents(group, voiceIdx, {
-        grandstaff: voice.grandstaff,
-        startTick: cursor,
-      });
+      // Page walk with the cursor as startTick: each hand starts at the group
+      // start (simultaneous), and endTick chains the next group.
+      const { events, endTick } = pageVoiceNoteEvents(group, voiceIdx, { startTick: cursor });
       const toPage = voice.cropToPage[groupIdx];
       for (const ev of events) {
         const tick = ev.tick;

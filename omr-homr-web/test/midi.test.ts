@@ -148,7 +148,7 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
       lower("note_4", "C3"),
       lower("note_4", "D3"),
     ];
-    const { events, endTick } = pageVoiceNoteEvents(stream, 0, { grandstaff: true });
+    const { events, endTick } = pageVoiceNoteEvents(stream, 0);
     const byPitch = new Map(events.map((e) => [e.midi, e.tick]));
     assert.equal(byPitch.get(72), 0); // C5 upper
     assert.equal(byPitch.get(74), 480); // D5 upper
@@ -164,16 +164,37 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
       newline,
       sym("note_4", "E5"),
     ];
-    const { events, endTick } = pageVoiceNoteEvents(stream, 0, { grandstaff: true });
+    const { events, endTick } = pageVoiceNoteEvents(stream, 0);
     const e5 = events.find((e) => e.midi === 76);
     assert.equal(e5?.tick, 960);
     assert.equal(endTick, 1440);
   });
 
-  it("does not split hands for a non-grand voice", () => {
-    const stream: DecodedSymbol[] = [sym("note_4", "C5"), lower("note_4", "C3")];
-    const { events } = pageVoiceNoteEvents(stream, 0, { grandstaff: false });
-    assert.deepEqual(events.map((e) => e.tick), [0, 480]);
+  // omr-sheet-cam b8bbe27 HandTimingTests: each hand keeps its own cursor.
+  it("upper hand does not wait for a lower-hand half-note chord", () => {
+    // Die Letzte Kompanie bar 1: dotted eighth + 16th over a half-note bass chord.
+    const bar = [
+      sym("note_8.", "G4"), sym("chord"), lower("note_2", "D3"), sym("chord"), lower("note_2", "B2"),
+      sym("note_16", "G4"), sym("note_8", "G4"), sym("note_8", "A4"),
+      sym("note_4", "B4"), sym("chord"), lower("note_2", "F3"),
+    ];
+    const { events } = staffSymbolsToNoteEvents(bar, 0);
+    assert.deepEqual(events.map((e) => e.tick), [0, 0, 0, 360, 480, 720, 960, 960]);
+  });
+
+  it("a chord-tied rest lasts only its own length", () => {
+    const bar = [sym("note_2", "G4"), sym("chord"), lower("rest_4"), lower("note_4", "C3"), sym("note_2", "A4")];
+    const { events } = staffSymbolsToNoteEvents(bar, 0);
+    assert.deepEqual(events.map((e) => e.tick), [0, 480, 960]);
+  });
+
+  it("a row starting with an interleaved upper note keeps its duration", () => {
+    const rows = [
+      sym("note_4", "C4"), sym("chord"), lower("note_2", "C3"), sym("note_4", "D4"), newline,
+      sym("note_4", "E4"), sym("chord"), lower("note_2", "E3"), sym("note_4", "F4"),
+    ];
+    const { events } = pageVoiceNoteEvents(rows, 0);
+    assert.deepEqual(events.map((e) => e.tick).sort((a, b) => a - b), [0, 0, 480, 960, 960, 1440]);
   });
 
   it("staff-only walk restarts at a lower clef (resetCursorOnClef)", () => {
@@ -184,8 +205,9 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
     ];
     const { events } = staffSymbolsToNoteEvents(stream, 0);
     assert.deepEqual(events.map((e) => e.tick), [0, 0]);
+    // Without the reset the lower hand still starts on its own cursor.
     const noReset = staffSymbolsToNoteEvents(stream, 0, { resetCursorOnClef: false });
-    assert.deepEqual(noReset.events.map((e) => e.tick), [0, 480]);
+    assert.deepEqual(noReset.events.map((e) => e.tick), [0, 0]);
   });
 });
 

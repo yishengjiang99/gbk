@@ -189,11 +189,7 @@ async function handleTranscribePage(
   );
   post({ type: "progress", stage: "writing MIDI" });
   const voiceSymbols = voices.map((v) => v.symbols);
-  const { midi, warnings, noteEvents } = symbolsToMidi(
-    voiceSymbols,
-    title ?? "homr scan",
-    voices.map((v) => v.grandstaff),
-  );
+  const { midi, warnings, noteEvents } = symbolsToMidi(voiceSymbols, title ?? "homr scan", true);
 
   // One layout entry per sounding note; boxes are coarse (documented) and a
   // missing attention point or crop mapping falls back to a null box.
