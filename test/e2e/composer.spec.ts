@@ -147,8 +147,19 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await expect(v2.getByTestId("readonly-banner")).toBeVisible({ timeout: 30_000 });
   const shared = await ws(v2);
   expect(shared.readOnly).toBeTruthy(); expect(shared.notes).toBe(after.notes); expect(shared.id).not.toBe(after.id);
+  // Signed-out Fork opens sign-in; this flow covers a signed-in visitor forking immediately.
+  await v2.evaluate(async () => {
+    const j = async (r: Response) => { if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.json(); };
+    const s = await j(await fetch("/api/session", { credentials: "same-origin" }));
+    await j(await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-gbk-csrf": s.csrf }, body: JSON.stringify({ code: "e2e-code-2" }) }));
+  });
+  await v2.reload();
+  await expect(v2.getByTestId("workstation")).toBeVisible();
+  await dismissLandingPaywall(v2);
+  await expect(v2.getByTestId("readonly-banner")).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => (await ws(v2)).readOnly, { timeout: 20_000 }).toBeTruthy();
   await v2.getByTestId("studio-fork").click();
-  await expect(v2.getByTestId("forked-from")).toBeVisible();
+  await expect(v2.getByTestId("forked-from")).toBeVisible({ timeout: 20_000 });
   expect((await ws(v2)).readOnly).toBeNull();
   await v2.screenshot({ path: `${SHOTS}/composer-e2e-forked.png` });
   await page.goto("/"); await expect(page.getByTestId("feed-card").first()).toBeVisible();
