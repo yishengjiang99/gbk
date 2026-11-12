@@ -18,7 +18,7 @@ import {
 } from "./page.js";
 
 export type WorkerRequest =
-  | { type: "load"; encoderUrl: string; decoderUrl: string; segnetUrl?: string; wasmPaths?: string; strictWebGpu?: boolean; wasmOnly?: boolean }
+  | { type: "load"; encoderUrl: string; decoderUrl: string; segnetUrl?: string; wasmPaths?: string; strictWebGpu?: boolean; wasmOnly?: boolean; numThreads?: number }
   | { type: "transcribe-staff"; pixels: ArrayBuffer; width: number; height: number; title?: string }
   | {
       type: "transcribe-page";
@@ -189,11 +189,7 @@ async function handleTranscribePage(
   );
   post({ type: "progress", stage: "writing MIDI" });
   const voiceSymbols = voices.map((v) => v.symbols);
-  const { midi, warnings, noteEvents } = symbolsToMidi(
-    voiceSymbols,
-    title ?? "homr scan",
-    voices.map((v) => v.grandstaff),
-  );
+  const { midi, warnings, noteEvents } = symbolsToMidi(voiceSymbols, title ?? "homr scan", true);
 
   // One layout entry per sounding note; boxes are coarse (documented) and a
   // missing attention point or crop mapping falls back to a null box.
@@ -337,7 +333,11 @@ workerSelf.onmessage = (event: { data: WorkerRequest }) => {
             segnetUrl: request.segnetUrl,
           },
           (stage) => post({ type: "progress", stage }),
-          { strictWebGpu: request.strictWebGpu ?? false, wasmOnly: request.wasmOnly ?? false },
+          {
+            strictWebGpu: request.strictWebGpu ?? false,
+            wasmOnly: request.wasmOnly ?? false,
+            numThreads: request.numThreads,
+          },
         );
         post({ type: "ready", webgpu: webGpuAvailable() });
       } else if (request.type === "transcribe-staff") {

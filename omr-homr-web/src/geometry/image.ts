@@ -174,36 +174,166 @@ export function ellipseKernel(cols: number, rows: number): KernelOffsets {
   return out;
 }
 
+function morphNaive(src: GrayImage, kernel: KernelOffsets, isDilate: boolean): GrayImage {
+  const dst = GrayImage.zeros(src.width, src.height);
+  const { width: w, height: h } = src;
+  const sd = src.data;
+  const dd = dst.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let best = isDilate ? 0 : 255;
+      for (let k = 0; k < kernel.length; k++) {
+        const nx = x + kernel[k][0];
+        const ny = y + kernel[k][1];
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const v = sd[ny * w + nx];
+        if (isDilate) {
+          if (v > best) best = v;
+        } else if (v < best) {
+          best = v;
+        }
+      }
+      dd[y * w + x] = best;
+    }
+  }
+  return dst;
+}
+
+/** One kernel line: offset `off` across the line, contiguous range lo..hi along it. */
+interface KernelRun {
+  off: number;
+  lo: number;
+  hi: number;
+}
+
+/**
+ * Splits a kernel into contiguous runs along one axis (columns when
+ * `vertical`, else rows). Null when some line has a gap (or duplicates),
+ * i.e. the kernel is not run-decomposable along that axis.
+ */
+function kernelRunsAlong(kernel: KernelOffsets, vertical: boolean): KernelRun[] | null {
+  const lines = new Map<number, number[]>();
+  for (const [dx, dy] of kernel) {
+    const off = vertical ? dx : dy;
+    const along = vertical ? dy : dx;
+    const list = lines.get(off);
+    if (list) list.push(along);
+    else lines.set(off, [along]);
+  }
+  const runs: KernelRun[] = [];
+  for (const [off, list] of lines) {
+    list.sort((a, b) => a - b);
+    for (let i = 1; i < list.length; i++) if (list[i] !== list[i - 1] + 1) return null;
+    runs.push({ off, lo: list[0], hi: list[list.length - 1] });
+  }
+  return runs;
+}
+
+/**
+ * Sliding extreme over one strided line: dst[i] = op(src[i+lo .. i+hi]),
+ * out-of-range samples taking the identity (so they never win, matching
+ * morphNaive's skip). van Herk/Gil-Werman: O(1) per sample for any window.
+ * `pad`, `g`, `hbuf` are scratch buffers of at least n + (hi - lo) entries.
+ */
+function slidingExtreme(
+  src: Uint8Array,
+  dst: Uint8Array,
+  start: number,
+  stride: number,
+  n: number,
+  lo: number,
+  hi: number,
+  isDilate: boolean,
+  pad: Uint8Array,
+  g: Uint8Array,
+  hbuf: Uint8Array,
+): void {
+  const k = hi - lo + 1;
+  const m = n + k - 1;
+  const id = isDilate ? 0 : 255;
+  for (let q = 0; q < m; q++) {
+    const s = q + lo;
+    pad[q] = s >= 0 && s < n ? src[start + s * stride] : id;
+  }
+  for (let q = 0; q < m; q++) {
+    const v = pad[q];
+    if (q % k === 0) g[q] = v;
+    else g[q] = isDilate ? (v > g[q - 1] ? v : g[q - 1]) : v < g[q - 1] ? v : g[q - 1];
+  }
+  for (let q = m - 1; q >= 0; q--) {
+    const v = pad[q];
+    if (q === m - 1 || q % k === k - 1) hbuf[q] = v;
+    else hbuf[q] = isDilate ? (v > hbuf[q + 1] ? v : hbuf[q + 1]) : v < hbuf[q + 1] ? v : hbuf[q + 1];
+  }
+  for (let i = 0; i < n; i++) {
+    const a = hbuf[i];
+    const b = g[i + k - 1];
+    dst[start + i * stride] = isDilate ? (a > b ? a : b) : a < b ? a : b;
+  }
+}
+
+/**
+ * Exact same result as morphNaive for kernels made of contiguous runs
+ * (rect and ellipse kernels): a sliding extreme per distinct run along the
+ * longer axis, then an extreme across the run offsets.
+ */
+function morphRuns(src: GrayImage, runs: KernelRun[], vertical: boolean, isDilate: boolean): GrayImage {
+  const { width: w, height: h } = src;
+  const sd = src.data;
+  // Along-axis line length/stride and across-axis count/stride.
+  const n = vertical ? h : w;
+  const alongStride = vertical ? w : 1;
+  const lines = vertical ? w : h;
+  const acrossStride = vertical ? 1 : w;
+  let maxK = 1;
+  for (const r of runs) maxK = Math.max(maxK, r.hi - r.lo + 1);
+  const pad = new Uint8Array(n + maxK);
+  const g = new Uint8Array(n + maxK);
+  const hbuf = new Uint8Array(n + maxK);
+  const windowed = new Map<string, Uint8Array>();
+  for (const r of runs) {
+    const key = `${r.lo},${r.hi}`;
+    if (windowed.has(key)) continue;
+    const out = new Uint8Array(w * h);
+    for (let line = 0; line < lines; line++) {
+      slidingExtreme(sd, out, line * acrossStride, alongStride, n, r.lo, r.hi, isDilate, pad, g, hbuf);
+    }
+    windowed.set(key, out);
+  }
+  const dst = GrayImage.full(w, h, isDilate ? 0 : 255);
+  const dd = dst.data;
+  for (const r of runs) {
+    const wd = windowed.get(`${r.lo},${r.hi}`) as Uint8Array;
+    for (let line = 0; line < lines; line++) {
+      const srcLine = line + r.off;
+      if (srcLine < 0 || srcLine >= lines) continue;
+      const dBase = line * acrossStride;
+      const sBase = srcLine * acrossStride;
+      for (let i = 0; i < n; i++) {
+        const v = wd[sBase + i * alongStride];
+        const o = dBase + i * alongStride;
+        if (isDilate ? v > dd[o] : v < dd[o]) dd[o] = v;
+      }
+    }
+  }
+  return dst;
+}
+
 function morph(
   src: GrayImage,
   kernel: KernelOffsets,
   iterations: number,
   isDilate: boolean,
 ): GrayImage {
+  // Decompose along whichever axis gives fewer runs (columns of a tall
+  // kernel, rows of a wide one); fall back to the direct loop otherwise.
+  const vRuns = kernelRunsAlong(kernel, true);
+  const hRuns = kernelRunsAlong(kernel, false);
+  const vertical = vRuns !== null && (hRuns === null || vRuns.length <= hRuns.length);
+  const runs = vertical ? vRuns : hRuns;
   let cur = src;
   for (let it = 0; it < iterations; it++) {
-    const dst = GrayImage.zeros(cur.width, cur.height);
-    const { width: w, height: h } = cur;
-    const sd = cur.data;
-    const dd = dst.data;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let best = isDilate ? 0 : 255;
-        for (let k = 0; k < kernel.length; k++) {
-          const nx = x + kernel[k][0];
-          const ny = y + kernel[k][1];
-          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-          const v = sd[ny * w + nx];
-          if (isDilate) {
-            if (v > best) best = v;
-          } else if (v < best) {
-            best = v;
-          }
-        }
-        dd[y * w + x] = best;
-      }
-    }
-    cur = dst;
+    cur = runs && kernel.length > 0 ? morphRuns(cur, runs, vertical, isDilate) : morphNaive(cur, kernel, isDilate);
   }
   return cur;
 }
@@ -289,9 +419,45 @@ export interface RotatedRect {
   angle: number;
 }
 
+/**
+ * Only the lowest and highest point of each column can be a hull vertex, so
+ * integer pixel sets reduce to <= 2 points per x, already in (x, y) order —
+ * no sort over every contour pixel. Null when the input is not integer, too
+ * sparse in x, or reduces to a single point (duplicates of one pixel, where
+ * the full monotone chain returns [p, p]).
+ */
+function columnExtremes(points: Array<readonly [number, number]>): Array<[number, number]> | null {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const p of points) {
+    if (!Number.isInteger(p[0]) || !Number.isInteger(p[1])) return null;
+    if (p[0] < minX) minX = p[0];
+    if (p[0] > maxX) maxX = p[0];
+  }
+  const range = maxX - minX + 1;
+  if (range > 2 * points.length + 64) return null;
+  const lo = new Float64Array(range).fill(Infinity);
+  const hi = new Float64Array(range).fill(-Infinity);
+  for (const p of points) {
+    const i = p[0] - minX;
+    if (p[1] < lo[i]) lo[i] = p[1];
+    if (p[1] > hi[i]) hi[i] = p[1];
+  }
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < range; i++) {
+    if (lo[i] === Infinity) continue;
+    out.push([minX + i, lo[i]]);
+    if (hi[i] !== lo[i]) out.push([minX + i, hi[i]]);
+  }
+  return out.length >= 2 ? out : null;
+}
+
 function convexHull(points: Array<readonly [number, number]>): Array<[number, number]> {
-  const pts = points.map((p) => [p[0], p[1]] as [number, number]);
-  pts.sort((a, b) => (a[0] === b[0] ? a[1] - b[1] : a[0] - b[0]));
+  let pts = columnExtremes(points);
+  if (pts === null) {
+    pts = points.map((p) => [p[0], p[1]] as [number, number]);
+    pts.sort((a, b) => (a[0] === b[0] ? a[1] - b[1] : a[0] - b[0]));
+  }
   const cross = (o: number[], a: number[], b: number[]): number =>
     (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
   const lower: Array<[number, number]> = [];

@@ -165,10 +165,17 @@ export interface WalkOptions {
 }
 
 /**
- * Convert one segment of decoded symbols to MIDI note events on a tick
- * cursor starting at `startTick`; returns the events plus the tick just past
- * the last one so callers can chain segments back to back. Port of Music
- * Reader's (omr-sheet-cam) `SymbolMIDIMapping.walkEvents`.
+ * Convert one segment of decoded symbols to MIDI note events starting at
+ * `startTick`; returns the events plus the furthest end tick so callers can
+ * chain segments back to back. Port of Music Reader's (omr-sheet-cam
+ * b8bbe27) `SymbolMIDIMapping.walkEvents`.
+ *
+ * Each staff (upper / lower position) keeps its own cursor: an un-chorded
+ * token starts where the previous token on its staff ended, so one hand's
+ * long notes never delay the other hand. A shared cursor made a 16th after a
+ * dotted eighth wait out a half-note bass chord (Die Letzte Kompanie ran 100
+ * beats instead of 73). A `chord` marker makes the next note or rest share
+ * the previous event's onset; a chord-tied rest lasts only its own length.
  * Exported for unit tests; symbolsToMidi assembles the SMF.
  */
 export function staffSymbolsToNoteEvents(
@@ -180,63 +187,66 @@ export function staffSymbolsToNoteEvents(
   const warnings: string[] = [];
   const startTick = opts.startTick ?? 0;
   const resetCursorOnClef = opts.resetCursorOnClef ?? true;
-  let cursor = startTick;
-  for (const group of groupIntoChords(symbols)) {
-    // Clef branch (mirrors walkEvents): a lower clef after notes have
-    // started means the stream moved to the lower staff of a staff-only
-    // grand-staff dump — those notes sound from the segment start, not
-    // after everything before them.
-    if (
-      resetCursorOnClef &&
-      events.length > 0 &&
-      group.some((s) => s.rhythm.startsWith("clef") && isLowerPosition(s.position))
-    ) {
-      cursor = startTick;
+  let end = startTick; // furthest end seen: where the next segment may start
+  let staffEnd = [startTick, startTick]; // 0 upper, 1 lower
+  let chordAnchor = startTick;
+  let shareNextOnset = false;
+  for (const symbol of symbols) {
+    if (symbol.rhythm === "chord") {
+      shareNextOnset = true;
+      continue;
     }
-    let advance = 0;
-    for (const symbol of group) {
-      const dur = parseKernDuration(symbol.rhythm);
-      if (!dur) continue; // barline, clef, key/time signature, chord leftovers
-      if (dur.isRest) {
-        if (!dur.grace) advance = Math.max(advance, dur.ticks);
-        continue;
+    const dur = parseKernDuration(symbol.rhythm);
+    if (!dur) {
+      // A lower clef after notes have started means the stream moved to the
+      // lower staff of a staff-only grand-staff dump: restart at the segment
+      // start. Barlines, key/time signatures: cursor no-ops.
+      if (resetCursorOnClef && events.length > 0 && symbol.rhythm.startsWith("clef") && isLowerPosition(symbol.position)) {
+        end = startTick;
+        staffEnd = [startTick, startTick];
+        chordAnchor = startTick;
       }
-      const midi = pitchToMidi(symbol.pitch, symbol.lift);
-      if (midi === null) {
-        if (!dur.grace) advance = Math.max(advance, dur.ticks);
-        continue;
-      }
+      shareNextOnset = false;
+      continue;
+    }
+    const st = isLowerPosition(symbol.position) ? 1 : 0;
+    const tick = shareNextOnset ? chordAnchor : staffEnd[st];
+    shareNextOnset = false;
+    chordAnchor = tick;
+    const midi = dur.isRest ? null : pitchToMidi(symbol.pitch, symbol.lift);
+    if (midi !== null) {
       events.push({
-        tick: cursor,
+        tick,
         midi,
         durationTicks: Math.max(1, dur.ticks),
         staff,
         attention: symbol.attention ?? null,
       });
-      if (!dur.grace) advance = Math.max(advance, dur.ticks);
     }
-    cursor += advance;
+    // Grace notes sound briefly but do not move time; rests and unreadable
+    // pitches still take their duration.
+    if (!dur.grace) {
+      staffEnd[st] = tick + dur.ticks;
+      if (staffEnd[st] > end) end = staffEnd[st];
+    }
   }
   if (events.length === 0) warnings.push(`staff ${staff}: no notes decoded`);
-  return { events, warnings, endTick: cursor };
+  return { events, warnings, endTick: end };
 }
 
 /**
  * Page-path voice stream -> note events. Port of Music Reader's
- * (omr-sheet-cam) `SymbolMIDIMapping.pageVoiceEvents`. Rows (split on
- * `newline`) run sequentially; within a grand-staff row, the lower staff
- * restarts at the row's start tick so the two hands sound simultaneously
- * instead of one after the other. The next row starts after the longer hand,
- * so a short-decoded hand can't drag later systems out of alignment.
- *
- * The hand split is by position tag (first upper -> lower transition), not
- * by clef token: the page cleanup drops repeated clefs, and a mid-piece clef
- * change inside one hand must not move time.
+ * (omr-sheet-cam b8bbe27) `SymbolMIDIMapping.pageVoiceEvents`. Rows (split
+ * on `newline`) run sequentially; within a row each staff keeps its own
+ * cursor from the row's start tick (staffSymbolsToNoteEvents), so the hands
+ * sound together whether the stream interleaves them or runs one after the
+ * other. The next row starts after the longer hand, so a short-decoded hand
+ * can't drag later systems out of alignment.
  */
 export function pageVoiceNoteEvents(
   symbols: DecodedSymbol[],
   staff: number,
-  opts: { grandstaff: boolean; startTick?: number },
+  opts: { startTick?: number } = {},
 ): { events: MidiNoteEvent[]; warnings: string[]; endTick: number } {
   const events: MidiNoteEvent[] = [];
   const warnings: string[] = [];
@@ -246,33 +256,14 @@ export function pageVoiceNoteEvents(
 
   const flushRow = (): void => {
     if (row.length === 0) return;
-    const current = row;
+    const walked = staffSymbolsToNoteEvents(row, staff, {
+      startTick: rowTick,
+      resetCursorOnClef: false,
+    });
     row = [];
-    const split = opts.grandstaff
-      ? current.findIndex((s) => isLowerPosition(s.position))
-      : -1;
-    if (split >= 0) {
-      const upper = staffSymbolsToNoteEvents(current.slice(0, split), staff, {
-        startTick: rowTick,
-        resetCursorOnClef: false,
-      });
-      const lower = staffSymbolsToNoteEvents(current.slice(split), staff, {
-        startTick: rowTick,
-        resetCursorOnClef: false,
-      });
-      events.push(...upper.events, ...lower.events);
-      warnings.push(...upper.warnings.filter((w) => w !== noNotes));
-      warnings.push(...lower.warnings.filter((w) => w !== noNotes));
-      rowTick = Math.max(upper.endTick, lower.endTick);
-    } else {
-      const walked = staffSymbolsToNoteEvents(current, staff, {
-        startTick: rowTick,
-        resetCursorOnClef: false,
-      });
-      events.push(...walked.events);
-      warnings.push(...walked.warnings.filter((w) => w !== noNotes));
-      rowTick = walked.endTick;
-    }
+    events.push(...walked.events);
+    warnings.push(...walked.warnings.filter((w) => w !== noNotes));
+    rowTick = walked.endTick;
   };
 
   for (const sym of symbols) {
@@ -291,15 +282,14 @@ export function pageVoiceNoteEvents(
  * Build a format-1 SMF: conductor track (name, tempo, 4/4) + one track per
  * staff (program 0, note events). Matches the gbk timer worker's parser.
  *
- * `grandstaffFlags` (page path): one entry per voice; when provided, each
- * voice is walked with pageVoiceNoteEvents (rows sequential, grand-staff
- * hands simultaneous). When omitted (staff-only path), voices are walked
- * with staffSymbolsToNoteEvents and its lower-clef cursor reset.
+ * `pagePath`: each voice is walked with pageVoiceNoteEvents (rows
+ * sequential, hands on their own cursors). Otherwise (staff-only path),
+ * voices are walked with staffSymbolsToNoteEvents and its lower-clef reset.
  */
 export function symbolsToMidi(
   staves: DecodedSymbol[][],
   title = "homr scan",
-  grandstaffFlags?: boolean[],
+  pagePath = false,
 ): StaffMidiResult {
   const warnings: string[] = [];
   const conductor = new TrackBuilder();
@@ -318,12 +308,9 @@ export function symbolsToMidi(
       warnings.push(`staff ${staffIdx}: too many staves for MIDI channels, skipped`);
       return;
     }
-    const { events, warnings: w } =
-      grandstaffFlags !== undefined
-        ? pageVoiceNoteEvents(symbols, staffIdx, {
-            grandstaff: grandstaffFlags[staffIdx] ?? false,
-          })
-        : staffSymbolsToNoteEvents(symbols, staffIdx);
+    const { events, warnings: w } = pagePath
+      ? pageVoiceNoteEvents(symbols, staffIdx)
+      : staffSymbolsToNoteEvents(symbols, staffIdx);
     warnings.push(...w);
     noteEvents.push(...events);
 
