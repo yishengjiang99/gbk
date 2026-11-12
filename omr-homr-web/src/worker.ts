@@ -18,7 +18,7 @@ import {
 } from "./page.js";
 
 export type WorkerRequest =
-  | { type: "load"; encoderUrl: string; decoderUrl: string; segnetUrl?: string; wasmPaths?: string; strictWebGpu?: boolean; wasmOnly?: boolean }
+  | { type: "load"; encoderUrl: string; decoderUrl: string; segnetUrl?: string; wasmPaths?: string; strictWebGpu?: boolean; wasmOnly?: boolean; numThreads?: number }
   | { type: "transcribe-staff"; pixels: ArrayBuffer; width: number; height: number; title?: string }
   | {
       type: "transcribe-page";
@@ -333,7 +333,11 @@ workerSelf.onmessage = (event: { data: WorkerRequest }) => {
             segnetUrl: request.segnetUrl,
           },
           (stage) => post({ type: "progress", stage }),
-          { strictWebGpu: request.strictWebGpu ?? false, wasmOnly: request.wasmOnly ?? false },
+          {
+            strictWebGpu: request.strictWebGpu ?? false,
+            wasmOnly: request.wasmOnly ?? false,
+            numThreads: request.numThreads,
+          },
         );
         post({ type: "ready", webgpu: webGpuAvailable() });
       } else if (request.type === "transcribe-staff") {

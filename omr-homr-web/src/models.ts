@@ -124,14 +124,17 @@ export interface ModelUrls {
 export async function loadModels(
   urls: ModelUrls,
   onProgress?: (stage: string) => void,
-  opts?: { strictWebGpu?: boolean; wasmOnly?: boolean },
+  opts?: { strictWebGpu?: boolean; wasmOnly?: boolean; numThreads?: number },
 ): Promise<ModelSet> {
   // Multithreaded WASM needs SharedArrayBuffer (COOP/COEP); GitHub Pages does
   // not send those headers, so fall back to a single thread there.
-  const threads =
-    typeof crossOriginIsolated !== "undefined" && crossOriginIsolated
-      ? Math.min(4, (typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 4) || 4)
-      : 1;
+  // `numThreads` overrides the isolated default (benchmarks/diagnostics).
+  // 8 threads: on an M4 Pro, SegNet/encoder were ~1.6x faster than at 4 and
+  // no faster at 10; the decoder stops scaling past ~4.
+  const isolated = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
+  const threads = !isolated
+    ? 1
+    : opts?.numThreads ?? Math.min(8, (typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 4) || 4);
   ort.env.wasm.numThreads = threads;
   ort.env.wasm.simd = true;
 

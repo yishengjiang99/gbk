@@ -81,9 +81,12 @@ export function omrModelUrls(base: string = OMR_MODEL_BASE_URL): {
   decoderUrl: string;
   segnetUrl: string;
 } {
-  const webgpu = typeof navigator !== "undefined" && "gpu" in navigator;
+  // fp32 encoder on every backend: the fp16 build on ORT's WebGPU EP yields a
+  // context the decoder never stops on (608 tokens, 0 notes on the C-scale
+  // page; Chrome on Apple M4 Pro, ORT 1.30). fp32 on WebGPU matches WASM and
+  // is still ~4x faster than WASM. iOS runs the fp16 build on CoreML fine.
   return {
-    encoderUrl: base + (webgpu ? "transformer_encoder_model_fp16.onnx" : "transformer_encoder_model_fp32.onnx"),
+    encoderUrl: base + "transformer_encoder_model_fp32.onnx",
     decoderUrl: base + "transformer_decoder_model_fp32.onnx",
     segnetUrl: base + "segnet_model_fp16.onnx",
   };

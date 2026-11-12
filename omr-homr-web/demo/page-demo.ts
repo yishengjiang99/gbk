@@ -91,10 +91,10 @@ async function main(): Promise<void> {
     // encoder stalls on its WebGPU EP, so a full browser proof on a GPU-less
     // VM must bypass WebGPU entirely. Real-GPU browsers use the default path.
     const forceWasm = new URLSearchParams(location.search).get("wasm") === "1";
-    const encoderUrl = shaderF16 && !forceWasm
-      ? "/models/transformer_encoder_model_fp16.onnx"
-      : "/models/transformer_encoder_model_fp32.onnx";
-    log(`WebGPU ${webgpu ? "available" : "unavailable"}, shader-f16 ${shaderF16 ? "yes" : "no"}, forceWasm=${forceWasm} -> ${shaderF16 && !forceWasm ? "fp16" : "fp32"} encoder, fp16 SegNet`);
+    // fp32 encoder everywhere: the fp16 build on the WebGPU EP never reaches
+    // EOS (608 tokens, 0 notes on this page; Chrome, Apple GPU, ORT 1.30).
+    const encoderUrl = "/models/transformer_encoder_model_fp32.onnx";
+    log(`WebGPU ${webgpu ? "available" : "unavailable"}, shader-f16 ${shaderF16 ? "yes" : "no"}, forceWasm=${forceWasm} -> fp32 encoder, fp16 SegNet`);
 
     const [page, oracle] = await Promise.all([
       pagePixels("/demo/fixtures/c-scale-page.png"),
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
     log(`page fixture: ${page.width}x${page.height}, oracle: ${oracle.length} symbols`);
 
     const worker = new Worker("/demo/dist/worker.bundle.js");
-    const encoderName = `${forceWasm ? "wasm-only" : shaderF16 ? "fp16" : "fp32"} encoder + fp16 SegNet`;
+    const encoderName = `${forceWasm ? "wasm-only" : "fp32"} encoder + fp16 SegNet`;
     const ready = new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("worker load timeout")), 180000);
       worker.onmessage = (ev: MessageEvent) => {

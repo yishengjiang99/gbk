@@ -9,7 +9,7 @@ oracle only — no Python runs in the browser.
 ## Architecture (locked)
 
 - **SegNet fp16** → WebGPU (page segmentation, Phase 3)
-- **Encoder fp16** → WebGPU, input `[1,1,256,1280]` grayscale normalized with
+- **Encoder fp32** → WebGPU (the fp16 build never reaches EOS on the WebGPU EP; fp16 is iOS/CoreML only), input `[1,1,256,1280]` grayscale normalized with
   mean `0.7931` / std `0.1738`
 - **fp16 → fp32 cast** of the encoder context `[1,1280,512]` (byte-identical to
   homr's CoreML path, validated in Phase 0)
