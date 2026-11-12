@@ -8,7 +8,8 @@ export type Pending =
   | { kind: "report"; what: "song" | "comment" | "user"; target: string; label: string }
   | { kind: "profile" }
   | { kind: "inbox" }
-  | { kind: "publish" };
+  | { kind: "publish" }
+  | { kind: "fork" };
 const KEY = "gbk.pendingAction";
 export const setPending = (p: Pending | null) => { if (p) sessionStorage.setItem(KEY, JSON.stringify({ ...p, at: Date.now() })); else sessionStorage.removeItem(KEY); };
 /** Takes the pending action if it matches `kinds` (and is < 15 min old). */

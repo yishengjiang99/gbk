@@ -40,11 +40,13 @@ async function checkpointBeforeReplace(): Promise<void> {
 }
 
 /** Load a shared song as a NEW read-only local project (validated: shared data is untrusted). */
-export async function openShared(slug: string, fork = false): Promise<ShareInfo> {
+export async function openShared(slug: string, fork = false, signal?: AbortSignal): Promise<ShareInfo> {
   playerBridge.holdStartupLoads = true; // in-app navigation to a share: an in-flight player startup load must not win
   const s = await getShare(slug);
+  if (signal?.aborted) return s;
   const p = sanitizeSharedProject(s.project);
   await checkpointBeforeReplace();
+  if (signal?.aborted) return s;
   workstation.loadShared({ ...p, name: s.title.slice(0, 120), meta: { ...(p.meta ?? {}), owner: "user", sharedFrom: { slug: s.slug, title: s.title, owner: s.owner, parentSlug: s.parent?.slug ?? null } } });
   if (fork) workstation.fork();
   return s;

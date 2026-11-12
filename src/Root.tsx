@@ -37,9 +37,22 @@ export default function Root() {
   useEffect(() => { const f = () => setRoute(parseRoute()); window.addEventListener("popstate", f); return () => window.removeEventListener("popstate", f); }, []);
   useEffect(() => {
     if (route.view !== "share") return;
+    const ac = new AbortController();
     setShareErr("");
     beginShareOpen(route.slug);
-    void openShared(route.slug, route.fork).then((sh) => { setShareTitle(sh.title, { handle: sh.handle }); if (sh.slug && sh.slug !== route.slug && location.pathname.includes("/s/")) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search); settleShareOpen(route.slug, { ok: true, title: sh.title }); }).catch((e) => { reportError(e, { where: "openShared", slug: route.slug }); if (!settleShareOpen(route.slug, { ok: false, error: e })) setShareErr(`Could not open shared song: ${(e as Error).message}`); });
+    // Abort on cleanup so React Strict Mode's remount (and a real route change) cannot loadShared
+    // a second time and overwrite a fork that just ran after sign-in.
+    void openShared(route.slug, route.fork, ac.signal).then((sh) => {
+      if (ac.signal.aborted) return;
+      setShareTitle(sh.title, { handle: sh.handle });
+      if (sh.slug && sh.slug !== route.slug && location.pathname.includes("/s/")) history.replaceState(null, "", appUrl(`s/${sh.slug}`) + location.search);
+      settleShareOpen(route.slug, { ok: true, title: sh.title });
+    }).catch((e) => {
+      if (ac.signal.aborted) return;
+      reportError(e, { where: "openShared", slug: route.slug });
+      if (!settleShareOpen(route.slug, { ok: false, error: e })) setShareErr(`Could not open shared song: ${(e as Error).message}`);
+    });
+    return () => ac.abort();
   }, [route]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && playerOpen) setPlayerOpen(false); };

@@ -251,6 +251,7 @@ export function DesktopStudio(props: DesktopStudioProps) {
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const x = takePending("compose"); if (x && s.send(x.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   useEffect(() => { if (s.auth.authenticated && takePending("publish")) void doPublish(); }, [s.auth.authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (s.auth.authenticated && ro && takePending("fork")) workstation.fork(); }, [s.auth.authenticated, ro]);
   const running = !!s.run;
   const stickRef = useRef<{ repin: () => void } | null>(null);
   const send = (raw = text) => {
@@ -281,9 +282,10 @@ export function DesktopStudio(props: DesktopStudioProps) {
     const makeCurrent = () => cur || workstation.restoreSnapshot(v!.snapshot, `restore v${v!.n}`);
     return <div className="ms-card-host"><VersionCard v={v} p={p} current={cur} playing={cur && t.playing} pos={secs} total={songSeconds(p)}
       onPlay={() => { if (makeCurrent()) play(); }} onEdit={() => { if (makeCurrent()) { setMenu(null); document.querySelector<HTMLElement>("[data-testid=composer-log]")?.blur(); say("Edit notes in the piano roll above."); } }}
-      onPublish={v || publishable ? () => { if (makeCurrent()) void doPublish(); } : undefined} /></div>;
+      onPublish={!ro && (v || publishable) ? () => { if (makeCurrent()) void doPublish(); } : undefined} /></div>;
   };
 
+  const doFork = () => { if (!s.auth.authenticated) { needSignIn("Sign in to fork this song and edit your own copy.", { kind: "fork" }); return; } workstation.fork(); };
   const doPublish = async () => {
     setMenu(null);
     const native = inNativeApp();
@@ -458,7 +460,9 @@ export function DesktopStudio(props: DesktopStudioProps) {
             <div className="ds-pop-row">🎬 Video <VideoExportButton compact /></div>
           </div>}
         </div>
-        <button className="ds-btn on" data-testid="studio-publish" title="Publish and get a share link" onClick={() => void doPublish()}>Publish</button>
+        {ro
+          ? <button className="ds-btn on" data-testid="studio-fork" title="Fork this song and edit your own copy" onClick={doFork}>Fork</button>
+          : <button className="ds-btn on" data-testid="studio-publish" title="Publish and get a share link" onClick={() => void doPublish()}>Publish</button>}
         <div className="ds-menu">
           <button className="ds-btn ds-ic" data-testid="studio-overflow" aria-label="More" aria-haspopup="menu" aria-expanded={menu === "more"} onClick={() => setMenu(menu === "more" ? null : "more")}>⋯</button>
           {menu === "more" && <div className="ds-pop ds-pop-r" role="menu">
@@ -534,8 +538,8 @@ export function DesktopStudio(props: DesktopStudioProps) {
           {focusTrack && <button className="ds-btn" data-testid="show-all" title="Back to the overview of every track" onClick={showAll}>Show all tracks</button>}
         </div>
         {(ro || forkOf) && <div className="ds-banner" role="status">
-          {ro && from ? <span data-testid="readonly-banner">Viewing <b>{from.title}</b> by {from.owner} (read-only). <button className="ds-btn" data-testid="fork-btn" onClick={() => workstation.fork()}>Fork</button></span>
-            : ro ? <span data-testid="readonly-banner">{ro} <button className="ds-btn" data-testid="fork-btn" onClick={() => workstation.fork()}>Fork</button></span>
+          {ro && from ? <span data-testid="readonly-banner">Viewing <b>{from.title}</b> by {from.owner} (read-only).</span>
+            : ro ? <span data-testid="readonly-banner">{ro}</span>
             : <span className="ds-small" data-testid="forked-from">forked from <a href={appUrl(`s/${forkOf}`)}>{forkOf}</a> · your fork is private until you publish it</span>}
         </div>}
         <Ruler project={p} view={view} snapTicks={snapTicks} />
