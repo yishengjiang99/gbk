@@ -147,7 +147,7 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   await expect(v2.getByTestId("readonly-banner")).toBeVisible({ timeout: 30_000 });
   const shared = await ws(v2);
   expect(shared.readOnly).toBeTruthy(); expect(shared.notes).toBe(after.notes); expect(shared.id).not.toBe(after.id);
-  await v2.getByTestId("fork-btn").click();
+  await v2.getByTestId("studio-fork").click();
   await expect(v2.getByTestId("forked-from")).toBeVisible();
   expect((await ws(v2)).readOnly).toBeNull();
   await v2.screenshot({ path: `${SHOTS}/composer-e2e-forked.png` });

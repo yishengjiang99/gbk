@@ -38,6 +38,7 @@ html:has(.ms), html:has(.ms) body { background: #ffffff; overflow-x: hidden; }
 .ms-ai p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ms-err { background: var(--ms-err-bg); color: var(--ms-err-fg); border-radius: 12px; padding: 10px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .ms-note { background: var(--ms-card); border: 1px solid var(--ms-line); border-radius: 12px; padding: 10px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ms-note .ms-fork { flex: 1 1 100%; width: 100%; height: var(--ms-tap); font-size: 16px; font-weight: 600; }
 .ms-mut, .ms small { color: var(--ms-mut); }
 .ms small { display: block; font-size: 13px; }
 .ms-grow { flex: 1 1 auto; min-width: 0; text-align: left; }

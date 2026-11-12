@@ -83,12 +83,13 @@ export function MobileStudio(props: MobileStudioProps) {
   useEffect(() => { if (s.conn.state === "connected" && sessionStorage.getItem("gbk.focusComposer")) { sessionStorage.removeItem("gbk.focusComposer"); input.current?.focus(); } }, [s.conn.state]);
   useEffect(() => { if (s.conn.state !== "connected") return; const q = takePending("compose"); if (q && s.send(q.text)) { setText(""); sessionStorage.removeItem("gbk.composerDraft"); } }, [s.conn.state]);
   useEffect(() => { if (s.auth.authenticated && takePending("publish")) void doPublish(); }, [s.auth.authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (s.auth.authenticated && workstation.readOnlyReason && takePending("fork")) workstation.fork(); }, [s.auth.authenticated, workstation.readOnlyReason]);
   const running = !!s.run;
   const stickRef = useRef<{ repin: () => void } | null>(null);
   const send = (raw = text) => {
     const v = raw.trim(); if (!v) { input.current?.focus(); return; }
     if (!s.auth.authenticated) { sessionStorage.setItem("gbk.composerDraft", v); needSignIn("Sign in to compose with the AI. It's free, with a daily limit.", { kind: "compose", text: v }); return; }
-    if (workstation.readOnlyReason) { say("This shared song is read-only. Tap “Make a copy” to change it."); return; }
+    if (workstation.readOnlyReason) { say("This shared song is read-only. Tap Fork to change your own copy."); return; }
     if (s.conn.state !== "connected") { say("Still connecting to the composer. Try again in a moment."); s.reconnect(); return; }
     if (running) return;
     if (s.send(v)) { setText(""); stickRef.current?.repin(); } else say("Couldn't send that. Check your connection and try again.");
@@ -124,11 +125,12 @@ export function MobileStudio(props: MobileStudioProps) {
   const makeCurrent = (v: SongVersion | null) => !v || v.revision === p.revision || restore(v);
 
   // ---- actions ---------------------------------------------------------------------------------------------------
+  const doFork = () => { setSheet(null); if (!s.auth.authenticated) { needSignIn("Sign in to fork this song and edit your own copy.", { kind: "fork" }); return; } workstation.fork(); };
   const doPublish = async (v: SongVersion | null = null) => {
     setSheet(null);
     const native = inNativeApp();
     if (!native && !s.auth.authenticated) { needSignIn("Sign in to publish and share your song.", { kind: "publish" }); return; }
-    if (workstation.readOnlyReason) { say("Make a copy of this song first, then publish your version."); return; }
+    if (workstation.readOnlyReason) { say("Fork this song first, then publish your version."); return; }
     if (!makeCurrent(v)) return;
     if (!workstation.project.tracks.length) { say("Make something first, then publish it."); return; }
     setBusy("Saving your song…");
@@ -222,9 +224,9 @@ export function MobileStudio(props: MobileStudioProps) {
   const latestArt = latestArtifactItemId(s.items);
   const mapped = s.items.map((m) => songCardFor(m, { version: versionLog.forRun(p.id, m.runId), hasSong: p.tracks.length > 0 && !running, latestArtifactId: latestArt, enabled: cardOn }));
   const inlineCurrent = mapped.some((x) => x.card?.kind === "current");
-  const currentCard = <VersionCard p={p} playing={t.playing} pos={pos} total={total} current onPlay={playCurrent} onEdit={() => openEditor()} onPublish={currentPublishable ? () => void doPublish() : undefined} />;
+  const currentCard = <VersionCard p={p} playing={t.playing} pos={pos} total={total} current onPlay={playCurrent} onEdit={() => openEditor()} onPublish={!ro && currentPublishable ? () => void doPublish() : undefined} />;
   const versionCard = (v: SongVersion) => <VersionCard v={v} p={p} playing={v.revision === p.revision ? t.playing : preview?.n === v.n} pos={pos} total={total} current={v.revision === p.revision}
-    onPlay={() => playVersion(v, v.revision === p.revision)} onEdit={() => openEditor(v)} onPublish={() => void doPublish(v)} onRestore={() => restore(v)} />;
+    onPlay={() => playVersion(v, v.revision === p.revision)} onEdit={() => openEditor(v)} onPublish={ro ? undefined : () => void doPublish(v)} onRestore={() => restore(v)} />;
   return (
     <div className="ms" ref={root} data-testid="workstation" data-compact="1" data-sheet={sheet ?? ""}>
       <header className="ms-head" data-testid="compact-head">
@@ -238,7 +240,10 @@ export function MobileStudio(props: MobileStudioProps) {
       </header>
 
       <main className="ms-chat" ref={chat} data-testid="studio-chat" aria-live="polite">
-        {ro && <div className="ms-note" data-testid="readonly-banner" role="status">You're listening to <b>{from?.title ?? p.name}</b>{from?.owner ? <> by {from.owner}</> : null}. Make your own copy to change it. <button className="ms-btn ms-small" data-testid="fork-btn" onClick={() => workstation.fork()}>Make a copy</button></div>}
+        {ro && <div className="ms-note" data-testid="readonly-banner" role="status">
+          <span>Viewing <b>{from?.title ?? p.name}</b>{from?.owner ? <> by {from.owner}</> : null}.</span>
+          <button type="button" className="ms-btn ms-pill ms-fork" data-testid="studio-fork" onClick={doFork}>Fork</button>
+        </div>}
         {!s.items.length && !p.tracks.length && <div className="ms-empty" data-testid="studio-empty">
           <h2>What should we make?</h2><p>Describe a song, hum a melody, or import sheet music.</p>
           <div className="ms-sug">{SUGGESTIONS.map((x) => <button key={x.text} data-testid="suggestion" onClick={() => send(x.text)}>{x.icon} {x.text}</button>)}</div>
@@ -265,7 +270,9 @@ export function MobileStudio(props: MobileStudioProps) {
       </SheetBox>}
       {sheet === "recent" && <SheetBox id="recent" label="Recent projects" title="Recent projects"><div data-testid="recent-list"><RecentProjects className="ms-row" onDone={() => setSheet(null)} /></div></SheetBox>}
       {sheet === "more" && <SheetBox id="more" label="More">
-        <Row icon="📤" title="Publish & share" sub="Get a public link" testId="more-publish" onClick={() => void doPublish()} />
+        {ro
+          ? <Row icon="⎘" title="Fork" sub="Edit your own copy" testId="more-fork" onClick={doFork} />
+          : <Row icon="📤" title="Publish & share" sub="Get a public link" testId="more-publish" onClick={() => void doPublish()} />}
         <Row icon="⬇️" title="Export" sub="MIDI, WAV, video" testId="more-export" onClick={() => setSheet("export")} />
         <Row icon="🕘" title="Recent projects" sub="Saved on this device" testId="more-recent" onClick={() => setSheet("recent")} />
         <Row icon="📁" title="My songs" testId="more-songs" onClick={() => { if (!s.auth.authenticated) { setSheet(null); needSignIn("Sign in to see your saved songs."); } else setSheet("songs"); }} />
@@ -278,7 +285,7 @@ export function MobileStudio(props: MobileStudioProps) {
         <Row icon="🔊" title="WAV audio" testId="export-wav" disabled={!p.tracks.length} onClick={exportWav} />
         <div className="ms-row"><span className="ms-ic">🎬</span><div className="ms-grow">Video<small>Moving piano roll with sound</small></div><VideoExportButton compact /></div>
       </SheetBox>}
-      {sheet === "rename" && <SheetBox id="rename" label="Rename" title="Rename song"><RenameForm name={p.name} onDone={(n) => { setSheet(null); if (n != null && !workstation.rename(n) && workstation.readOnlyReason) say("Make a copy of this song to rename it."); }} /></SheetBox>}
+      {sheet === "rename" && <SheetBox id="rename" label="Rename" title="Rename song"><RenameForm name={p.name} onDone={(n) => { setSheet(null); if (n != null && !workstation.rename(n) && workstation.readOnlyReason) say("Fork this song to rename it."); }} /></SheetBox>}
       {sheet === "songs" && <SheetBox id="songs" label="My songs"><MySongs compact /></SheetBox>}
       {sheet === "settings" && <SheetBox id="settings" label="Settings" title="Settings">
         {s.auth.authenticated
@@ -337,7 +344,7 @@ export function MobileStudio(props: MobileStudioProps) {
         <form className="ms-bar" onSubmit={(e) => { e.preventDefault(); send(); }}>
           <button type="button" className="ms-btn" aria-label="Add" data-testid="plus-btn" aria-expanded={sheet === "plus"} onClick={() => setSheet(sheet === "plus" ? null : "plus")}>＋</button>
           <textarea ref={input} data-testid="composer-input" rows={emptyChat ? 3 : 1} maxLength={12000} value={text} aria-label="Describe a song or a change"
-            placeholder={running ? "Composing… keep typing" : ro ? "Make a copy to change this song…" : p.tracks.length ? "Describe a change…" : "Describe a song…"}
+            placeholder={running ? "Composing… keep typing" : ro ? "Fork this song to change it…" : p.tracks.length ? "Describe a change…" : "Describe a song…"}
             onChange={(e) => { setText(e.target.value); if (!s.auth.authenticated) sessionStorage.setItem("gbk.composerDraft", e.target.value); }}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
           {running ? <button type="button" className="ms-btn ms-stop" aria-label="Stop composing" data-testid="composer-stop" onClick={s.stop}>■</button>

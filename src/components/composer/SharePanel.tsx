@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { workstation } from "../../workstation/instance.ts";
+import { needSignIn, takePending } from "../auth/gate.ts";
 import { autosaveProject, uploadMedia, type SavedSong, type ShareInfo } from "../../agent/share-client.ts";
 import { songAutosaver } from "../../agent/autosave.ts";
 import { artifactStore } from "../../audio/artifact-store.ts";
@@ -27,22 +28,25 @@ export function SharePanel({ project, readOnly, authenticated, publishRequest = 
   const [busy, setBusy] = useState(false); const [last, setLast] = useState<ShareInfo | null>(null); const [err, setErr] = useState("");
   const [dialog, setDialog] = useState<SavedSong | null>(null); const [rk, setRk] = useState(0);
   const from = project.meta?.sharedFrom; const forkOf = project.meta?.forkOf;
+  const doFork = () => { if (!authenticated) { needSignIn("Sign in to fork this song and edit your own copy.", { kind: "fork" }); return; } workstation.fork(); };
   const openPublish = async () => {
     setBusy(true); setErr("");
     try { setDialog(await saveForPublish()); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
   // The Composer asks for the Publish dialog when an agent run finishes on a saved song.
   useEffect(() => { if (publishRequest && authenticated && !readOnly && project.tracks.length) void openPublish(); }, [publishRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (authenticated && readOnly && takePending("fork")) workstation.fork(); }, [authenticated, readOnly]);
   return (
     <section className="cmp-share" data-testid="share-panel">
       {readOnly && from && (
         <div className="cmp-readonly" data-testid="readonly-banner" role="status">
           Viewing <b>{from.title}</b> by {from.owner} (read-only){from.parentSlug ? <> · forked from <a href={appUrl(`s/${from.parentSlug}`)}>{from.parentSlug}</a></> : null}.
-          <button data-testid="fork-btn" onClick={() => workstation.fork()}>Fork</button>
         </div>
       )}
       {!readOnly && forkOf && <div className="ws-dim" data-testid="forked-from">forked from <a href={appUrl(`s/${forkOf}`)}>{forkOf}</a> · your fork is private until you publish it</div>}
-      {authenticated && !readOnly && (
+      {readOnly
+        ? <button className="pri" data-testid="studio-fork" onClick={doFork}>Fork</button>
+        : authenticated && (
         <button data-testid="share-btn" disabled={busy || !project.tracks.length} onClick={() => void openPublish()}>
           {busy ? "Saving…" : "Publish…"}
         </button>
