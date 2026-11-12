@@ -14,24 +14,50 @@ export class HumRecorder {
   private source: MediaStreamAudioSourceNode | null = null;
   private chunks: Float32Array[] = [];
   private captured = 0;
+  private starting: Promise<void> | null = null;
+  private aborted = false;
+  /** Called if the microphone goes away mid-take (unplugged, permission revoked, OS took it). */
+  onEnded: (() => void) | null = null;
 
   get recording(): boolean { return this.ctx !== null; }
   /** Seconds captured so far. */
   get elapsed(): number { return this.ctx ? this.captured / this.ctx.sampleRate : 0; }
 
-  async start(): Promise<void> {
-    if (this.ctx) return;
+  /** Concurrent calls (double tap during the permission prompt) share one attempt, so no second stream leaks. */
+  start(): Promise<void> {
+    if (this.ctx) return Promise.resolve();
+    return (this.starting ??= this.open().finally(() => { this.starting = null; }));
+  }
+
+  private async open(): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("This browser cannot record from a microphone (getUserMedia unavailable).");
     }
-    // Throws NotAllowedError on permission denial; the caller surfaces it.
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
+    this.aborted = false;
+    // Create and resume the context while still inside the tap's user gesture: after the permission
+    // await, Safari can leave a new context suspended, and a suspended context captures nothing.
     const ctx = new AudioContext();
+    const resumed = ctx.resume().catch(() => undefined);
+    let stream: MediaStream;
+    try {
+      // Throws NotAllowedError on permission denial; the caller surfaces it.
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+    } catch (e) {
+      void ctx.close().catch(() => undefined);
+      throw e;
+    }
+    await resumed;
+    if (this.aborted) { // cancel() while the permission prompt was up
+      stream.getTracks().forEach((t) => t.stop());
+      void ctx.close().catch(() => undefined);
+      return;
+    }
+    this.stream = stream;
     this.ctx = ctx;
-    await ctx.resume().catch(() => undefined);
-    this.source = ctx.createMediaStreamSource(this.stream);
+    stream.getAudioTracks()[0]?.addEventListener("ended", () => { if (this.stream === stream) this.onEnded?.(); });
+    this.source = ctx.createMediaStreamSource(stream);
     this.node = ctx.createScriptProcessor(4096, 1, 1);
     const mute = ctx.createGain();
     mute.gain.value = 0;
@@ -74,6 +100,7 @@ export class HumRecorder {
 
   /** Abandon the take without transcribing it. */
   cancel(): void {
+    if (this.starting) this.aborted = true;
     if (!this.ctx) return;
     this.node?.disconnect();
     this.source?.disconnect();

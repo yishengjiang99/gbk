@@ -29,14 +29,19 @@ export function HumButton() {
 }
 /** Web Hum flow (record -> transcribe in a worker -> one undoable "Hummed melody" track). `onError` gets plain text. */
 export function useWebHum(onError: (msg: string) => void = (m) => alert(m)) {
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhaseState] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState(0);
   const recorderRef = useRef<HumRecorder | null>(null);
   const mountedRef = useRef(true);
+  // The phase as of now, not as of the last render: two taps (or a tap racing the 60 s auto-stop) before
+  // React re-renders must not stop the take twice. Each take/cancel bumps the generation; stale work drops out.
+  const phaseRef = useRef<Phase>("idle");
+  const genRef = useRef(0);
+  const setPhase = (p: Phase) => { phaseRef.current = p; setPhaseState(p); };
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; recorderRef.current?.cancel(); };
+    return () => { mountedRef.current = false; genRef.current++; recorderRef.current?.cancel(); };
   }, []);
   useEffect(() => {
     if (phase !== "recording") return;
@@ -51,14 +56,17 @@ export function useWebHum(onError: (msg: string) => void = (m) => alert(m)) {
   }, [phase]);
 
   const start = async () => {
+    if (phaseRef.current !== "idle") return;
     if (workstation.readOnlyReason) {
       for (const f of workstation.readOnlyHintListeners) f(workstation.readOnlyReason);
       return;
     }
     const rec = (recorderRef.current ??= new HumRecorder());
+    rec.onEnded = () => void stopAndTranscribe(); // mic unplugged or taken mid-take: keep what was captured
     try {
       await rec.start();
       if (!mountedRef.current) { rec.cancel(); return; }
+      if (!rec.recording || phaseRef.current !== "idle") return; // cancelled during the permission prompt
       setElapsed(0);
       setPhase("recording");
     } catch (e) {
@@ -74,18 +82,20 @@ export function useWebHum(onError: (msg: string) => void = (m) => alert(m)) {
 
   const stopAndTranscribe = async () => {
     const rec = recorderRef.current;
-    if (!rec || phase !== "recording") return;
+    if (!rec || phaseRef.current !== "recording") return;
+    const gen = ++genRef.current;
+    const live = () => mountedRef.current && gen === genRef.current;
     setPhase("transcribing");
     setProgress(0);
     try {
       const { samples, seconds } = await rec.stop();
-      if (!mountedRef.current) return;
+      if (!live()) return;
       if (seconds < 0.3 || samples.length === 0) {
         onError("That take was too short to transcribe — hum a few notes, then tap Stop.");
         return;
       }
-      const notes = await transcribe(samples, (f) => { if (mountedRef.current) setProgress(f); });
-      if (!mountedRef.current) return;
+      const notes = await transcribe(samples, (f) => { if (live()) setProgress(f); });
+      if (!live()) return;
       if (!notes.length) {
         onError("No melody detected in that take — try humming a clear, single tune closer to the microphone.");
         return;
@@ -93,17 +103,18 @@ export function useWebHum(onError: (msg: string) => void = (m) => alert(m)) {
       const trackId = newId("trk");
       const ops = humToOps(workstation.project, notes, trackId);
       const r = workstation.userEdit(ops, { label: "hum a melody" });
-      if (r) workstation.setSelection({ trackIds: [trackId], noteIds: [] });
+      if (r) workstation.setSelection({ trackIds: [trackId], noteIds: [] }); // null: read-only, hint already shown
     } catch (e) {
       const err = e as Error;
       reportError(err, { where: "hum.transcribe" });
-      onError("Couldn't turn that take into notes. Please try again.");
+      if (live()) onError("Couldn't turn that take into notes. Please try again.");
     } finally {
-      if (mountedRef.current) setPhase("idle");
+      if (live()) setPhase("idle");
     }
   };
 
-  const cancel = () => { recorderRef.current?.cancel(); setPhase("idle"); };
+  /** Discards the take, also mid-transcription (the result is dropped). */
+  const cancel = () => { genRef.current++; recorderRef.current?.cancel(); setPhase("idle"); };
   return { phase, elapsed, progress, start, stop: stopAndTranscribe, cancel };
 }
 

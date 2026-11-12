@@ -55,7 +55,8 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
     /// Discards the current take. The recorder's stop() restores the session through AudioSessionController.
     func cancel() {
         switch phase {
-        case .idle: return
+        case .idle:
+            if starting { generation += 1 } // start() bails after the permission prompt
         case .recording:
             ticker?.invalidate(); ticker = nil
             if fixtureURL == nil { _ = recorder.stop() } else { HumRecorder.restoreSession() }
@@ -67,6 +68,9 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         }
     }
     private var generation = 0
+    /// True from the tap until recording begins (context fetch, permission prompt): phase is still idle then,
+    /// and a second toggle must not start a second take (it leaked a forever-repeating ticker).
+    private var starting = false
 
     nonisolated static func isTrusted(_ origin: WKSecurityOrigin) -> Bool {
         (origin.protocol == "https" && origin.host == "compose.grepawk.com") || origin.protocol == "file"
@@ -74,30 +78,40 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
 
     func toggle() async {
         switch phase {
-        case .idle: await start()
+        case .idle:
+            guard !starting else { return }
+            starting = true
+            defer { starting = false }
+            await start()
         case .recording: await stopAndTranscribe()
         case .transcribing: break
         }
     }
 
     private func start() async {
+        let gen = generation
         let ctx = await context()
+        guard gen == generation else { return }
         if let reason = ctx.readOnlyReason {
             await js("window.gbkHum?.showReadOnlyHint?.(\(Self.jsonString(reason)))")
             return
         }
         if fixtureURL == nil {
-            guard await HumRecorder.requestPermission() else {
+            let granted = await HumRecorder.requestPermission()
+            guard gen == generation else { return }
+            guard granted else {
                 alert("Microphone access was denied. Allow microphone access for GBK in Settings, then tap Hum again.")
                 return
             }
+            recorder.onAutoStop = { [weak self] in Task { await self?.stopAndTranscribe() } }
             do { try recorder.start() } catch {
-                alert("Could not start recording: \(error)")
+                NSLog("[gbk.hum] start failed: %@", "\(error)")
+                alert("Could not start recording. Check that a microphone is available and try again.")
                 return
             }
-            recorder.onAutoStop = { [weak self] in Task { await self?.stopAndTranscribe() } }
         }
         setPhase(.recording)
+        ticker?.invalidate()
         ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.report() }
         }
@@ -109,19 +123,19 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         setPhase(.transcribing)
         let gen = generation
         defer { if gen == generation { setPhase(.idle) } }
-        let take: (samples: [Float], seconds: Double)
-        if let fixtureURL {
-            let s = (try? HumRecorder.load(url: fixtureURL)) ?? []
-            take = (s, Double(s.count) / HumRecorder.targetRate)
-        } else {
-            take = recorder.stop()
-        }
-        if take.seconds < 0.3 || take.samples.isEmpty {
+        let fixture = fixtureURL
+        let raw = fixture == nil ? recorder.stop() : []
+        // Resampling up to 60 s of 48 kHz audio is real work; keep it off the main thread.
+        let samples = await Task.detached(priority: .userInitiated) {
+            fixture.map { (try? HumRecorder.load(url: $0)) ?? [] } ?? HumRecorder.resample(raw)
+        }.value
+        guard gen == generation else { return } // cancelled while resampling
+        if Double(samples.count) / HumRecorder.targetRate < 0.3 {
             alert("That take was too short to transcribe — hum a few notes, then tap Stop.")
             return
         }
         do {
-            let notes = try await HumTranscriber.transcribe(take.samples) { f in
+            let notes = try await HumTranscriber.transcribe(samples) { f in
                 Task { @MainActor [weak self] in if self?.generation == gen { self?.report(progress: f) } }
             }
             guard gen == generation else { return } // cancelled while transcribing
@@ -133,12 +147,18 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
             let trackId = HumNotesToOps.newTrackId()
             let ops = HumNotesToOps.ops(project: ctx, notes: notes, trackId: trackId)
             let r = await js("return window.gbkHum ? window.gbkHum.apply(\(Self.jsonString(ops.map(\.json))), { label: 'hum a melody', selectTrackId: \(Self.jsonString(trackId)) }) : { ok: false, error: 'This page does not support native Hum yet.' }")
-            if let d = r as? [String: Any], d["ok"] as? Bool != true {
-                alert("Transcription failed: \(d["error"] as? String ?? "the studio rejected the notes")")
+            guard gen == generation else { return }
+            guard let d = r as? [String: Any] else { // page navigated or the script threw
+                alert("Couldn't add the melody to the song. Please try again.")
+                return
+            }
+            if d["ok"] as? Bool != true, ctx.readOnlyReason == nil {
+                alert("Couldn't add the melody to the song: \(d["error"] as? String ?? "the studio rejected the notes")")
             }
         } catch {
             guard gen == generation else { return }
-            alert("Transcription failed: \(error)")
+            NSLog("[gbk.hum] transcription failed: %@", "\(error)")
+            alert("Couldn't turn that take into notes. Please try again.")
         }
     }
 

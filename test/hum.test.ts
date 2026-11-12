@@ -61,6 +61,14 @@ test("windowing: a sub-window take still yields the exact frame count", async ()
   assert.deepEqual(decodeNotes(frames, frames), []);
 });
 
+test("windowing: every take length keeps all of its frames (no dropped tail)", async () => {
+  const runWindow = async () => ({ note: new Float32Array(172 * N_BINS), onset: new Float32Array(172 * N_BINS) });
+  for (const n of [36_667, 40_004, 76_000, BP_SAMPLE_RATE * 60]) {
+    const { frames } = await runBasicPitch(new Float32Array(n), runWindow);
+    assert.equal(frames.length, Math.floor((n * 86) / BP_SAMPLE_RATE), `${n} samples`);
+  }
+});
+
 test("velocity: amplitude maps into 1..127 with a sane default", () => {
   assert.equal(amplitudeToVelocity(1), 127);
   assert.equal(amplitudeToVelocity(0), 1);

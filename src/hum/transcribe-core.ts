@@ -40,7 +40,10 @@ export async function runBasicPitch(
 
   const padded = new Float32Array(PAD_LEFT + samples.length);
   padded.set(samples, PAD_LEFT);
-  const windowCount = padded.length <= BP_WINDOW ? 1 : Math.floor((padded.length - BP_WINDOW + HOP_SAMPLES - 1) / HOP_SAMPLES) + 1;
+  // One window per hop start, like upstream and HearSheetCore (iOS). Each window keeps 142 frames but only
+  // advances 36,164 samples, so counting windows by "last full window" instead dropped up to 14 trailing
+  // frames (~0.16 s, the end of the last note) for some take lengths.
+  const windowCount = Math.ceil(padded.length / HOP_SAMPLES);
 
   for (let w = 0; w < windowCount; w++) {
     const start = w * HOP_SAMPLES;

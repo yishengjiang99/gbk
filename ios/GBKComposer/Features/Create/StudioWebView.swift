@@ -272,8 +272,9 @@ extension StudioWebView {
 }
 
 extension StudioWebView {
-    /// Truthy while a composer run, hum recording or other busy step is in progress.
-    static let busyScript = "!!document.querySelector('[data-testid=studio-busy],[data-status=running],.ms-rec')"
+    /// Truthy while a composer run, hum recording or other busy step is in progress. Native Hum records through
+    /// AVAudioEngine, not WebKit capture, so `microphoneCaptureState` misses it; every hum button carries `data-phase`.
+    static let busyScript = "!!document.querySelector('[data-testid=studio-busy],[data-status=running],.ms-rec,[data-testid=hum-btn][data-phase]:not([data-phase=idle])')"
 
     /// The web owns the rule (docs/social-api.md, `window.gbkStudio`): resume only when
     /// `hasContent && (!published || dirtySincePublish)`; otherwise `startNew()` (saves, then a blank project).
