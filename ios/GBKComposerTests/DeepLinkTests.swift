@@ -93,6 +93,26 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(r.selectedTab, .feed)
     }
 
+    func testSongPageBypassIsBoundToItsSong() {
+        typealias C = WebView.Coordinator
+        let now = Date()
+        let a = C.SongPageAllowance(slug: "ember-crown-rmpaqyj8", until: now.addingTimeInterval(C.songPageWindow))
+        XCTAssertTrue(C.allowsSongPage(a, link: .share(slug: "ember-crown-rmpaqyj8"), now: now))
+        XCTAssertFalse(C.allowsSongPage(a, link: .share(slug: "other-song-abcd"), now: now), "another song routes to the feed")
+        XCTAssertFalse(C.allowsSongPage(a, link: .share(slug: "ember-crown-rmpaqyj8"), now: now.addingTimeInterval(60)), "never stays armed")
+        XCTAssertFalse(C.allowsSongPage(nil, link: .share(slug: "ember-crown-rmpaqyj8"), now: now))
+        XCTAssertEqual(C.songSlug(URL(string: "https://compose.grepawk.com/s/ember-crown-rmpaqyj8?fork=1")), "ember-crown-rmpaqyj8")
+    }
+
+    func testSongOpenedDuringHandoffIsRequeuedAsANewLoad() {
+        let open = StudioSongRequest(slug: "ember-crown-rmpaqyj8", fork: true)
+        let again = StudioWebView.songToRequeue(before: nil, now: open.id, open: open)
+        XCTAssertEqual(again?.slug, open.slug)
+        XCTAssertEqual(again?.fork, true)
+        XCTAssertNotEqual(again?.id, open.id, "same id would never re-arm the song-page bypass")
+        XCTAssertNil(StudioWebView.songToRequeue(before: open.id, now: open.id, open: open))
+    }
+
     func testStudioWebRoute() {
         typealias C = WebView.Coordinator
         func r(_ s: String, main: Bool = true) -> C.Route { C.route(URL(string: s), mainFrame: main) }

@@ -8,7 +8,15 @@ import WebKit
 /// so `--pub-tabbar` is forced to 0.
 @MainActor
 final class PublishBridge: NSObject, WKScriptMessageHandler {
-    struct Request: Equatable, Identifiable { var id: String { projectId }; var projectId: String; var slug: String? = nil; var title: String; var labels: [String]; var tags: [String] }
+    struct Request: Equatable, Identifiable {
+        var id: String { projectId }
+        var projectId: String; var slug: String? = nil; var title: String; var labels: [String]; var tags: [String]
+        /// One per web Publish tap: a result only counts for the sheet that started it.
+        var attempt = UUID()
+        static func == (a: Request, b: Request) -> Bool {
+            (a.projectId, a.slug, a.title, a.labels, a.tags) == (b.projectId, b.slug, b.title, b.labels, b.tags)
+        }
+    }
     static let handlerName = "publish"
     static let script = #"""
     (function () { var s = document.createElement("style"); s.textContent = ".pub-native, :root { --pub-tabbar: 0px !important; }";

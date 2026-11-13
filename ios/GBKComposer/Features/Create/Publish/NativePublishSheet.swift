@@ -35,7 +35,8 @@ struct NativePublishSheet: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle("Publish")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(result == nil ? "Cancel" : "Done", action: onClose).accessibilityIdentifier("publish-cancel") } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(result == nil ? "Cancel" : "Done", action: onClose).disabled(busy).accessibilityIdentifier("publish-cancel") } }
+            .interactiveDismissDisabled(busy) // a publish in flight finishes on this sheet, not behind a later one
             .safeAreaInset(edge: .bottom) {
                 if result == nil {
                     Button { Task { await publish() } } label: {
