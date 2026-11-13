@@ -6,10 +6,11 @@ import OMRScanUI
 import XCTest
 @testable import GBKComposer
 
-/// Renders the feed card and sign-in in light and dark. PNGs are attached to the test result and, when
-/// SNAPSHOT_DIR is set (CI passes TEST_RUNNER_SNAPSHOT_DIR), written there for upload as a CI artifact.
+/// Appearance checks, not pixel snapshots (no baselines on purpose: they break on every OS/font change): each screen
+/// renders, follows Dark Mode, and the live viz draws from real audio. PNGs are attached to the result and, when
+/// SNAPSHOT_DIR is set (CI passes TEST_RUNNER_SNAPSHOT_DIR), written there for review as a CI artifact.
 @MainActor
-final class SnapshotTests: XCTestCase {
+final class AppearanceTests: XCTestCase {
     private func render<V: View>(_ view: V, name: String, style: UIUserInterfaceStyle,
                                  size: CGSize = CGSize(width: 393, height: 760)) throws -> UIImage {
         let scheme: ColorScheme = style == .dark ? .dark : .light

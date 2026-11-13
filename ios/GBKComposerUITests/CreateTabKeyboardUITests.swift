@@ -23,7 +23,7 @@ final class CreateTabKeyboardUITests: XCTestCase {
         create.tap()
         let web = app.webViews.firstMatch
         guard web.textViews["Describe a song or a change"].waitForExistence(timeout: 60) else {
-            throw XCTSkip("studio did not load from compose.grepawk.com")
+            XCTFail("studio did not load from compose.grepawk.com"); throw StudioDidNotLoad()
         }
         // The imported test MIDI's project is titled "Scanned sheet music" (an unpublished draft).
         let draft = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Scanned sh'")).firstMatch
@@ -68,7 +68,7 @@ final class CreateTabKeyboardUITests: XCTestCase {
         let input = web.textViews["Describe a song or a change"]
         guard input.waitForExistence(timeout: 60) else {
             attach(app, "create-tab-no-input-\(mode)")
-            throw XCTSkip("composer-input did not load from compose.grepawk.com/studio (network or web layout)")
+            XCTFail("composer-input did not load from compose.grepawk.com/studio"); throw StudioDidNotLoad()
         }
         let window = app.windows.firstMatch.frame
         let tabBar = app.tabBars.firstMatch.frame

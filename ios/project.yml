@@ -128,7 +128,4 @@ schemes:
     test:
       targets:
         - GBKComposerTests
-        - name: GBKComposerUITests
-          skippedTests:
-            # Quarantined: import chooser never appears after scan; fails every full run (#208).
-            - ScanUITests/testScanFixtureAddsTrackToStudio
+        - GBKComposerUITests
