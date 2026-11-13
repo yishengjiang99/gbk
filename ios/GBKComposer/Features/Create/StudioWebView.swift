@@ -34,6 +34,7 @@ struct StudioWebView: View {
     /// A /studio universal link that arrived before the first load: used as the handoff path.
     @State private var pendingStudioPath: String?
     @State private var songLoadID: UUID?
+    @State private var openSong: StudioSongRequest?
     /// A feed card landing is on its way: the Create-tab draft check must not `startNew()` over it.
     @State private var landingInFlight = false
     /// Remix landing with this tab already showing (first entry to Create): covers the page until
@@ -72,7 +73,7 @@ struct StudioWebView: View {
                                 loadSong(song)
                             // App launch (or any full load that restored a project): same draft check.
                             } else if Self.humHarnessURL == nil, loaded.query?.contains("new=") != true { Task { await freshIfNoDraft(waitForRestore: true) } }
-                        }, onPublish: { r in publishRequest = r; Task { await auth.loadMe() } },
+                        }, onPublish: { r in lastPublished = nil; publishRequest = r; Task { await auth.loadMe() } },
                            onDeepLink: { router.open($0) }, onTab: { router.selectedTab = $0 })
                             .accessibilityIdentifier("studio-webview")
                     } else { ProgressView().tint(Theme.accent) }
@@ -96,7 +97,10 @@ struct StudioWebView: View {
         }) { r in
             NativePublishSheet(draft: PublishDraft(title: r.title, labels: Array(r.labels.prefix(PublishDraft.maxLabels)), tags: Array(r.tags.prefix(PublishDraft.maxTags))),
                                projectId: r.projectId, slug: r.slug, service: GuestPublishServices.make(webView: scan.webView),
-                               onPublished: { res in published = true; lastPublished = res },
+                               onPublished: { res in
+                                   guard publishRequest?.attempt == r.attempt else { return } // that sheet is gone
+                                   published = true; lastPublished = res
+                               },
                                onClose: { publishRequest = nil })
         }
         // Entering Create from another tab: resume a draft as is; start fresh only when the latest project was
@@ -124,8 +128,11 @@ struct StudioWebView: View {
             if url != nil, urlToken == token { return } // tab re-entry: keep the live page (freshIfNoDraft decides)
             let path = pendingStudioPath ?? Self.studioPath(fresh: false)
             pendingStudioPath = nil
+            let songBefore = songLoadID
             let handoff = try? await AuthServices.current.webSessionURL(returnPath: path)
             if Task.isCancelled { return }
+            // A song opened while the handoff was in flight: load it after the handoff instead of dropping it.
+            if songLoadID != songBefore, let song = openSong { pendingSong = song }
             urlToken = token
             url = (handoff ?? nil) ?? URL(string: path, relativeTo: Self.studioURL)!.absoluteURL
         }
@@ -160,6 +167,7 @@ extension StudioWebView {
 
     @MainActor func loadSong(_ req: StudioSongRequest) {
         songLoadID = req.id
+        openSong = req
         url = Self.songURL(req)
     }
 
@@ -181,7 +189,8 @@ extension StudioWebView {
             deliverRemix(req)
         } else {
             pendingPrompt = req
-            if url?.path.hasPrefix("/studio") != true {
+            // No page yet: the auth handoff's /studio load delivers it (a bare /studio here would load unauthenticated).
+            if url != nil, url?.path.hasPrefix("/studio") != true {
                 url = URL(string: Self.studioPath(fresh: false), relativeTo: Self.studioURL)!.absoluteURL
             }
         }
@@ -373,6 +382,11 @@ struct WebView: UIViewRepresentable {
         view.scrollView.contentInsetAdjustmentBehavior = .never
         view.scrollView.bounces = false
         context.coordinator.pinWhenFitting(view.scrollView)
+        context.coordinator.loaded = url // else the first updateUIView loads it again (one-time web code redeemed twice)
+        if let songLoad, let slug = Coordinator.songSlug(url) {
+            context.coordinator.seenSongLoad = songLoad
+            context.coordinator.songPageAllowance = .init(slug: slug, until: Date().addingTimeInterval(Coordinator.songPageWindow))
+        }
         Self.load(view, url)
         return view
     }
@@ -384,7 +398,10 @@ struct WebView: UIViewRepresentable {
         context.coordinator.onTab = onTab
         if let songLoad, songLoad != context.coordinator.seenSongLoad {
             context.coordinator.seenSongLoad = songLoad
-            context.coordinator.allowSongPageOnce = true
+            // Only a load that actually happens may arm the bypass, and only for its own song.
+            if context.coordinator.loaded != url, let slug = Coordinator.songSlug(url) {
+                context.coordinator.songPageAllowance = .init(slug: slug, until: Date().addingTimeInterval(Coordinator.songPageWindow))
+            }
         }
         if uiView.url == nil || context.coordinator.loaded != url {
             context.coordinator.loaded = url
@@ -404,10 +421,25 @@ struct WebView: UIViewRepresentable {
         var onDeepLink: (@MainActor (DeepLink) -> Void)?
         var onTab: (@MainActor (AppTab) -> Void)?
         private var urlObservation: NSKeyValueObservation?
-        /// Set when the app itself asked the Studio to open a song (feed card "open"/fork);
-        /// consumed by the next /s/<slug> navigation decision.
-        var allowSongPageOnce = false
+        /// Set when the app itself asked the Studio to open a song (feed card "open"/fork): lets that song's
+        /// /s/<slug> page through once, briefly. Any other song page clears it and routes as usual.
+        struct SongPageAllowance: Equatable { let slug: String; let until: Date }
+        var songPageAllowance: SongPageAllowance?
+        static let songPageWindow: TimeInterval = 15
         var seenSongLoad: UUID?
+
+        static func songSlug(_ url: URL?) -> String? {
+            guard let url else { return nil }
+            switch DeepLink(url: url) {
+            case .share(let s)?, .studioSong(let s, _)?: return s
+            default: return nil
+            }
+        }
+
+        static func allowsSongPage(_ a: SongPageAllowance?, link: DeepLink, now: Date) -> Bool {
+            guard let a, now < a.until, case .share(let slug) = link else { return false }
+            return slug == a.slug
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard let u = webView.url, u.path.hasPrefix("/studio") else { return }
@@ -531,12 +563,13 @@ struct WebView: UIViewRepresentable {
             if Self.isPurchaseLink(action.request.url) {
                 decisionHandler(.cancel)
                 interceptPurchase(mainFrame: action.targetFrame?.isMainFrame == true)
-            } else if allowSongPageOnce, Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) != nil {
-                allowSongPageOnce = false
-                decisionHandler(.allow)
-            } else if let onDeepLink, let link = Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) {
+            } else if let link = Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) {
+                let allowed = Self.allowsSongPage(songPageAllowance, link: link, now: Date())
+                songPageAllowance = nil
+                if allowed || onDeepLink == nil { return decisionHandler(.allow) }
                 decisionHandler(.cancel)
-                Task { @MainActor in onDeepLink(link) }
+                let open = onDeepLink
+                Task { @MainActor in open?(link) }
             } else {
                 let r = Self.route(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true)
                 decisionHandler(r == .allow ? .allow : .cancel)
