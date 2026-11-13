@@ -452,7 +452,8 @@ function columnExtremes(points: Array<readonly [number, number]>): Array<[number
   return out.length >= 2 ? out : null;
 }
 
-function convexHull(points: Array<readonly [number, number]>): Array<[number, number]> {
+/** Monotone-chain convex hull (CCW, no repeated end point). Exported for tests. */
+export function convexHull(points: Array<readonly [number, number]>): Array<[number, number]> {
   let pts = columnExtremes(points);
   if (pts === null) {
     pts = points.map((p) => [p[0], p[1]] as [number, number]);

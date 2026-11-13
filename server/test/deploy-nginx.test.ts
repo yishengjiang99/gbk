@@ -41,3 +41,47 @@ test("both nginx configs route /api/jam/ws as a WebSocket without upstream failo
     assert.ok(c.includes("location = /api/agent/ws {"), `${f}: agent ws kept`);
   }
 });
+
+// #217/#220: Scan's ONNX Runtime needs cross-origin isolation for SharedArrayBuffer threads. The app shell sends
+// COOP same-origin + COEP credentialless; the worker scripts (/assets/, /ort-runtime/) need COEP too, or ORT's
+// thread pool hangs instead of falling back. nginx drops server-level add_header in any location that sets its
+// own, so each location is checked on its own.
+function locationBody(c: string, header: string): string {
+  const start = c.indexOf(`location ${header} {`);
+  assert.ok(start >= 0, `location ${header}`);
+  let depth = 0;
+  for (let i = c.indexOf("{", start); i < c.length; i++) {
+    if (c[i] === "{") depth++;
+    else if (c[i] === "}" && --depth === 0) return c.slice(c.indexOf("{", start) + 1, i);
+  }
+  throw new Error(`unbalanced location ${header}`);
+}
+const COOP = 'add_header Cross-Origin-Opener-Policy "same-origin" always;';
+const COEP = 'add_header Cross-Origin-Embedder-Policy "credentialless" always;';
+
+test("nginx: app shell is cross-origin isolated; worker scripts carry COEP", () => {
+  const shells: Record<string, string[]> = {
+    "deploy/nginx.conf": ["/", "@spa", "~ ^/((s|u)/[^/]+|og/s/[A-Za-z0-9-]+\\.(png|mp4))$"],
+    "deploy/nginx.docker.conf": ["/"],
+  };
+  for (const [f, locations] of Object.entries(shells)) {
+    const c = readFileSync(f, "utf8");
+    for (const loc of locations) {
+      const body = locationBody(c, loc);
+      assert.ok(body.includes(COOP), `${f} ${loc}: COOP same-origin`);
+      assert.ok(body.includes(COEP), `${f} ${loc}: COEP credentialless`);
+    }
+    for (const loc of ["^~ /assets/", "^~ /ort-runtime/"]) assert.ok(locationBody(c, loc).includes(COEP), `${f} ${loc}: COEP credentialless`);
+    // Never require-corp: it would block the no-cors images/audio (and Turnstile's script) that credentialless allows.
+    assert.ok(!c.includes("require-corp"), `${f}: no require-corp`);
+  }
+});
+
+test("vite dev/preview and serve-dist send the same isolation headers", () => {
+  const vite = readFileSync("vite.config.ts", "utf8");
+  assert.match(vite, /isolationHeaders = \{ "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "credentialless" \}/);
+  assert.match(vite, /server: \{ headers: isolationHeaders/);
+  assert.match(vite, /preview: \{ headers: isolationHeaders/);
+  const serve = readFileSync("scripts/serve-dist.mjs", "utf8");
+  assert.ok(serve.includes('"Cross-Origin-Opener-Policy": "same-origin"') && serve.includes('"Cross-Origin-Embedder-Policy": "credentialless"'));
+});

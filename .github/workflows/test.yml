@@ -34,6 +34,11 @@ jobs:
         timeout-minutes: 5
       - run: npm run test:mcp   # MCP subset again on its own line so a protocol regression is easy to spot in the log
         timeout-minutes: 10
+      # Scan's OMR package (MIDI timing, morphology equivalence, ...). Model-backed tests skip without models/.
+      - name: omr-homr-web typecheck + tests
+        working-directory: omr-homr-web
+        run: npm ci && npm run typecheck && npm test
+        timeout-minutes: 10
 
   # Launch checks (#72 Phase 8): no network, no paid calls, no prod secrets.
   launch-checks:
