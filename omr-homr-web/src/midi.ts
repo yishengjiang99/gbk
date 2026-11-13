@@ -142,6 +142,18 @@ export interface WalkOptions {
    * continuously across rows and hands are split by position instead.
    */
   resetCursorOnClef?: boolean;
+  /**
+   * Whether `lower` positions are a second hand with its own clock. Default:
+   * the stream has a lower-staff clef (homr's own rule for keeping lower
+   * positions). Without one it is a single staff: one clock for every note,
+   * so a stray `lower` tag can't make a note overlap the one before it.
+   */
+  grandStaff?: boolean;
+}
+
+/** True when the stream establishes a lower staff (a lower-position clef). */
+export function hasLowerStaffClef(symbols: DecodedSymbol[]): boolean {
+  return symbols.some((s) => s.rhythm.startsWith("clef") && isLowerPosition(s.position));
 }
 
 /**
@@ -156,6 +168,10 @@ export interface WalkOptions {
  * dotted eighth wait out a half-note bass chord (Die Letzte Kompanie ran 100
  * beats instead of 73). A `chord` marker makes the next note or rest share
  * the previous event's onset; a chord-tied rest lasts only its own length.
+ * Members of one chord on the same staff all start together, and that
+ * staff's next note starts after the chord's shortest member (Humdrum's
+ * rule: a record lasts as long as its shortest token), whatever order the
+ * members were decoded in. Longer members keep sounding.
  * Exported for unit tests; symbolsToMidi assembles the SMF.
  */
 export function staffSymbolsToNoteEvents(
@@ -167,10 +183,12 @@ export function staffSymbolsToNoteEvents(
   const warnings: string[] = [];
   const startTick = opts.startTick ?? 0;
   const resetCursorOnClef = opts.resetCursorOnClef ?? true;
+  const grandStaff = opts.grandStaff ?? hasLowerStaffClef(symbols);
   let end = startTick; // furthest end seen: where the next segment may start
   let staffEnd = [startTick, startTick]; // 0 upper, 1 lower
   let chordAnchor = startTick;
   let shareNextOnset = false;
+  let inChord = [false, false]; // staff already has a member in the current chord
   for (const symbol of symbols) {
     if (symbol.rhythm === "chord") {
       shareNextOnset = true;
@@ -185,11 +203,13 @@ export function staffSymbolsToNoteEvents(
         end = startTick;
         staffEnd = [startTick, startTick];
         chordAnchor = startTick;
+        inChord = [false, false];
       }
       shareNextOnset = false;
       continue;
     }
-    const st = isLowerPosition(symbol.position) ? 1 : 0;
+    const st = grandStaff && isLowerPosition(symbol.position) ? 1 : 0;
+    if (!shareNextOnset) inChord = [false, false];
     const tick = shareNextOnset ? chordAnchor : staffEnd[st];
     shareNextOnset = false;
     chordAnchor = tick;
@@ -206,8 +226,10 @@ export function staffSymbolsToNoteEvents(
     // Grace notes sound briefly but do not move time; rests and unreadable
     // pitches still take their duration.
     if (!dur.grace) {
-      staffEnd[st] = tick + dur.ticks;
-      if (staffEnd[st] > end) end = staffEnd[st];
+      const memberEnd = tick + dur.ticks;
+      staffEnd[st] = inChord[st] ? Math.min(staffEnd[st], memberEnd) : memberEnd;
+      inChord[st] = true;
+      if (memberEnd > end) end = memberEnd;
     }
   }
   if (events.length === 0) warnings.push(`staff ${staff}: no notes decoded`);
@@ -226,11 +248,14 @@ export function staffSymbolsToNoteEvents(
 export function pageVoiceNoteEvents(
   symbols: DecodedSymbol[],
   staff: number,
-  opts: { startTick?: number } = {},
+  opts: { startTick?: number; grandStaff?: boolean } = {},
 ): { events: MidiNoteEvent[]; warnings: string[]; endTick: number } {
   const events: MidiNoteEvent[] = [];
   const warnings: string[] = [];
   const noNotes = `staff ${staff}: no notes decoded`;
+  // Decided once per voice: page cleanup drops repeated clefs, so later rows
+  // carry lower notes without their own lower clef.
+  const grandStaff = opts.grandStaff ?? hasLowerStaffClef(symbols);
   let rowTick = opts.startTick ?? 0;
   let row: DecodedSymbol[] = [];
 
@@ -239,6 +264,7 @@ export function pageVoiceNoteEvents(
     const walked = staffSymbolsToNoteEvents(row, staff, {
       startTick: rowTick,
       resetCursorOnClef: false,
+      grandStaff,
     });
     row = [];
     events.push(...walked.events);

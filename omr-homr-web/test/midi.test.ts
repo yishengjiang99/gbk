@@ -127,6 +127,8 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
     position: "lower",
   });
   const newline: DecodedSymbol = { ...sym("newline"), position: "nonote" };
+  // A lower-staff clef makes the stream a grand staff (two hands, two clocks).
+  const bassClef: DecodedSymbol = { ...lower("clef"), rhythm: "clef" };
 
   it("sounds the lower hand from the row start, not after the upper hand", () => {
     // Hand-after-hand decode: two upper quarters, then a lower clef and two
@@ -151,6 +153,7 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
 
   it("chains the next row after the longer hand", () => {
     const stream: DecodedSymbol[] = [
+      bassClef,
       sym("note_2", "C5"), // upper hand: 960 ticks
       lower("note_4", "C3"), // lower hand: 480 ticks
       newline,
@@ -166,6 +169,7 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
   it("upper hand does not wait for a lower-hand half-note chord", () => {
     // Die Letzte Kompanie bar 1: dotted eighth + 16th over a half-note bass chord.
     const bar = [
+      bassClef,
       sym("note_8.", "G4"), sym("chord"), lower("note_2", "D3"), sym("chord"), lower("note_2", "B2"),
       sym("note_16", "G4"), sym("note_8", "G4"), sym("note_8", "A4"),
       sym("note_4", "B4"), sym("chord"), lower("note_2", "F3"),
@@ -175,13 +179,14 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
   });
 
   it("a chord-tied rest lasts only its own length", () => {
-    const bar = [sym("note_2", "G4"), sym("chord"), lower("rest_4"), lower("note_4", "C3"), sym("note_2", "A4")];
+    const bar = [bassClef, sym("note_2", "G4"), sym("chord"), lower("rest_4"), lower("note_4", "C3"), sym("note_2", "A4")];
     const { events } = staffSymbolsToNoteEvents(bar, 0);
     assert.deepEqual(events.map((e) => e.tick), [0, 480, 960]);
   });
 
   it("a row starting with an interleaved upper note keeps its duration", () => {
     const rows = [
+      bassClef,
       sym("note_4", "C4"), sym("chord"), lower("note_2", "C3"), sym("note_4", "D4"), newline,
       sym("note_4", "E4"), sym("chord"), lower("note_2", "E3"), sym("note_4", "F4"),
     ];
@@ -200,6 +205,58 @@ describe("grand-staff hand timing (Music Reader pageVoiceEvents port)", () => {
     // Without the reset the lower hand still starts on its own cursor.
     const noReset = staffSymbolsToNoteEvents(stream, 0, { resetCursorOnClef: false });
     assert.deepEqual(noReset.events.map((e) => e.tick), [0, 0]);
+  });
+});
+
+describe("chord timing does not depend on member order (#218)", () => {
+  const ticksByPitch = (symbols: DecodedSymbol[]) =>
+    Object.fromEntries(staffSymbolsToNoteEvents(symbols, 0).events.map((e) => [e.midi, e.tick]));
+
+  it("every member starts together and the next note follows the shortest member", () => {
+    // Two voices on one staff: G4 half under C5 then D5 quarters.
+    const halfFirst = [sym("note_2", "G4"), sym("chord"), sym("note_4", "C5"), sym("note_4", "D5")];
+    const quarterFirst = [sym("note_4", "C5"), sym("chord"), sym("note_2", "G4"), sym("note_4", "D5")];
+    const want = { 67: 0, 72: 0, 74: 480 };
+    assert.deepEqual(ticksByPitch(halfFirst), want);
+    assert.deepEqual(ticksByPitch(quarterFirst), want);
+  });
+
+  it("holds for three members in every order, and the segment end covers the longest", () => {
+    const members = [sym("note_2", "C4"), sym("note_4", "E4"), sym("note_1", "G4")];
+    const orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    for (const order of orders) {
+      const chord = order.flatMap((i, k) => (k === 0 ? [members[i]] : [sym("chord"), members[i]]));
+      const walked = staffSymbolsToNoteEvents([...chord, sym("note_4", "C5")], 0);
+      const ticks = Object.fromEntries(walked.events.map((e) => [e.midi, e.tick]));
+      assert.deepEqual(ticks, { 60: 0, 64: 0, 67: 0, 72: 480 }, `order ${order}`);
+      assert.equal(walked.endTick, 1920, `order ${order}`);
+    }
+  });
+});
+
+describe("single staff: lower tags share one clock (#219)", () => {
+  const lower = (rhythm: string, pitch = "."): DecodedSymbol => ({ ...sym(rhythm, pitch), position: "lower" });
+
+  it("without a lower clef, a lower-tagged note follows the note before it", () => {
+    const stream = [sym("note_4", "C5"), lower("note_4", "D5"), sym("note_4", "E5")];
+    const { events, endTick } = staffSymbolsToNoteEvents(stream, 0);
+    assert.deepEqual(events.map((e) => e.tick), [0, 480, 960]);
+    assert.equal(endTick, 1440);
+    const page = pageVoiceNoteEvents([...stream, { ...sym("newline"), position: "nonote" }, sym("note_4", "F5")], 0);
+    assert.deepEqual(page.events.map((e) => e.tick), [0, 480, 960, 1440]);
+  });
+
+  it("with a lower clef anywhere in the voice, lower notes get their own clock on every row", () => {
+    const newline: DecodedSymbol = { ...sym("newline"), position: "nonote" };
+    const bassClef: DecodedSymbol = { ...lower("clef"), rhythm: "clef" };
+    // Page cleanup drops the repeated clef, so row 2 has no clef of its own.
+    const stream = [
+      sym("note_4", "C5"), sym("note_4", "D5"), bassClef, lower("note_2", "C3"), newline,
+      sym("note_4", "E5"), sym("note_4", "F5"), lower("note_2", "E3"),
+    ];
+    const { events } = pageVoiceNoteEvents(stream, 0);
+    const ticks = Object.fromEntries(events.map((e) => [e.midi, e.tick]));
+    assert.deepEqual(ticks, { 72: 0, 74: 480, 48: 0, 76: 960, 77: 1440, 52: 960 });
   });
 });
 
