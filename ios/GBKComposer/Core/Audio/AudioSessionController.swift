@@ -39,6 +39,7 @@ final class AudioSessionController {
     private var reapplying = false
 
     private init() {}
+    private var resetObserver: NSObjectProtocol? // kept, or the media-services-reset handler is dropped
 
     /// Call at launch: applies `.playback` and starts guarding the route.
     func start() {
@@ -48,7 +49,7 @@ final class AudioSessionController {
         routeObserver = center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in AudioSessionController.shared.enforce() }
         }
-        _ = center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { _ in
+        resetObserver = center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in AudioSessionController.shared.apply() }
         }
     }

@@ -18,9 +18,10 @@ final class SoundFontStore {
     @discardableResult
     func load(from url: URL? = SoundFontStore.bundledURL) -> Task<SF2SoundFont?, Never> {
         if let task { return task }
-        let t = Task<SF2SoundFont?, Never> {
-            guard let url else { return nil }
-            return try? await SF2SoundFont.load(contentsOf: url)
+        let t = Task<SF2SoundFont?, Never> { [weak self] in
+            let sf: SF2SoundFont? = if let url { try? await SF2SoundFont.load(contentsOf: url) } else { nil }
+            if sf == nil { self?.task = nil } // a failed load is retried next time, not memoized
+            return sf
         }
         task = t
         return t

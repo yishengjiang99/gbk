@@ -85,3 +85,14 @@ final class StoreTests: XCTestCase {
         XCTAssertNil(store.introText(for: StoreCatalog.proYearly))
     }
 }
+
+/// #143: the privacy manifest ships in the app and declares the required-reason APIs the app uses.
+final class PrivacyManifestTests: XCTestCase {
+    func testManifestIsBundledWithRequiredReasons() throws {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "PrivacyInfo", withExtension: "xcprivacy"), "not in the app bundle")
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
+        let apis = (plist["NSPrivacyAccessedAPITypes"] as? [[String: Any]] ?? []).compactMap { $0["NSPrivacyAccessedAPIType"] as? String }
+        XCTAssertTrue(apis.contains("NSPrivacyAccessedAPICategoryUserDefaults"))
+        XCTAssertEqual(plist["NSPrivacyTracking"] as? Bool, false)
+    }
+}

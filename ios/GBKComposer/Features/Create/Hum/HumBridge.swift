@@ -64,10 +64,13 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
             setPhase(.idle)
         case .transcribing:
             generation += 1 // stopAndTranscribe drops its result
+            transcription?.cancel() // and the model stops at its next window
+            transcription = nil
             setPhase(.idle)
         }
     }
     private var generation = 0
+    private var transcription: Task<[HumTimedNote], Error>?
     /// True from the tap until recording begins (context fetch, permission prompt): phase is still idle then,
     /// and a second toggle must not start a second take (it leaked a forever-repeating ticker).
     private var starting = false
@@ -135,9 +138,14 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
             return
         }
         do {
-            let notes = try await HumTranscriber.transcribe(samples) { f in
-                Task { @MainActor [weak self] in if self?.generation == gen { self?.report(progress: f) } }
+            let work = Task {
+                try await HumTranscriber.transcribe(samples) { f in
+                    Task { @MainActor [weak self] in if self?.generation == gen { self?.report(progress: f) } }
+                }
             }
+            transcription = work
+            defer { if gen == generation { transcription = nil } }
+            let notes = try await work.value
             guard gen == generation else { return } // cancelled while transcribing
             guard !notes.isEmpty else {
                 alert("No melody detected in that take — try humming a clear, single tune closer to the microphone.")

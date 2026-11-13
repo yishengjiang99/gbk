@@ -64,6 +64,7 @@ final class AuthStore: ObservableObject {
     /// Until GBK Social ships `POST /api/auth/anonymous` this ends at notAvailable and gated actions prompt sign-in.
     /// Seconds the server asked us to wait (429 retry-after) before registering the guest again.
     private(set) var anonymousRetryAfter: TimeInterval?
+    private var anonymousRetry: Task<Void, Never>?
 
     func ensureAnonymousSession(service: AuthServicing = AuthServices.current) async {
         var name = AnonymousIdentity.username
@@ -84,8 +85,10 @@ final class AuthStore: ObservableObject {
                 // 429: keep the local name, try again after retry-after (default 10 min, at most 1 h).
                 anonymousRetryAfter = min(max(after ?? 600, 1), 3600)
                 let wait = anonymousRetryAfter!
-                Task { [weak self] in
+                anonymousRetry?.cancel()
+                anonymousRetry = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
+                    guard !Task.isCancelled else { return } // signed out / deleted meanwhile
                     await self?.ensureAnonymousSession(service: service)
                 }
                 return
@@ -137,6 +140,7 @@ final class AuthStore: ObservableObject {
     }
 
     func clearLocal() {
+        anonymousRetry?.cancel(); anonymousRetry = nil
         isAnonymousSession = false
         UserDefaults.standard.set(false, forKey: Self.anonymousFlagKey)
         Keychain.set(nil, for: Self.accessKey)
