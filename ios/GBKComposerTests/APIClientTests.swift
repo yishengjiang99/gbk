@@ -294,3 +294,36 @@ final class StudioKeyboardTests: XCTestCase {
         XCTAssertFalse(WebView.Coordinator.shouldReset(contentHeight: 1400, boundsHeight: 700, offsetY: 120), "scrollable pages keep their offset")
     }
 }
+
+final class AuthSessionTests: XCTestCase {
+    private actor Counter { var n = 0; func hit() { n += 1 } }
+
+    func testConcurrentRefreshesShareOneCall() async {
+        let gate = RefreshGate(), calls = Counter()
+        let results = await withTaskGroup(of: Bool.self) { g -> [Bool] in
+            for _ in 0..<8 {
+                g.addTask { await gate.run { await calls.hit(); try? await Task.sleep(nanoseconds: 300_000_000); return true } }
+            }
+            return await g.reduce(into: []) { $0.append($1) }
+        }
+        XCTAssertEqual(results, Array(repeating: true, count: 8))
+        let shared = await calls.n
+        XCTAssertEqual(shared, 1, "one refresh token, one refresh call")
+        _ = await gate.run { await calls.hit(); return false }
+        let next = await calls.n
+        XCTAssertEqual(next, 2, "a finished refresh frees the gate")
+    }
+
+    @MainActor func testNewSessionDropsPreviousAccountsRefreshTokenAndIdentity() throws {
+        let store = AuthStore(); store.clearLocal()
+        defer { store.clearLocal() }
+        let guest = try APIClient.makeDecoder().decode(Me.self, from: Data(#"{"id":"g1","handle":"mellowfox"}"#.utf8))
+        store.store(TokenPair(accessToken: "g", tokenType: nil, expiresIn: nil, refreshToken: "guest-refresh", me: guest), anonymous: true)
+        XCTAssertEqual(AuthStore.currentRefreshToken(), "guest-refresh")
+        // Reviewer sign-in: access token only.
+        store.store(TokenPair(accessToken: "r", tokenType: nil, expiresIn: nil, refreshToken: nil, me: nil), anonymous: false)
+        XCTAssertNil(AuthStore.currentRefreshToken())
+        XCTAssertNil(store.me)
+        XCTAssertTrue(store.isLinkedAccount)
+    }
+}

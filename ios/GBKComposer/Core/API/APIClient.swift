@@ -107,8 +107,7 @@ final class APIClient: APIClientProtocol {
     /// On a 401: rotate tokens with `POST /api/auth/refresh` (the old refresh token is revoked server-side).
     /// A rejected refresh (401 INVALID_REFRESH) signs out locally. Concurrent 401s share one refresh.
     func refreshTokens() async -> Bool {
-        if let inFlight = await RefreshGate.shared.current() { return await inFlight.value }
-        let task = Task<Bool, Never> {
+        await RefreshGate.shared.run {
             guard let refresh = AuthStore.currentRefreshToken() else { return false }
             do {
                 let pair = try await AuthServices.current.refresh(refreshToken: refresh)
@@ -121,10 +120,6 @@ final class APIClient: APIClientProtocol {
                 return false
             }
         }
-        await RefreshGate.shared.set(task)
-        let ok = await task.value
-        await RefreshGate.shared.set(nil)
-        return ok
     }
 
     // MARK: Convenience
@@ -146,6 +141,13 @@ final class APIClient: APIClientProtocol {
 actor RefreshGate {
     static let shared = RefreshGate()
     private var task: Task<Bool, Never>?
-    func current() -> Task<Bool, Never>? { task }
-    func set(_ t: Task<Bool, Never>?) { task = t }
+    /// Joins the refresh in flight or starts `refresh`; claim-or-join happens in one actor turn.
+    func run(_ refresh: @escaping @Sendable () async -> Bool) async -> Bool {
+        if let task { return await task.value }
+        let t = Task { await refresh() }
+        task = t
+        let ok = await t.value
+        if task == t { task = nil }
+        return ok
+    }
 }
