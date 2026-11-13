@@ -78,6 +78,15 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(C.songSlug(URL(string: "https://compose.grepawk.com/s/ember-crown-rmpaqyj8?fork=1")), "ember-crown-rmpaqyj8")
     }
 
+    func testSongOpenedDuringHandoffIsRequeuedAsANewLoad() {
+        let open = StudioSongRequest(slug: "ember-crown-rmpaqyj8", fork: true)
+        let again = StudioWebView.songToRequeue(before: nil, now: open.id, open: open)
+        XCTAssertEqual(again?.slug, open.slug)
+        XCTAssertEqual(again?.fork, true)
+        XCTAssertNotEqual(again?.id, open.id, "same id would never re-arm the song-page bypass")
+        XCTAssertNil(StudioWebView.songToRequeue(before: open.id, now: open.id, open: open))
+    }
+
     func testStudioWebRoute() {
         typealias C = WebView.Coordinator
         func r(_ s: String, main: Bool = true) -> C.Route { C.route(URL(string: s), mainFrame: main) }

@@ -132,7 +132,7 @@ struct StudioWebView: View {
             let handoff = try? await AuthServices.current.webSessionURL(returnPath: path)
             if Task.isCancelled { return }
             // A song opened while the handoff was in flight: load it after the handoff instead of dropping it.
-            if songLoadID != songBefore, let song = openSong { pendingSong = song }
+            if let song = Self.songToRequeue(before: songBefore, now: songLoadID, open: openSong) { pendingSong = song }
             urlToken = token
             url = (handoff ?? nil) ?? URL(string: path, relativeTo: Self.studioURL)!.absoluteURL
         }
@@ -163,6 +163,12 @@ extension StudioWebView {
             try? await Task.sleep(for: .seconds(2))
             landingInFlight = false
         }
+    }
+
+    /// A fresh request (new id): the web view arms the song-page bypass only for a load id it hasn't seen.
+    static func songToRequeue(before: UUID?, now: UUID?, open: StudioSongRequest?) -> StudioSongRequest? {
+        guard now != before, let open else { return nil }
+        return StudioSongRequest(slug: open.slug, fork: open.fork)
     }
 
     @MainActor func loadSong(_ req: StudioSongRequest) {
