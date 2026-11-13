@@ -3,20 +3,15 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign, createHash } from "node:crypto";
 import { buildApp } from "../src/app.ts";
 import { testConfig, ScriptModel, reply } from "./helpers.ts";
-import { e164 } from "../src/routes/auth-extra.ts";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = { ...publicKey.export({ format: "jwk" }), kid: "a1", alg: "RS256" };
 const jwt = (c: object) => { const h = Buffer.from(JSON.stringify({ alg: "RS256", kid: "a1" })).toString("base64url"); const p = Buffer.from(JSON.stringify(c)).toString("base64url"); return `${h}.${p}.${sign("RSA-SHA256", Buffer.from(`${h}.${p}`), privateKey).toString("base64url")}`; };
 const calls: { url: string; body: string; auth: string | null }[] = [];
-let turnstileOk = true, approve = "approved";
 const fakeFetch = (async (u: string | URL, init?: RequestInit) => {
   const url = String(u); const body = String(init?.body ?? ""); calls.push({ url, body, auth: new Headers(init?.headers).get("authorization") });
   const json = (o: object, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json" } });
   if (url.includes("appleid.apple.com/auth/keys")) return json({ keys: [jwk] });
-  if (url.includes("turnstile")) return json({ success: turnstileOk });
-  if (url.endsWith("/Verifications")) return json({ status: "pending" }, 201);
-  if (url.endsWith("/VerificationCheck")) return json({ status: approve });
   return json({}, 404);
 }) as unknown as typeof fetch;
 async function start(env: Record<string, string>) {
@@ -26,26 +21,17 @@ async function start(env: Record<string, string>) {
 }
 const J = { "content-type": "application/json" };
 
-test("SMS sign-in: Turnstile gate, country allowlist, Twilio Verify start/check, web cookie + native tokens", async () => {
+test("SMS sign-in is disabled: endpoints return 410 and session.sms is false even when Twilio keys are set", async () => {
   const s = await start({ TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_VERIFY_SID: "VA1", TURNSTILE_SECRET: "ts", TURNSTILE_SITE_KEY: "site" });
-  const st = (b: object) => fetch(`${s.base}/api/auth/sms/start`, { method: "POST", headers: J, body: JSON.stringify(b) });
   try {
-    assert.equal((await (await fetch(`${s.base}/api/auth/sms/config`)).json()).turnstileSiteKey, "site");
-    assert.equal((await st({ phone: "+14155550100" })).status, 400, "captcha required");
-    assert.equal((await st({ phone: "+442079460958", turnstileToken: "t" })).status, 422, "UK not in allowlist");
-    turnstileOk = false; assert.equal((await st({ phone: "+14155550100", turnstileToken: "t" })).status, 403); turnstileOk = true;
-    assert.equal(calls.filter((c) => c.url.endsWith("/Verifications")).length, 0, "no SMS sent before captcha passes");
-    assert.equal((await st({ phone: "(415) 555-0100", turnstileToken: "t" })).status, 200);
-    const v = calls.find((c) => c.url.endsWith("/Verifications"))!;
-    assert.match(v.url, /Services\/VA1\/Verifications$/); assert.match(v.body, /To=%2B14155550100/); assert.equal(v.auth, `Basic ${Buffer.from("AC1:tok").toString("base64")}`);
-    approve = "pending"; assert.equal((await fetch(`${s.base}/api/auth/sms/verify`, { method: "POST", headers: J, body: JSON.stringify({ phone: "+14155550100", code: "000000" }) })).status, 401); approve = "approved";
-    const w = await fetch(`${s.base}/api/auth/sms/verify`, { method: "POST", headers: J, body: JSON.stringify({ phone: "+14155550100", code: "123456" }) });
-    assert.equal(w.status, 200); const ck = w.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
-    const me = await (await fetch(`${s.base}/api/me`, { headers: { cookie: ck } })).json(); assert.match(me.id, /^ph-[0-9a-f]{32}$/);
-    const n = await (await fetch(`${s.base}/api/auth/sms/verify`, { method: "POST", headers: J, body: JSON.stringify({ phone: "4155550100", code: "123456", client: "native" }) })).json();
-    assert.equal(n.me.id, me.id, "same account for the same number"); assert.match(n.refresh_token, /^rt_/);
-    for (let i = 0; i < 3; i++) await st({ phone: "+14155550100", turnstileToken: "t" });
-    assert.equal((await st({ phone: "+14155550100", turnstileToken: "t" })).status, 429, "per-phone / per-IP send limits");
+    assert.equal((await (await fetch(`${s.base}/api/session`)).json()).sms, false);
+    const body = JSON.stringify({ phone: "+14155550100", turnstileToken: "t", code: "123456" });
+    for (const [method, path] of [["GET", "/api/auth/sms/config"], ["POST", "/api/auth/sms/start"], ["POST", "/api/auth/sms/verify"]] as const) {
+      const r = await fetch(`${s.base}${path}`, { method, headers: J, body: method === "POST" ? body : undefined });
+      assert.equal(r.status, 410, path);
+      assert.deepEqual(await r.json(), { error: "sms_signin_disabled" });
+    }
+    assert.equal(calls.filter((c) => /turnstile|twilio|Verifications|VerificationCheck/i.test(c.url)).length, 0, "no Twilio or Turnstile requests");
   } finally { await s.app.close(); }
 });
 

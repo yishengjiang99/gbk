@@ -30,11 +30,11 @@ Constants also live in `docs/social-api.md` → "Client behavior".
 - **No standalone Sign in button anywhere**: not in the header, the feed, the studio, or the composer. Guests browse, play, read comments, open songs in the studio, and type in the composer freely.
 - **Gated actions open the sign-in sheet.** These are: rate, comment, follow, DM, report, publish/save, Send in the composer, and the Inbox tab. **Profile is not gated**: a signed-out or guest user can open their own Profile tab. It shows the guest name (web: "Guest"; iOS: the two-word guest name) and offers the sign-in sheet from there. Only Inbox opens the sheet when its tab is tapped.
   - On phones the sheet is a bottom sheet; on desktop it is a centred modal.
-  - It lists only the methods the server has configured, in this order: Apple, Google, GitHub, SMS, invite code, reviewer. Web reads these from `/api/session` (`providers`, `apple`, `sms`, `loginAvailable`, `reviewerLogin`).
+  - It lists only the methods the server has configured, in this order: Apple, Google, GitHub, invite code, reviewer. Web reads these from `/api/session` (`providers`, `apple`, `loginAvailable`, `reviewerLogin`). SMS sign-in is disabled and is not shown.
   - It shows a one-line reason ("Sign in to rate songs.") and "Guests can browse, play and read without an account."
 - **Resume the exact action after sign-in.**
   - Web stores the pending action in sessionStorage `gbk.pendingAction` (`compose` text, `rate` slug+stars, `comment` slug+text, `report`, `profile`, `inbox`). It is valid for 15 minutes.
-  - Every sign-in path ends in a page load: an OAuth redirect with `?return=`, or an in-place code/SMS login followed by a reload. The owning view then replays the action: it sends the composer text, applies the rating, posts the comment, reopens the report, or opens the tab.
+  - Every sign-in path ends in a page load: an OAuth redirect with `?return=`, or an in-place invite-code login followed by a reload. The owning view then replays the action: it sends the composer text, applies the rating, posts the comment, reopens the report, or opens the tab.
   - iOS keeps the pending action in memory and replays it when the sheet's sign-in completes.
 - **Sign out** is in Profile (own profile, below the settings) on web, and in Settings on iOS.
 - Code: `src/components/auth/gate.ts` (`needSignIn`, `takePending`), `src/components/auth/SignInSheet.tsx`. Tests: e2e `sign-in only on demand` (WebKit iPhone, Pixel, desktop Chrome).
