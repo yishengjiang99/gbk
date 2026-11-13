@@ -424,15 +424,14 @@ struct WebView: UIViewRepresentable {
 
         /// Microphone capture is granted without a second WebKit prompt only for our own origin (the system
         /// NSMicrophoneUsageDescription prompt still appears once). Camera and other origins are denied.
-        static func mediaCaptureDecision(host: String, type: WKMediaCaptureType) -> WKPermissionDecision {
-            let ours = host == "compose.grepawk.com"
-            return ours && type == .microphone ? .grant : .deny
+        static func mediaCaptureDecision(trusted: Bool, type: WKMediaCaptureType) -> WKPermissionDecision {
+            trusted && type == .microphone ? .grant : .deny
         }
 
         func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                      initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                      decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            decisionHandler(Self.mediaCaptureDecision(host: origin.host, type: type))
+            decisionHandler(Self.mediaCaptureDecision(trusted: WebTrust.isTrusted(origin), type: type))
         }
 
         /// While the page records, the app session is playAndRecord (speaker, Bluetooth; see AudioSessionController);
@@ -452,7 +451,7 @@ struct WebView: UIViewRepresentable {
         /// Web alerts (e.g. "Microphone access was denied…", "Transcription failed…") need a native panel in WKWebView.
         func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                      initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
-            guard let top = Self.topController(webView) else { completionHandler(); return }
+            guard WebTrust.isTrusted(frame.securityOrigin), let top = Self.topController(webView) else { completionHandler(); return }
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
             top.present(alert, animated: true)
@@ -460,7 +459,7 @@ struct WebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                      initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-            guard let top = Self.topController(webView) else { completionHandler(false); return }
+            guard WebTrust.isTrusted(frame.securityOrigin), let top = Self.topController(webView) else { completionHandler(false); return }
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(false) })
             alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
@@ -546,10 +545,16 @@ struct WebView: UIViewRepresentable {
 
         enum Route: Equatable { case allow, link(DeepLink), tab(AppTab), safari }
 
-        /// Only /studio, /s/ (songs) and /api (auth redeem) stay in the Studio; other site pages go native or to Safari.
+        /// Only /studio, /s/ (songs) and /api (auth redeem) stay in the Studio; other site pages go native, and
+        /// every other origin opens in Safari (the page carries the guest credential and native bridges).
         static func route(_ url: URL?, mainFrame: Bool) -> Route {
-            guard mainFrame, let url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-                  url.host?.lowercased() == DeepLink.host else { return .allow }
+            guard mainFrame, let url else { return .allow }
+            switch url.scheme?.lowercased() {
+            case "about", "blob": return .allow
+            case "file": return WebTrust.trustsFileHarness ? .allow : .safari
+            default: break
+            }
+            guard WebTrust.isTrusted(url) else { return .safari }
             let parts = url.pathComponents.filter { $0 != "/" }.map { $0.lowercased() }
             switch parts.first {
             case nil, "feed", "explore":
@@ -558,7 +563,7 @@ struct WebView: UIViewRepresentable {
                    let song = URL(string: "https://\(DeepLink.host)/s/\(pin)"), case .share(let slug)? = DeepLink(url: song) { return .link(.share(slug: slug)) }
                 return .link(.feed)
             case "studio", "s", "api": return .allow
-            case "inbox": return parts.count > 1 ? .link(.inbox(handle: url.pathComponents.filter { $0 != "/" }[1])) : .tab(.inbox)
+            case "inbox": return DeepLink(url: url).map { .link($0) } ?? .tab(.inbox)
             case "profile": return .tab(.profile)
             case "u": return DeepLink(url: url).map { .link($0) } ?? .tab(.profile)
             default: return .safari

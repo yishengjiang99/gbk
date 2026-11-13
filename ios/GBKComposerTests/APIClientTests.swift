@@ -138,6 +138,16 @@ final class APIClientTests: XCTestCase {
     }
 }
 
+final class EndpointEncodingTests: XCTestCase {
+    func testPathValuesCannotSplitTheRoute() throws {
+        let client = APIClient()
+        XCTAssertEqual(try client.url(for: Endpoints.song("a/b?c#d e")).absoluteString, "https://compose.grepawk.com/api/songs/a%2Fb%3Fc%23d%20e")
+        XCTAssertEqual(try client.url(for: Endpoints.tag("50%", cursor: nil)).absoluteString, "https://compose.grepawk.com/api/tags/50%25")
+        XCTAssertEqual(try client.url(for: Endpoints.user("@bob", cursor: "c1")).absoluteString, "https://compose.grepawk.com/api/users/bob?cursor=c1")
+        XCTAssertThrowsError(try client.url(for: Endpoint(path: "/api/x y")))
+    }
+}
+
 final class MockAuthServiceTests: XCTestCase {
     func testMockAuthFlows() async throws {
         let mock = MockAuthService()

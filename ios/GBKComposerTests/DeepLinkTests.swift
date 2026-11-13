@@ -14,6 +14,32 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(link("https://compose.grepawk.com/explore"), .feed)
     }
 
+    func testRejectsMalformedValues() {
+        XCTAssertNil(link("https://compose.grepawk.com/t/has%20space"))
+        XCTAssertNil(link("https://compose.grepawk.com/t/" + String(repeating: "a", count: 25)))
+        XCTAssertNil(link("https://compose.grepawk.com/s/ember-crown-rmpaqyj8/comments/1"))
+        XCTAssertEqual(link("https://compose.grepawk.com/inbox/MaestroAria"), .inbox(handle: "maestroaria"))
+        XCTAssertNil(link("https://compose.grepawk.com/inbox/a%2Fb"))
+    }
+
+    @MainActor func testOpenIgnoresInvalidBuiltLinks() {
+        let r = DeepLinkRouter()
+        r.selectedTab = .create
+        r.open(.share(slug: "../api/me"))
+        XCTAssertNil(r.pending)
+        XCTAssertEqual(r.selectedTab, .create)
+    }
+
+    func testWebTrustIsTheExactComposeOrigin() {
+        XCTAssertTrue(WebTrust.isTrusted(URL(string: "https://compose.grepawk.com/studio")))
+        XCTAssertTrue(WebTrust.isTrusted(URL(string: "https://compose.grepawk.com:443/studio")))
+        XCTAssertFalse(WebTrust.isTrusted(URL(string: "http://compose.grepawk.com/studio")))
+        XCTAssertFalse(WebTrust.isTrusted(URL(string: "https://compose.grepawk.com:8443/studio")))
+        XCTAssertFalse(WebTrust.isTrusted(URL(string: "https://compose.grepawk.com.evil.example/studio")))
+        XCTAssertFalse(WebTrust.isTrusted(nil))
+        XCTAssertEqual(WebView.Coordinator.mediaCaptureDecision(trusted: false, type: .microphone), .deny)
+    }
+
     func testCustomScheme() {
         XCTAssertEqual(link("gbk://s/ember-crown-rmpaqyj8"), .share(slug: "ember-crown-rmpaqyj8"))
         XCTAssertEqual(link("gbk:///s/ember-crown-rmpaqyj8"), .share(slug: "ember-crown-rmpaqyj8"))
@@ -75,8 +101,13 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(r(b + "/s/ember-crown-rmpaqyj8"), .allow)
         XCTAssertEqual(r(b + "/api/auth/web-code/redeem?code=x&return=/studio"), .allow)
         XCTAssertEqual(r(b + "/", main: false), .allow)
-        XCTAssertEqual(r("https://accounts.google.com/x"), .allow)
+        XCTAssertEqual(r("https://evil.example/studio"), .safari) // other origins never load next to the bridges
+        XCTAssertEqual(r("http://compose.grepawk.com/studio"), .safari)
+        XCTAssertEqual(r("https://compose.grepawk.com:8443/studio"), .safari)
+        XCTAssertEqual(r("https://evil.example/x", main: false), .allow)
         XCTAssertEqual(r("about:blank"), .allow)
+        XCTAssertEqual(r(b + "/inbox/MaestroAria"), .link(.inbox(handle: "maestroaria")))
+        XCTAssertEqual(r(b + "/inbox/a%20b"), .tab(.inbox))
         XCTAssertEqual(r(b + "/"), .link(.feed))   // studio ‹ Back (pushState "/"), via URL KVO
         XCTAssertEqual(r(b), .link(.feed))
         XCTAssertEqual(r(b + "/feed"), .link(.feed))

@@ -34,12 +34,13 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
         ? Bundle.main.url(forResource: "hum-fixture", withExtension: "wav") : nil
 
     static func install(on config: WKWebViewConfiguration, bridge: HumBridge) {
-        config.userContentController.addUserScript(WKUserScript(source: capabilityScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // Carries the guest credential: only the trusted origin gets it.
+        config.userContentController.addUserScript(WKUserScript(source: WebTrust.onlyOnTrustedOrigin(capabilityScript), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(WeakHandler(bridge), name: handlerName)
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, Self.isTrusted(message.frameInfo.securityOrigin) else { return }
+        guard message.frameInfo.isMainFrame, WebTrust.isTrusted(message.frameInfo.securityOrigin) else { return }
         switch Self.command(message.body) {
         case .toggle: Task { await toggle() }
         case .cancel: cancel()
@@ -71,10 +72,6 @@ final class HumBridge: NSObject, WKScriptMessageHandler {
     /// True from the tap until recording begins (context fetch, permission prompt): phase is still idle then,
     /// and a second toggle must not start a second take (it leaked a forever-repeating ticker).
     private var starting = false
-
-    nonisolated static func isTrusted(_ origin: WKSecurityOrigin) -> Bool {
-        (origin.protocol == "https" && origin.host == "compose.grepawk.com") || origin.protocol == "file"
-    }
 
     func toggle() async {
         switch phase {

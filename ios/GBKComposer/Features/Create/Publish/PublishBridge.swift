@@ -31,7 +31,7 @@ final class PublishBridge: NSObject, WKScriptMessageHandler {
     }
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
-        guard m.frameInfo.isMainFrame, HumBridge.isTrusted(m.frameInfo.securityOrigin),
+        guard m.frameInfo.isMainFrame, WebTrust.isTrusted(m.frameInfo.securityOrigin),
               let r = Self.request(from: m.body) else { return }
         onPublish?(r)
     }

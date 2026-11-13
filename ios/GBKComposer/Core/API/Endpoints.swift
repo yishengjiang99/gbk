@@ -31,32 +31,39 @@ private func q(_ name: String, _ value: String?) -> [URLQueryItem] {
     return [URLQueryItem(name: name, value: value)]
 }
 
+/// One percent-encoded path segment: `/ ? # %` and spaces can't split or truncate the route.
+func pathSegment(_ s: String) -> String {
+    var allowed = CharacterSet.urlPathAllowed
+    allowed.remove(charactersIn: "/;")
+    return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+}
+
 enum Endpoints {
     // MARK: Feed & songs (P1, live)
     static func feed(_ query: FeedQuery, cursor: String?, limit: Int = 20) -> Endpoint {
         Endpoint(path: "/api/feed", query: q("sort", query.sort.rawValue) + q("label", query.label) + q("tag", query.tag)
                  + q("cursor", cursor) + q("limit", String(limit)) + q("session", ImpressionLogger.session))
     }
-    static func tag(_ tag: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/tags/\(tag)", query: q("cursor", cursor)) }
+    static func tag(_ tag: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/tags/\(pathSegment(tag))", query: q("cursor", cursor)) }
     static func topTags(limit: Int = 20) -> Endpoint { Endpoint(path: "/api/tags/top", query: q("limit", String(limit))) }
-    static func song(_ slug: String) -> Endpoint { Endpoint(path: "/api/songs/\(slug)") }
-    static func play(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(slug)/play", method: .post, body: [:]) }
+    static func song(_ slug: String) -> Endpoint { Endpoint(path: "/api/songs/\(pathSegment(slug))") }
+    static func play(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(pathSegment(slug))/play", method: .post, body: [:]) }
     /// Owner-only (server 404s for anyone else): deletes the published song (the share) from the feed.
     /// The Studio project it was published from is NOT deleted. Same route the web's My Songs uses.
-    static func deleteSong(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(slug)", method: .delete) }
+    static func deleteSong(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(pathSegment(slug))", method: .delete) }
 
     // MARK: Ratings & comments (P1, live)
     static func rate(_ slug: String, stars: Int) -> Endpoint {
-        Endpoint(path: "/api/shares/\(slug)/rating", method: .put, body: ["stars": stars])
+        Endpoint(path: "/api/shares/\(pathSegment(slug))/rating", method: .put, body: ["stars": stars])
     }
-    static func clearRating(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(slug)/rating", method: .delete) }
+    static func clearRating(_ slug: String) -> Endpoint { Endpoint(path: "/api/shares/\(pathSegment(slug))/rating", method: .delete) }
     static func comments(_ slug: String, order: String = "new", cursor: String?) -> Endpoint {
-        Endpoint(path: "/api/shares/\(slug)/comments", query: q("order", order) + q("cursor", cursor))
+        Endpoint(path: "/api/shares/\(pathSegment(slug))/comments", query: q("order", order) + q("cursor", cursor))
     }
     static func postComment(_ slug: String, body: String) -> Endpoint {
-        Endpoint(path: "/api/shares/\(slug)/comments", method: .post, body: ["body": body])
+        Endpoint(path: "/api/shares/\(pathSegment(slug))/comments", method: .post, body: ["body": body])
     }
-    static func deleteComment(_ id: String) -> Endpoint { Endpoint(path: "/api/comments/\(id)", method: .delete) }
+    static func deleteComment(_ id: String) -> Endpoint { Endpoint(path: "/api/comments/\(pathSegment(id))", method: .delete) }
 
     // MARK: Profiles (P1, live)
     static let me = Endpoint(path: "/api/me")
@@ -65,14 +72,14 @@ enum Endpoints {
     static func meEngagement(event: String) -> Endpoint {
         Endpoint(path: "/api/me/engagement", method: .post, body: ["event": event])
     }
-    static func user(_ handle: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/users/\(handle.hasPrefix("@") ? String(handle.dropFirst()) : handle)", query: q("cursor", cursor)) }
+    static func user(_ handle: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/users/\(pathSegment(handle.hasPrefix("@") ? String(handle.dropFirst()) : handle))", query: q("cursor", cursor)) }
 
     // MARK: Reports (P1, live) / blocks (P4, not live)
     static func report(kind: String, target: String, reason: String) -> Endpoint {
         Endpoint(path: "/api/reports", method: .post, body: ["kind": kind, "target": target, "reason": reason])
     }
-    static func block(_ handle: String) -> Endpoint { Endpoint(path: "/api/blocks/\(handle)", method: .post, body: [:]) }
-    static func unblock(_ handle: String) -> Endpoint { Endpoint(path: "/api/blocks/\(handle)", method: .delete) }
+    static func block(_ handle: String) -> Endpoint { Endpoint(path: "/api/blocks/\(pathSegment(handle))", method: .post, body: [:]) }
+    static func unblock(_ handle: String) -> Endpoint { Endpoint(path: "/api/blocks/\(pathSegment(handle))", method: .delete) }
 
     // MARK: Native auth (live; Apple answers 503 until configured)
     static func appleExchange(identityToken: String, nonce: String, displayName: String?) -> Endpoint {

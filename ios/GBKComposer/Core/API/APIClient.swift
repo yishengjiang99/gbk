@@ -54,8 +54,12 @@ final class APIClient: APIClientProtocol {
     }
 
     func url(for endpoint: Endpoint) throws -> URL {
-        guard var comps = URLComponents(url: baseURL.appendingPathComponent(endpoint.path), resolvingAgainstBaseURL: false)
-        else { throw APIError.invalidURL }
+        // Endpoint paths are already percent-encoded (`pathSegment`); appendingPathComponent would encode them again.
+        guard endpoint.path.unicodeScalars.allSatisfy({ CharacterSet.urlPathAllowed.contains($0) || $0 == "%" }),
+              endpoint.path.removingPercentEncoding != nil,
+              var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { throw APIError.invalidURL }
+        let base = comps.percentEncodedPath.hasSuffix("/") ? String(comps.percentEncodedPath.dropLast()) : comps.percentEncodedPath
+        comps.percentEncodedPath = base + endpoint.path
         if !endpoint.query.isEmpty { comps.queryItems = endpoint.query }
         guard let url = comps.url else { throw APIError.invalidURL }
         return url
@@ -137,7 +141,7 @@ final class APIClient: APIClientProtocol {
     }
 
     func mediaURL(slug: String, kind: String = "mp3") -> URL {
-        baseURL.appendingPathComponent("/api/shares/\(slug)/media/\(kind)")
+        (try? url(for: Endpoint(path: "/api/shares/\(pathSegment(slug))/media/\(pathSegment(kind))"))) ?? baseURL
     }
 
 }
