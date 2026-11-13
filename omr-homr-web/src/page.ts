@@ -377,11 +377,6 @@ export interface ParsedVoice {
   symbols: DecodedSymbol[];
   /** Per-staff crop->page mappings, aligned with the non-empty staffs. */
   cropToPage: Array<(x: number, y: number) => [number, number]>;
-  /**
-   * True when this voice's staffs are grand staffs (keeps lower-position
-   * symbols; the MIDI walk gives each hand its own cursor either way).
-   */
-  grandstaff: boolean;
 }
 
 function newlineSymbol(): DecodedSymbol {
@@ -435,7 +430,6 @@ export async function parseStaffs(
     voices.push({
       symbols: removeDuplicatedSymbols(resultForVoice),
       cropToPage,
-      grandstaff: staffsForVoice.length > 0 && staffsForVoice[0].isGrandstaff,
     });
   }
   return voices;

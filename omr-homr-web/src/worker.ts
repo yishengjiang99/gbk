@@ -160,8 +160,8 @@ async function handleTranscribePage(
   const { multiStaffs, staffs } = detectStaffsInImage(masks, page.preprocessed);
   const tDetect = performance.now();
   // parseStaffs' default transcriber always feeds float32 to the encoder;
-  // forward the model's expected dtype (fp16 on WebGPU-capable browsers)
-  // exactly like transcribeStaff does.
+  // forward the model's expected dtype exactly like transcribeStaff does
+  // (the app loads the fp32 encoder; an fp16 build would need float16 input).
   const encoderInputFloat16 = models.encoderInputFloat16 ?? false;
   let encodeMs = 0;
   let decodeMs = 0;
