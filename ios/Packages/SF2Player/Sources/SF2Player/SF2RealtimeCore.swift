@@ -23,6 +23,11 @@ public final class SF2CompiledSequence: @unchecked Sendable {
     /// Per event: for a noteOn, the frame of its matching noteOff (same track, channel and note,
     /// first unmatched in order) or `lengthFrames`; -1 for other events. Lets a seek re-sound held notes.
     let noteEnds: UnsafeMutablePointer<Int>
+    /// Seek indexes, so the render callback never scans every event: indices of the state events a seek
+    /// replays (program/controllers/CC/bend), and the longest note, which bounds how far back a held note can start.
+    let controls: UnsafeMutablePointer<Int>
+    let controlCount: Int
+    let maxNoteFrames: Int
 
     public init(plan: SF2RenderPlan) {
         sampleRate = plan.sampleRate
@@ -58,6 +63,17 @@ public final class SF2CompiledSequence: @unchecked Sendable {
                 open[key] = q
             }
         }
+        var ctl: [Int] = [], longest = 0
+        for i in 0 ..< eventCount {
+            let k = events[i].kind
+            if k == SF2SynthEvent.Kind.noteOn.rawValue { longest = max(longest, noteEnds[i] - events[i].frame) }
+            if k == SF2SynthEvent.Kind.setPreset.rawValue || k == SF2SynthEvent.Kind.setControllers.rawValue
+                || k == SF2SynthEvent.Kind.controlChange.rawValue || k == SF2SynthEvent.Kind.pitchBend.rawValue { ctl.append(i) }
+        }
+        controlCount = ctl.count
+        controls = .allocate(capacity: max(1, ctl.count))
+        controls.initialize(from: ctl, count: ctl.count)
+        maxNoteFrames = longest
         trackCount = plan.tracks.count
         tracks = .allocate(capacity: max(1, plan.tracks.count))
         for (i, t) in plan.tracks.enumerated() {
@@ -74,6 +90,7 @@ public final class SF2CompiledSequence: @unchecked Sendable {
         events.deinitialize(count: eventCount); events.deallocate()
         tracks.deinitialize(count: trackCount); tracks.deallocate()
         noteEnds.deinitialize(count: max(1, eventCount)); noteEnds.deallocate()
+        controls.deinitialize(count: controlCount); controls.deallocate()
     }
 
     public var durationSeconds: Double { song?.durationSec ?? Double(lengthFrames) / sampleRate }
@@ -81,7 +98,7 @@ public final class SF2CompiledSequence: @unchecked Sendable {
     var view: SequenceView {
         SequenceView(events: UnsafePointer(events), eventCount: eventCount, tracks: UnsafePointer(tracks), trackCount: trackCount,
                      store: store.hdr, maxVoices: maxVoices, lengthFrames: lengthFrames, noteEnds: UnsafePointer(noteEnds),
-                     spec: fidelity == .spec)
+                     spec: fidelity == .spec, controls: UnsafePointer(controls), controlCount: controlCount, maxNoteFrames: maxNoteFrames)
     }
 }
 
@@ -95,6 +112,19 @@ struct SequenceView {
     var lengthFrames: Int
     var noteEnds: UnsafePointer<Int>
     var spec: Bool
+    var controls: UnsafePointer<Int>
+    var controlCount: Int
+    var maxNoteFrames: Int
+
+    /// First event at or after `pos` (events are frame-sorted). O(log n).
+    @inline(__always) func firstEvent(notBefore pos: Double) -> Int {
+        var lo = 0, hi = eventCount
+        while lo < hi {
+            let mid = (lo + hi) >> 1
+            if Double(events[mid].frame) < pos { lo = mid + 1 } else { hi = mid }
+        }
+        return lo
+    }
 }
 
 struct RTCommand {
@@ -282,7 +312,8 @@ public final class SF2RealtimeCore: @unchecked Sendable {
         let r = rt
         guard let seq = r.pointee.seq else { return }
         let mute = r.pointee.muteMask
-        var i = 0
+        // A note starting before pos - maxNoteFrames has ended by pos.
+        var i = seq.firstEvent(notBefore: pos - Double(seq.maxNoteFrames))
         while i < upTo && i < seq.eventCount {
             let e = seq.events[i]
             if e.kind == SF2SynthEvent.Kind.noteOn.rawValue && Double(seq.noteEnds[i]) > pos && !isMuted(e.trackIndex, mute) {
@@ -303,15 +334,12 @@ public final class SF2RealtimeCore: @unchecked Sendable {
         for i in 0 ..< seq.trackCount { engine.setTrackRT(seq.tracks[i].0, seq.tracks[i].1) }
         r.pointee.songPos = max(0, target)
         r.pointee.finished = false
-        var idx = 0
+        let idx = seq.firstEvent(notBefore: r.pointee.songPos)
         // Replay program/controller state before the target; skip notes.
-        while idx < seq.eventCount && Double(seq.events[idx].frame) < r.pointee.songPos {
-            let k = seq.events[idx].kind
-            if k == SF2SynthEvent.Kind.setPreset.rawValue || k == SF2SynthEvent.Kind.setControllers.rawValue
-                || k == SF2SynthEvent.Kind.controlChange.rawValue || k == SF2SynthEvent.Kind.pitchBend.rawValue {
-                engine.dispatch(seq.events[idx])
-            }
-            idx += 1
+        var c = 0
+        while c < seq.controlCount && seq.controls[c] < idx {
+            engine.dispatch(seq.events[seq.controls[c]])
+            c += 1
         }
         r.pointee.eventIndex = idx
         // Only while playing: a paused seek re-sounds on the next play.

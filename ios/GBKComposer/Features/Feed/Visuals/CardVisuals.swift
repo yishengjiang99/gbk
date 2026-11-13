@@ -17,6 +17,7 @@ private let blackKeys: Set<Int> = [1, 3, 6, 8, 10]
 struct NowPlayingVizView: View {
     let preview: SongPreview?
     let playback: CardPlayback?
+    @State private var roll = RollNotesCache()
 
     var body: some View {
         let live = playback?.isPlaying ?? false
@@ -68,7 +69,7 @@ struct NowPlayingVizView: View {
     private func drawRoll(_ ctx: inout GraphicsContext, W: CGFloat, H: CGFloat, t: Double, dur: Double,
                           window: Double, playhead: Double) {
         ctx.fill(Path(CGRect(x: 0, y: 0, width: W, height: H)), with: .color(Theme.vizBg))
-        let notes = PianoRollMath.notes(from: preview, durationSeconds: dur)
+        let notes = roll.notes(preview, dur)
         let span = PianoRollMath.noteSpan(notes, fallbackLo: preview?.lo ?? 60, fallbackHi: preview?.hi ?? 72)
         let (lo, hi) = PianoRollMath.pitchRange(lo: span.lo, hi: span.hi)
         let rows = hi - lo + 1, rh = H / rows
@@ -98,3 +99,15 @@ struct NowPlayingVizView: View {
 
 #Preview("Viz light") { NowPlayingVizView(preview: nil, playback: nil).frame(height: 300).preferredColorScheme(.light) }
 #Preview("Viz dark") { NowPlayingVizView(preview: nil, playback: nil).frame(height: 300).preferredColorScheme(.dark) }
+
+/// Piano-roll notes for one (preview, duration): rebuilt when the song changes, not every frame.
+final class RollNotesCache {
+    private var key: (SongPreview?, Double)?
+    private var value: [RollNote] = []
+    func notes(_ preview: SongPreview?, _ dur: Double) -> [RollNote] {
+        if let key, key.0 == preview, key.1 == dur { return value }
+        value = PianoRollMath.notes(from: preview, durationSeconds: dur)
+        key = (preview, dur)
+        return value
+    }
+}

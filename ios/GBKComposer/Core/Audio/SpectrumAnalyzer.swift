@@ -73,26 +73,34 @@ final class SpectrumAnalyzer {
     private var bands: [Range<Int>] = []
     private var bandsRate: Double = 0
     private var lastTime: Double?
+    /// This frame's samples: `bars(now:)` reads the scope once and `waveform()` reuses it.
+    private var frameSamples: [Float]?
+    private var frameSamplesAt: CFTimeInterval = 0
+    // FFT scratch, reused every frame.
+    private var windowed: [Float], real: [Float], imag: [Float], mags: [Float]
     /// Live output of the playing engine (tap); nil → silence.
-    var source: OutputScope?
+    var source: OutputScope? { didSet { frameSamples = nil } }
 
     init(fftSize: Int = FeedVisuals.fftSize) {
         n = fftSize
         log2n = vDSP_Length(log2(Double(fftSize)))
         setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))!
         window = [Float](repeating: 0, count: fftSize)
+        windowed = [Float](repeating: 0, count: fftSize)
+        real = [Float](repeating: 0, count: fftSize / 2); imag = real; mags = real
         vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
     }
 
     deinit { vDSP_destroy_fftsetup(setup) }
 
-    func reset() { levels = [Float](repeating: 0, count: FeedVisuals.barCount); lastTime = nil }
+    func reset() { levels = [Float](repeating: 0, count: FeedVisuals.barCount); lastTime = nil; frameSamples = nil }
 
     /// Smoothed 0...1 levels for `FeedVisuals.barCount` log-spaced bars.
     func bars(now: Double) -> [Float] {
         let dt = lastTime.map { now - $0 } ?? 0
         lastTime = now
-        guard let source, let samples = latestSamples(now: now) else {
+        frameSamples = latestSamples(now: now); frameSamplesAt = CACurrentMediaTime()
+        guard let source, let samples = frameSamples else {
             levels = SpectrumMath.smooth(previous: levels, target: levels.map { _ in 0 }, dt: dt); return levels
         }
         if source.sampleRate != bandsRate {
@@ -112,16 +120,13 @@ final class SpectrumAnalyzer {
 
     /// 256-point waveform at the playhead (web getFloatTimeDomainData), flat before decode.
     func waveform() -> [Float] {
-        latestSamples().map { WaveformMath.points($0) } ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
+        let fresh = CACurrentMediaTime() - frameSamplesAt < 1.0 / 60 ? frameSamples : nil
+        return (fresh ?? latestSamples()).map { WaveformMath.points($0) } ?? [Float](repeating: 0, count: FeedVisuals.waveformPoints)
     }
 
     func powerSpectrum(_ samples: [Float]) -> [Float] {
         guard samples.count == n else { return [Float](repeating: 0, count: n / 2) }
-        var windowed = [Float](repeating: 0, count: n)
         vDSP_vmul(samples, 1, window, 1, &windowed, 1, vDSP_Length(n))
-        var real = [Float](repeating: 0, count: n / 2)
-        var imag = [Float](repeating: 0, count: n / 2)
-        var mags = [Float](repeating: 0, count: n / 2)
         real.withUnsafeMutableBufferPointer { rp in
             imag.withUnsafeMutableBufferPointer { ip in
                 var split = DSPSplitComplex(realp: rp.baseAddress!, imagp: ip.baseAddress!)
@@ -131,12 +136,12 @@ final class SpectrumAnalyzer {
                     }
                 }
                 vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
-                vDSP_zvmags(&split, 1, &mags, 1, vDSP_Length(n / 2))
+                mags.withUnsafeMutableBufferPointer { vDSP_zvmags(&split, 1, $0.baseAddress!, 1, vDSP_Length(n / 2)) }
             }
         }
         // zrip output is scaled by 2; normalise so a full-scale sine is ~0 dB.
         var scale = 1 / Float(n * n / 4)
-        vDSP_vsmul(mags, 1, &scale, &mags, 1, vDSP_Length(n / 2))
+        mags.withUnsafeMutableBufferPointer { vDSP_vsmul($0.baseAddress!, 1, &scale, $0.baseAddress!, 1, vDSP_Length(n / 2)) }
         mags[0] = 0 // DC (real part packs Nyquist into imag[0])
         return mags
     }
