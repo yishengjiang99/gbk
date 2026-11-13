@@ -9,7 +9,6 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  groupIntoChords,
   pageVoiceNoteEvents,
   parseKernDuration,
   pitchToMidi,
@@ -65,13 +64,6 @@ describe("token -> MIDI primitives", () => {
     assert.equal(parseKernDuration("barline"), null);
     assert.equal(parseKernDuration("clef_G2"), null);
     assert.equal(parseKernDuration("timeSignature/4"), null);
-  });
-
-  it("groups chord tokens onto the previous onset", () => {
-    const groups = groupIntoChords([sym("note_4", "C4"), sym("chord"), sym("note_4", "E4"), sym("note_4", "G4")]);
-    assert.equal(groups.length, 2);
-    assert.equal(groups[0].length, 2);
-    assert.equal(groups[1].length, 1);
   });
 });
 

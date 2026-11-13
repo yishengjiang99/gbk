@@ -1,6 +1,6 @@
 /* Browser demo page script (isolated technical demo, not product UI).
  * Drives the real omr-homr-web Worker end-to-end in the browser:
- * load (fp16 encoder on WebGPU when available, else fp32 on WASM) ->
+ * load (fp32 encoder on WebGPU when available, else on WASM) ->
  * transcribe the C-scale staff fixture -> compare symbols/MIDI vs oracle.
  */
 const $ = (id: string) => document.getElementById(id)!;
@@ -70,8 +70,8 @@ async function main(): Promise<void> {
     log(r.pass ? "DEMO PASS" : `DEMO FAIL${r.error ? ": " + r.error : ""}`);
   };
   try {
-    // fp16 compute needs the WGSL shader-f16 feature (absent on SwiftShader);
-    // fall back to the fp32 encoder on WebGPU rather than fake an fp16 run.
+    // shader-f16 is logged for diagnostics only: the encoder is fp32 everywhere
+    // (the fp16 build never reaches EOS on the WebGPU EP).
     let shaderF16 = false;
     if ("gpu" in navigator) {
       try {
@@ -82,10 +82,8 @@ async function main(): Promise<void> {
       }
     }
     const webgpu = "gpu" in navigator;
-    const encoderUrl = shaderF16
-      ? "/models/transformer_encoder_model_fp16.onnx"
-      : "/models/transformer_encoder_model_fp32.onnx";
-    log(`WebGPU ${webgpu ? "available" : "unavailable"}, shader-f16 ${shaderF16 ? "yes" : "no"} -> ${shaderF16 ? "fp16" : "fp32"} encoder`);
+    const encoderUrl = "/models/transformer_encoder_model_fp32.onnx";
+    log(`WebGPU ${webgpu ? "available" : "unavailable"}, shader-f16 ${shaderF16 ? "yes" : "no"} -> fp32 encoder`);
 
     const [pixels, oracle, notesCsv] = await Promise.all([
       staffPixels("/fixtures/mono.c_major_scale/input.png"),
@@ -96,7 +94,7 @@ async function main(): Promise<void> {
     log(`fixture loaded: ${oracle.length} oracle symbols, ${wantNotes.length} expected notes`);
 
     const worker = new Worker("/demo/dist/worker.bundle.js");
-    const encoderName = `${shaderF16 ? "fp16" : "fp32"} (WebGPU strict)`;
+    const encoderName = "fp32 (WebGPU strict)";
     const ready = new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("worker load timeout")), 180000);
       worker.onmessage = (ev: MessageEvent) => {

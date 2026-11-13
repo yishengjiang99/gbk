@@ -73,26 +73,6 @@ export function parseKernDuration(rhythm: string): KernDuration | null {
   return { ticks: grace ? 60 : ticks, grace, isRest: m[1] === "rest" };
 }
 
-/** Group symbols into onset chords (port of homr's sort_token_chords). */
-export function groupIntoChords(symbols: DecodedSymbol[]): DecodedSymbol[][] {
-  const groups: DecodedSymbol[][] = [];
-  let inChord = false;
-  for (const symbol of symbols) {
-    if (symbol.rhythm === "chord") {
-      inChord = true;
-      continue;
-    }
-    if (inChord && groups.length > 0) {
-      groups[groups.length - 1].push(symbol);
-      inChord = false;
-    } else {
-      groups.push([symbol]);
-      inChord = false;
-    }
-  }
-  return groups;
-}
-
 function vlq(value: number): number[] {
   let v = Math.max(0, Math.trunc(value));
   const bytes = [v & 0x7f];

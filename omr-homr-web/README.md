@@ -115,8 +115,8 @@ run. Writer-only tests are instant; ONNX tests load the pinned weights from
 
 ## Browser demo (isolated)
 
-`demo/` exercises the real Worker end-to-end in Chromium: fp16 encoder on
-WebGPU when available (else fp32 on WASM), C-scale staff fixture in, tokens +
+`demo/` exercises the real Worker end-to-end in Chromium: fp32 encoder on
+WebGPU when available (else on WASM), C-scale staff fixture in, tokens +
 MIDI out, compared against the oracle. Not wired into the sheet-cam UI.
 
 ```

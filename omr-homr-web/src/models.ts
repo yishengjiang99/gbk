@@ -3,7 +3,8 @@
  * Browser-only. Part of omr-homr-web, licensed under AGPL-3.0-only.
  *
  * Placement (validated in Phase 0 against ORT's WebGPU operator table):
- * - SegNet fp16 + encoder fp16 -> WebGPU when available, else WASM.
+ * - SegNet fp16 + encoder fp32 -> WebGPU when available, else WASM. (The
+ *   fp16 encoder never reaches EOS on the WebGPU EP; it is iOS/CoreML only.)
  * - Decoder fp32 (dynamically quantized) -> WASM only. Its
  *   com.microsoft::MultiHeadAttention nodes use past/present KV cache, which
  *   the WebGPU EP does not implement.

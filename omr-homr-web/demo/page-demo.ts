@@ -1,7 +1,7 @@
 /* Browser page demo (isolated technical demo, not product UI).
  * Drives the real omr-homr-web Worker end-to-end in the browser:
- * load (fp16 encoder+SegNet on WebGPU when shader-f16 is present, else
- * fp32 encoder on WebGPU with WASM fallback for the fp16 SegNet) ->
+ * load (fp32 encoder + fp16 SegNet on WebGPU; without shader-f16 the
+ * SegNet falls back to WASM) ->
  * transcribe-page on the C-scale page fixture -> score Layers A/B/C.
  */
 const $ = (id: string) => document.getElementById(id)!;
