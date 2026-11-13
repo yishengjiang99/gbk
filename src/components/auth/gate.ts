@@ -1,6 +1,6 @@
 // Sign-in gating (docs/social/feed-design.md "Sign-in only when an action needs it"). There is no standalone
 // Sign in button: a gated action calls needSignIn(why, pending). The sheet signs the user in (OAuth redirect or
-// in-place code/SMS login, both end in a page load) and the pending action is replayed by whoever owns it.
+// in-place invite-code login, both end in a page load) and the pending action is replayed by whoever owns it.
 export type Pending =
   | { kind: "compose"; text: string }
   | { kind: "rate"; slug: string; stars: number }

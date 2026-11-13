@@ -14,7 +14,7 @@ export interface Config {
   security: { sessionSecret: string; accessCodes: string[]; cookieSecure: boolean; loginPerMinute: number; messagesPerMinute: number; ipRequestsPerMinute: number; sharesPerMinute: number };
   /** Sign-in. A provider is offered only when both its client id and secret are set. */
   /** Native iOS client: Sign in with Apple, Google ID tokens, APNs, universal links. All optional; unset = feature answers 503/404. */
-  /** Web Sign in with Apple (Services ID) and SMS sign-in (Twilio Verify + Turnstile). Unset = 503. */
+  /** Web Sign in with Apple (Services ID). Unset = 503. Twilio/Turnstile env is ignored; SMS sign-in is disabled. */
   signin2: { appleServicesId: string; twilio: { accountSid: string; user: string; secret: string; verifySid: string } | null; turnstileSecret: string; turnstileSiteKey: string; smsPrefixes: string[] };
   /** Apple IAP: sandbox/Xcode transactions accepted only when allowSandbox (default: on outside production). */
   iap: { bundleId: string; allowSandbox: boolean };

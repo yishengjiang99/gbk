@@ -37,6 +37,9 @@ that is still required is **unverified** - follow what the portal shows.
   token from the code exchange for that.
 
 ## 2. SMS sign-in
+
+**Disabled (2026-11-13).** The sign-in sheet no longer offers SMS or phone. `GET /api/auth/sms/config`, `POST /api/auth/sms/start`, and `POST /api/auth/sms/verify` return `410 { error: "sms_signin_disabled" }`. Existing phone accounts and database columns are unchanged. The rest of this section is the original proposal.
+
 Public US pricing checked 2026-10-25 (verify again before signing up):
 
 | Option | US cost per verification (1 SMS) | Notes |

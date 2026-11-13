@@ -65,16 +65,16 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 | `POST /api/auth/apple` | live; client id = bundle `com.grepawk.moviefone` by default (`APPLE_BUNDLE_ID` overrides; empty disables → 503 `APPLE_UNAVAILABLE`) | `{ identityToken, nonce, displayName? }`. Verifies Apple JWT (JWKS, `aud` = bundle id, `sha256(nonce)` = claim). → `TokenPair` |
 | `POST /api/auth/google/native` | live | `{ idToken }` (`aud` = iOS client id). → `TokenPair` |
 | `GET /api/auth/apple/web?return=` | live (503 until `APPLE_SERVICES_ID`) | web Sign in with Apple (form_post to `POST /api/auth/apple/callback`, id_token verified, nonce bound to a state cookie) |
-| `GET /api/auth/sms/config` | live | `{ enabled, turnstileSiteKey, countries }` |
-| `POST /api/auth/sms/start` | live (503 until Twilio + Turnstile keys) | `{ phone, turnstileToken }` → `{ ok: true }` (generic). Turnstile is checked before any SMS; country allowlist `SMS_COUNTRY_PREFIXES` (default `+1`); limits 5/h per IP, 3/15 min + 10/day per phone, 200/h global |
-| `POST /api/auth/sms/verify` | live (503 until configured) | `{ phone, code, client?: "native" }` → web: cookie session `{ ok, csrf }`; native: `TokenPair`. 5 checks / 15 min per phone |
+| `GET /api/auth/sms/config` | disabled | `410 { error: "sms_signin_disabled" }` |
+| `POST /api/auth/sms/start` | disabled | `410 { error: "sms_signin_disabled" }` |
+| `POST /api/auth/sms/verify` | disabled | `410 { error: "sms_signin_disabled" }` |
 | `POST /api/auth/refresh` | live | `{ refresh_token }` → `TokenPair` (rotating, single use; the old access token is revoked too; re-using a spent refresh token revokes all of the user's refresh tokens → `401 INVALID_REFRESH`, sign in again) |
 | `POST /api/auth/logout` | live | revokes the presented access + refresh tokens |
 | `POST /api/auth/web-code` | live | bearer → `{ code, expires_in: 60 }` one-time code |
 | `GET /api/auth/web-code/redeem?code=&return=/studio` | live | sets the cookie session in the WKWebView, 302 to `return` (same-origin path only). Single use, 60 s |
 | `DELETE /api/me` | live | deletes account, songs, comments, ratings, messages, devices; → `{ ok: true }` (App Store 5.1.1(v)) |
 
-Turnstile and cross-origin isolation: the app shell sends COOP `same-origin` + COEP `credentialless` (Scan's ORT threads). Turnstile still loads: `api.js` is a no-cors script (CORP `cross-origin`), and Cloudflare serves the challenge iframe with its own COEP `require-corp` + CORP `cross-origin`, which is what a COEP parent requires of a nested document. No `credentialless` iframe is needed (Turnstile builds its iframe itself). `test/e2e/sms-turnstile.spec.ts` checks this in Chromium and iPhone WebKit with Cloudflare's test sitekey.
+SMS sign-in is disabled. `/api/session` always returns `sms: false`. Existing phone accounts are left in place; there is no phone option in the sign-in sheet.
 
 `TokenPair` = `{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, me: Me }`.
 
@@ -197,7 +197,7 @@ Guests publish like anyone else: `POST /api/shares` with `public: true`, or `PAT
 APNs sender (token-based .p8 auth, ported from earsheet apns.ts) fires on: comment on your song, public fork of your song (live), new DM (P4).
 Payload: `{ aps: { alert: { title, body }, sound }, kind: "comment|fork|dm", link }`. Dead tokens (410/BadDeviceToken) are dropped.
 
-Server env (all optional; never commit values): `APPLE_SERVICES_ID`, `TWILIO_ACCOUNT_SID`, `TWILIO_VERIFY_SID`, `TWILIO_AUTH_TOKEN` (or `TWILIO_API_KEY` + `TWILIO_API_SECRET`), `TURNSTILE_SECRET`, `TURNSTILE_SITE_KEY`, `SMS_COUNTRY_PREFIXES`, `APPLE_BUNDLE_ID`, `GOOGLE_IOS_CLIENT_IDS` (comma list; the web `GOOGLE_CLIENT_ID` is also accepted as audience),
+Server env (all optional; never commit values): `APPLE_SERVICES_ID`, `APPLE_BUNDLE_ID`, `GOOGLE_IOS_CLIENT_IDS` (comma list; the web `GOOGLE_CLIENT_ID` is also accepted as audience),
 `IOS_APP_IDS` (e.g. `83D36RPMUM.com.grepawk.moviefone` (default), enables AASA), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8` or `APNS_P8_PATH`, `APNS_TOPIC` (defaults to the bundle id `com.grepawk.moviefone`).
 APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.com/inbox/<handle>" }`. No email notifications.
 
