@@ -65,14 +65,26 @@ final class FeedPlayer: ObservableObject {
         return p
     }
 
+    /// Stops at `maxBytes`: a broken or hostile media server can't fill memory while the feed scrolls.
+    nonisolated static func download(_ url: URL, maxBytes: Int, session: URLSession = .shared) async -> Data? {
+        guard let (bytes, r) = try? await session.bytes(from: url),
+              (r as? HTTPURLResponse)?.statusCode ?? 200 == 200, r.expectedContentLength <= Int64(maxBytes) else { return nil }
+        var d = Data()
+        do {
+            for try await b in bytes {
+                d.append(b)
+                if d.count > maxBytes { return nil }
+            }
+        } catch { return nil }
+        return d
+    }
+
     private func midi(slug: String, url: URL) -> Task<Data?, Never> {
         if let d = midiCache[slug] { return Task { d } }
         if let t = midiLoads[slug] { return t }
         let t = Task<Data?, Never> {
             if url.isFileURL { return try? Data(contentsOf: url) }
-            guard let (d, r) = try? await URLSession.shared.data(from: url),
-                  (r as? HTTPURLResponse)?.statusCode ?? 200 == 200 else { return nil }
-            return d
+            return await Self.download(url, maxBytes: SMFReader.maxBytes)
         }
         midiLoads[slug] = t
         return t

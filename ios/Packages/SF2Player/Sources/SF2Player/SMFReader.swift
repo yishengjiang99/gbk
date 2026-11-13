@@ -11,6 +11,8 @@ public enum SMFError: Error, Equatable {
     case invalidHeader
     case smpteNotSupported
     case missingTrack(Int)
+    /// Over `SMFReader.maxBytes` or `SMFReader.maxEvents`: fail the song, not the process.
+    case tooLarge
 }
 
 public struct SMFTempoSegment: Equatable, Sendable {
@@ -102,7 +104,11 @@ public struct SMFSong: Equatable, Sendable {
     }
 }
 
-enum SMFReader {
+public enum SMFReader {
+    /// Feed MIDIs are tens of KB; parsing expands each event ~40x in memory.
+    public static let maxBytes = 4 << 20
+    public static let maxEvents = 500_000
+
     enum RawKind {
         case tempo(Int), timeSig(Int, Int), noteOn(Int, Int), noteOff(Int), cc(Int, Int), program(Int), pitchBend(Int)
     }
@@ -113,7 +119,7 @@ enum SMFReader {
         String(b.filter { $0 != 0 }.map { Character(Unicode.Scalar($0)) })
     }
 
-    static func parseTrack(_ t: ArraySlice<UInt8>) -> RawTrack {
+    static func parseTrack(_ t: ArraySlice<UInt8>, maxEvents: Int = SMFReader.maxEvents) throws -> RawTrack {
         let bytes = Array(t)
         var out = RawTrack()
         var pos = 0
@@ -131,6 +137,7 @@ enum SMFReader {
             return Int(v)
         }
         while pos < bytes.count {
+            if out.events.count >= maxEvents { throw SMFError.tooLarge }
             tick += varLen()
             if pos >= bytes.count { break }
             var status = at(pos); pos += 1
@@ -145,13 +152,14 @@ enum SMFReader {
                 let slice = bytes[min(start, bytes.count) ..< min(start + len, bytes.count)]
                 if metaType == 0x03 && len > 0 { out.name = text(slice) }
                 if metaType == 0x04 && len > 0 { out.instrument = text(slice) }
-                if metaType == 0x51 && len == 3 {
+                // Tempo 0 µs/qn is legal bytes but divides by zero downstream: ignore it.
+                if metaType == 0x51 && len == 3 && (at(start) | at(start + 1) | at(start + 2)) != 0 {
                     out.events.append(RawEvent(seq: seq, tick: tick, channel: 0, kind: .tempo((at(start) << 16) | (at(start + 1) << 8) | at(start + 2))))
                     seq += 1
                 }
                 if metaType == 0x58 && len >= 2 {
                     let num = at(start) != 0 ? at(start) : 4
-                    let den = 1 << (at(start + 1) != 0 ? at(start + 1) : 2)
+                    let den = 1 << min(at(start + 1) != 0 ? at(start + 1) : 2, 6) // up to 64th notes
                     out.events.append(RawEvent(seq: seq, tick: tick, channel: 0, kind: .timeSig(num, den)))
                     seq += 1
                 }
@@ -223,6 +231,7 @@ enum SMFReader {
     }
 
     static func parse(_ data: Data) throws -> SMFSong {
+        guard data.count <= maxBytes else { throw SMFError.tooLarge }
         let u8 = [UInt8](data)
         func be16(_ p: Int) -> Int { p + 1 < u8.count ? Int(u8[p]) << 8 | Int(u8[p + 1]) : 0 }
         func be32(_ p: Int) -> Int { p + 3 < u8.count ? Int(u8[p]) << 24 | Int(u8[p + 1]) << 16 | Int(u8[p + 2]) << 8 | Int(u8[p + 3]) : 0 }
@@ -236,11 +245,14 @@ enum SMFReader {
 
         var pos = 8 + headerLen
         var raw: [RawTrack] = []
+        var events = 0
         for i in 0 ..< ntrks {
             guard id(pos) == "MTrk" else { throw SMFError.missingTrack(i) }
             let len = be32(pos + 4)
             let start = pos + 8
-            raw.append(parseTrack(u8[min(start, u8.count) ..< min(start + len, u8.count)]))
+            let track = try parseTrack(u8[min(start, u8.count) ..< min(start + len, u8.count)], maxEvents: maxEvents - events)
+            events += track.events.count
+            raw.append(track)
             pos = start + len
         }
         let all = raw.flatMap(\.events)
