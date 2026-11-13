@@ -55,6 +55,7 @@ import { isUpperOrHasNoPosition, removeDuplicatedSymbols } from "./symbols.ts";
 import {
   SCAN_TEMPO_BPM,
   TICKS_PER_QUARTER,
+  hasLowerStaffClef,
   pageVoiceNoteEvents,
 } from "./midi.ts";
 
@@ -522,10 +523,12 @@ export function buildPageNoteLayout(
       );
     }
     let cursor = 0;
+    // Same hand rule as symbolsToMidi, which walks the whole voice at once.
+    const grandStaff = hasLowerStaffClef(voice.symbols);
     groups.forEach((group, groupIdx) => {
       // Page walk with the cursor as startTick: each hand starts at the group
-      // start (simultaneous), and endTick chains the next group.
-      const { events, endTick } = pageVoiceNoteEvents(group, voiceIdx, { startTick: cursor });
+      // start (simultaneous), and endTick (absolute) chains the next group.
+      const { events, endTick } = pageVoiceNoteEvents(group, voiceIdx, { startTick: cursor, grandStaff });
       const toPage = voice.cropToPage[groupIdx];
       for (const ev of events) {
         const tick = ev.tick;
@@ -550,7 +553,7 @@ export function buildPageNoteLayout(
           box,
         });
       }
-      cursor += endTick;
+      cursor = endTick;
     });
   });
   layout.sort((a, b) => a.startSec - b.startSec || a.pitch - b.pitch);

@@ -469,4 +469,26 @@ describe("c-scale page pipeline", { skip: !modelsPresent }, () => {
     assert.equal(attentionBoxes, 0);
     // The worker maps attentionBoxes === 0 to layoutSource "midi-fallback".
   });
+
+});
+
+describe("page note layout (model-free)", () => {
+  it("Layer C: layout times match the MIDI on every row of a multi-row voice", () => {
+    const n = (pitch: string, position = "upper", rhythm = "note_4"): DecodedSymbol => ({
+      rhythm, pitch, lift: "_", articulation: "_", slur: "_", position, attention: [0, 0],
+    });
+    const nl = { ...n("nonote", "nonote", "newline") };
+    const symbols = [
+      n(".", "lower", "clef"), n("C5"), n("D5"), n("C3", "lower", "note_2"), nl,
+      n("E5"), n("F5"), n("E3", "lower", "note_2"), nl,
+      n("G5"), n("A5"), nl,
+    ];
+    const voice = { symbols, cropToPage: [] } as unknown as ParsedVoice;
+    const { noteEvents } = symbolsToMidi([symbols], "t", true);
+    const { layout } = buildPageNoteLayout([voice]);
+    const sec = 60 / 72 / 480;
+    const want = noteEvents.map((e) => `${e.midi}@${e.tick}`).sort();
+    const got = layout.map((l) => `${l.pitch}@${Math.round(l.startSec / sec)}`).sort();
+    assert.deepEqual(got, want);
+  });
 });
