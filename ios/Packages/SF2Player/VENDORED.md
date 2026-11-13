@@ -10,4 +10,5 @@ Local changes for the gbk feed:
 - `SF2MIDIPlayer.outputGainDb` / `fadeGain`: main-mixer gain (crossfades).
 - `SF2RealtimeCore.setMasterGainDb` / `setMasterDynamicsEnabled` (+ `SF2MIDIPlayer` wrappers): real-time-safe master gain and compressor/limiter switch; the feed runs a fixed 0.8 gain with dynamics off, like web live playback.
 - `SF2MIDIPlayer.init(soundFont:)` shares one parsed bank across players.
+- `SMFReader` ignores tempo 0, clamps time-signature denominators, and throws `tooLarge` above 4 MB / 500k events.
 Tests were not copied (they live in earsheet).

@@ -48,21 +48,24 @@ enum HumNotesToOps {
         var segs: [TempoSeg] = []
         var sec = 0.0
         for i in sorted.indices {
-            if i > 0 { sec += Double(sorted[i].tick - sorted[i - 1].tick) * Double(sorted[i - 1].microPerQuarter) / 1e6 / Double(ppq) }
+            if i > 0 { sec += Double(sorted[i].tick - sorted[i - 1].tick) * Double(sorted[i - 1].microPerQuarter) / 1e6 / Double(max(1, ppq)) }
             if segs.last?.tick == sorted[i].tick { segs.removeLast() }
             segs.append(TempoSeg(tick: sorted[i].tick, sec: sec, mpq: sorted[i].microPerQuarter))
         }
         return segs
     }
 
-    /// JS Math.round (half up, also for negatives).
-    static func jsRound(_ x: Double) -> Int { Int((x + 0.5).rounded(.down)) }
+    /// JS Math.round (half up, also for negatives). Non-finite → 0 and clamped, so page data can't trap Int(_:).
+    static func jsRound(_ x: Double) -> Int {
+        guard x.isFinite else { return 0 }
+        return Int(min(max((x + 0.5).rounded(.down), -1e15), 1e15))
+    }
 
     static func secToTick(_ p: HumProjectContext, _ sec: Double) -> Int {
         let segs = tempoSegments(p.tempos, ppq: p.ppq)
         var s = segs[0]
         for seg in segs { if seg.sec <= sec { s = seg } else { break } }
-        return jsRound(Double(s.tick) + (sec - s.sec) * 1e6 * Double(p.ppq) / Double(s.mpq))
+        return jsRound(Double(s.tick) + (sec - s.sec) * 1e6 * Double(max(1, p.ppq)) / Double(max(1, s.mpq)))
     }
 
     /// Next free melodic channel, skipping 9 (GM drums).

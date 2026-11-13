@@ -55,8 +55,9 @@ struct PlacedNote: Equatable {
 enum PianoRollMath {
     static func notes(from preview: SongPreview?, durationSeconds: Double) -> [RollNote] {
         guard let raw = preview?.notes, durationSeconds > 0 else { return [] }
+        // Server JSON: a non-finite or huge number would trap in Int(_:) inside the per-frame draw.
         return raw.compactMap { n in
-            guard n.count >= 4 else { return nil }
+            guard n.count >= 4, n.allSatisfy(\.isFinite), (0...1023).contains(n[0]), (0...127).contains(n[3]) else { return nil }
             return RollNote(track: Int(n[0]), start: n[1] / 1000 * durationSeconds,
                             length: n[2] / 1000 * durationSeconds, pitch: Int(n[3]))
         }
@@ -64,7 +65,10 @@ enum PianoRollMath {
 
     /// Actual min/max pitch of the notes (preview `lo`/`hi` can be wider than the drawn notes); fallback when empty.
     static func noteSpan(_ notes: [RollNote], fallbackLo: Double, fallbackHi: Double) -> (lo: Double, hi: Double) {
-        guard let l = notes.map(\.pitch).min(), let h = notes.map(\.pitch).max() else { return (fallbackLo, fallbackHi) }
+        guard let l = notes.map(\.pitch).min(), let h = notes.map(\.pitch).max() else {
+            func pitch(_ x: Double, _ d: Double) -> Double { x.isFinite ? min(127, max(0, x)) : d }
+            return (pitch(fallbackLo, 60), pitch(fallbackHi, 72))
+        }
         return (Double(l), Double(h))
     }
 
