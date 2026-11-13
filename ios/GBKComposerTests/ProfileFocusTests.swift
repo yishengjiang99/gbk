@@ -75,6 +75,24 @@ final class ProfileFocusTests: XCTestCase {
         XCTAssertEqual(model.focusError, "This song has no audio yet.")
     }
 
+    /// #140: switching the query while a page is loading must load the new query, not strand on a spinner.
+    func testQueryChangeMidLoadLoadsTheNewQuery() async throws {
+        let json = APIClientTests.docSong.replacingOccurrences(
+            of: "\"midi\": null", with: "\"midi\": \"https://compose.grepawk.com/api/shares/minuet-in-g-a1b2c3/media/midi\"")
+        let song = try APIClient.makeDecoder().decode(Song.self, from: Data(json.utf8))
+        let feed = GatedFeed(song: song)
+        let model = FeedViewModel(provider: feed)
+        let first = Task { await model.reload() }
+        while feed.gate == nil { await Task.yield() }
+        model.query.tag = "jazz"
+        for _ in 0..<200 where model.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(model.items.map(\.slug), [song.slug])
+        feed.gate?.resume()
+        await first.value
+        XCTAssertEqual(model.items.map(\.slug), [song.slug], "the old query's page is dropped")
+        XCTAssertEqual(feed.queries.last?.tag, "jazz")
+    }
+
     /// Cold start: the link is focused before the first feed page; the reload must keep it as card 0.
     func testPinnedSongSurvivesReload() async throws {
         let song = try page().songs[0]
@@ -85,6 +103,23 @@ final class ProfileFocusTests: XCTestCase {
         model.query.tag = "jazz" // a user filter change drops the pin
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertTrue(model.items.isEmpty)
+    }
+}
+
+/// First call hangs until `gate` is resumed and returns an old-query page; later calls return `song`.
+@MainActor
+private final class GatedFeed: FeedProviding {
+    let song: Song
+    var gate: CheckedContinuation<Void, Never>?
+    var queries: [FeedQuery] = []
+    init(song: Song) { self.song = song }
+    func feedPage(_ query: FeedQuery, cursor: String?, limit: Int) async throws -> FeedPage {
+        queries.append(query)
+        if queries.count == 1 {
+            await withCheckedContinuation { gate = $0 }
+            return FeedPage(items: [], nextCursor: "stale")
+        }
+        return FeedPage(items: [song], nextCursor: nil)
     }
 }
 

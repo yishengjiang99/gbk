@@ -5,7 +5,7 @@ final class FeedViewModel: ObservableObject {
     @Published private(set) var items: [Song] = []
     @Published private(set) var error: String?
     @Published var query = FeedQuery() {
-        didSet { if query != oldValue { pinned = nil; Task { await reload() } } }
+        didSet { if query != oldValue { pinned = nil; reloadTask?.cancel(); reloadTask = Task { await reload() } } }
     }
     /// Shown when a deep link / profile tap can't open its song (instead of silently showing another one).
     @Published var focusError: String?
@@ -15,25 +15,29 @@ final class FeedViewModel: ObservableObject {
     /// slug → model_version of the feed page that delivered it.
     private(set) var modelVersions: [String: String] = [:]
     private var exhausted = false
-    private var loading = false
+    /// Bumped by every reload: a load for an older query can neither apply its page nor block the new query's load.
+    private var generation = 0
+    private var loadingGeneration: Int?
+    private var reloadTask: Task<Void, Never>?
     let provider: FeedProviding
 
     init(provider: FeedProviding = APIClient.shared) { self.provider = provider }
 
     func reload() async {
+        generation += 1
         items = pinned.map { [$0] } ?? []; cursor = nil; exhausted = false; error = nil
         await loadMoreIfNeeded(current: nil)
     }
 
     func loadMoreIfNeeded(current: Song?) async {
-        guard !loading, !exhausted else { return }
+        guard loadingGeneration != generation, !exhausted else { return }
         if let current, let idx = items.firstIndex(where: { $0.slug == current.slug }), idx < items.count - 3 { return }
-        loading = true
-        defer { loading = false }
-        let requested = query
+        let gen = generation
+        loadingGeneration = gen
+        defer { if loadingGeneration == gen { loadingGeneration = nil } }
         do {
-            let page = try await provider.feedPage(requested, cursor: cursor, limit: 20)
-            guard requested == query else { return }
+            let page = try await provider.feedPage(query, cursor: cursor, limit: 20)
+            guard gen == generation else { return }
             let known = Set(items.map(\.slug))
             items.append(contentsOf: page.items.filter { $0.midiURL != nil && !known.contains($0.slug) })
             for s in page.items { modelVersions[s.slug] = page.modelVersion ?? "unknown" }
@@ -41,7 +45,7 @@ final class FeedViewModel: ObservableObject {
             exhausted = page.nextCursor == nil
             error = nil
         } catch {
-            self.error = "Couldn't load the feed."
+            if gen == generation { self.error = "Couldn't load the feed." }
         }
     }
 

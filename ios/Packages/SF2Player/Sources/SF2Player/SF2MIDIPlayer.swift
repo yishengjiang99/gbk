@@ -40,6 +40,15 @@ public struct SF2TrackInfo: Equatable, Sendable, Identifiable {
 /// Real-time SoundFont MIDI player: AVAudioEngine + AVAudioSourceNode driving `SF2RealtimeCore`.
 /// The render block only calls `SF2RealtimeCore.render` (preallocated voices, lock-free command
 /// ring); all parsing, region building and allocation happen on the main actor or a background task.
+/// A parsed and compiled song from `SF2MIDIPlayer.prepare` (any thread), installed with `load(prepared:)`.
+public struct SF2PreparedSong: @unchecked Sendable {
+    public let song: SMFSong
+    let sequence: SF2CompiledSequence
+    let program: Int?
+    let transpose: Int
+    let fidelity: SF2Fidelity
+}
+
 @MainActor
 public final class SF2MIDIPlayer: ObservableObject {
     public enum PlayerError: Error, Equatable {
@@ -156,6 +165,28 @@ public final class SF2MIDIPlayer: ObservableObject {
         if song != nil { try compile() }
     }
 
+    /// Parse + compile without touching the player, so hosts can do it off the main actor.
+    public nonisolated static func prepare(midi: Data, soundFont sf: SF2SoundFont, sampleRate: Double, program: Int? = nil,
+                                           transpose: Int = 0, fidelity: SF2Fidelity = .spec) throws -> SF2PreparedSong {
+        let song = try SMFSong(data: midi)
+        let plan = try SF2SequenceBuilder.plan(song: song, soundFont: sf, sampleRate: sampleRate, programOverride: program,
+                                               transpose: transpose, fidelity: fidelity)
+        return SF2PreparedSong(song: song, sequence: SF2CompiledSequence(plan: plan), program: program, transpose: transpose, fidelity: fidelity)
+    }
+
+    /// The rate `prepare` should compile for (the engine's output rate).
+    public var outputRate: Double { outputSampleRate() }
+
+    /// Installs a prepared song. Recompiles here only if the output rate or settings changed since `prepare`.
+    public func load(prepared p: SF2PreparedSong) throws {
+        mutedTracks = []
+        loop = nil
+        song = p.song
+        guard soundFont != nil else { throw PlayerError.soundFontNotLoaded }
+        let fits = p.sequence.sampleRate == outputSampleRate() && p.program == program && p.transpose == transpose && p.fidelity == fidelity
+        try compile(fits ? p.sequence : nil)
+    }
+
     /// Parses SMF (format 0/1) and prepares its sample-accurate schedule. Stops current playback.
     public func load(midi: Data) throws {
         let parsed = try SMFSong(data: midi)
@@ -166,12 +197,15 @@ public final class SF2MIDIPlayer: ObservableObject {
         try compile()
     }
 
-    private func compile() throws {
+    private func compile(_ prebuilt: SF2CompiledSequence? = nil) throws {
         guard let sf = soundFont, let song else { return }
         let c = try prepareCore()
-        let plan = try SF2SequenceBuilder.plan(song: song, soundFont: sf, sampleRate: c.sampleRate, programOverride: program,
-                                               transpose: transpose, fidelity: fidelity)
-        let seq = SF2CompiledSequence(plan: plan)
+        let seq: SF2CompiledSequence
+        if let prebuilt, prebuilt.sampleRate == c.sampleRate { seq = prebuilt } else {
+            let plan = try SF2SequenceBuilder.plan(song: song, soundFont: sf, sampleRate: c.sampleRate, programOverride: program,
+                                                   transpose: transpose, fidelity: fidelity)
+            seq = SF2CompiledSequence(plan: plan)
+        }
         sequence = seq
         c.setSequence(seq)
         c.setTempoScale(tempoScale)

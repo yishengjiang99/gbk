@@ -105,7 +105,14 @@ final class FeedPlayer: ObservableObject {
                       !Task.isCancelled, let self, self.currentSlug == slug else { return }
                 self.midiLoads[slug] = nil
                 self.midiCache[slug] = data
-                self.start(data: data, soundFont: sf, slug: slug, requested: requested, outgoing: outgoing)
+                let incoming = self.nextPlayer(sf, outgoing: outgoing)
+                let rate = incoming.outputRate
+                // Parse + compile off the main actor: a big song stalled scrolling for hundreds of ms.
+                let prepared = await Task.detached(priority: .userInitiated) {
+                    Result { try SF2MIDIPlayer.prepare(midi: data, soundFont: sf, sampleRate: rate) }
+                }.value
+                guard !Task.isCancelled, self.currentSlug == slug else { return }
+                self.start(prepared, player: incoming, slug: slug, requested: requested, outgoing: outgoing)
             }
         } else if !isPlaying {
             AudioSessionController.shared.start()
@@ -115,10 +122,17 @@ final class FeedPlayer: ObservableObject {
         if let next { preload(slug: next.slug, url: next.url) }
     }
 
-    private func start(data: Data, soundFont sf: SF2SoundFont, slug: String, requested: CFTimeInterval, outgoing: SF2MIDIPlayer?) {
-        let incoming = (standby.flatMap { $0 === outgoing ? nil : $0 }) ?? makePlayer(sf)
+    private func nextPlayer(_ sf: SF2SoundFont, outgoing: SF2MIDIPlayer?) -> SF2MIDIPlayer {
+        if let s = standby, s !== outgoing { return s }
+        let p = makePlayer(sf)
+        standby = p
+        return p
+    }
+
+    private func start(_ prepared: Result<SF2PreparedSong, Error>, player incoming: SF2MIDIPlayer, slug: String,
+                       requested: CFTimeInterval, outgoing: SF2MIDIPlayer?) {
         removeTap(incoming)
-        do { try incoming.load(midi: data) } catch {
+        do { try incoming.load(prepared: prepared.get()) } catch {
             Self.log.error("MIDI load failed for \(slug, privacy: .public): \(String(describing: error), privacy: .public)")
             return
         }
