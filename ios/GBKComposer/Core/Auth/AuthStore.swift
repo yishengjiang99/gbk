@@ -95,18 +95,19 @@ final class AuthStore: ObservableObject {
         }
     }
 
-    /// Refresh keeps the current kind unless the server says otherwise.
-    func store(_ pair: TokenPair) { store(pair, anonymous: pair.me?.isGuest ?? isAnonymousSession) }
+    /// Refresh keeps the current kind and identity unless the server says otherwise.
+    func store(_ pair: TokenPair) { store(pair, anonymous: pair.me?.isGuest ?? isAnonymousSession, sameAccount: true) }
 
     /// Apple/Google exchanges send the current (anonymous) bearer, so the server can link/upgrade that account.
-    func store(_ pair: TokenPair, anonymous: Bool) {
+    /// A pair is a whole session: a missing refresh token or identity clears the previous account's, never keeps it.
+    func store(_ pair: TokenPair, anonymous: Bool, sameAccount: Bool = false) {
         let wasLinked = isLinkedAccount
         isAnonymousSession = anonymous
         UserDefaults.standard.set(anonymous, forKey: Self.anonymousFlagKey)
         Keychain.set(pair.accessToken, for: Self.accessKey)
-        if let r = pair.refreshToken { Keychain.set(r, for: Self.refreshKey) }
+        Keychain.set(pair.refreshToken, for: Self.refreshKey) // refresh tokens are single use: never keep a spent one
         accessToken = pair.accessToken
-        if let m = pair.me { me = m }
+        if let m = pair.me { me = m } else if !sameAccount { me = nil }
         // Guest bearer sent with Apple/Google: "linked" keeps the guest's handle/name; "merged" means the existing
         // account won and the guest was deleted. Either way the returned `me` is now the identity; refresh it.
         if pair.upgraded != nil || pair.me == nil { Task { await loadMe() } }
