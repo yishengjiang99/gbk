@@ -27,6 +27,8 @@ final class MIDIBridge: NSObject, WKScriptMessageHandler {
     }
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        // Same gate as Hum/Publish: MIDI input opens a LAN session and Bluetooth pairing UI.
+        guard message.frameInfo.isMainFrame, WebTrust.isTrusted(message.frameInfo.securityOrigin) else { return }
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
         switch type {
         case "request": startInput()

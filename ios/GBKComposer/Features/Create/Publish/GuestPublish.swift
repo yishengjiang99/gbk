@@ -103,6 +103,8 @@ struct WebViewGuestPublishService: GuestPublishing {
 
     @MainActor func publish(_ draft: PublishDraft, projectId: String, slug: String?, as username: String) async throws -> PublishResult {
         guard let webView else { throw PublishError.failed("The studio isn't ready yet.") }
+        // The script sends the guest credential to the page's origin: never run it on another site.
+        guard WebTrust.isTrusted(webView.url) else { throw PublishError.failed("Open the Studio to publish.") }
         let args: [String: Any] = ["deviceId": AnonymousIdentity.deviceID, "guestName": username, "projectId": projectId, "knownSlug": slug ?? "",
                                    "title": draft.title.trimmingCharacters(in: .whitespaces), "labels": draft.labels,
                                    "tags": draft.tags, "sharePrompt": draft.sharePrompt]

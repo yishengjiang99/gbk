@@ -15,6 +15,21 @@ enum DeepLink: Equatable {
     static let host = "compose.grepawk.com"
     static let scheme = "gbk"
 
+    static func isSlug(_ s: String) -> Bool { s.range(of: #"^[a-z0-9][a-z0-9-]{3,127}$"#, options: .regularExpression) != nil }
+    static func isHandle(_ s: String) -> Bool { s.range(of: #"^[a-z0-9_]{3,20}$"#, options: .regularExpression) != nil }
+    /// docs/social-api.md: tags are a-z0-9-, 2–24 chars.
+    static func isTag(_ s: String) -> Bool { s.range(of: #"^[a-z0-9-]{2,24}$"#, options: .regularExpression) != nil }
+
+    /// Values in a link built in code (e.g. the publish bridge's `.share`) are checked like parsed ones.
+    var isValid: Bool {
+        switch self {
+        case .share(let s), .studioSong(let s, _): return Self.isSlug(s)
+        case .user(let h), .inbox(let h): return Self.isHandle(h)
+        case .tag(let t): return Self.isTag(t)
+        case .feed, .studio: return true
+        }
+    }
+
     init?(url: URL) {
         let scheme = url.scheme?.lowercased()
         var parts = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
@@ -33,21 +48,24 @@ enum DeepLink: Equatable {
             if first == "studio" { self = .studio(query: URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery); return }
             return nil
         }
+        guard parts.count == 2 else { return nil }
         let value = parts[1]
         switch first {
         case "s":
-            guard value.range(of: #"^[a-z0-9][a-z0-9-]{3,127}$"#, options: .regularExpression) != nil else { return nil }
+            guard Self.isSlug(value) else { return nil }
             let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             func on(_ k: String) -> Bool { q.contains { $0.name == k && ($0.value ?? "") != "" && $0.value != "0" } }
             if on("fork") { self = .studioSong(slug: value, fork: true) }
             else if on("edit") { self = .studioSong(slug: value, fork: false) }
             else { self = .share(slug: value) }
-        case "u":
+        case "u", "inbox":
             let h = value.lowercased()
-            guard h.range(of: #"^[a-z0-9_]{3,20}$"#, options: .regularExpression) != nil else { return nil }
-            self = .user(name: h)
-        case "t": self = .tag(name: value.lowercased())
-        case "inbox": self = .inbox(handle: value)
+            guard Self.isHandle(h) else { return nil }
+            self = first == "u" ? .user(name: h) : .inbox(handle: h)
+        case "t":
+            let t = value.lowercased()
+            guard Self.isTag(t) else { return nil }
+            self = .tag(name: t)
         default: return nil
         }
     }
@@ -130,6 +148,7 @@ final class DeepLinkRouter: ObservableObject {
     }
 
     func open(_ link: DeepLink) {
+        guard link.isValid else { return }
         switch link {
         case .studioSong(let slug, let fork): openInStudio(slug: slug, fork: fork); return
         case .studio(let query):
