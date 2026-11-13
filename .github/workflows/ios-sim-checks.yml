@@ -39,6 +39,7 @@ jobs:
         run: |
           U=${{ steps.sim.outputs.udid }}
           mkdir -p snapshots
+          status=0 # a failed test fails the job (the old `| grep || true` always passed)
           for mode in light dark; do
             xcrun simctl ui "$U" appearance $mode
             xcrun simctl openurl "$U" "https://compose.grepawk.com/feed?noimpressions=1"
@@ -47,9 +48,11 @@ jobs:
             TEST_RUNNER_SIM_CHECKS=1 TEST_RUNNER_APPEARANCE=$mode TEST_RUNNER_SNAPSHOT_DIR="$PWD/snapshots" \
               xcodebuild test-without-building -project GBKComposer.xcodeproj -scheme GBKComposer \
               -destination "id=$U" -only-testing:GBKComposerUITests/SimChecksUITests \
-              -resultBundlePath "SimChecks-$mode.xcresult" CODE_SIGNING_ALLOWED=NO | grep -E "SIMCHECK|Test Case|error" || true
+              -resultBundlePath "SimChecks-$mode.xcresult" CODE_SIGNING_ALLOWED=NO > "xcodebuild-$mode.log" 2>&1 || status=1
+            grep -E "SIMCHECK|Test Case|error" "xcodebuild-$mode.log" || true
           done
           cat snapshots/simchecks-*.txt || true
+          exit $status
       - uses: actions/upload-artifact@v4
         if: always()
         with:

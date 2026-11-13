@@ -21,7 +21,7 @@ final class StudioPublishUITests: XCTestCase {
         create.tap()
         let web = app.webViews.firstMatch
         let input = web.textViews["Describe a song or a change"]
-        guard input.waitForExistence(timeout: 60) else { throw XCTSkip("studio did not load from compose.grepawk.com (network)") }
+        guard input.waitForExistence(timeout: 60) else { XCTFail("studio did not load from compose.grepawk.com"); throw StudioDidNotLoad() }
 
         let tabBar = app.tabBars.firstMatch.frame
         XCTAssertLessThanOrEqual(web.frame.maxY, tabBar.minY + 1, "web view \(web.frame) ends above the tab bar \(tabBar)")
