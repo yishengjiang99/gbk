@@ -313,7 +313,8 @@ extension StudioWebView {
         let afterPublish = published
         published = false
         let r = try? await web.callAsyncJavaScript(Self.entryScript, arguments: ["waitForRestore": waitForRestore, "afterPublish": afterPublish], contentWorld: .page)
-        NSLog("[gbk.create-entry] restore=%@ afterPublish=%@ url=%@ -> %@", "\(waitForRestore)", "\(afterPublish)", web.url?.absoluteString ?? "-", String(describing: r ?? "nil"))
+        // Verdict only: the project JSON and URL are user content and don't belong in the device log.
+        NSLog("[gbk.create-entry] restore=%@ afterPublish=%@ -> %@", "\(waitForRestore)", "\(afterPublish)", ((r as? String) ?? "nil").components(separatedBy: " ").first ?? "")
     }
 }
 

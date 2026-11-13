@@ -44,6 +44,9 @@ targets:
       # matching the flat lookups in StudioWebView/HumBridge.
       - path: GBKComposer/Resources/HumTest
         buildPhase: resources
+      # Privacy manifest (required-reason APIs, collected data). Must match the App Store privacy labels.
+      - path: GBKComposer/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
       # Scan UI-test fixture (12 KB one-staff C major scale; used only with -uiTestScanFixture).
       - path: GBKComposer/Resources/ScanTest
         buildPhase: resources

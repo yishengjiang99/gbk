@@ -160,7 +160,7 @@ final class DeepLinkRouter: ObservableObject {
         switch link {
         case .user(let handle): feedPath = [handle]; pending = nil
         case .share, .tag, .feed: feedPath = []; pending = link
-        case .inbox: pending = link
+        case .inbox: pending = nil // Inbox shows the thread list; a pending link nobody consumes would stick
         case .studioSong, .studio: break
         }
         if case .inbox = link { selectedTab = .inbox } else { selectedTab = .feed }

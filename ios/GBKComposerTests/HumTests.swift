@@ -123,6 +123,16 @@ final class HumDecoderTests: XCTestCase {
                                                thresholds: .basicPitchDefaults).isEmpty)
     }
 
+    /// #141: cancelling the caller stops the model; a cancelled take never delivers notes.
+    func testCancelledTranscriptionStops() async throws {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "hum-fixture", withExtension: "wav"))
+        let one = try HumRecorder.load(url: url)
+        let long = Array(repeating: one, count: 20).flatMap { $0 }
+        let t = Task { try await HumTranscriber.transcribe(long) }
+        t.cancel()
+        do { _ = try await t.value; XCTFail("transcription finished after cancel") } catch is CancellationError {}
+    }
+
     /// End to end on the simulator: bundled Core ML model + fixture (C4 E4 G4 C5 hum-like tones).
     func testBundledModelTranscribesFixture() async throws {
         let url = try XCTUnwrap(Bundle.main.url(forResource: "hum-fixture", withExtension: "wav"))

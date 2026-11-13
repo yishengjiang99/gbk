@@ -23,12 +23,13 @@ enum HumTranscriber {
         return m
     }
 
-    /// 22,050 Hz mono samples → notes in seconds. Runs off the main thread.
+    /// 22,050 Hz mono samples → notes in seconds. Runs off the main thread; cancelling the caller cancels the work.
     static func transcribe(_ samples: [Float], onProgress: (@Sendable (Double) -> Void)? = nil) async throws -> [HumTimedNote] {
-        try await Task.detached(priority: .userInitiated) {
+        let work = Task.detached(priority: .userInitiated) {
             let events = try Transcriber.transcribe(samples: samples, model: try model(), onProgress: onProgress)
             return events.map(Self.timed)
-        }.value
+        }
+        return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
     }
 
     /// NoteEvent → web TimedNote. Web velocity = round(amplitude·127), so amplitude = velocity/127 keeps it.
