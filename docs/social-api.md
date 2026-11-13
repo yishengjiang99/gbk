@@ -74,6 +74,8 @@ Tokens are minted by the existing `/oauth` token machinery (same signing, same `
 | `GET /api/auth/web-code/redeem?code=&return=/studio` | live | sets the cookie session in the WKWebView, 302 to `return` (same-origin path only). Single use, 60 s |
 | `DELETE /api/me` | live | deletes account, songs, comments, ratings, messages, devices; → `{ ok: true }` (App Store 5.1.1(v)) |
 
+Turnstile and cross-origin isolation: the app shell sends COOP `same-origin` + COEP `credentialless` (Scan's ORT threads). Turnstile still loads: `api.js` is a no-cors script (CORP `cross-origin`), and Cloudflare serves the challenge iframe with its own COEP `require-corp` + CORP `cross-origin`, which is what a COEP parent requires of a nested document. No `credentialless` iframe is needed (Turnstile builds its iframe itself). `test/e2e/sms-turnstile.spec.ts` checks this in Chromium and iPhone WebKit with Cloudflare's test sitekey.
+
 `TokenPair` = `{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, me: Me }`.
 
 ### Guest accounts (iOS; live)
