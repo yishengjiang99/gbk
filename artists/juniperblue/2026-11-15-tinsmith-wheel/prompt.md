@@ -1,0 +1,1 @@
+Original gypsy-jazz (manouche) swing in D minor at 200 BPM: violin lead and steel-string lead guitar over la pompe rhythm guitar, upright bass and light brushes. AABA head with minor 6 and dim passing chords, guitar solo, violin solo, head out, coda.
