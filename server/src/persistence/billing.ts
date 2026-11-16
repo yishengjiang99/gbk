@@ -46,6 +46,9 @@ export class BillingLog {
   forAccount(account: string, limit = 100): LogRow[] {
     return this.db.prepare("SELECT * FROM billing_log WHERE account = ? ORDER BY id DESC LIMIT ?").all(account, Math.min(500, Math.max(1, limit))) as unknown as LogRow[];
   }
+  recent(limit = 50): LogRow[] {
+    return this.db.prepare("SELECT * FROM billing_log ORDER BY id DESC LIMIT ?").all(Math.min(500, Math.max(1, limit))) as unknown as LogRow[];
+  }
   /** True when the account's latest money event is a trial start (a DID_RENEW then reads as a conversion). */
   hasOpenTrial(account: string): boolean {
     const r = this.db.prepare("SELECT event FROM billing_log WHERE account = ? AND event IN ('trial_start','purchase','renewal','trial_convert') ORDER BY id DESC LIMIT 1").get(account) as { event: string } | undefined;

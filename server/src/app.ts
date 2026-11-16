@@ -32,6 +32,7 @@ import { FunnelStore } from "./persistence/funnel.ts";
 import { BillingLog, BillingRecorder } from "./persistence/billing.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
 import { billingRoutes } from "./routes/billing.ts";
+import { adminReadRoutes } from "./routes/admin-read.ts";
 import { AdsConversions, adsConfig } from "./ads/conversions.ts";
 import { galleryRoutes } from "./routes/gallery.ts";
 import { McpStore } from "./mcp/store.ts";
@@ -144,6 +145,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const ads = new AdsConversions(adsConfig(process.env), { fetch: deps.fetch, log: (o) => app.log.warn(o) });
   app.log.info({ evt: "ads_capi", ...ads.status() });
   billingRoutes(app, cfg, sessions, { funnel, billing, log: billingLog, ads });
+  adminReadRoutes(app, cfg, sessions, { events, funnel, billingLog, clientErrors, social });
   // P3: suggested prompt for opt-in prompt sharing = the owner's first AI Composer prompt (owner edits before sharing).
   app.get("/api/songs/:slug/prompt-suggestion", async (req, reply) => {
     const s = currentSession(req, sessions); const row = shares.bySlug((req.params as { slug: string }).slug);
