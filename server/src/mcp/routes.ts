@@ -11,6 +11,7 @@
 // its authorization is NOT frozen at initialize: on every request the session is rebound to the
 // credentials actually presented (same user), so refreshed/narrower tokens take effect immediately,
 // and an anonymous session may upgrade to an authenticated one. Idle sessions are evicted.
+import { sendPaywall } from "../routes/paywall.ts";
 import { createHmac, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -182,13 +183,18 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
       if (principal.user !== row.owner) return reply.code(404).send({ code: "NOT_FOUND", message: "no such artifact" });
       if (!principal.scopes.includes("gbk:artifacts.read") && principal.via !== "test") return reply.code(403).send({ code: "INSUFFICIENT_SCOPE", message: "gbk:artifacts.read scope required" });
     }
+    // Paywall plan (2026-11-16): an explicit download (?download=1, served as an attachment) is Pro only and answers
+    // the shared 402 contract (routes/paywall.ts). Inline fetches stay free: players and the in-chat widget stream
+    // these same URLs for playback, and playback is free.
+    const download = (req.query as { download?: string }).download === "1";
+    if (download && !deps.service.proOf(row.owner)) return sendPaywall(reply, cfg.publicOrigin, "export", !row.owner.startsWith("guest:"));
     const path = deps.store.artifactAbsPath(row);
     let size: number;
     try { size = statSync(path).size; } catch { return reply.code(410).send({ code: "ARTIFACT_EXPIRED", message: "artifact bytes are no longer stored" }); }
     if (size !== row.size_bytes) req.log.warn({ evt: "mcp_artifact_size_mismatch", artifactId: id, stored: row.size_bytes, onDisk: size });
     const range = req.headers.range;
     reply.header("content-type", row.mime_type).header("accept-ranges", "bytes")
-      .header("content-disposition", `inline; filename="${row.filename.replace(/["\\]/g, "_")}"`)
+      .header("content-disposition", `${download ? "attachment" : "inline"}; filename="${row.filename.replace(/["\\]/g, "_")}"`)
       .header("x-content-type-options", "nosniff").header("cache-control", "private, no-store");
     if (req.method === "HEAD") { reply.header("content-length", String(size)); return reply.code(200).send(); }
     // One download per full fetch or first range (players issue many range requests per listen).

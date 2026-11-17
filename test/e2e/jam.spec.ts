@@ -103,7 +103,13 @@ test("shared metronome: host starts it, every client clicks at the same wall tim
   await host.getByTestId("jam-take-stop").click();
   const proj = await host.evaluate(() => window.__gbkJam!.takeProject());
   expect(proj.tracks.length).toBe(2); expect(proj.notes.map((n) => n.pitch).sort()).toEqual([60, 64, 67]);
-  const dl = host.waitForEvent("download"); await host.getByTestId("jam-take-mid").click(); expect((await dl).suggestedFilename()).toBe("live-jam-take.mid");
+  // The take's .mid download is an export: Pro only (paywall plan 2026-11-16). A free host gets the export paywall, no file.
+  let downloaded = false; host.on("download", () => { downloaded = true; });
+  await host.getByTestId("jam-take-mid").click();
+  await expect(host.getByTestId("paywall-modal")).toHaveAttribute("data-reason", "export");
+  await host.getByTestId("paywall-continue").click();
+  await expect(host.getByTestId("paywall-modal")).toHaveCount(0);
+  expect(downloaded).toBe(false);
   // Stop: clicks end everywhere, playing still works without it.
   await host.getByTestId("jam-metro-toggle").click();
   for (const p of pages) await expect(p.getByTestId("jam-metronome")).toHaveAttribute("data-running", "0");

@@ -2,6 +2,7 @@
 // Player / Library, no live preset. Results are returned only after rendering + validation; long renders expose a
 // real job id. Audio bytes never go into JSON text: small files can be returned as MCP audio content (when the host
 // supports it), otherwise as a persisted artifact read with bounded, offset-based gbk_read_wav_bytes chunks.
+import { requireExport } from "../agent/paywall.ts";
 import type { WorkstationController } from "../workstation/controller.ts";
 import { WorkstationError } from "../workstation/ops.ts";
 import { renderJobs, safeFilename, type RenderJob } from "../audio/render-job.ts";
@@ -71,6 +72,7 @@ export function buildRenderTools(c: WorkstationController): ToolDef[] {
         if (a.download === true) {
           const res = renderJobs().result(j.id);
           if (!res || !c.host.download) downloaded = { requested: false, reason: "no browser download handler" };
+          else if (!(await requireExport("wav"))) downloaded = { requested: false, reason: "PRO_REQUIRED: exporting a song is a GBK Pro feature; the artifact is still playable" };
           else { const ok = c.host.download(res.blob, safeFilename(j.projectName, "wav")); downloaded = { requested: ok !== false, confirmed: false, note: "browsers do not report whether a download was allowed; the artifact stays available either way" }; }
         }
         const res = renderJobs().result(j.id);
@@ -111,6 +113,7 @@ export function buildRenderTools(c: WorkstationController): ToolDef[] {
       run: async (a) => {
         try { const m = await store().meta(a.artifactId as string); const b = await store().blob(m.id);
           if (!c.host.download) throw new RenderError("DOWNLOAD_BLOCKED", "no download mechanism in this runtime; use gbk_read_wav_bytes");
+          if (!(await requireExport(m.kind === "midi" ? "midi" : "wav"))) throw new RenderError("DOWNLOAD_BLOCKED", "PRO_REQUIRED: exporting a song is a GBK Pro feature; the user was shown the upgrade option. The artifact stays playable in the Studio");
           const ok = c.host.download(b, m.filename);
           if (ok === false) throw new RenderError("DOWNLOAD_BLOCKED", "the browser refused to start the download; use the artifact panel link or gbk_read_wav_bytes");
           return { data: { artifactId: m.id, filename: m.filename, requested: true, confirmed: false } }; }

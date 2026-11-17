@@ -1,23 +1,39 @@
-/* Web Studio paywall modal (#116): same dark sheet language as the publish dialog, one z-index above it. */
-.pw-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; z-index: 1100; }
-.pw-card { position: relative; background: #151a22; border: 1px solid #2c3442; border-radius: 10px; padding: 18px 20px; width: min(460px, 92vw); max-height: 92dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; color: #dbe4f0; }
-.pw-card h3 { margin: 0 22px 0 0; font-size: 18px; }
-.pw-x { position: absolute; top: 10px; right: 10px; background: none; border: 0; color: #93a5bb; font-size: 15px; cursor: pointer; padding: 4px 6px; }
-.pw-body { margin: 0; color: #aebdd0; line-height: 1.45; }
-.pw-reset { margin: 0; font-weight: 600; }
-.pw-cmp { border-collapse: collapse; width: 100%; font-size: 13px; }
-.pw-cmp td, .pw-cmp th { border: 1px solid #2c3442; padding: 6px 8px; text-align: left; }
-.pw-cmp th { color: #93c5ff; }
+/* Web Studio paywall modal: bright theme (white card, dark text), one z-index above the publish dialog.
+   Fits a 320 px phone: no horizontal overflow, scrolls inside the card when the viewport is short. */
+.pw-backdrop { position: fixed; inset: 0; background: rgba(20, 28, 40, .38); display: flex; align-items: center; justify-content: center; z-index: 1100; padding: 12px; box-sizing: border-box; }
+.pw-card { position: relative; box-sizing: border-box; background: #fff; border: 1px solid #dfe5ee; border-radius: 14px; box-shadow: 0 12px 40px rgba(20, 30, 50, .18); padding: 18px 18px 16px; width: min(440px, 100%); max-width: 100%; max-height: calc(100dvh - 24px); overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 10px; color: #1d2633; }
+.pw-card h3 { margin: 0 26px 0 0; font-size: 19px; line-height: 1.25; color: #111a26; overflow-wrap: anywhere; }
+.pw-card .pw-x { position: absolute; margin: 0; width: auto; min-width: 0; line-height: 1; top: 8px; right: 8px; background: none; border: 0; color: #5d6b7e; font-size: 16px; cursor: pointer; padding: 6px 8px; border-radius: 8px; }
+.pw-card .pw-x:hover { background: #f0f3f8; }
+.pw-body { margin: 0; color: #435163; line-height: 1.45; font-size: 14px; overflow-wrap: anywhere; }
+.pw-reset { margin: 0; font-weight: 600; font-size: 14px; }
+.pw-free { margin: 0; color: #1f7a43; font-size: 13px; font-weight: 600; }
+.pw-cmp { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
+.pw-cmp td, .pw-cmp th { border: 1px solid #e3e8ef; padding: 6px 8px; text-align: left; overflow-wrap: anywhere; }
+.pw-cmp td { color: #1d2633; background: #fff; opacity: 1; }
+.pw-cmp th { color: #2e6fd7; background: #f6f9fd; }
+.pw-cmp td:first-child { width: 46%; }
 .pw-plans { display: flex; flex-direction: column; gap: 6px; }
-.pw-plan { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; column-gap: 8px; border: 1px solid #2c3442; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
-.pw-plan.sel { border-color: #2e7dd7; background: rgba(46, 125, 215, .12); }
+.pw-plan { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; column-gap: 8px; border: 1px solid #dfe5ee; border-radius: 10px; padding: 9px 10px; cursor: pointer; background: #fff; }
+.pw-plan.sel { border-color: #2e6fd7; background: #eef4fd; }
 .pw-plan input { margin: 0; }
-.pw-plan-name { font-weight: 600; }
-.pw-plan-price { font-weight: 700; color: #93c5ff; }
-.pw-plan-price small { color: #aebdd0; font-weight: 400; }
-.pw-plan-note { grid-column: 2 / 4; color: #93a5bb; font-size: 12px; }
-.pw-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
-.pw-actions button { padding: 9px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; }
-.pw-ghost { background: none; border: 1px solid #2c3442; color: #dbe4f0; }
-.pw-primary { background: #2e7dd7; border: 1px solid #2e7dd7; color: #fff; font-weight: 600; }
-.pw-fine { margin: 0; color: #77879c; font-size: 12px; line-height: 1.4; }
+.pw-plan-name { font-weight: 600; overflow-wrap: anywhere; }
+.pw-plan-price { font-weight: 700; color: #1f5fc4; white-space: nowrap; }
+.pw-plan-price small { color: #5d6b7e; font-weight: 400; }
+.pw-plan-note { grid-column: 2 / 4; color: #5d6b7e; font-size: 12px; }
+/* The actions stay in view while the card scrolls on short phones. */
+.pw-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 2px; position: sticky; bottom: -16px; background: #fff; padding: 8px 0 2px; z-index: 1; }
+.pw-actions button { padding: 10px 14px; border-radius: 10px; font-size: 15px; cursor: pointer; min-height: 44px; }
+.pw-ghost { background: #fff; border: 1px solid #cfd7e3; color: #1d2633; }
+.pw-primary { background: #2e6fd7; border: 1px solid #2e6fd7; color: #fff; font-weight: 600; flex: 1 1 auto; }
+.pw-fine { margin: 0; color: #6b7889; font-size: 12px; line-height: 1.4; }
+@media (max-width: 480px) {
+  .pw-card { padding: 14px 14px 12px; gap: 8px; }
+  .pw-card h3 { font-size: 18px; }
+  .pw-body { font-size: 13px; }
+  .pw-cmp { font-size: 12px; }
+  .pw-cmp td, .pw-cmp th { padding: 4px 6px; }
+  .pw-plan { padding: 7px 10px; }
+  .pw-actions { bottom: -12px; }
+}
+@media (max-width: 380px) { .pw-card { padding: 14px 12px 12px; } .pw-actions button { flex: 1 1 100%; } }

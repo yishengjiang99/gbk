@@ -73,6 +73,7 @@ export async function startNew(): Promise<void> {
   await flushSave();
   workstation.stop();
   workstation.load(emptyProject());
+  void import("../agent/paywall.ts").then((m) => m.maybeThirdSongPaywall()).catch(() => undefined); // song #3: one-time popup
 }
 
 /** Saved local projects, newest first (for the Recent list). */

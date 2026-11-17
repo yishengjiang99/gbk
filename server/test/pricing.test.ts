@@ -35,7 +35,7 @@ test("pricing page: yearly is the preselected default, value-led copy, sticky CT
     assert.match(html, /save 33%/);
     assert.match(html, /<title>[^<]*Pro from \$4\/month billed yearly<\/title>/);
     // Lead copy leads with the value users feel and the trial; the FAQ keeps the ChatGPT explanation.
-    assert.match(html, /<p class="lead">Get 10× the AI composer budget and longer renders[^<]*7-day free trial/);
+    assert.match(html, /<p class="lead">Export your songs as MIDI and WAV, and get 10× the AI composer budget and longer renders[^<]*7-day free trial/);
     assert.match(html, /Can I buy Pro inside ChatGPT\?/);
     assert.match(html, /ChatGPT plugins may not sell subscriptions/);
     // Sticky CTA is present and defaults to the yearly plan's checkout form.

@@ -1,3 +1,4 @@
+import { maybeThirdSongPaywall, requireExport } from "../../agent/paywall.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Live content-box size of an element (the studio is a fixed 100dvh layout; children size from it). */
@@ -128,9 +129,16 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
   const pos = state.transport.positionTick;
   const bb = useMemo(() => tickToBarBeat(p, pos), [p, pos]);
   const run = (f: () => unknown) => { try { const r = f(); if (r instanceof Promise) r.catch((e: Error) => alert(e.message)); } catch (e) { alert((e as Error).message); } };
-  const exportMidi = () => { const { bytes, filename } = workstation.prepareMidiExport(); workstation.host.download?.(bytes, filename); window.dispatchEvent(new Event("gbk:exported")); };
+  // Export is Pro only (paywall plan 2026-11-16): the server decides (POST /api/paywall/check); a non-Pro user gets
+  // the export paywall and nothing is built or downloaded.
+  const exportMidi = async () => {
+    if (!(await requireExport("midi"))) return;
+    try { const { bytes, filename } = workstation.prepareMidiExport(); workstation.host.download?.(bytes, filename); window.dispatchEvent(new Event("gbk:exported")); }
+    catch (e) { alert((e as Error).message); }
+  };
   // Same headless renderer as gbk_render_wav: progress + artifact appear in the artifact panel; errors are shown, never swallowed.
   const renderWav = async () => {
+    if (!(await requireExport("wav"))) return;
     const j = renderJobs().submit(workstation.project, { sampleRate: 44100, channels: 2, format: "pcm16", tailSeconds: 3 }, { saveArtifact: true });
     const done = await renderJobs().wait(j.id);
     if (done.status !== "completed") throw new Error(`WAV export ${done.status}: ${done.error?.message ?? ""}`);
@@ -147,6 +155,7 @@ export function WorkstationView({ onOpenPlayer, composer = false, onExplore }: {
     const hasContent = cur.tracks.length > 0 || cur.notes.length > 0;
     if (hasContent && cur.revision > 0 && !workstation.readOnlyReason && !confirm("Start a new song? Unsaved changes to the current one may be lost.")) return false;
     await workstation.createProject({ name: "Untitled", owner: "user", replaceCurrent: !workstation.host.checkpoint });
+    void maybeThirdSongPaywall(); // free users starting song #3: the one-time popup
     return true;
   };
   const newProject = () => run(createNew);

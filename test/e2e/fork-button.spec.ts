@@ -8,11 +8,9 @@ const ws = (page: Page) => page.evaluate(() => {
 });
 const compact = (page: Page) => page.getByTestId("workstation").getAttribute("data-compact");
 
+/** The landing paywall is gone (paywall plan 2026-11-16): nothing covers the app after a page load. */
 async function dismissLandingPaywall(page: Page) {
-  const modal = page.getByTestId("paywall-modal");
-  try { await expect(modal).toBeVisible({ timeout: 8_000 }); } catch { return; }
-  await page.getByTestId("paywall-later").click();
-  await expect(modal).toHaveCount(0);
+  await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
 }
 
 async function publishSong(page: Page, code: string, title: string): Promise<string> {

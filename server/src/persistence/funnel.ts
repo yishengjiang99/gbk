@@ -41,7 +41,9 @@ export class FunnelStore {
       CREATE TABLE IF NOT EXISTS billing_daily (day TEXT NOT NULL, event TEXT NOT NULL, surface TEXT NOT NULL DEFAULT '', platform TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (day, event, surface, platform));
       CREATE TABLE IF NOT EXISTS mcp_clients_daily (day TEXT NOT NULL, client TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', oauth_client TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (day, client, user_agent, oauth_client, source));`);
+        PRIMARY KEY (day, client, user_agent, oauth_client, source));
+      CREATE TABLE IF NOT EXISTS paywall_reasons_daily (day TEXT NOT NULL, event TEXT NOT NULL, reason TEXT NOT NULL, surface TEXT NOT NULL DEFAULT '', platform TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, event, reason, surface, platform));`);
   }
   /** Never throws: analytics must not break the request it observes. Unknown events/sources are dropped. */
   bump(event: FunnelEvent, source: FunnelSource = "", now = Date.now()) {
@@ -99,6 +101,24 @@ export class FunnelStore {
         .run(new Date(now).toISOString().slice(0, 10), event, surface.slice(0, 32), platform.slice(0, 32));
     } catch { /* best effort */ }
   }
+  /** Paywall plan (2026-11-16): paywall_view / paywall_dismiss / plan_select per trigger reason (export, ai_budget,
+   * render_limit, third_song, …), aggregate only. `reason` is pre-sanitized by BillingRecorder. Never throws. */
+  bumpPaywallReason(event: BillingEvent, reason: string, surface = "", platform = "", now = Date.now()) {
+    if (!reason || !(["paywall_view", "paywall_dismiss", "plan_select"] as string[]).includes(event)) return;
+    if (analyticsExcluded()) return;
+    try {
+      this.db.prepare("INSERT INTO paywall_reasons_daily (day, event, reason, surface, platform, count) VALUES (?,?,?,?,?,1) ON CONFLICT(day, event, reason, surface, platform) DO UPDATE SET count = count + 1")
+        .run(new Date(now).toISOString().slice(0, 10), event, reason.slice(0, 32), surface.slice(0, 32), platform.slice(0, 32));
+    } catch { /* best effort */ }
+  }
+  /** { reason: { paywall_view, paywall_dismiss, plan_select } } over the last `days` UTC days. */
+  paywallReasons(days = 30, now = Date.now()) {
+    const since = new Date(now - (Math.max(1, days) - 1) * 86_400_000).toISOString().slice(0, 10);
+    const rows = this.db.prepare("SELECT reason, event, SUM(count) AS count FROM paywall_reasons_daily WHERE day >= ? GROUP BY reason, event").all(since) as { reason: string; event: string; count: number }[];
+    const out: Record<string, Record<string, number>> = {};
+    for (const r of rows) (out[r.reason] ??= { paywall_view: 0, paywall_dismiss: 0, plan_select: 0 })[r.event] = Number(r.count);
+    return out;
+  }
   /** Billing totals over the last `days` UTC days, plus the paywall_view -> checkout_start -> purchase
    * steps overall and split by surface and by platform, plus a per-day series. */
   billingSummary(days = 30, now = Date.now()) {
@@ -123,7 +143,7 @@ export class FunnelStore {
     const bySurface: object[] = [], byPlatform: object[] = [];
     for (const [k, r] of stepRows) { const [kind, key] = k.split(/:(.*)/s).slice(0, 2); if (kind === "surface") bySurface.push(finish("surface", key, r)); else if (kind === "platform") byPlatform.push(finish("platform", key, r)); }
     const all = stepRows.get("all:") ?? { paywall_view: 0, checkout_start: 0, purchase: 0 };
-    return { since, days, totals, byDay, steps: { overall: finish("scope", "all", all), bySurface, byPlatform } };
+    return { since, days, totals, byDay, steps: { overall: finish("scope", "all", all), bySurface, byPlatform }, byReason: this.paywallReasons(days, now) };
   }
   close() { try { this.db.close(); } catch { /* closed */ } }
 }
