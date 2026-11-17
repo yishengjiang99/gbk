@@ -17,7 +17,7 @@ final class CreateTabKeyboardUITests: XCTestCase {
     func testDraftSurvivesFeedToCreateAndNewStartsFresh() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestStudioMIDI"]
-        app.launch()
+        app.launchInTestMode()
         let create = app.tabBars.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 90))
         create.tap()
@@ -58,7 +58,7 @@ final class CreateTabKeyboardUITests: XCTestCase {
         let mode = dark ? "dark" : "light"
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestStudioMIDI"] + (dark ? ["-uiTestDark"] : [])
-        app.launch()
+        app.launchInTestMode()
         let create = app.tabBars.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 90), "tab bar (cold simulator launch can be slow)")
         create.tap()

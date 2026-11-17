@@ -9,7 +9,7 @@ final class HumUITests: XCTestCase {
         throw XCTSkip("paused: timed out waiting for the hummed track on the full CI run for 454bf20")
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestHum", "-uiTestHumFixture"]
-        app.launch()
+        app.launchInTestMode()
         app.tabBars.buttons["Create"].tap()
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 20))

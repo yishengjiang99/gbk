@@ -67,7 +67,9 @@ final class FeedPlayer: ObservableObject {
 
     /// Stops at `maxBytes`: a broken or hostile media server can't fill memory while the feed scrolls.
     nonisolated static func download(_ url: URL, maxBytes: Int, session: URLSession = .shared) async -> Data? {
-        guard let (bytes, r) = try? await session.bytes(from: url),
+        var req = URLRequest(url: url)
+        UITestMode.apply(&req)
+        guard let (bytes, r) = try? await session.bytes(for: req),
               (r as? HTTPURLResponse)?.statusCode ?? 200 == 200, r.expectedContentLength <= Int64(maxBytes) else { return nil }
         var d = Data()
         do {

@@ -121,12 +121,21 @@ final class APIClientTests: XCTestCase {
         let req = try client.request(for: Endpoints.feed(FeedQuery(sort: .top, label: "jazz", tag: nil), cursor: "abc", limit: 20))
         XCTAssertEqual(req.url?.absoluteString, "https://compose.grepawk.com/api/feed?sort=top&label=jazz&cursor=abc&limit=20&session=\(ImpressionLogger.session)")
         XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+        XCTAssertNil(req.value(forHTTPHeaderField: "X-GBK-Test"))
         XCTAssertFalse(req.httpShouldHandleCookies)
 
         let rate = try client.request(for: Endpoints.rate("x", stars: 5))
         XCTAssertEqual(rate.httpMethod, "PUT")
         let body = try JSONSerialization.jsonObject(with: try XCTUnwrap(rate.httpBody)) as? [String: Int]
         XCTAssertEqual(body?["stars"], 5)
+    }
+
+    func testUITestModeAddsHeader() throws {
+        let off = try APIClient(tokenProvider: { nil }, testMode: false).request(for: Endpoints.me)
+        let on = try APIClient(tokenProvider: { nil }, testMode: true).request(for: Endpoints.me)
+        XCTAssertNil(off.value(forHTTPHeaderField: "X-GBK-Test"))
+        XCTAssertEqual(on.value(forHTTPHeaderField: "X-GBK-Test"), "1")
+        XCTAssertFalse(on.httpShouldHandleCookies)
     }
 
     func testDeepLinks() {

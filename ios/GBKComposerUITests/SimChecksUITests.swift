@@ -14,7 +14,7 @@ final class SimChecksUITests: XCTestCase {
     /// Native feed: the playing card's viz changes frame to frame; after pausing it is static.
     func testNativeFeedOnlyPlayingCardAnimates() throws {
         let app = XCUIApplication()
-        app.launch()
+        app.launchInTestMode()
         let viz = app.otherElements["card-pianoroll"].firstMatch
         XCTAssertTrue(viz.waitForExistence(timeout: 30))
         sleep(6) // first song loads and autoplays

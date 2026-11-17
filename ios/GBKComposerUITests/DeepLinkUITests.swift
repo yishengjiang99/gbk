@@ -7,7 +7,7 @@ final class DeepLinkUITests: XCTestCase {
         let url = URL(string: "https://compose.grepawk.com/api/feed?sort=new&limit=50")!
         var result: String?
         let done = expectation(description: "feed")
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        URLSession.shared.dataTask(with: UITestLaunch.apiRequest(url)) { data, _, _ in
             if let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let items = obj["items"] as? [[String: Any]] {
                 result = items.last(where: { ($0["media"] as? [String: Any])?["midi"] is String })?["slug"] as? String
@@ -23,7 +23,7 @@ final class DeepLinkUITests: XCTestCase {
         let url = URL(string: "https://compose.grepawk.com/api/feed?sort=new&limit=50")!
         var result: (String, String)?
         let done = expectation(description: "feed")
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        URLSession.shared.dataTask(with: UITestLaunch.apiRequest(url)) { data, _, _ in
             if let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let items = obj["items"] as? [[String: Any]],
                let it = items.first(where: { ($0["media"] as? [String: Any])?["midi"] is String && ($0["author"] as? [String: Any])?["handle"] is String }),
@@ -42,7 +42,7 @@ final class DeepLinkUITests: XCTestCase {
         let (slug, handle) = try authoredSong()
         let app = XCUIApplication()
         app.launchArguments = ["-deepLink", "https://compose.grepawk.com/u/\(handle)"]
-        app.launch()
+        app.launchInTestMode()
         let row = app.buttons["profileSong-\(slug)"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 45), "profile row for \(slug) on @\(handle)")
         row.tap()
@@ -63,7 +63,7 @@ final class DeepLinkUITests: XCTestCase {
         for url in ["https://compose.grepawk.com/s/\(slug)", "gbk://s/\(slug)"] {
             let app = XCUIApplication()
             app.launchArguments = ["-deepLink", url]
-            app.launch()
+            app.launchInTestMode()
             let card = app.descendants(matching: .any)["feedCard-\(slug)"].firstMatch
             XCTAssertTrue(card.waitForExistence(timeout: 45), "card for \(slug) via \(url)")
             XCTAssertTrue(card.isHittable, "\(slug) is the visible card via \(url)")
@@ -89,7 +89,7 @@ final class DeepLinkUITests: XCTestCase {
     func testSunnywalrusProfileLoadsAndTapOpensThatSong() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-deepLink", "https://compose.grepawk.com/u/sunnywalrus"]
-        app.launch()
+        app.launchInTestMode()
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'profileSong-'"))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 45), "profile songs for @sunnywalrus")
         XCTAssertFalse(app.staticTexts["Couldn't load the profile."].exists)
@@ -103,6 +103,7 @@ final class DeepLinkUITests: XCTestCase {
     func testShareLinkColdStartOpensThatSong() throws {
         let slug = try deepSlug()
         let app = XCUIApplication()
+        app.preparedForUITest()
         app.terminate()
         app.open(URL(string: "gbk://s/\(slug)")!)
         assertShowsCard(app, slug, "cold start")
@@ -112,7 +113,7 @@ final class DeepLinkUITests: XCTestCase {
     func testShareLinkWarmStartOpensThatSong() throws {
         let slug = try deepSlug()
         let app = XCUIApplication()
-        app.launch()
+        app.launchInTestMode()
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'feedCard-'")).firstMatch.waitForExistence(timeout: 45))
         XCUIDevice.shared.press(.home)
         app.open(URL(string: "gbk://s/\(slug)")!)

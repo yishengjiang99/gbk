@@ -372,6 +372,11 @@ struct WebView: UIViewRepresentable {
         context.coordinator.onLoad = onLoad
         context.coordinator.onDeepLink = onDeepLink
         context.coordinator.onTab = onTab
+        if UITestMode.isEnabled {
+            config.userContentController.addUserScript(WKUserScript(
+                source: WebTrust.onlyOnTrustedOrigin(UITestMode.headerScript),
+                injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
         let midi = MIDIBridge.install(in: config) // Web MIDI polyfill backed by CoreMIDI (Core/MIDI, docs/ios/midi.md)
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.hum.webView = view
@@ -416,9 +421,27 @@ struct WebView: UIViewRepresentable {
         }
     }
 
-    static func load(_ view: WKWebView, _ url: URL) {
-        if url.isFileURL { view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent()) }
-        else { view.load(URLRequest(url: url)) }
+    /// Cookie plant is async; later loads await the same task so the cookie is in place first.
+    @MainActor static var testCookieTask: Task<Void, Never>?
+
+    @MainActor static func load(_ view: WKWebView, _ url: URL) {
+        if url.isFileURL { view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent()); return }
+        let req = UITestMode.request(url)
+        guard UITestMode.isEnabled else { view.load(req); return }
+        let store = view.configuration.websiteDataStore.httpCookieStore
+        let host = url.host ?? DeepLink.host
+        Task { @MainActor in
+            if testCookieTask == nil {
+                testCookieTask = Task { @MainActor in
+                    guard let cookie = UITestMode.cookie(for: host) else { return }
+                    await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                        store.setCookie(cookie) { c.resume() }
+                    }
+                }
+            }
+            await testCookieTask?.value
+            view.load(req)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -631,7 +654,7 @@ struct WebView: UIViewRepresentable {
                 self.perform(r, wv.url)
                 DispatchQueue.main.async {
                     if wv.canGoBack { wv.goBack() }
-                    else { wv.load(URLRequest(url: URL(string: "https://\(DeepLink.host)/studio")!)) }
+                    else { wv.load(UITestMode.request(URL(string: "https://\(DeepLink.host)/studio")!)) }
                 }
             }
         }

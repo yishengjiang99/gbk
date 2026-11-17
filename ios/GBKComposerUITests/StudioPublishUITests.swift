@@ -15,7 +15,7 @@ final class StudioPublishUITests: XCTestCase {
         let mode = dark ? "dark" : "light"
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestStudioMIDI", "-uiTestPublishMock"] + (dark ? ["-uiTestDark"] : []) // mock: never publish to prod from CI
-        app.launch()
+        app.launchInTestMode()
         let create = app.tabBars.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 90))
         create.tap()
