@@ -1,0 +1,1 @@
+Original cool jazz in 5/4, E minor, 168 BPM: alto sax lead over piano, upright bass and ride cymbal, bars split 3+2. Piano and bass vamp intro, AABA head moving Em9 to Cmaj7, Am9-D9, Fmaj7#11 bridge, alto solo, piano solo, head out and a quiet Em9 coda.
