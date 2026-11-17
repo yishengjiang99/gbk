@@ -112,6 +112,8 @@ struct Song: Codable, Hashable, Identifiable {
     let promptText: String?
     let parentSlug: String?
     let isMine: Bool
+    /// Hook start, milliseconds from 0 (`hook_start_ms`). Missing, null, or out of range plays from 0.
+    var hookStartMs: Int64? = nil
     /// Canonical share wording from the server (`share_title` / `share_text` / `x_intent_url`).
     var shareTitle: String? = nil
     var shareText: String? = nil

@@ -48,6 +48,9 @@ struct FeedCardView: View {
     /// opens a fork of the song in a fresh composer session.
     var onRemixPrompt: (String, String, String) -> Void = { _, _, _ in }
     var remixing = false
+    /// Seek to the beginning and loop from there. Shown only on the active card when a hook is in use.
+    var showFromStart = false
+    var onFromStart: () -> Void = {}
 
     private var isPlaying: Bool { playback?.isPlaying ?? false }
     @EnvironmentObject private var auth: AuthStore
@@ -157,16 +160,29 @@ struct FeedCardView: View {
                 .accessibilityIdentifier("feed-rail")
             }
             .overlay(alignment: .bottomLeading) {
-                Button(action: onTap) {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(Theme.onAccent)
-                        .frame(width: 56, height: 56)
-                        .background(Circle().fill(Theme.accent).shadow(color: .black.opacity(0.25), radius: 8, y: 3))
+                HStack(alignment: .center, spacing: 8) {
+                    Button(action: onTap) {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(Theme.onAccent)
+                            .frame(width: 56, height: 56)
+                            .background(Circle().fill(Theme.accent).shadow(color: .black.opacity(0.25), radius: 8, y: 3))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isPlaying ? "Pause" : "Play")
+                    if showFromStart {
+                        Button("From start", action: onFromStart)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .foregroundStyle(Theme.text)
+                            .background(Capsule().fill(Theme.surfaceRaised.opacity(0.92)))
+                            .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                            .accessibilityLabel("From start")
+                            .accessibilityIdentifier("feed-from-start")
+                    }
                 }
-                .buttonStyle(.plain)
                 .padding(12)
-                .accessibilityLabel(isPlaying ? "Pause" : "Play")
             }
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
