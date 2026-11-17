@@ -5,6 +5,22 @@ import os
 import QuartzCore
 import SF2Player
 
+/// Seek and loop origin for a feed song. Missing, null, non-positive, non-finite, or past-the-end hooks start at 0.
+enum FeedPlayback {
+    static func hookStartSeconds(hookStartMs: Int64?, durationSeconds: Double) -> Double {
+        guard let ms = hookStartMs, ms > 0, durationSeconds.isFinite, durationSeconds > 0 else { return 0 }
+        let s = Double(ms) / 1000
+        guard s.isFinite, s > 0, s < durationSeconds else { return 0 }
+        return s
+    }
+
+    /// Remaining duration from the hook (or 0 if the listener chose From start). Used for listen_ratio and completed.
+    static func remainingSeconds(hookStartMs: Int64?, fromStart: Bool, durationSeconds: Double) -> Double {
+        let origin = fromStart ? 0 : hookStartSeconds(hookStartMs: hookStartMs, durationSeconds: durationSeconds)
+        return durationSeconds > origin ? durationSeconds - origin : durationSeconds
+    }
+}
+
 /// Feed playback: every song is its MIDI (`media.midi`) sequenced live through SF2Engine (sf2player-swift 6ce4941,
 /// GeneralUser GS 2.0.2) on AVAudioEngine, with the engine's reverb/chorus (CC91/93) applied in real time.
 /// Nothing is prerendered and no MP3/WAV is played. Output level matches web live playback: no LUFS
@@ -22,6 +38,10 @@ final class FeedPlayer: ObservableObject {
     @Published private(set) var isPlaying = false
     /// Seconds from `play(slug:)` to the first non-silent tap block of that song (see `timeToFirstAudio` log).
     @Published private(set) var lastTimeToFirstAudio: Double?
+    /// Clamped hook start of the active song, in seconds. 0 when missing, invalid, or not yet loaded.
+    @Published private(set) var hookOrigin: Double = 0
+    /// True after the listener chose "From start" for the active song (loop and later seeks go to 0).
+    @Published private(set) var playsFromStart = false
 
     /// Two live players (A/B) so the outgoing song can fade while the incoming one starts.
     private var active: SF2MIDIPlayer?
@@ -33,6 +53,9 @@ final class FeedPlayer: ObservableObject {
     /// fade starts, so a superseded fade task can tell it no longer owns its player.
     private var fadeGeneration = 0
     private var startTask: Task<Void, Never>?
+    private var hookStartMs: Int64?
+    /// Seconds to seek and loop back to (hook, or 0 after "From start").
+    private var loopStart: Double = 0
     var onStart: ((String) -> Void)?
     let analyzer = SpectrumAnalyzer()
     private var scope = OutputScope()
@@ -61,7 +84,11 @@ final class FeedPlayer: ObservableObject {
         let p = SF2MIDIPlayer(soundFont: sf)
         p.managesAudioSession = false // AudioSessionController owns the session (.playback, loudspeaker)
         p.fidelity = .spec
-        p.onFinished = { [weak p] in p?.seek(to: 0); p?.play() } // loop like the old feed
+        p.onFinished = { [weak self, weak p] in
+            guard let self, let p, self.active === p else { return }
+            p.seek(to: self.loopStart)
+            p.play()
+        }
         return p
     }
 
@@ -93,12 +120,16 @@ final class FeedPlayer: ObservableObject {
     }
 
     /// Call when the feed's scroll position settles on `slug`. `url` is the song's MIDI.
-    func play(slug: String, url: URL, next: (slug: String, url: URL)?) {
+    func play(slug: String, url: URL, hookStartMs: Int64? = nil, next: (slug: String, url: URL)?) {
         if currentSlug != slug {
             startTask?.cancel()
             let requested = CACurrentMediaTime()
             let outgoing = active
             currentSlug = slug
+            self.hookStartMs = hookStartMs
+            playsFromStart = false
+            hookOrigin = 0
+            loopStart = 0
             onStart?(slug)
             let midiTask = midi(slug: slug, url: url)
             let sfTask = SoundFontStore.shared.load()
@@ -141,6 +172,7 @@ final class FeedPlayer: ObservableObject {
         incoming.fadeGain = Self.incomingGain
         incoming.setMasterDynamicsEnabled(false)
         incoming.setMasterGainDb(Self.headroomGainDb)
+        applyStart(on: incoming)
         let scope = OutputScope()
         self.scope = scope
         analyzer.reset()
@@ -230,6 +262,20 @@ final class FeedPlayer: ObservableObject {
         }
     }
 
+    private func applyStart(on player: SF2MIDIPlayer) {
+        hookOrigin = FeedPlayback.hookStartSeconds(hookStartMs: hookStartMs, durationSeconds: player.duration)
+        loopStart = playsFromStart ? 0 : hookOrigin
+        if loopStart > 0 { player.seek(to: loopStart) }
+    }
+
+    /// Seek to 0 and loop from there for the rest of this song.
+    func seekToStart() {
+        playsFromStart = true
+        loopStart = 0
+        active?.seek(to: 0)
+        ImpressionLogger.shared.playFromStart()
+    }
+
     /// Song seconds of the active item from the real-time core's clock. nil when `slug` isn't active.
     func currentSeconds(for slug: String) -> Double? {
         guard slug == currentSlug, let p = active else { return nil }
@@ -266,6 +312,10 @@ final class FeedPlayer: ObservableObject {
         if let a = active { fadeOut(a); standby = a }
         active = nil
         currentSlug = nil
+        hookStartMs = nil
+        hookOrigin = 0
+        playsFromStart = false
+        loopStart = 0
         isPlaying = false
     }
 

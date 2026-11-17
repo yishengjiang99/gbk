@@ -28,6 +28,8 @@ struct Impression: Codable, Equatable {
 struct OpenImpression {
     let song: String, position: Int, feed: String, modelVersion: String
     let t0: Date
+    var hookStartMs: Int64? = nil
+    var fromStart = false
     var actions: [FeedAction] = []
     var listened: Double = 0
     var lastT: Double?
@@ -45,9 +47,16 @@ struct OpenImpression {
         lastT = t
     }
 
+    /// "From start" is a user seek, not a loop, so it must not count as a replay.
+    mutating func playFromStart() {
+        fromStart = true
+        lastT = nil
+    }
+
     func close(at now: Date, scrollV: Double? = nil) -> Impression {
         let dwell = Int((now.timeIntervalSince(t0) * 1000).rounded())
-        let ratio = duration > 0 ? listened / duration : 0
+        let remaining = FeedPlayback.remainingSeconds(hookStartMs: hookStartMs, fromStart: fromStart, durationSeconds: duration)
+        let ratio = remaining > 0 ? listened / remaining : 0
         return Impression(song: song, dwellMs: dwell, listenRatio: (ratio * 1000).rounded() / 1000,
                           completed: ratio >= 0.9 || replay, fastSkip: dwell < 2000, replay: replay, actions: actions,
                           position: position, feed: feed, modelVersion: modelVersion, ts: Int64(now.timeIntervalSince1970 * 1000),
@@ -97,10 +106,11 @@ final class ImpressionLogger {
     func markRate(stars: Int?, song: String) { mark(.rate, song: song); if let s = stars, s >= 4 { mark(.like, song: song) } }
 
     func start(song: String, position: Int, feed: String, modelVersion: String,
+               hookStartMs: Int64? = nil,
                time: @escaping @MainActor () -> Double?, duration: @escaping @MainActor () -> Double?) {
         if open?.song == song { return }
         end(); peakScrollV = 0
-        open = OpenImpression(song: song, position: position, feed: feed, modelVersion: modelVersion, t0: now())
+        open = OpenImpression(song: song, position: position, feed: feed, modelVersion: modelVersion, t0: now(), hookStartMs: hookStartMs)
         clock = (time, duration)
         if sampler == nil {
             sampler = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in Task { @MainActor in ImpressionLogger.shared.sample() } }
@@ -122,6 +132,8 @@ final class ImpressionLogger {
         open = nil; clock = nil
         if queue.count >= Self.batchSize { flush() }
     }
+
+    func playFromStart() { open?.playFromStart() }
 
     func mark(_ action: FeedAction, song: String) {
         if open?.song == song {

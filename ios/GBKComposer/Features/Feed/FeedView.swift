@@ -112,7 +112,9 @@ struct FeedView: View {
                                          onOpen: { router.openInStudio(slug: song.slug, fork: false) },
                                          onFork: { router.openInStudio(slug: song.slug, fork: true) },
                                          onRemixPrompt: { slug, prompt, title in router.remixPrompt(slug: slug, prompt: prompt, title: title) },
-                                         remixing: router.remixLoadingSlug != nil)
+                                         remixing: router.remixLoadingSlug != nil,
+                                         showFromStart: player.currentSlug == song.slug && player.hookOrigin > 0 && !player.playsFromStart,
+                                         onFromStart: { player.seekToStart() })
                             .frame(width: geo.size.width, height: geo.size.height)
                             .id(song.slug)
                             .accessibilityElement(children: .contain)
@@ -251,11 +253,13 @@ struct FeedView: View {
         guard let slug, let idx = model.items.firstIndex(where: { $0.slug == slug }),
               let url = model.items[idx].midiURL else { return }
         let p = player
+        let hook = model.items[idx].hookStartMs
         ImpressionLogger.shared.start(song: slug, position: idx, feed: model.query.sort.rawValue,
                                       modelVersion: model.modelVersions[slug] ?? "unknown",
+                                      hookStartMs: hook,
                                       time: { p.currentSeconds(for: slug) }, duration: { p.durationSeconds(for: slug) })
         let next = idx + 1 < model.items.count ? model.items[idx + 1] : nil
-        player.play(slug: slug, url: url, next: next.flatMap { n in n.midiURL.map { (slug: n.slug, url: $0) } })
+        player.play(slug: slug, url: url, hookStartMs: hook, next: next.flatMap { n in n.midiURL.map { (slug: n.slug, url: $0) } })
     }
 }
 
