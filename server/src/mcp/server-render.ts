@@ -16,6 +16,17 @@ import { McpError } from "./errors.ts";
 export type RenderFailure = Error & { code: string };
 const fail = (code: string, message: string): RenderFailure => Object.assign(new Error(message), { code });
 
+/** Hard time budget for one server render of `seconds` of audio (song + tail). Renders run at about 1.1x real
+ * time on prod, so a flat 180 s timed out 13 of 55 renders that the 180/300/600 s duration limits had admitted.
+ * Budget = 2x the length + 30 s, never below SERVER_RENDER_TIMEOUT_MS, capped at the same formula for the
+ * longest length any tier may submit, so every admitted song can finish and nothing runs unbounded. */
+export function serverRenderTimeoutMs(seconds: number, sr: Config["serverRender"]): number {
+  const budget = (s: number) => Math.ceil(2 * s * 1000) + 30_000;
+  const cap = Math.max(sr.timeoutMs, budget(Math.max(sr.guestMaxSeconds, sr.accountMaxSeconds, sr.proMaxSeconds)));
+  const want = Number.isFinite(seconds) && seconds > 0 ? budget(seconds) : sr.timeoutMs;
+  return Math.min(cap, Math.max(sr.timeoutMs, want));
+}
+
 export interface ServerRenderResult { bytes: Uint8Array; meta: Record<string, unknown> }
 /** A per-job SoundFont selection resolved by the caller (RenderService): file + provenance label. */
 export interface JobFont { sfPath: string; sfLabel: string }
@@ -121,12 +132,14 @@ export class ServerRenderPool {
     for (const slot of this.slots) {
       if (slot.task || !this.queue.length) continue;
       const t = this.queue.shift()!; slot.task = t;
+      // Per-job budget (submitServer scales it with the song length); the config value is the floor.
+      const limitMs = Math.max(this.cfg.serverRender.timeoutMs, Number(t.options.timeoutMs) || 0);
       slot.timer = setTimeout(() => {
         if (slot.task !== t) return;
         slot.task = undefined;
-        t.reject(fail("RENDER_TIMEOUT", `server render exceeded ${this.cfg.serverRender.timeoutMs} ms and was stopped; no artifact was published`));
+        t.reject(fail("RENDER_TIMEOUT", `server render exceeded ${limitMs} ms and was stopped; no artifact was published`));
         void slot.w.terminate();
-      }, this.cfg.serverRender.timeoutMs);
+      }, limitMs);
       slot.timer.unref?.();
       slot.w.postMessage({ type: "render", jobId: t.jobId, project: t.project, options: t.options,
         ...(t.font ? { soundFontPath: t.font.sfPath, soundFontLabel: t.font.sfLabel } : {}) });

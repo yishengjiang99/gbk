@@ -21,7 +21,7 @@ import { McpStore, type RenderJobRow, type CompositionRow } from "./store.ts";
 import { McpError } from "./errors.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
 import { signArtifactUrl } from "./urls.ts";
-import type { ServerRenderPool } from "./server-render.ts";
+import { serverRenderTimeoutMs, type ServerRenderPool } from "./server-render.ts";
 import { resolveRenderFont, resolveFontFile, defaultFontId } from "./soundfonts.ts";
 import { tickToSec } from "../../../src/workstation/timing.ts";
 
@@ -142,8 +142,8 @@ export class RenderService {
       return this.store.getJob(job.id, owner)!;
     }
     const options = { sampleRate: cfgFull.sampleRate, channels: cfgFull.channels, format: cfgFull.format, normalize: cfgFull.normalize, targetLufs: cfgFull.targetLufs, tailSeconds: cfgFull.tailSeconds ?? 3, maxSeconds,
-      timeoutMs: sr.timeoutMs, stallMs: sr.timeoutMs };
-    this.log({ evt: "mcp_server_render_started", user: owner, jobId: job.id, compositionId: row.id, revision: row.revision, seconds: Math.round(seconds) });
+      timeoutMs: serverRenderTimeoutMs(seconds, sr), stallMs: serverRenderTimeoutMs(seconds, sr) };
+    this.log({ evt: "mcp_server_render_started", user: owner, jobId: job.id, compositionId: row.id, revision: row.revision, seconds: Math.round(seconds), timeoutMs: options.timeoutMs });
     pool.run(job.id, owner, a.snapshot, options, (x) => { if (this.active.has(job.id)) this.store.patchJob(job.id, { progress: Math.max(0, Math.min(0.99, x)) }); }, jobFont ?? undefined)
       .then((r) => {
         if (!this.active.has(job.id)) return;
