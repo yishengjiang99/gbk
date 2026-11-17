@@ -9,7 +9,7 @@ final class ScanUITests: XCTestCase {
     private func openStudio() throws -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestScanFixture"]
-        app.launch()
+        app.launchInTestMode()
         app.tabBars.buttons["Create"].tap()
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30))

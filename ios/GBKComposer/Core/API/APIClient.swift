@@ -45,12 +45,16 @@ final class APIClient: APIClientProtocol {
     private let tokenProvider: () -> String?
     private let decoder = APIClient.makeDecoder()
 
+    private let testMode: Bool
+
     init(baseURL: URL = APIClient.defaultBaseURL,
          session: URLSession = .shared,
-         tokenProvider: @escaping () -> String? = { AuthStore.currentAccessToken() }) {
+         tokenProvider: @escaping () -> String? = { AuthStore.currentAccessToken() },
+         testMode: Bool = UITestMode.isEnabled) {
         self.baseURL = baseURL
         self.session = session
         self.tokenProvider = tokenProvider
+        self.testMode = testMode
     }
 
     func url(for endpoint: Endpoint) throws -> URL {
@@ -77,6 +81,7 @@ final class APIClient: APIClientProtocol {
         req.httpShouldHandleCookies = false
         for (k, v) in endpoint.headers { req.setValue(v, forHTTPHeaderField: k) }
         if let token = tokenProvider() { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if testMode { req.setValue(UITestMode.headerValue, forHTTPHeaderField: UITestMode.headerName) }
         return req
     }
 
