@@ -219,3 +219,28 @@ test("engagement channel records plan_select to billing (#116 modal -> #118 funn
     assert.match(sel?.detail ?? "", /reason=ai_limit/);
   } finally { await b.app.close(); }
 });
+
+test("Sandbox/Xcode purchases are accepted (allowSandbox) but never counted as trial_start/purchase", { timeout: 60_000 }, async () => {
+  const p = pki(mkdtempSync(join(tmpdir(), "iap-sandbox-")));
+  const cfg = testConfig({ COMPOSER_PUBLIC_ORIGIN: "http://composer.test", IAP_ALLOW_SANDBOX: "1", COMPOSER_ADMIN_USERS: "alice" });
+  const b = await buildApp(cfg, { model: new ScriptModel([() => reply("x")]), persist: false, logger: false, iapRoots: [p.root] });
+  b.app.addHook("preClose", (done) => { b.app.server.closeAllConnections?.(); done(); });
+  await b.app.listen({ port: 0, host: "127.0.0.1" }); const base = `http://127.0.0.1:${(b.app.server.address() as { port: number }).port}`;
+  const post = (path: string, body: unknown, h: Record<string, string> = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) });
+  const B = "com.grepawk.moviefone"; const exp = Date.now() + 30 * 86_400_000;
+  try {
+    const alice = await login(base, "code-a");
+    const totals = async () => (await (await fetch(`${base}/api/admin/billing?days=7`, { headers: { cookie: alice.cookie } })).json()).totals as Record<string, number>;
+    const g = await (await post("/api/auth/anonymous", { deviceId: "sandbox-device-00001", username: "SandBird" })).json(); const A = { authorization: `Bearer ${g.token}` };
+    const tx = (o: object = {}) => ({ transactionId: "9001", originalTransactionId: "9000", bundleId: B, productId: `${B}.pro_monthly`, expiresDate: exp, environment: "Sandbox", offerDiscountType: "FREE_TRIAL", price: 0, ...o });
+    const r = await post("/api/iap/apple", { signed_transaction: jws(p, tx()) }, A);
+    assert.equal(r.status, 200); assert.deepEqual((await r.json()).entitlements, ["pro"]); // still grants in sandbox
+    await post("/api/iap/apple", { signed_transaction: jws(p, tx({ transactionId: "9101", originalTransactionId: "9100", environment: "Xcode", offerDiscountType: undefined, price: 5990 })) }, A);
+    await post("/api/iap/apple/notifications", { signedPayload: jws(p, { notificationType: "SUBSCRIBED", notificationUUID: "sb1", data: { bundleId: B, environment: "Sandbox", signedTransactionInfo: jws(p, tx({ transactionId: "9201", originalTransactionId: "9200", offerDiscountType: undefined })) } }) });
+    let t = await totals();
+    assert.equal(t.trial_start, 0); assert.equal(t.purchase, 0);
+    // the same flow in Production counts
+    await post("/api/iap/apple", { signed_transaction: jws(p, tx({ transactionId: "9301", originalTransactionId: "9300", environment: "Production" })) }, A);
+    t = await totals(); assert.equal(t.trial_start, 1);
+  } finally { await b.app.close(); }
+});

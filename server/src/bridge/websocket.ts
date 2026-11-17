@@ -1,5 +1,6 @@
 // WebSocket endpoint /api/agent/ws: origin + session-cookie auth on upgrade, manifest reconciliation, typed
 // messages, tool RPC with pending-call tracking, run lifecycle (one run per user by default), cancel, heartbeat.
+import { classifyTraffic, withTraffic, type TrafficClass } from "../security/traffic.ts";
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
@@ -81,15 +82,17 @@ export class AgentHub {
     const s = this.sessions.fromCookie(parseCookies(req.headers.cookie)[COOKIE]);
     if (!s) { this.log({ evt: "ws_reject", reason: "auth", ip }); return reject(401, "Unauthorized"); }
     if (!this.cfg.enabled) return reject(503, "Service Unavailable");
-    this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, s.user, s.id));
+    // Telemetry audit: X-GBK-Test / gbk_test=1 (and crawler UA) carry over to everything this socket triggers.
+    const traffic = classifyTraffic(req.headers, req.url ?? "");
+    this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, s.user, s.id, traffic));
   }
 
-  private onConnection(ws: WebSocket, user: string, authSessionId: string) {
+  private onConnection(ws: WebSocket, user: string, authSessionId: string, traffic: TrafficClass = { bot: false, test: false }) {
     const conn = new BrowserConnection(user, authSessionId, ws, this);
     (ws as WebSocket & { _alive?: boolean })._alive = true;
     ws.on("pong", () => { (ws as WebSocket & { _alive?: boolean })._alive = true; conn.lastSeen = Date.now(); });
     this.log({ evt: "ws_open", user, session: conn.sessionId });
-    ws.on("message", (raw, isBinary) => {
+    ws.on("message", (raw, isBinary) => withTraffic(traffic, () => {
       conn.lastSeen = Date.now(); (ws as WebSocket & { _alive?: boolean })._alive = true;
       if (isBinary) return conn.emit({ type: "error", code: "BAD_FRAME", message: "binary frames are not accepted" });
       if (!this.sessions.isLive(authSessionId)) { conn.close(4401, "session expired"); return; }
@@ -97,7 +100,7 @@ export class AgentHub {
       try { m = JSON.parse(String(raw)); } catch { return conn.emit({ type: "error", code: "BAD_FRAME", message: "invalid JSON" }); }
       if (!m || typeof m !== "object" || typeof (m as { type?: unknown }).type !== "string") return conn.emit({ type: "error", code: "BAD_FRAME", message: "missing type" });
       this.onMessage(conn, m);
-    });
+    }));
     ws.on("close", () => {
       conn.alive = false; this.registry.detach(conn);
       conn.pending.rejectAll("BROWSER_DISCONNECTED", "browser tab disconnected");

@@ -22,6 +22,9 @@ export function iapRoutes(app: FastifyInstance, cfg: Config, d: { sessions: Sess
   const ipL = new RateLimiter(30), userL = new RateLimiter(10), hookL = new RateLimiter(300);
   const bad = (reply: FastifyReply, status: number, code: string, message: string) => reply.code(status).send({ code, message, error: status === 409 ? "Conflict" : status === 429 ? "Too Many Requests" : "Bad Request", statusCode: status });
   const envOk = (e: unknown) => e === "Production" || (cfg.iap.allowSandbox && (e === "Sandbox" || e === "Xcode"));
+  // Telemetry audit: Sandbox/Xcode purchases (TestFlight, UI tests) are accepted when allowSandbox is on but are
+  // not money: only Production transactions reach the billing funnel (trial_start/purchase/renewal/...).
+  const billable = (env: unknown) => env === "Production";
   const answer = (orig: string) => { const t = iap.get(orig)!; const on = iap.active(t, now()); return { entitlements: on ? ["pro"] : [], expires_at: t.expires_at, product_id: t.product_id, environment: t.environment }; };
 
   app.post("/api/iap/apple", { bodyLimit: 131072 }, async (req, reply) => {
@@ -41,12 +44,12 @@ export function iapRoutes(app: FastifyInstance, cfg: Config, d: { sessions: Sess
     const user = s?.user ?? tokenUser ?? prior?.user ?? null;
     if (user && ((prior?.user && prior.user !== user) || (tokenUser && tokenUser !== user))) return bad(reply, 409, "IAP_OWNED_BY_OTHER", "this purchase belongs to another account");
     if (prior && iap.seenTx(txid) && (!user || prior.user === user)) { // idempotent repost = a restore on the device
-      d.billing?.record("restore", { account: user, surface: "ios", platform: "ios", plan: planOf(tx.productId), provider: "apple", result: "success" });
+      if (billable(tx.environment)) d.billing?.record("restore", { account: user, surface: "ios", platform: "ios", plan: planOf(tx.productId), provider: "apple", result: "success" });
       return answer(orig);
     }
     iap.upsert({ original_tx: orig, last_tx: txid, user, app_token: appToken, product_id: tx.productId, environment: String(tx.environment), expires_at: products[tx.productId] === "life" ? null : Number(tx.expiresDate ?? 0) || null, revoked_at: tx.revocationDate ? Number(tx.revocationDate) : null });
     if (user && appToken) iap.bindToken(appToken, user);
-    if (!tx.revocationDate) d.billing?.record(tx.offerDiscountType === "FREE_TRIAL" ? "trial_start" : "purchase", { account: user, surface: "ios", platform: "ios", plan: planOf(tx.productId), provider: "apple", valueCents: centsOf(tx) });
+    if (!tx.revocationDate && billable(tx.environment)) d.billing?.record(tx.offerDiscountType === "FREE_TRIAL" ? "trial_start" : "purchase", { account: user, surface: "ios", platform: "ios", plan: planOf(tx.productId), provider: "apple", valueCents: centsOf(tx) });
     req.log.info({ evt: "iap_apple", user, product: tx.productId, env: tx.environment });
     return answer(orig);
   });
@@ -78,12 +81,13 @@ export function iapRoutes(app: FastifyInstance, cfg: Config, d: { sessions: Sess
       else if (type === "DID_CHANGE_RENEWAL_STATUS" || type === "DID_CHANGE_RENEWAL_PREF") { if (prior) iap.patch(orig, { auto_renew: base.auto_renew }); }
       // #118: billing funnel events from the same notification — money truth comes from Apple, not the app.
       // EXPIRED / DID_FAIL_TO_RENEW record nothing: a cancel is counted once, at AUTO_RENEW_DISABLED.
+      const bill = billable(tx.environment ?? n.data?.environment) ? d.billing : undefined;
       const bd = { account: user, surface: "server", platform: "ios", plan: planOf(tx.productId), provider: "apple", valueCents: centsOf(tx) };
-      if (type === "SUBSCRIBED") d.billing?.record(tx.offerDiscountType === "FREE_TRIAL" ? "trial_start" : "purchase", bd);
-      else if (type === "OFFER_REDEEMED") d.billing?.record("purchase", bd);
-      else if (type === "DID_RENEW") d.billing?.record(d.billing?.hasOpenTrial(user) ? "trial_convert" : "renewal", bd);
-      else if (type === "DID_CHANGE_RENEWAL_STATUS" && n.subtype === "AUTO_RENEW_DISABLED") d.billing?.record("cancel", bd);
-      else if (type === "REFUND" || type === "REVOKE") d.billing?.record("refund", bd);
+      if (type === "SUBSCRIBED") bill?.record(tx.offerDiscountType === "FREE_TRIAL" ? "trial_start" : "purchase", bd);
+      else if (type === "OFFER_REDEEMED") bill?.record("purchase", bd);
+      else if (type === "DID_RENEW") bill?.record(bill?.hasOpenTrial(user) ? "trial_convert" : "renewal", bd);
+      else if (type === "DID_CHANGE_RENEWAL_STATUS" && n.subtype === "AUTO_RENEW_DISABLED") bill?.record("cancel", bd);
+      else if (type === "REFUND" || type === "REVOKE") bill?.record("refund", bd);
     }
     req.log.info({ evt: "iap_notify", type, subtype: n.subtype ?? null });
     return { ok: true };

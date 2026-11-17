@@ -124,6 +124,14 @@ export function mcpRoutes(app: FastifyInstance, cfg: Config, sessions: SessionSt
         raw.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32002, message: "MCP session capacity reached; retry later" }, id: null })); return;
       }
       deps.funnel?.bump("mcp_connect", principal ? "account" : "guest");
+      // Telemetry audit: record WHICH client connected so our own agents can be excluded from mcp_connect.
+      const info = (first as { params?: { clientInfo?: { name?: unknown; version?: unknown } } } | undefined)?.params?.clientInfo;
+      const clientLabel = [info?.name, info?.version].filter((v) => typeof v === "string" && v).join("/");
+      const ua = String(req.headers["user-agent"] ?? "");
+      let oauthClient = "";
+      if (principal?.clientId) { try { oauthClient = deps.store.getClient(principal.clientId)?.client_name || principal.clientId; } catch { oauthClient = principal.clientId; } }
+      deps.funnel?.bumpMcpClient({ client: clientLabel, userAgent: ua, oauthClient, source: principal ? "account" : "guest" });
+      req.log.info({ evt: "mcp_connect", client: clientLabel.slice(0, 80), ua: ua.slice(0, 160), oauth_client: oauthClient.slice(0, 80), via: principal?.via ?? "guest" });
       const ac = new AbortController();
       // Abort tool work only when the client actually goes away mid-response; the request's own
       // 'close' fires as soon as the body is consumed and must not cancel the call.

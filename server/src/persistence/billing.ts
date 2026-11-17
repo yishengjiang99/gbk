@@ -9,6 +9,7 @@
 // refund/restore) and the Stripe hop POST /api/billing/stripe-events (finalcut forwards its webhook).
 import type { DatabaseSync } from "node:sqlite";
 import { BILLING_EVENTS, type BillingEvent, type FunnelStore } from "./funnel.ts";
+import { analyticsExcluded } from "../security/traffic.ts";
 
 export const BILLING_SURFACES = ["studio", "pricing", "ios", "chatgpt", "mcp", "server"] as const;
 export const BILLING_PLATFORMS = ["web", "ios", "server"] as const;
@@ -64,6 +65,9 @@ export class BillingRecorder {
   record(event: BillingEvent, dims: BillingDims = {}) {
     try {
       if (!(BILLING_EVENTS as readonly string[]).includes(event)) return;
+      // CI/UI-test (X-GBK-Test) and crawler requests never reach the aggregates or the support log: the
+      // iOS UI tests' accounts made 297 of 298 prod "signups" before this.
+      if (analyticsExcluded()) return;
       const d = {
         plan: pick(dims.plan, BILLING_PLANS), provider: pick(dims.provider, BILLING_PROVIDERS),
         surface: pick(dims.surface, BILLING_SURFACES), platform: pick(dims.platform, BILLING_PLATFORMS),

@@ -12,6 +12,7 @@ import { ACTIONS, MAX_ACTIONS, MAX_SCROLL_V, type EventStore, type Impression } 
 import { billingPlanOf, type BillingRecorder } from "../persistence/billing.ts";
 import type { BillingEvent } from "../persistence/funnel.ts";
 import { currentSession } from "./agent.ts";
+import { classifyTraffic } from "../security/traffic.ts";
 
 const GID = "gbk_gid"; const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: SessionStore, shares: ShareStore, events: EventStore, admins: string[], billing?: BillingRecorder) {
@@ -20,6 +21,10 @@ export function eventRoutes(app: FastifyInstance, cfg: Config, sessions: Session
     const s = currentSession(req, sessions); const bearer = /^Bearer /i.test(String(req.headers.authorization ?? ""));
     // Browsers always send Origin on POST; native apps (no Origin) are allowed and identify with x-gbk-install.
     if (!bearer && req.headers.origin !== undefined && !originAllowed(cfg, req.headers.origin)) return reply.code(403).send({ code: "BAD_ORIGIN", message: "cross-origin request rejected" });
+    // Telemetry audit: crawlers (meta-webindexer sent 179 of 228 web batches) and X-GBK-Test CI traffic are
+    // acknowledged but never stored, and get no gbk_gid cookie, so they cannot become "listeners".
+    const traffic = classifyTraffic(req.headers, req.url);
+    if (traffic.bot || traffic.test) { if (!ipLim.take(req.ip)) return reply.code(429).send({ code: "RATE_LIMITED", message: "slow down" }); return { ok: true, accepted: 0, ignored: traffic.bot ? "bot" : "test" }; }
     let actor = s?.user ?? null;
     if (!actor) {
       const c = parseCookies(req.headers.cookie)[GID]; const h = String(req.headers["x-gbk-install"] ?? "");
