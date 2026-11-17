@@ -61,14 +61,15 @@ enum ThirdSongGate {
     /// reappear in this install even if the engagement report is lost.
     @MainActor @discardableResult
     static func maybePresent(me: Me?, isPro: Bool, defaults: UserDefaults = .standard,
-                             present: (String) -> Void = { PurchaseStore.shared.presentPaywall(reason: $0) }) -> Bool {
+                             present: ((String) -> Void)? = nil) -> Bool {
         let seenServer = me?.paywall?.thirdSongSeen == true
         if seenServer { markSeen(defaults: defaults) }
         let seen = seenServer || seenLocal(defaults: defaults)
         let songs = me?.songCount ?? 0
         guard Paywall.shouldShowThirdSong(isPro: isPro, seen: seen, existingSongs: songs) else { return false }
         markSeen(defaults: defaults)
-        present("third_song")
+        if let present { present("third_song") }
+        else { PurchaseStore.shared.presentPaywall(reason: "third_song") }
         return true
     }
 }
