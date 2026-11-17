@@ -11,8 +11,7 @@ async function signIn(page: Page) {
   await page.getByTestId("signin-code").fill("e2e-code-4"); await page.getByTestId("signin-code-submit").click();
   await expect(page.getByTestId("signin-sheet")).toBeHidden({ timeout: 15_000 });
   await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
-  const modal = page.getByTestId("paywall-modal");
-  try { await expect(modal).toBeVisible({ timeout: 4000 }); await page.getByTestId("paywall-later").click(); } catch { /* no paywall */ }
+  await expect(page.getByTestId("paywall-modal")).toHaveCount(0); // no landing paywall (plan 2026-11-16)
 }
 async function send(page: Page, text: string) {
   await expect(async () => { await page.getByTestId("composer-input").fill(text); await expect(page.getByTestId("composer-send")).toBeVisible({ timeout: 1000 }); }).toPass({ timeout: 15_000 });

@@ -15,8 +15,10 @@ export const BILLING_SURFACES = ["studio", "pricing", "ios", "chatgpt", "mcp", "
 export const BILLING_PLATFORMS = ["web", "ios", "server"] as const;
 export const BILLING_PLANS = ["pro_monthly", "pro_yearly", "lifetime"] as const;
 export const BILLING_PROVIDERS = ["apple", "stripe"] as const;
-/** Paywall triggers from #115 (usage.ts PaywallReason) plus a manual upgrade tap. */
-export const BILLING_REASONS = ["second_composition", "export_after_2", "ai_limit", "render_limit", "landing", "manual", "profile", "studio_link"] as const;
+/** Paywall reasons: the current triggers (usage.ts PAYWALL_REASONS: export, ai_budget, render_limit, third_song),
+ *  manual/profile/studio_link upgrade taps, and the retired #115 reasons still sent by older iOS builds. */
+export const BILLING_REASONS = ["export", "ai_budget", "render_limit", "third_song", "manual", "profile", "studio_link",
+  "second_composition", "export_after_2", "ai_limit", "landing"] as const;
 /** Client-reported plan value -> billing plan id: accepts a plan slug as-is, or a StoreKit product id
  *  (suffix match, mirroring routes/iap.ts planOf) since the iOS app reports product ids (#119). */
 export const billingPlanOf = (v: string): string => ((BILLING_PLANS as readonly string[]).includes(v) ? v
@@ -77,6 +79,8 @@ export class BillingRecorder {
           typeof dims.detail === "string" ? dims.detail.slice(0, 120) : ""].filter(Boolean).join(" ").slice(0, 200),
       };
       this.funnel.bumpBilling(event, d.surface, d.platform, this.now());
+      const reason = pick(dims.reason, BILLING_REASONS);
+      if (reason) this.funnel.bumpPaywallReason(event, reason, d.surface, d.platform, this.now());
       const account = typeof dims.account === "string" && dims.account ? dims.account.slice(0, 128) : null;
       if (account && this.log) this.log.record(account, event, d);
     } catch { /* best effort */ }

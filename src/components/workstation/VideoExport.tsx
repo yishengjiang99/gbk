@@ -1,3 +1,4 @@
+import { requireExport } from "../../agent/paywall.ts";
 import { useEffect, useState } from "react";
 import { workstation } from "./useWorkstation.ts";
 import { cancelVideoExport, exportVideo, subscribeVideoExport, videoExportState } from "../../video/export-video.ts";
@@ -6,7 +7,8 @@ import { cancelVideoExport, exportVideo, subscribeVideoExport, videoExportState 
 export function VideoExportButton({ compact = false }: { compact?: boolean }) {
   const [s, setS] = useState(videoExportState);
   useEffect(() => subscribeVideoExport(setS), []);
-  const start = () => { exportVideo(workstation.project, { download: (b, n) => workstation.host.download?.(b, n) }).catch((e: Error) => alert(`Video export failed: ${e.message}`)); };
+  // A video carries the song's audio: exporting it is Pro only, like WAV/MIDI (paywall plan 2026-11-16).
+  const start = async () => { if (!(await requireExport("wav"))) return; exportVideo(workstation.project, { download: (b, n) => workstation.host.download?.(b, n) }).catch((e: Error) => alert(`Video export failed: ${e.message}`)); };
   if (s.running) return (
     <span className="ws-vexport" data-testid="video-export-progress" role="status">
       <progress max={1} value={s.progress} /> {compact ? "" : `${s.stage} `}{Math.round(s.progress * 100)}%

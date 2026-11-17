@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { renderJobs, type RenderJob } from "../../audio/render-job.ts";
 import { artifactStore, type ArtifactMeta } from "../../audio/artifact-store.ts";
+import { ExportLink } from "../composer/ExportLink.tsx";
 
 const STAGE: Record<string, string> = { queued: "Queued", loading: "Loading SoundFont / resolving instruments", rendering: "Rendering audio", encoding: "Encoding WAV", validating: "Validating output", saving: "Saving artifact", completed: "Completed", failed: "Failed", cancelled: "Cancelled" };
 const fmtBytes = (n: number) => (n > 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${(n / 1024).toFixed(0)} KB`);
@@ -49,8 +50,8 @@ export function ArtifactPanel() {
               <div className="ws-dim">WAV {a.wav?.format?.toUpperCase()} · {a.wav?.durationSeconds.toFixed(1)} s · {a.wav ? `${a.wav.sampleRate / 1000} kHz ${a.wav.channels === 2 ? "stereo" : "mono"}` : ""} · {fmtBytes(a.bytes)}</div>
               <div className="ws-dim">peak {a.wav?.peakDbFS} dBFS · RMS {a.wav?.rmsDbFS} dBFS{a.wav?.clippedSamples ? ` · ${a.wav.clippedSamples} clipped` : ""} · {new Date(a.createdAt).toLocaleTimeString()}</div>
               <div className="ws-row">
-                {urls[a.id] && <a href={urls[a.id]} download={a.filename} data-testid="artifact-download-wav">Download WAV</a>}
-                {m && urls[m.id] && <a href={urls[m.id]} download={m.filename} data-testid="artifact-download-midi">Download MIDI</a>}
+                {urls[a.id] && <ExportLink href={urls[a.id]} filename={a.filename} kind="wav" testId="artifact-download-wav">Download WAV</ExportLink>}
+                {m && urls[m.id] && <ExportLink href={urls[m.id]} filename={m.filename} kind="midi" testId="artifact-download-midi">Download MIDI</ExportLink>}
                 <button onClick={() => void artifactStore().delete(a.id).catch((e) => setError((e as Error).message))}>Delete</button>
               </div>
               {urls[a.id] && <audio controls preload="none" src={urls[a.id]} style={{ width: "100%", height: 28 }} />}

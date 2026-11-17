@@ -44,7 +44,7 @@ export const PLANS = [
 ] as const;
 
 export const FAQ: [string, string][] = [
-  ["Is GBK Composer free?", "Yes. Composing, editing, the in-chat player, browser rendering and MIDI/WAV downloads are free, with or without an account. Pro raises the limits that cost us money to run."],
+  ["Is GBK Composer free?", "Yes. Composing, editing, playback, saving and sharing to GBK Social are free, with or without an account. Exporting your songs as MIDI or WAV from GBK Studio and the iOS app is Pro (with a 7-day free trial), and Pro raises the limits that cost us money to run."],
   ["What does Pro add?", "Signed-in Pro accounts get 10× the daily AI budget for the composer agent inside GBK Studio, plus more server renders per hour and longer server renders (up to 600 s each), a longer revision history (100 snapshots kept per composition, vs 10 on Free), rendered files kept for a year (vs 30 days) and compositions up to 256 bars (vs 64). Your compositions, files and the ChatGPT plugin work the same either way."],
   ["Can I buy Pro inside ChatGPT?", "No. ChatGPT plugins may not sell subscriptions, so Pro is sold only here on compose.grepawk.com. After you buy, sign in to GBK with the same email (Google or GitHub) and your higher limits apply everywhere, including ChatGPT."],
   ["Which email does Pro attach to?", "The email you pay with at checkout. If you are signed in to GBK when you press Buy, checkout is prefilled with your GBK account email so they match."],
@@ -112,12 +112,13 @@ function pricingBody(cfg: Config, p: PricingConfig, email: string | null, notice
   // Its checkout form is a plain form[data-checkout], so the shared attribution snippet
   // (public/attribution.js, #131) fills it at submit time exactly like the card forms.
   const sticky = `<div class="sticky-cta"><p>Pro yearly: $4/month billed yearly, with a 7-day free trial.</p>${p.checkoutEnabled ? buy("pro_yearly") : `<a class="cta" href="#waitlist">Get notified</a>`}</div>`;
-  return `<h1>GBK Composer pricing</h1><p class="lead">Get 10× the AI composer budget and longer renders, up to 10 minutes each, with Pro. Every plan starts with a 7-day free trial. Free stays free: compose real, editable MIDI by describing it in a chat.</p>${notice}
+  return `<h1>GBK Composer pricing</h1><p class="lead">Export your songs as MIDI and WAV, and get 10× the AI composer budget and longer renders, up to 10 minutes each, with Pro. Every plan starts with a 7-day free trial. Free stays free: compose real, editable MIDI by describing it in a chat.</p>${notice}
 <div class="plans">${cards}${freeCard}</div>
 ${p.checkoutEnabled ? `<p>Checkout is handled by Stripe on grepawk.com. ${email ? `Pro will attach to <strong>${esc(email)}</strong>, your signed-in GBK email.` : `Tip: <a href="/studio">sign in to GBK</a> first so Pro attaches to your account email.`}</p>` : waitlist}
 <h2>Free vs Pro</h2><table class="cmp"><tr><th></th><th>Free</th><th>Pro</th></tr>
 <tr><td>Compose and edit in ChatGPT, Studio and other MCP apps</td><td>Yes</td><td>Yes</td></tr>
-<tr><td>Browser rendering, MIDI and WAV downloads</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Playback, saving and sharing to GBK Social</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Export songs as MIDI or WAV (GBK Studio and the iOS app)</td><td>No</td><td>Yes</td></tr>
 <tr><td>Server renders (no browser, e.g. Codex)</td><td>${sr.guestPerHour}/hour without an account, ${sr.accountPerHour}/hour signed in, up to ${sr.accountMaxSeconds} s</td><td>120/hour, up to 600 s</td></tr>
 <tr><td>Composer agent inside GBK Studio</td><td>Daily AI budget</td><td>10× daily AI budget</td></tr>
 <tr><td>Revision history kept per composition</td><td>10 snapshots</td><td>100 snapshots</td></tr>

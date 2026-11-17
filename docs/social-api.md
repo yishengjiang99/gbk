@@ -272,7 +272,7 @@ Mapping to an account uses `originalTransactionId`, then `appAccountToken`. Inva
 
 `pro_source: "stripe"` comes from an active Stripe subscription on grepawk.com (looked up by verified account email, cached 10 min; see `server/src/billing/stripe-pro.ts`). Stripe Pro carries no `pro_expires_at`/`pro_environment`.
 
-`Me` also has (#115) `usage: { compositions, ai_runs, renders, exports, shares, paywall_views, last_paywall_at }` (lifetime counts) and `paywall: { eligible, reason: "second_composition" | "export_after_2" | "ai_limit" | "render_limit" | null, cooldown_until: <unix ms> | null }`. Pro is never eligible; a dismiss starts a 24 h cooldown. `POST /api/me/engagement {event: "paywall_view" | "paywall_dismiss" | "export"}` (CSRF like other writes) records an impression, a dismissal or a client-side WAV/MIDI export and returns `{usage, paywall}`. None of this is exposed through MCP/ChatGPT.
+`Me` also has (#115) `usage: { compositions, ai_runs, renders, exports, shares, paywall_views, last_paywall_at }` (lifetime counts) and `paywall: { eligible, reason: "ai_budget" | "render_limit" | null, cooldown_until: <unix ms> | null, third_song_seen: boolean }` (see **Paywall** below; there is no landing / composition-count / export-count reason anymore). `POST /api/me/engagement {event: "paywall_view" | "paywall_dismiss" | "plan_select" | "export", reason?, plan?, surface?, platform?}` (CSRF like other writes) records an impression, a dismissal, a plan pick or a (Pro) client-side WAV/MIDI export and returns `{usage, paywall}`. None of this is exposed through MCP/ChatGPT.
 
 Pro from either source lifts the agent token budget and render limits.
 
@@ -283,6 +283,76 @@ Guest → Apple/Google upgrade or merge carries Apple entitlements over: purchas
 `DELETE /api/me` detaches purchases from the account. They stay re-claimable by `app_account_token` / Restore.
 
 No App Store Server API key is needed for JWS verification. An In-App Purchase key would only be needed later for lookups or refund history.
+
+## Paywall (web + iOS contract; live with the paywall plan, 2026-11-16)
+
+Free with no limit: composing, playback, saving, sharing to Social, and the daily Studio AI budget. Pro only: exporting or downloading a song (audio or MIDI). No paywall on page load. Prices are unchanged; every paywall leads with **Pro yearly** and the **7-day free trial** (`default_plan: "pro_yearly"`, `trial_days: 7`).
+
+### Reasons
+
+| `reason` | Kind | When | Server signal |
+|---|---|---|---|
+| `export` | hard (Pro only) | first and every export/download of a song, WAV or MIDI (video too, it carries the audio) | `402 PRO_REQUIRED` |
+| `ai_budget` | hard | the free daily AI budget is used up | `402 AI_BUDGET_EXHAUSTED`; `Me.paywall.reason`; agent runs fail with `TOKEN_BUDGET_EXHAUSTED` / `COST_BUDGET_EXHAUSTED` |
+| `render_limit` | hard | the free daily render limit is reached | `402 RENDER_LIMIT_REACHED`; `Me.paywall.reason` |
+| `third_song` | soft (dismissible, shown once) | a free user starts a 3rd composition (already has 2+ songs); the first two songs are fully free | never a 402; `Me.paywall.third_song_seen` |
+
+Reason strings are stable. Retired reasons (`landing`, `second_composition`, `export_after_2`, `ai_limit`) are still accepted in analytics from older app builds but are never returned.
+
+### The 402 body
+
+Every paywalled HTTP answer is `402 Payment Required` with `cache-control: no-store` and this JSON (fields may be added, never renamed or removed):
+
+```json
+{
+  "code": "PRO_REQUIRED",
+  "reason": "export",
+  "message": "Exporting songs (audio or MIDI) is a GBK Pro feature. Start the 7-day free trial to export.",
+  "signed_in": false,
+  "paywall": {
+    "reason": "export",
+    "hard": true,
+    "default_plan": "pro_yearly",
+    "trial_days": 7,
+    "pricing_url": "https://compose.grepawk.com/pricing?plan=pro_yearly&reason=export"
+  }
+}
+```
+
+| `code` | `reason` |
+|---|---|
+| `PRO_REQUIRED` | `export` |
+| `AI_BUDGET_EXHAUSTED` | `ai_budget` |
+| `RENDER_LIMIT_REACHED` | `render_limit` |
+
+`message` is user-presentable English. `signed_in` tells a client whether to offer sign-in alongside the purchase (a signed-out user can still buy on `/pricing`; Pro applies to the checkout email). iOS opens its native paywall with `paywall.reason` instead of following `pricing_url`.
+
+### `POST /api/paywall/check`
+
+Ask before a paywalled action. Session optional (cookie or bearer, like `/api/me`); no CSRF (no side effects).
+
+- `{ "action": "export", "kind": "midi" | "wav" }` → `200 { "ok": true, "pro": true }` for Pro (Apple, Stripe or admin), else `402 PRO_REQUIRED` (signed-out callers too, with `signed_in: false`). `kind` is optional.
+- `{ "action": "ai" }` → `200 { "ok": true, "pro": <bool> }`, or `402 AI_BUDGET_EXHAUSTED` for a free account over today's budget. `401 UNAUTHENTICATED` when signed out.
+- `{ "action": "render" }` → `200`, or `402 RENDER_LIMIT_REACHED`. `401` when signed out.
+- Unknown `action` / `kind` → `422 INVALID_ARGUMENT`. `429 RATE_LIMITED` above 120/min.
+
+The web Studio builds MIDI/WAV files in the browser, so it calls this before every export/download (Studio export menu, artifact Download links, player WAV export, live-take and Jam `.mid` downloads, video export, WebMCP download tools) and shows the export paywall on 402; nothing is downloaded.
+
+### Server-held downloads
+
+`GET /api/mcp/artifacts/:id?download=1` (served as `content-disposition: attachment`) answers the same `402 PRO_REQUIRED` when the artifact owner is not Pro. Without `download=1` the artifact is served inline as before: the in-chat player and Studio stream these URLs for playback, and playback is free. Shared-song media (`/api/shares/:slug/media/*`) stays public playback media.
+
+### Remembering the 3rd-song popup
+
+Show it when a free user starts a new song while already having 2+ songs and `Me.paywall.third_song_seen` is false. Report the presentation with `POST /api/me/engagement {event: "paywall_view", reason: "third_song"}` (and `paywall_dismiss` with the same reason on dismiss): either one sets `third_song_seen: true` for the account, for good (a guest → account upgrade carries it over). A `third_song` dismiss starts no cooldown. Signed-out web users are remembered in `localStorage` (`gbk.paywall.thirdSong.v1`).
+
+### Logging
+
+Each presentation is logged with its reason: `paywall_view` (and `paywall_dismiss` / `plan_select`) with `reason` through `POST /api/me/engagement` when signed in, or the anonymous `POST /api/billing/events` when signed out. Aggregates per reason are in `paywall_reasons_daily` (analytics DB) and in `GET /api/admin/billing` as `byReason`. Test traffic (`X-GBK-Test: 1` or cookie `gbk_test=1`) and crawlers are excluded.
+
+### Web inside the iOS app
+
+The Studio WebView never renders the web paywall. For `export` and `third_song` it navigates to `/pricing?plan=pro_yearly&reason=<reason>`, which the app's purchase-link intercept turns into the native paywall (read `reason` from the URL to tag `paywall_view`). The export itself is still blocked by the server.
 
 ## Rate limits
 

@@ -1,3 +1,4 @@
+import { requireExport } from "./agent/paywall.ts";
 import { playerBridge } from "./workstation/player-bridge.ts";
 import { ctlToSynth, type CtlPlayEvent } from "./workstation/controller-events.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1541,6 +1542,8 @@ export default function MidiReader({
       });
       setExportProgress(1);
       if (onBlob) { onBlob(r.blob); return r.blob; }
+      // Downloading the file is an export: Pro only (paywall plan 2026-11-16). A non-Pro user gets the export paywall.
+      if (!(await requireExport("wav"))) return r.blob;
       const url = URL.createObjectURL(r.blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1745,15 +1748,18 @@ export default function MidiReader({
     if (!liveTake) return;
     const file = liveTake.takeFile();
     if (!file) return;
-    const blob = new Blob([file.bytes as BlobPart], { type: "audio/midi" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // The .mid download is an export (Pro only, paywall plan 2026-11-16); saving the take to the playlist stays free.
+    if (await requireExport("midi")) {
+      const blob = new Blob([file.bytes as BlobPart], { type: "audio/midi" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
     try {
       const buf = file.bytes.buffer.slice(
         file.bytes.byteOffset,

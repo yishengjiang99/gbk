@@ -4,10 +4,11 @@ import type { PianoRollPreview } from "./piano-roll-preview.ts";
 
 export const LABELS = ["ambient", "lofi", "classical", "jazz", "rnb", "electronic", "cinematic", "game", "pop", "experimental", "wip"] as const;
 export interface SUser { handle: string; display_name: string; bio?: string | null; badge?: string | null; pro?: boolean; avatar_url: string | null; song_count: number; rating_avg: number | null; created_at: number }
-/** #115: lifetime engagement counters + paywall eligibility, as returned by GET /api/me. */
-export type PaywallReason = "second_composition" | "export_after_2" | "ai_limit" | "render_limit" | "landing";
+/** Paywall reasons (docs/social-api.md "Paywall"): export (hard, Pro only), ai_budget / render_limit (hard, free
+ *  daily limit), third_song (soft, once). GET /api/me only ever reports the hard daily-limit reasons. */
+export type PaywallReason = "export" | "ai_budget" | "render_limit" | "third_song";
 export interface MeUsage { compositions: number; ai_runs: number; renders: number; exports: number; shares: number; paywall_views: number; last_paywall_at: number | null }
-export interface MePaywall { eligible: boolean; reason: PaywallReason | null; cooldown_until: number | null }
+export interface MePaywall { eligible: boolean; reason: PaywallReason | null; cooldown_until: number | null; third_song_seen?: boolean }
 export interface Me extends SUser { id: string; dm_policy: "all" | "off"; handle_changed: boolean; is_admin: boolean; pro_source?: "apple" | "stripe" | null; usage?: MeUsage; paywall?: MePaywall }
 export interface Song { slug: string; title: string; url: string; author: SUser; created_at: number; published_at: number | null; labels: string[]; tags: string[]; rating_avg: number | null; rating_count: number; comment_count: number; play_count: number; fork_count: number; my_rating: number | null; media: { mp3: string | null; wav: string | null; midi: string | null }; preview: PianoRollPreview | null; prompt_shared: boolean; prompt_text: string | null; parent_slug: string | null; is_mine: boolean; share_title?: string; share_text?: string; x_intent_url?: string }
 export interface SComment { id: string; author: SUser; body: string; created_at: number; can_delete: boolean }

@@ -68,8 +68,11 @@ export function socialRoutes(app: FastifyInstance, cfg: Config, sessions: Sessio
     const b = (req.body ?? {}) as { event?: unknown; surface?: unknown; platform?: unknown; reason?: unknown; plan?: unknown };
     const ev = b.event;
     const dims = { account: s.user, surface: typeof b.surface === "string" ? b.surface : "studio", platform: typeof b.platform === "string" ? b.platform : "web", reason: typeof b.reason === "string" ? b.reason : undefined, plan: typeof b.plan === "string" ? b.plan : undefined };
+    // Paywall plan (2026-11-16): the 3rd-song popup is shown once per account — a view or dismiss with reason
+    // third_song remembers it (/api/me paywall.third_song_seen). Its dismiss starts no cooldown (it is not a gate).
+    if ((ev === "paywall_view" || ev === "paywall_dismiss") && dims.reason === "third_song") engagement.usage.markThirdSong(s.user);
     if (ev === "paywall_view") { engagement.usage.bump(s.user, "paywall_views"); engagement.billing?.record("paywall_view", dims); }
-    else if (ev === "paywall_dismiss") { engagement.usage.dismiss(s.user); engagement.billing?.record("paywall_dismiss", dims); }
+    else if (ev === "paywall_dismiss") { if (dims.reason !== "third_song") engagement.usage.dismiss(s.user); engagement.billing?.record("paywall_dismiss", dims); }
     else if (ev === "export") { engagement.usage.bump(s.user, "exports"); engagement.billing?.record("export", dims); }
     // #116/#118: plan picks from the paywall modals arrive on this channel too — billing-only (no
     // #115 usage counter exists for them); the recorder sanitizes the plan slug.

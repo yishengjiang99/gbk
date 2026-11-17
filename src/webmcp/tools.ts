@@ -1,4 +1,5 @@
 // gbk_* WebMCP tools: thin, validated wrappers over WorkstationController (no agent-only state copy).
+import { requireExport } from "../agent/paywall.ts";
 import type { WorkstationController } from "../workstation/controller.ts";
 import { WorkstationError } from "../workstation/ops.ts";
 import type { Op } from "../workstation/ops.ts";
@@ -239,14 +240,20 @@ export function buildCoreTools(c: WorkstationController): ToolDef[] {
     { name: "gbk_undo", readOnly: false, description: "Undo the agent's own last edit. The history is shared with the user: if the newest edit is the user's, this refuses with NOT_AGENT_EDIT instead of reverting their work.", inputSchema: obj({}), run: () => ({ data: { undone: c.agentUndo() } }) },
     { name: "gbk_redo", readOnly: false, description: "Redo an agent edit previously undone with gbk_undo. Refuses with NOT_AGENT_EDIT when the next redo entry is the user's edit.", inputSchema: obj({}), run: () => ({ data: { redone: c.agentRedo() } }) },
     { name: "gbk_prepare_midi_export", readOnly: false, description: "Build a Standard MIDI File (tempo/meter, timed CC, bend/pressure, programs, raw events) and offer it as a browser-local download.", inputSchema: obj({ download: { type: "boolean" } }),
-      run: (a) => { const { bytes, filename } = c.prepareMidiExport(); if (a.download !== false) c.host.download?.(bytes, filename); return { data: { filename, bytes: bytes.length, downloaded: a.download !== false && !!c.host.download } }; } },
+      run: async (a) => {
+        const { bytes, filename } = c.prepareMidiExport();
+        // Downloading is an export: Pro only (paywall plan 2026-11-16); the user sees the export paywall otherwise.
+        const allowed = a.download !== false && !!c.host.download && await requireExport("midi");
+        if (allowed) c.host.download!(bytes, filename);
+        return { data: { filename, bytes: bytes.length, downloaded: allowed, ...(a.download !== false && !allowed && c.host.download ? { reason: "PRO_REQUIRED: exporting a song is a GBK Pro feature" } : {}) } };
+      } },
     { name: "gbk_prepare_wav_export", readOnly: false, description: "Offline-render the project with the headless SF2 renderer (same engine as gbk_render_wav; no audio unlock needed). Offers a browser download unless download is false (legacy behavior); prefer gbk_render_wav for artifacts and byte transfer.", inputSchema: obj({ download: { type: "boolean" }, normalize: { type: "string", enum: ["loudness", "peak", "off"], description: "whole-file level (default loudness: -16 LUFS, <= -1 dBTP)" } }),
       run: async (a, signal) => {
         if (!c.host.renderWav) throw new WorkstationError("UNSUPPORTED", "no renderer in this runtime");
         const blob = await c.host.renderWav(c.project, signal, a.normalize as "loudness" | "peak" | "off" | undefined);
         if (signal.aborted) throw new WorkstationError("OPERATION_CANCELLED", "cancelled");
         const filename = `${c.project.name.replace(/[^\w\- .]/g, "_").slice(0, 80) || "gbk"}.wav`;
-        const requested = a.download !== false && !!c.host.download && c.host.download(blob, filename) !== false;
+        const requested = a.download !== false && !!c.host.download && await requireExport("wav") && c.host.download(blob, filename) !== false;
         return { data: { filename, bytes: blob.size, downloadRequested: requested } };
       } },
   ];

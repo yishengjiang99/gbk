@@ -24,14 +24,9 @@ async function signIn(page: Page, code = "e2e-code") {
   await expect(composerConn(page)).toHaveAttribute("data-state", "connected", { timeout: 30_000 });
 }
 
-/** The landing paywall greets a fresh signed-in user ~1 s after load and covers the Studio. Dismiss it
- * when it appears so compose flows can proceed; the dismissal starts the server-side 24 h cooldown,
- * which also means no composition-triggered soft paywall appears later in the flow. */
+/** The landing paywall is gone (paywall plan 2026-11-16): nothing covers the app after a page load. */
 async function dismissLandingPaywall(page: Page) {
-  const modal = page.getByTestId("paywall-modal");
-  try { await expect(modal).toBeVisible({ timeout: 10_000 }); } catch { return; }
-  await page.getByTestId("paywall-later").click();
-  await expect(modal).toHaveCount(0);
+  await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
 }
 
 test("compose a fugue through the server agent, render a valid WAV, follow-up edit, share + fork", async ({ page, browser }) => {
@@ -114,10 +109,8 @@ test("compose a fugue through the server agent, render a valid WAV, follow-up ed
   expect(JSON.stringify(after.voice)).toMatch(/"gen":8|filterCutoff|"value"/);
   await page.screenshot({ path: `${SHOTS}/composer-e2e-followup.png` });
 
-  // The landing paywall was dismissed right after sign-in, so this user is inside the 24 h dismiss
-  // cooldown: the follow-up (their 2nd composition) raises NO soft paywall, and the publish offer below
-  // is not gated by a paywall decision. (Before the landing trigger, this beat asserted the
-  // second_composition modal; the trigger itself is covered by the dedicated paywall test + unit tests.)
+  // No composition-count paywall (plan 2026-11-16): the follow-up raises no paywall, and the publish offer below
+  // is not held by a paywall decision. Paywall triggers are covered by paywall.spec.ts + unit tests.
   await page.waitForTimeout(3_000); // let the run-completed eligibility check settle
   await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
 
@@ -442,8 +435,7 @@ test("mobile composer view: each reply is a version card; older versions play an
   await page.getByTestId("composer-input").fill("Make the cello darker"); await page.getByTestId("composer-send").click();
   const v2 = page.locator("[data-testid=version-card][data-version='2']"); await expect(v2).toBeVisible({ timeout: 240_000 });
   await expect(v2).toHaveAttribute("data-current", "1");
-  // The landing paywall was dismissed right after sign-in (24 h cooldown), so the 2nd composition raises
-  // no soft paywall in the phone studio either — nothing covers the version restore below.
+  // No composition-count paywall (plan 2026-11-16): nothing covers the version restore below.
   await page.waitForTimeout(2_000);
   await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
   const v1 = page.locator("[data-testid=version-card][data-version='1']"); await expect(v1).toHaveAttribute("data-current", "0");
@@ -488,93 +480,7 @@ test("mobile composer view: in the iOS app (gbkNative) the + sheet has two rows,
   await inputOk(page, "app + sheet");
 });
 
-// Landing paywall + #116. The modal greets a non-Pro user right after landing (reason "landing"; annual
-// preselected, trial CTA, view + dismiss recorded server-side); the dismiss starts a 24 h cooldown that
-// also silences the composition triggers; the hard variant still blocks on a budget failure. A dedicated
-// access-code user (paywall:e2e-code-3) keeps the per-user usage counters deterministic.
-test("paywall modal: landing right after sign-in, dismiss cooldown silences composition triggers, hard variant blocks", async ({ page }) => {
-  test.skip(test.info().project.name !== "chrome-no-webmcp", "paywall flow runs on desktop Chrome only");
-  page.on("pageerror", (e) => console.log("pageerror", e.message));
-  await page.goto("/");
-  await expect(page.getByTestId("social-app")).toBeVisible();
-  await (await studioReveal(page, "tab-create")).click();
-  await expect(page).toHaveURL(/\/studio$/);
-  await expect(page.getByTestId("workstation")).toBeVisible();
-  await signIn(page, "e2e-code-3");
-  await expect(page.getByTestId("starter-prompts")).toBeVisible();
-
-  const me = () => page.evaluate(async () => { const r = await fetch("/api/me", { credentials: "same-origin" }); return r.ok ? (await r.json()) as any : null; });
-  expect((await me())?.usage?.compositions ?? 0).toBe(0);
-  expect((await me())?.paywall?.reason).toBe("landing");
-
-  // --- landing: the soft paywall greets the fresh signed-in user (the host checks once on mount).
-  const modal = page.getByTestId("paywall-modal");
-  await expect(modal).toBeVisible({ timeout: 30_000 });
-  await expect(modal).toHaveAttribute("data-kind", "soft");
-  await expect(modal).toHaveAttribute("data-reason", "landing");
-  await expect(page.getByTestId("paywall-plan-pro_yearly")).toHaveClass(/sel/); // annual preselected
-  await expect(page.getByTestId("paywall-cta")).toHaveText("Start 7-day free trial");
-  await page.screenshot({ path: `${SHOTS}/composer-e2e-paywall-soft.png` });
-  await expect.poll(async () => (await me())?.usage?.paywall_views, { timeout: 15_000 }).toBe(1); // paywall_view recorded
-
-  // --- dismiss: modal gone, and the server recorded the dismiss (24 h cooldown in /api/me.paywall).
-  await page.getByTestId("paywall-later").click();
-  await expect(modal).toHaveCount(0);
-  await expect.poll(async () => (await me())?.paywall?.cooldown_until ?? 0, { timeout: 15_000 }).toBeGreaterThan(Date.now());
-
-  // --- 1st composition: counted, but no paywall (the dismiss cooldown silences every soft trigger).
-  await page.getByTestId("composer-input").fill(PROMPT);
-  await page.getByTestId("composer-input").press("Enter");
-  await expect(page.getByTestId("composer-log").getByTestId("version-card")).toBeVisible({ timeout: 540_000 });
-  await expect(page.getByTestId("publish-dialog")).toBeVisible({ timeout: 30_000 }); // autosave offer, as in the fugue flow
-  await page.getByTestId("publish-cancel").click();
-  await page.waitForTimeout(3_000); // let the run-completed eligibility check settle
-  await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
-  expect((await me())?.usage?.compositions).toBe(1);
-
-  // --- 2nd composition: second_composition would fire, but the cooldown keeps the modal away; the
-  // publish offer still arrives (the paywall gate releases it once the decision settles).
-  await page.getByTestId("composer-input").fill("Make the cello darker and reduce the reverb.");
-  await page.getByTestId("composer-send").click();
-  await expect(page.getByTestId("assistant-text").last()).toContainText("cello is darker", { timeout: 120_000 });
-  await expect(page.getByTestId("publish-dialog")).toBeVisible({ timeout: 30_000 });
-  await page.getByTestId("publish-cancel").click();
-  await page.waitForTimeout(3_000);
-  await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
-  expect((await me())?.usage?.compositions).toBe(2);
-
-  // --- hard variant: a budget failure blocks with the reset time; Escape does not dismiss it.
-  const budgetFail = () => page.evaluate(() => window.dispatchEvent(new CustomEvent("gbk:run-failed", { detail: { runId: "e2e-paywall", code: "TOKEN_BUDGET_EXHAUSTED", message: "budget" } })));
-  // Dispatch until the host picks it up (a dispatch that lands before the listener mounts is a no-op;
-  // re-dispatching while the modal is open is also a no-op, so polling this is safe).
-  await expect.poll(async () => { await budgetFail(); return modal.count(); }, { timeout: 30_000 }).toBe(1);
-  await expect(modal).toBeVisible();
-  await expect(modal).toHaveAttribute("data-kind", "hard");
-  await expect(modal).toHaveAttribute("data-reason", "ai_limit");
-  await expect(page.getByTestId("paywall-reset")).toContainText("resets at");
-  await page.screenshot({ path: `${SHOTS}/composer-e2e-paywall-hard.png` });
-  await page.keyboard.press("Escape");
-  await expect(modal).toBeVisible(); // hard modals are not Escape-dismissable
-  await page.getByTestId("paywall-continue").click(); // "Continue free" closes it (dismiss recorded)
-  await expect(modal).toHaveCount(0);
-  await budgetFail();
-  await page.waitForTimeout(2_000);
-  await expect(modal).toHaveCount(0); // a dismissed hard reason stays dismissed for the session
-
-  // --- plan_select + CTA: a fresh page session re-arms the hard gate; picking monthly fires plan_select
-  // through POST /api/me/engagement and navigates to /pricing with the plan attached.
-  await page.goto("/studio");
-  await expect(page.getByTestId("workstation")).toBeVisible();
-  await expect.poll(async () => { await budgetFail(); return modal.count(); }, { timeout: 30_000 }).toBe(1);
-  await expect(modal).toBeVisible();
-  await page.getByTestId("paywall-plan-pro_monthly").click();
-  await expect(page.getByTestId("paywall-plan-pro_monthly")).toHaveClass(/sel/);
-  const planSelect = page.waitForRequest((r) => r.url().includes("/api/me/engagement") && (r.postDataJSON() as any)?.event === "plan_select", { timeout: 15_000 });
-  await page.getByTestId("paywall-cta").click();
-  const body = (await planSelect).postDataJSON() as any;
-  expect(body.plan).toBe("pro_monthly"); expect(body.surface).toBe("studio"); expect(body.platform).toBe("web"); expect(body.reason).toBe("ai_limit");
-  await expect(page).toHaveURL(/\/pricing\?plan=pro_monthly/, { timeout: 20_000 });
-});
+// Paywall flows (no landing paywall, export block, 3rd-song popup, hard gates) live in paywall.spec.ts.
 
 test("mobile composer view: a just-loaded song's card has no Publish until it is edited; the input auto-grows and shrinks", async ({ page }) => {
   test.skip(!test.info().project.name.startsWith("mobile"), "phone layout");

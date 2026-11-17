@@ -1,4 +1,5 @@
 // Live Jam web UI: lobby (create / join by link or code) and the room (players, instrument, keyboard, mix, panic).
+import { requireExport } from "../../agent/paywall.ts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import "./jam.css";
 import { appUrl, navigate } from "../../agent/routes.ts";
@@ -179,7 +180,7 @@ function TakePanel({ session }: { session: JamSession }) {
   const tk = session.take; const [, tick] = useState(0); const [msgTxt, setMsg] = useState("");
   useEffect(() => { if (!tk.recording) return; const i = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(i); }, [tk.recording]);
   const has = !tk.recording && tk.stopMs > 0;
-  const download = () => { const p = session.takeProject(); const blob = new Blob([serializeSmf(p) as BlobPart], { type: "audio/midi" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "live-jam-take.mid"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10_000); };
+  const download = async () => { if (!(await requireExport("midi"))) return; const p = session.takeProject(); const blob = new Blob([serializeSmf(p) as BlobPart], { type: "audio/midi" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "live-jam-take.mid"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10_000); };
   const openStudio = async () => { const p = session.takeProject(); await midiFileStore.putProject({ id: p.id, schemaVersion: PROJECT_SCHEMA_VERSION, savedAt: Date.now(), project: p }); setMsg("Saved. Open Studio to edit it or export WAV."); navigate("studio"); };
   return <div className="jam-row jam-take" data-testid="jam-take" data-notes={tk.count} data-recording={tk.recording ? "1" : "0"}>
     <strong>Take</strong>

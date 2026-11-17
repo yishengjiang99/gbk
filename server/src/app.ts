@@ -32,6 +32,7 @@ import { FunnelStore } from "./persistence/funnel.ts";
 import { BillingLog, BillingRecorder } from "./persistence/billing.ts";
 import { funnelRoutes } from "./routes/funnel.ts";
 import { billingRoutes } from "./routes/billing.ts";
+import { paywallRoutes } from "./routes/paywall.ts";
 import { adminReadRoutes } from "./routes/admin-read.ts";
 import { AdsConversions, adsConfig } from "./ads/conversions.ts";
 import { galleryRoutes } from "./routes/gallery.ts";
@@ -142,8 +143,11 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   runtime.onUsage = (u, c) => { usage.bump(u, c); if (c === "compositions") billComposition(u, "studio", "web"); };
   app.addHook("onResponse", async (req, reply) => { if (req.method === "POST" && req.routeOptions.url === "/api/shares" && reply.statusCode < 300) { const s = currentSession(req, sessions); if (s) { usage.bump(s.user, "shares"); if (!isExcludedRequest(req.headers, req.url)) billing.record("share_published", { account: s.user, surface: "studio", platform: "web" }); } } });
   iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now, billing });
-  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits,
-    { usage, billing, aiLimit: (u) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens, renderLimit: (u) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders });
+  const aiLimit = (u: string) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens;
+  const renderLimit = (u: string) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders;
+  const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits, { usage, billing, aiLimit, renderLimit });
+  // Paywall plan (2026-11-16): export is Pro only; the same unified Pro predicate /api/me uses (Apple OR Stripe OR admin).
+  paywallRoutes(app, cfg, sessions, { pro: (u) => !!limits.for(u).pro || !!iap.pro(u).pro, refresh: (u) => limits.refresh(u), aiLimit, renderLimit });
   eventRoutes(app, cfg, sessions, shares, events, cfg.adminUsers, billing);
   // #130: server-side X/Reddit conversions, off unless the pixel ids + API credentials are in env (same env as /pricing pixels).
   const ads = new AdsConversions(adsConfig(process.env), { fetch: deps.fetch, log: (o) => app.log.warn(o) });

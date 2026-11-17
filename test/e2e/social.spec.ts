@@ -5,14 +5,9 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { readFileSync } from "node:fs";
 
 const project = JSON.parse(readFileSync(new URL("../fixtures/social-song.json", import.meta.url), "utf8"));
-/** The landing paywall greets a freshly signed-in non-Pro user ~1 s after a page load and covers the
- * app. Dismiss it when it appears so feed/studio clicks are not blocked; tolerant when it does not
- * come (guest page, Pro, or the account is inside the dismiss cooldown). */
+/** The landing paywall is gone (paywall plan 2026-11-16): nothing covers the app after a page load. */
 async function dismissLandingPaywall(page: Page) {
-  const modal = page.getByTestId("paywall-modal");
-  try { await expect(modal).toBeVisible({ timeout: 10_000 }); } catch { return; }
-  await page.getByTestId("paywall-later").click();
-  await expect(modal).toHaveCount(0);
+  await expect(page.getByTestId("paywall-modal")).toHaveCount(0);
 }
 
 /** The Studio title is a text element in MobileStudio but an <input> (ds-title) in DesktopStudio;
