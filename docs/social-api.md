@@ -291,6 +291,7 @@ Per user + IP, in-memory: comments 10/min, ratings 60/min, DMs 20/min, reports 1
 ## Feed events (impressions)
 `POST /api/events` body `{session, client, events:[{song, dwell_ms, listen_ratio, completed, fast_skip?, actions?, model_version, position, feed?}]}`. It returns `{accepted}`.
 - Actor: the session user, else the `gbk_gid` cookie or the `x-gbk-install` header.
+- Not stored: crawler user agents (`server/src/security/traffic.ts` BOT_UA_RE) and CI/UI-test traffic, marked with the `X-GBK-Test: 1` header or the `gbk_test=1` cookie. Both get `{ ok: true, accepted: 0, ignored: "bot" | "test" }` and no `gbk_gid` cookie. The same marker keeps test traffic out of every funnel and billing aggregate (signups included), on HTTP and on `/api/agent/ws`.
 - Limits: ≤50 events per batch, 30 batches/min per actor.
 - `GET /api/feed` (For you, unfiltered) accepts `session=` and returns `model_version` (`heur-2` or `lr-YYYYMMDD`).
 - Admin: `GET /api/admin/metrics?days=7`.

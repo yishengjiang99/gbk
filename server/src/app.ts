@@ -59,6 +59,7 @@ import type { McpMetrics } from "./mcp/server.ts";
 import { JamRooms } from "./jam/rooms.ts";
 import { JamSignaling } from "./jam/signaling.ts";
 import { jamRoutes } from "./routes/jam.ts";
+import { withTraffic, classifyTraffic, isExcludedRequest } from "./security/traffic.ts";
 
 export const VERSION = process.env.GBK_COMPOSER_VERSION ?? "dev";
 
@@ -82,6 +83,9 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
   const shares = new ShareStore(persist ? join(cfg.dataDir, "shares.sqlite") : ":memory:");
   const hub = new AgentHub(cfg, sessions, runtime, catalog, convs, new RateLimiter(cfg.security.messagesPerMinute), new RateLimiter(cfg.security.ipRequestsPerMinute), (o) => app.log.info(o));
   const ipLimiter = new RateLimiter(cfg.security.ipRequestsPerMinute);
+  // Telemetry audit: crawler UAs and X-GBK-Test traffic stay out of aggregate analytics. Callback-style so the
+  // rest of the request (hooks + handler) runs inside the AsyncLocalStorage scope.
+  app.addHook("onRequest", (req, _reply, done) => withTraffic(classifyTraffic(req.headers, req.url), done));
   app.addHook("onRequest", async (req, reply) => {
     if (req.url.startsWith("/api/health")) return;
     // MCP + OAuth discovery are exempt from the per-IP limiter: hosted MCP clients share egress IPs and
@@ -136,7 +140,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     if (usage.usage(u).compositions === 1) billing.record("first_composition", { account: u, surface, platform });
   };
   runtime.onUsage = (u, c) => { usage.bump(u, c); if (c === "compositions") billComposition(u, "studio", "web"); };
-  app.addHook("onResponse", async (req, reply) => { if (req.method === "POST" && req.routeOptions.url === "/api/shares" && reply.statusCode < 300) { const s = currentSession(req, sessions); if (s) { usage.bump(s.user, "shares"); billing.record("share_published", { account: s.user, surface: "studio", platform: "web" }); } } });
+  app.addHook("onResponse", async (req, reply) => { if (req.method === "POST" && req.routeOptions.url === "/api/shares" && reply.statusCode < 300) { const s = currentSession(req, sessions); if (s) { usage.bump(s.user, "shares"); if (!isExcludedRequest(req.headers, req.url)) billing.record("share_published", { account: s.user, surface: "studio", platform: "web" }); } } });
   iapRoutes(app, cfg, { sessions, iap, roots: deps.iapRoots ?? [appleRoot()], now: deps.now, billing });
   const socialApi = socialRoutes(app, cfg, sessions, shares, accounts, social, notify, ranker, iap, limits,
     { usage, billing, aiLimit: (u) => ledger.snapshot(u).dayTokens >= limits.for(u).dailyTokens, renderLimit: (u) => mcpStore.countJobsSince(u, 86_400_000) >= limits.for(u).dailyRenders });

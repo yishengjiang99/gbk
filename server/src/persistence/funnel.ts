@@ -4,6 +4,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { analyticsExcluded } from "../security/traffic.ts";
 
 export const FUNNEL_EVENTS = [
   "page_view_landing", "page_view_chatgpt", "page_view_legal",
@@ -38,15 +39,36 @@ export class FunnelStore {
       CREATE TABLE IF NOT EXISTS funnel_daily (day TEXT NOT NULL, event TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (day, event, source));
       CREATE TABLE IF NOT EXISTS billing_daily (day TEXT NOT NULL, event TEXT NOT NULL, surface TEXT NOT NULL DEFAULT '', platform TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (day, event, surface, platform));`);
+        PRIMARY KEY (day, event, surface, platform));
+      CREATE TABLE IF NOT EXISTS mcp_clients_daily (day TEXT NOT NULL, client TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', oauth_client TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, client, user_agent, oauth_client, source));`);
   }
   /** Never throws: analytics must not break the request it observes. Unknown events/sources are dropped. */
   bump(event: FunnelEvent, source: FunnelSource = "", now = Date.now()) {
     if (!(FUNNEL_EVENTS as readonly string[]).includes(event) || !(FUNNEL_SOURCES as readonly string[]).includes(source)) return;
+    if (analyticsExcluded()) return; // crawler UA or X-GBK-Test request (security/traffic.ts)
     try {
       this.db.prepare("INSERT INTO funnel_daily (day, event, source, count) VALUES (?,?,?,1) ON CONFLICT(day, event, source) DO UPDATE SET count = count + 1")
         .run(new Date(now).toISOString().slice(0, 10), event, source);
     } catch { /* best effort */ }
+  }
+  /** Which MCP client sent an initialize (telemetry audit): the MCP clientInfo name/version, the HTTP user agent
+   * and the OAuth client name. Client software labels, never user identities, so metrics queries can drop our own
+   * agents (python-requests, Cursor/1.0.0, "GBK reviewer-login live check") from mcp_connect. Never throws. */
+  bumpMcpClient(c: { client?: string; userAgent?: string; oauthClient?: string; source?: FunnelSource }, now = Date.now()) {
+    if (analyticsExcluded()) return;
+    const clean = (v: unknown, n: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, n) : "");
+    const source = (FUNNEL_SOURCES as readonly string[]).includes(c.source ?? "") ? c.source ?? "" : "";
+    try {
+      this.db.prepare("INSERT INTO mcp_clients_daily (day, client, user_agent, oauth_client, source, count) VALUES (?,?,?,?,?,1) ON CONFLICT(day, client, user_agent, oauth_client, source) DO UPDATE SET count = count + 1")
+        .run(new Date(now).toISOString().slice(0, 10), clean(c.client, 80), clean(c.userAgent, 160), clean(c.oauthClient, 80), source);
+    } catch { /* best effort */ }
+  }
+  /** mcp_connect broken down by client over the last `days` UTC days, biggest first. */
+  mcpClients(days = 30, now = Date.now()) {
+    const since = new Date(now - (Math.max(1, days) - 1) * 86_400_000).toISOString().slice(0, 10);
+    return this.db.prepare("SELECT client, user_agent, oauth_client, source, SUM(count) AS count FROM mcp_clients_daily WHERE day >= ? GROUP BY client, user_agent, oauth_client, source ORDER BY count DESC LIMIT 200")
+      .all(since) as { client: string; user_agent: string; oauth_client: string; source: string; count: number }[];
   }
   /** Totals per event (and per source) over the last `days` UTC days, plus a per-day series. */
   summary(days = 30, now = Date.now()) {
@@ -61,7 +83,7 @@ export class FunnelStore {
       (byDay[r.day] ??= {})[r.event] = ((byDay[r.day] ??= {})[r.event] ?? 0) + r.count;
     }
     const rate = (a: string, b: string) => (totals[b] ? +(totals[a] / totals[b]).toFixed(3) : null);
-    return { since, days, totals, bySource, byDay,
+    return { since, days, totals, bySource, byDay, mcpClients: this.mcpClients(days, now),
       conversion: { createPerConnect: rate("create", "mcp_connect"), renderPerCreate: rate("render_requested", "create"),
         browserRenderPerRequest: rate("browser_render_completed", "render_requested"), downloadPerCreate: totals.create ? +((totals.midi_download + totals.wav_download) / totals.create).toFixed(3) : null,
         firstToolCallPerConnect: rate("first_tool_call", "mcp_connect"), serverRenderPerRequest: rate("server_render_completed", "render_requested"),
@@ -71,6 +93,7 @@ export class FunnelStore {
    * by the caller (BillingRecorder); they are segments, never identities. */
   bumpBilling(event: BillingEvent, surface = "", platform = "", now = Date.now()) {
     if (!(BILLING_EVENTS as readonly string[]).includes(event)) return;
+    if (analyticsExcluded()) return;
     try {
       this.db.prepare("INSERT INTO billing_daily (day, event, surface, platform, count) VALUES (?,?,?,?,1) ON CONFLICT(day, event, surface, platform) DO UPDATE SET count = count + 1")
         .run(new Date(now).toISOString().slice(0, 10), event, surface.slice(0, 32), platform.slice(0, 32));
