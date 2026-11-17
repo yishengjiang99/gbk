@@ -67,10 +67,18 @@ enum Endpoints {
 
     // MARK: Profiles (P1, live)
     static let me = Endpoint(path: "/api/me")
-    /// Paywall engagement report (#115): `event` is `paywall_view`, `paywall_dismiss` or `export`;
-    /// the reply carries the fresh `{ usage, paywall }`.
-    static func meEngagement(event: String) -> Endpoint {
-        Endpoint(path: "/api/me/engagement", method: .post, body: ["event": event])
+    /// Paywall engagement report: `event` is `paywall_view`, `paywall_dismiss`, `plan_select` or `export`.
+    /// The reply carries the fresh `{ usage, paywall }`. `reason` tags the view/dismiss (e.g. `third_song`).
+    static func meEngagement(event: String, reason: String? = nil) -> Endpoint {
+        var body: [String: Any] = ["event": event]
+        if let reason, !reason.isEmpty { body["reason"] = reason }
+        return Endpoint(path: "/api/me/engagement", method: .post, body: body)
+    }
+    /// Ask before a paywalled export. `{ action: "export", kind: "midi"|"wav" }` → 200 or 402 PRO_REQUIRED.
+    static func paywallCheck(action: String, kind: String? = nil) -> Endpoint {
+        var body: [String: Any] = ["action": action]
+        if let kind { body["kind"] = kind }
+        return Endpoint(path: "/api/paywall/check", method: .post, body: body)
     }
     static func user(_ handle: String, cursor: String?) -> Endpoint { Endpoint(path: "/api/users/\(pathSegment(handle.hasPrefix("@") ? String(handle.dropFirst()) : handle))", query: q("cursor", cursor)) }
 

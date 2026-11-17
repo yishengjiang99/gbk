@@ -315,6 +315,13 @@ extension StudioWebView {
         let r = try? await web.callAsyncJavaScript(Self.entryScript, arguments: ["waitForRestore": waitForRestore, "afterPublish": afterPublish], contentWorld: .page)
         // Verdict only: the project JSON and URL are user content and don't belong in the device log.
         NSLog("[gbk.create-entry] restore=%@ afterPublish=%@ -> %@", "\(waitForRestore)", "\(afterPublish)", ((r as? String) ?? "nil").components(separatedBy: " ").first ?? "")
+        if (r as? String)?.hasPrefix("new ") == true {
+            let me = AuthStore.shared.me
+            let isPro = PurchaseStore.shared.isPro || (me?.hasActivePro() ?? false)
+            if ThirdSongGate.maybePresent(me: me, isPro: isPro) {
+                PaywallTriggerWatcher.shared.report("paywall_view", "third_song")
+            }
+        }
     }
 }
 
@@ -566,11 +573,23 @@ struct WebView: UIViewRepresentable {
             mainFrame && (last.map { now.timeIntervalSince($0) >= paywallDebounce } ?? true)
         }
 
-        private func interceptPurchase(mainFrame: Bool) {
+        /// `reason` on /pricing?plan=pro_yearly&reason=<export|third_song|…>; untagged links stay `studio_link`.
+        static func paywallReason(from url: URL?) -> String {
+            let items = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
+            if let reason = items?.first(where: { $0.name == "reason" })?.value?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !reason.isEmpty { return reason }
+            return "studio_link"
+        }
+
+        private func interceptPurchase(mainFrame: Bool, url: URL?) {
             let now = Date()
             guard Self.shouldPresentPaywall(mainFrame: mainFrame, last: lastPaywallAt, now: now) else { return }
             lastPaywallAt = now
-            Task { @MainActor in PurchaseStore.shared.presentPaywall(reason: "studio_link") }
+            let reason = Self.paywallReason(from: url)
+            Task { @MainActor in
+                if reason == "third_song" { ThirdSongGate.markSeen() }
+                PurchaseStore.shared.presentPaywall(reason: reason)
+            }
         }
 
         /// Server redirects can land on checkout after an allowed request: check the final response URL too.
@@ -578,7 +597,7 @@ struct WebView: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
             guard Self.isPurchaseLink(navigationResponse.response.url) else { return decisionHandler(.allow) }
             decisionHandler(.cancel)
-            interceptPurchase(mainFrame: navigationResponse.isForMainFrame)
+            interceptPurchase(mainFrame: navigationResponse.isForMainFrame, url: navigationResponse.response.url)
         }
 
         /// A main-frame navigation to a song page (/s/<slug>) becomes the native share deep link.
@@ -591,7 +610,7 @@ struct WebView: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if Self.isPurchaseLink(action.request.url) {
                 decisionHandler(.cancel)
-                interceptPurchase(mainFrame: action.targetFrame?.isMainFrame == true)
+                interceptPurchase(mainFrame: action.targetFrame?.isMainFrame == true, url: action.request.url)
             } else if let link = Self.songLink(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) {
                 let allowed = Self.allowsSongPage(songPageAllowance, link: link, now: Date())
                 songPageAllowance = nil

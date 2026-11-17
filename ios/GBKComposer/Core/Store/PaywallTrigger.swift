@@ -45,54 +45,36 @@ struct PaywallTriggerState: Equatable {
     }
 }
 
-/// Pure trigger logic (#123): one `/api/me` snapshot in, a presentation decision out.
-/// Soft triggers (`second_composition`, `export_after_2`) present on the eligibility flip — at
-/// most once per distinct reason, and at most once per 24 h (the persisted cooldown, anchored at
-/// both the last soft presentation and the last dismissal). Hard reasons (`ai_limit`,
-/// `render_limit`) present immediately, once per episode, cooldown or not: the user is blocked,
-/// not nudged. Pro users never see a trigger. Episode markers re-arm when the reason clears.
+/// Pure trigger logic: one `/api/me` snapshot in, a presentation decision out.
+/// Only hard reasons from `/api/me` (`ai_budget`, `render_limit`) auto-present, once per episode,
+/// cooldown or not: the user is blocked, not nudged. Pro users never see a trigger. Episode
+/// markers re-arm when the reason clears. Soft `third_song` is not on this snapshot — it is
+/// decided when a free user starts a new song (`ThirdSongGate`).
 struct PaywallTriggerEngine {
     static let cooldown: TimeInterval = 24 * 3_600
     private(set) var state: PaywallTriggerState
 
     init(state: PaywallTriggerState = PaywallTriggerState()) { self.state = state }
 
-    mutating func evaluate(paywall: MePaywall?, isPro: Bool, now: Date) -> PaywallTriggerDecision {
-        guard !isPro, let paywall, let reason = paywall.reason else {
-            state.softEpisodeReason = nil
+    mutating func evaluate(paywall: MePaywall?, isPro: Bool, now _: Date) -> PaywallTriggerDecision {
+        guard !isPro, let paywall, let reason = paywall.reason, MePaywall.isHard(reason) else {
             state.hardEpisodeReason = nil
             return .none
         }
-        if MePaywall.hardReasons.contains(reason) {
-            guard state.hardEpisodeReason != reason else { return .none }
-            state.hardEpisodeReason = reason
-            return .present(reason: reason, hard: true)
-        }
-        state.hardEpisodeReason = nil // a non-hard snapshot ends any hard episode
-        guard MePaywall.softReasons.contains(reason) else {
-            state.softEpisodeReason = nil
-            return .none
-        }
-        guard paywall.eligible else { return .none } // server cooldown, or the trigger is not armed
-        guard state.softEpisodeReason != reason else { return .none } // already shown for this trigger
-        if let t = state.lastDismissedAt, now.timeIntervalSince(t) < Self.cooldown { return .none }
-        if let t = state.lastSoftShownAt, now.timeIntervalSince(t) < Self.cooldown { return .none }
-        state.softEpisodeReason = reason
-        state.lastSoftShownAt = now
-        return .present(reason: reason, hard: false)
+        guard state.hardEpisodeReason != reason else { return .none }
+        state.hardEpisodeReason = reason
+        return .present(reason: reason, hard: true)
     }
 
     /// A trigger-presented sheet was dismissed: start the local 24 h cooldown.
     mutating func noteDismissed(now: Date) { state.lastDismissedAt = now }
 }
 
-/// Watches `/api/me` snapshots (AuthStore) for paywall-eligibility flips and opens the native
-/// paywall (#123). Refresh points live with the callers — Studio tab open (RootTabView), app
-/// foreground (GBKComposerApp) and publish completion (StudioWebView) re-run
-/// `AuthStore.loadMe()`; every resulting snapshot, plus snapshots from elsewhere (sign-in,
-/// purchase), is evaluated here. Trigger presentations and dismissals are reported to
-/// `POST /api/me/engagement` (#115) so the server's counters and cooldown advance; the #119
-/// funnel events (`paywall_view` / `paywall_dismiss` to `/api/events`) fire from PaywallView.
+/// Watches `/api/me` snapshots (AuthStore) for hard paywall limits and opens the native paywall.
+/// Refresh points live with the callers — Studio tab open (RootTabView), app foreground
+/// (GBKComposerApp) and publish completion (StudioWebView) re-run `AuthStore.loadMe()`.
+/// Presentations and dismissals are reported to `POST /api/me/engagement` with the reason;
+/// funnel events to `/api/events` fire from PaywallView.
 @MainActor
 final class PaywallTriggerWatcher {
     static let shared = PaywallTriggerWatcher()
@@ -106,11 +88,10 @@ final class PaywallTriggerWatcher {
     var present: (String) -> Void = { PurchaseStore.shared.presentPaywall(reason: $0) }
     /// Injectable for tests: the reason of the sheet that just closed (default: PurchaseStore).
     var sheetReason: () -> String = { PurchaseStore.shared.paywallReason }
-    /// Injectable for tests: reports an engagement event, then resyncs `/api/me` so the next
-    /// snapshot carries the server's updated eligibility/cooldown.
-    var report: (String) -> Void = { event in
+    /// Injectable for tests: reports an engagement event with its reason, then resyncs `/api/me`.
+    var report: (String, String) -> Void = { event, reason in
         Task { @MainActor in
-            _ = try? await APIClient.shared.send(Endpoints.meEngagement(event: event), as: EngagementReply.self)
+            _ = try? await APIClient.shared.send(Endpoints.meEngagement(event: event, reason: reason), as: EngagementReply.self)
             await AuthStore.shared.loadMe()
         }
     }
@@ -130,15 +111,18 @@ final class PaywallTriggerWatcher {
         evaluate()
     }
 
-    /// The paywall sheet closed. Only trigger presentations count: a dismissal starts the 24 h
-    /// cooldown, locally and (via the report) on the server. Manual opens (Profile button, Studio
-    /// pricing links) neither consume a trigger nor start its cooldown.
+    /// The paywall sheet closed. Trigger presentations (hard limits, 3rd-song, export) report
+    /// `paywall_dismiss` with the reason. Manual opens (Profile button, untagged Studio links)
+    /// do not. A `third_song` dismiss starts no cooldown; hard/export dismiss cannot resume the
+    /// blocked action — that action already failed the 402 / export check.
     func sheetDismissed() {
         let reason = sheetReason()
         guard MePaywall.softReasons.contains(reason) || MePaywall.hardReasons.contains(reason) else { return }
-        engine.noteDismissed(now: Date())
-        persist()
-        report("paywall_dismiss")
+        if reason != "third_song" {
+            engine.noteDismissed(now: Date())
+            persist()
+        }
+        report("paywall_dismiss", reason)
     }
 
     private func evaluate() {
@@ -149,7 +133,7 @@ final class PaywallTriggerWatcher {
         persist()
         if case .present(let reason, _) = decision {
             present(reason)
-            report("paywall_view")
+            report("paywall_view", reason)
         }
     }
 

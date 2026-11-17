@@ -40,8 +40,8 @@ struct RootTabView: View {
         }
         .sheet(isPresented: $store.showPaywall, onDismiss: { PaywallTriggerWatcher.shared.sheetDismissed() }) { PaywallView(store: store) }
         .onChange(of: router.selectedTab) { _, tab in
-            // Studio open is a paywall watch point (#123): composing/exporting happened in the web
-            // Studio since the last snapshot, so refresh `/api/me` and let the watcher evaluate.
+            // Studio open is a paywall watch point: refresh `/api/me` so a live AI/render limit
+            // can present, and so third_song_seen / songCount are current for a new song.
             if tab == .create { Task { await auth.loadMe() } }
         }
     }

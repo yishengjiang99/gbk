@@ -8,6 +8,8 @@ enum APIError: Error, Equatable {
     case invalidURL
     /// 429 with the server's `retry-after` seconds (when sent) and body (e.g. guests' 20 comments/day).
     case rateLimited(retryAfter: TimeInterval?, APIErrorBody?)
+    /// 402 Payment Required: a paywalled action. The native paywall is presented when this is thrown.
+    case paywall(PaywallRequired)
 
     var userMessage: String {
         switch self {
@@ -16,6 +18,7 @@ enum APIError: Error, Equatable {
         case .badStatus(_, let body): return body?.message ?? "Something went wrong."
         case .invalidURL: return "Something went wrong."
         case .rateLimited(_, let body): return body?.message ?? "Slow down a little and try again."
+        case .paywall(let p): return p.message ?? "This is a GBK Pro feature."
         }
     }
 }
@@ -105,6 +108,12 @@ final class APIClient: APIClientProtocol {
             let body = try? decoder.decode(APIErrorBody.self, from: data)
             switch http.statusCode {
             case 401: throw APIError.unauthenticated
+            case 402:
+                if let required = try? decoder.decode(PaywallRequired.self, from: data), !required.effectiveReason.isEmpty {
+                    PaywallPresentation.present(reason: required.effectiveReason)
+                    throw APIError.paywall(required)
+                }
+                throw APIError.badStatus(402, body)
             case 404, 503: throw APIError.notAvailable
             case 429: throw APIError.rateLimited(retryAfter: (http.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init), body)
             default: throw APIError.badStatus(http.statusCode, body)

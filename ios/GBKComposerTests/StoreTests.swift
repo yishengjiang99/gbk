@@ -33,6 +33,13 @@ final class StoreTests: XCTestCase {
         XCTAssertTrue(WebView.Coordinator.shouldPresentPaywall(mainFrame: true, last: t, now: t.addingTimeInterval(3)))
     }
 
+    func testPurchaseInterceptReadsReasonFromPricingURL() {
+        XCTAssertEqual(WebView.Coordinator.paywallReason(from: URL(string: "https://compose.grepawk.com/pricing?plan=pro_yearly&reason=export")), "export")
+        XCTAssertEqual(WebView.Coordinator.paywallReason(from: URL(string: "https://compose.grepawk.com/pricing?plan=pro_yearly&reason=third_song")), "third_song")
+        XCTAssertEqual(WebView.Coordinator.paywallReason(from: URL(string: "https://compose.grepawk.com/pricing")), "studio_link")
+        XCTAssertEqual(WebView.Coordinator.paywallReason(from: URL(string: "https://compose.grepawk.com/pricing?reason=")), "studio_link")
+    }
+
     func testAppAccountTokenUsesAccountUUIDElseStableInstallUUID() {
         let id = UUID()
         XCTAssertEqual(AppAccountToken.resolve(accountId: id.uuidString.lowercased()), id)

@@ -40,7 +40,7 @@ struct Me: Codable, Hashable {
     var proExpiresAt: Int64? = nil
     /// `"Production" | "Sandbox" | nil`
     var proEnvironment: String? = nil
-    /// Paywall eligibility from the server's engagement counters (#115); the client trigger is #123.
+    /// Paywall state from the server (`ai_budget` / `render_limit`, `third_song_seen`).
     var paywall: MePaywall? = nil
 
     /// Server says Pro and it hasn't expired.
@@ -55,21 +55,41 @@ struct Me: Codable, Hashable {
     }
 }
 
-/// The `paywall` object in `GET /api/me` (#115): whether the server wants the native paywall shown,
-/// and why. Soft reasons are the engagement triggers (`second_composition`: the 2nd composition
-/// completed; `export_after_2`: a WAV/MIDI export after that paywall was seen). Hard reasons mean the
-/// account is at a real limit right now (`ai_limit`: daily AI budget, TOKEN_BUDGET_EXHAUSTED;
-/// `render_limit`). `eligible` already excludes Pro users and the server-side 24 h post-dismiss
-/// cooldown, but `reason` stays populated while `eligible` is false, so the client can still
-/// hard-present at a live limit (#123).
+/// The `paywall` object in `GET /api/me`: a live hard limit (`ai_budget`, `render_limit`), plus
+/// whether the one-time 3rd-song popup has already been shown. Retired reasons (`landing`,
+/// `second_composition`, `export_after_2`, `ai_limit`) are never returned. `export` is a hard
+/// reason too, but it arrives as a 402 (or `/api/paywall/check`), not on this object.
 struct MePaywall: Codable, Hashable {
     let eligible: Bool
     let reason: String?
     /// Unix ms when the server cooldown ends; nil when not cooling down.
     let cooldownUntil: Int64?
+    /// True once the account has been shown (or dismissed) the 3rd-song paywall.
+    var thirdSongSeen: Bool? = nil
 
-    static let softReasons: Set<String> = ["second_composition", "export_after_2"]
-    static let hardReasons: Set<String> = ["ai_limit", "render_limit"]
+    static let softReasons: Set<String> = ["third_song"]
+    static let hardReasons: Set<String> = ["export", "ai_budget", "render_limit"]
+    static func isHard(_ reason: String) -> Bool { hardReasons.contains(reason) }
+}
+
+/// `402 Payment Required` body for a paywalled action (docs/social-api.md "The 402 body").
+struct PaywallRequired: Codable, Hashable {
+    let code: String?
+    let reason: String?
+    let message: String?
+    let signedIn: Bool?
+    let paywall: PaywallOffer?
+
+    var effectiveReason: String { paywall?.reason ?? reason ?? "" }
+    var isHard: Bool { paywall?.hard ?? MePaywall.isHard(effectiveReason) }
+}
+
+struct PaywallOffer: Codable, Hashable {
+    let reason: String
+    let hard: Bool
+    var defaultPlan: String? = nil
+    var trialDays: Int? = nil
+    var pricingUrl: String? = nil
 }
 
 struct SongMedia: Codable, Hashable {

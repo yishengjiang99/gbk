@@ -2,7 +2,7 @@ import SwiftUI
 import StoreKit
 
 /// GBK Pro paywall sheet. Opened from Profile, the Create tab, any Studio link to /pricing or
-/// checkout, and by the paywall triggers (#123: 2nd composition / export, AI or render limit).
+/// checkout, and by the paywall triggers (export, 3rd song, AI budget or render limit).
 struct PaywallView: View {
     @ObservedObject var store: PurchaseStore
     @Environment(\.dismiss) private var dismiss
