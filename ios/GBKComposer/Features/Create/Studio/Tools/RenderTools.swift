@@ -416,6 +416,7 @@ func buildRenderTools(_ store: WorkstationStore) -> [GBKTool] {
             warnings.append(contentsOf: j.warnings)
             var downloaded: JSONValue? = nil
             if a.argBool("download") == true {
+                guard await Paywall.allowExport(kind: .wav) else { throw ToolArgError("PRO_REQUIRED", "Exporting songs is a GBK Pro feature.") }
                 if let data = j.resultData, let download = store.host.download {
                     let ok = download(data, safeFilename(j.projectName, "wav"))
                     downloaded = .object([("requested", .bool(ok)), ("confirmed", .bool(false)),
@@ -507,6 +508,9 @@ func buildRenderTools(_ store: WorkstationStore) -> [GBKTool] {
             do {
                 let m = try ArtifactStore.shared.meta(a.argStr("artifactId")!)
                 let b = try ArtifactStore.shared.data(m.id)
+                guard await Paywall.allowExport(kind: Paywall.exportKind(filename: m.filename)) else {
+                    throw ToolArgError("PRO_REQUIRED", "Exporting songs is a GBK Pro feature.")
+                }
                 guard let download = store.host.download else {
                     throw ToolArgError("DOWNLOAD_BLOCKED", "no download mechanism in this runtime; use gbk_read_wav_bytes")
                 }

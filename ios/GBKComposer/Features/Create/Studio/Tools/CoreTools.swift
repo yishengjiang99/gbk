@@ -409,6 +409,9 @@ func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
         GBKTool(name: "gbk_prepare_midi_export", description: "Build a Standard MIDI File (tempo/meter, timed CC, bend/pressure, programs, raw events) and offer it as a browser-local download.", inputSchema: schemaObj([
             ("download", schemaBool()),
         ]), readOnly: false) { a in
+            if a.argBool("download") != false {
+                guard await Paywall.allowExport(kind: .midi) else { throw ToolArgError("PRO_REQUIRED", "Exporting songs is a GBK Pro feature.") }
+            }
             let (bytes, filename) = store.prepareMidiExport()
             if a.argBool("download") != false { _ = store.host.download?(bytes, filename) }
             return ToolRunOut(data: .object([
@@ -420,6 +423,9 @@ func buildCoreTools(_ store: WorkstationStore) -> [GBKTool] {
             ("download", schemaBool()),
             ("normalize", schemaEnum(["loudness", "peak", "off"], "whole-file level (default loudness: -16 LUFS, <= -1 dBTP)")),
         ]), readOnly: false) { a in
+            if a.argBool("download") != false {
+                guard await Paywall.allowExport(kind: .wav) else { throw ToolArgError("PRO_REQUIRED", "Exporting songs is a GBK Pro feature.") }
+            }
             guard let renderWav = store.host.renderWav else { throw ToolArgError("UNSUPPORTED", "no renderer in this runtime") }
             let blob = try await renderWav(store.project, a.argStr("normalize") ?? "loudness")
             try checkCancelled()
