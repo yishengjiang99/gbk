@@ -2,7 +2,7 @@
 // Mimics the host sandbox: host page (origin H) -> <iframe sandbox="allow-scripts allow-same-origin allow-forms allow-popups ...">
 // on a DIFFERENT origin (S) served with a CSP header built from the resource's declared csp (connect/resource domains),
 // talking the MCP Apps postMessage bridge (ui/initialize, tools/call, ui/notifications/tool-result). The GBK server runs
-// on origin A. Then: click Render, wait for the in-browser OfflineAudioContext render, play, and probe downloads + Stop.
+// on origin A. Then: click Render, wait for the in-browser OfflineAudioContext render, play, and probe the Pro upgrade link + Stop.
 //   node --import tsx/esm test/e2e/widget-sandbox.check.ts [chromium|webkit|webkit-iphone|all]
 // Needs Node 22 (node:sqlite), Playwright browsers and a built widget (node scripts/build-widget.mjs).
 // Prints a JSON report; exits 1 when the strict-CSP render fails.
@@ -102,11 +102,13 @@ addEventListener("message", async (ev) => {
         await w.locator("#playBtn").click(); await page.waitForTimeout(1500);
         r.playback = await frame.evaluate(() => { const p = (window as unknown as P).__gbkPlayer.pl; return { playing: p.playing, audioContextState: p.ac?.state ?? null, seekValue: (document.getElementById("seek") as HTMLInputElement).value }; });
         await w.locator("#playBtn").click();
-        r.wavHref = ((await frame.locator("#dlWav").getAttribute("href")) ?? "").replace(/sig=[^&]+/, "sig=…").slice(0, 100);
-        const popup = ctx.waitForEvent("page", { timeout: 5000 }).then((p) => p.url().replace(/sig=[^&]+/, "sig=…").slice(0, 100)).catch(() => null);
-        const dl = page.waitForEvent("download", { timeout: 5000 }).then((d) => d.suggestedFilename()).catch(() => null);
-        await w.locator("#dlWav").click();
-        r.downloadClick = { popup: await popup, download: await dl };
+        r.wavVisible = await frame.locator("#dlWav").isVisible();
+        r.midiVisible = await frame.locator("#dlMidi").isVisible();
+        r.upgradeVisible = await frame.locator("#dlUpgrade").isVisible();
+        r.upgradeHref = ((await frame.locator("#dlUpgrade").getAttribute("href")) ?? "").slice(0, 200);
+        const popup = ctx.waitForEvent("page", { timeout: 5000 }).then((p) => p.url().slice(0, 200)).catch(() => null);
+        if (r.upgradeVisible) await w.locator("#dlUpgrade").click();
+        r.upgradeClick = { popup: await popup };
         await w.locator("#renderBtn").click(); await page.waitForTimeout(300); await w.locator("#stopBtn").click();
         await frame.waitForFunction(() => /Render stopped/.test(document.getElementById("renderStatus")!.textContent || ""), null, { timeout: 20_000 }).then(() => { r.stop = "ok"; }, () => { r.stop = "not observed"; });
       } catch (e) { r.error = (e as Error).message.split("\n")[0]; }

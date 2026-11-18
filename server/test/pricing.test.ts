@@ -73,3 +73,15 @@ test("waitlist stores valid emails, rejects bad ones, honeypot is silent; sitema
     const priv = await (await fetch(`${base}/privacy/payments-and-ads`)).text(); assert.match(priv, /Global Privacy Control/); assert.match(priv, /SHA-256/);
   });
 });
+
+test("/plans: free is play/listen; downloads and exports are Pro; no checkout or prices", async () => {
+  await withEnv({}, async (base) => {
+    const html = await (await fetch(`${base}/plans`)).text();
+    assert.match(html, /Downloading and exporting songs is Pro/);
+    assert.match(html, /listen in ChatGPT or the in-chat player/);
+    assert.match(html, /<strong>Pro<\/strong>: MIDI, WAV and video downloads and exports/);
+    assert.ok(!html.includes("MIDI and WAV downloads. Server renders"), "Free no longer lists downloads");
+    assert.ok(!html.includes("data-checkout"), "informational page has no checkout");
+    assert.ok(!html.includes("$47.99"), "plans page does not list prices");
+  });
+});

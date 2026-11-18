@@ -130,6 +130,7 @@ audio{display:none}
     <div class="row">
       <a class="btn hidden" id="dlWav" href="#" download>Download WAV</a>
       <a class="btn hidden" id="dlMidi" href="#" download>Download MIDI</a>
+      <a class="btn hidden" id="dlUpgrade" href="#" target="_blank" rel="noopener">Downloads are Pro</a>
       <a class="btn hidden" id="openStudio" href="#" target="_blank" rel="noopener">Open in GBK Studio</a>
       <button id="refreshBtn" type="button">Refresh</button>
     </div>
@@ -153,11 +154,23 @@ var els={title:$("title"),meta:$("metaLine"),rev:$("revLine"),loading:$("loading
   player:$("playerSec"),rollSec:$("rollSec"),trackSec:$("trackSec"),actions:$("actionSec"),
   audio:$("audio"),play:$("playBtn"),seek:$("seek"),cur:$("curTime"),dur:$("durTime"),perr:$("playerErr"),
   scroll:$("rollScroll"),roll:$("roll"),ccWrap:$("ccWrap"),cc:$("cc"),tracks:$("trackList"),
-  wav:$("dlWav"),midi:$("dlMidi"),studio:$("openStudio"),refresh:$("refreshBtn"),
+  wav:$("dlWav"),midi:$("dlMidi"),upgrade:$("dlUpgrade"),studio:$("openStudio"),refresh:$("refreshBtn"),
   status:$("statusLine"),form:$("followForm"),follow:$("followText"),
   renderBtn:$("renderBtn"),stopBtn:$("stopBtn"),progWrap:$("progWrap"),progBar:$("progBar"),progPct:$("progPct"),rstatus:$("renderStatus")};
 
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function canExport(d){ return !!(d&&d.canExport); }
+function pricingUrl(d){ return (d&&d.export&&d.export.paywall&&d.export.paywall.pricing_url)||""; }
+function wavPlayUrl(art){ return (art&&art.wav&&(art.wav.playUrl||art.wav.downloadUrl))||""; }
+function openHref(ev,href){
+  if(/^https?:/.test(href)&&window.openai&&typeof window.openai.openExternal==="function"){ ev.preventDefault(); try{ window.openai.openExternal({href:href,redirectUrl:false}); }catch(e){ window.open(href,"_blank"); } }
+}
+function showUpgrade(d){
+  var url=pricingUrl(d);
+  if(!url||canExport(d)){ els.upgrade.classList.add("hidden"); els.upgrade.removeAttribute("href"); return; }
+  els.upgrade.classList.remove("hidden");
+  els.upgrade.setAttribute("href",url);
+}
 function fmt(t){ if(!isFinite(t)||t<0)t=0; var m=Math.floor(t/60), s=Math.floor(t%60); return m+":"+(s<10?"0":"")+s; }
 function post(obj){ if(window.parent&&window.parent!==window) window.parent.postMessage(obj,"*"); }
 function rpcRequest(method,params){
@@ -258,20 +271,23 @@ function render(data){
     data.tracks.length+" tracks, "+(data.notes||[]).length+" notes, "+data.bars+" bars.");
 
   var art=data.artifacts||{};
-  var hasWav=!!(art.wav&&art.wav.downloadUrl);
+  var play=wavPlayUrl(art);
   var local=pl.mode==="buf";
-  els.noRender.classList.toggle("hidden",hasWav||local);
+  els.noRender.classList.toggle("hidden",!!play||local);
   els.player.classList.remove("hidden");
-  if(hasWav&&!local){
+  if(play&&!local){
     pl.mode="el";
-    if(els.audio.getAttribute("src")!==art.wav.downloadUrl) els.audio.setAttribute("src",art.wav.downloadUrl);
+    if(els.audio.getAttribute("src")!==play) els.audio.setAttribute("src",play);
     els.dur.textContent=fmt(art.wav.durationSeconds||data.durationSec||0);
   }
-  if(!local){ els.wav.classList.toggle("hidden",!hasWav); if(hasWav) els.wav.setAttribute("href",art.wav.downloadUrl); }
-  els.renderBtn.textContent=(hasWav||local)?"Re-render":"Render audio";
-  var hasMidi=!!(art.midi&&art.midi.downloadUrl);
-  els.midi.classList.toggle("hidden",!hasMidi);
-  if(hasMidi) els.midi.setAttribute("href",art.midi.downloadUrl);
+  if(!local){
+    if(canExport(data)&&art.wav&&art.wav.downloadUrl){ els.wav.classList.remove("hidden"); els.wav.setAttribute("href",art.wav.downloadUrl); }
+    else { els.wav.classList.add("hidden"); els.wav.setAttribute("href","#"); els.wav.removeAttribute("download"); }
+  }
+  els.renderBtn.textContent=(play||local)?"Re-render":"Render audio";
+  if(canExport(data)&&art.midi&&art.midi.downloadUrl){ els.midi.classList.remove("hidden"); els.midi.setAttribute("href",art.midi.downloadUrl); }
+  else { els.midi.classList.add("hidden"); els.midi.setAttribute("href","#"); }
+  showUpgrade(data);
   if(data.projectUrl){ els.studio.classList.remove("hidden"); els.studio.setAttribute("href",data.projectUrl); }
 
   els.rollSec.classList.remove("hidden");
@@ -497,9 +513,12 @@ function startRender(){
   }).then(function(r){
     res=r; job.worklet=r.worklet; setProg(0.95,"Rendered "+fmt(r.durationSeconds)+". Preparing playback…");
     var name=((d.title||"gbk").replace(/[^\\w\\- .]/g,"_").slice(0,60)||"gbk")+".wav";
-    try{ if(job.blobUrl) URL.revokeObjectURL(job.blobUrl); job.blobUrl=URL.createObjectURL(r.blob); els.wav.setAttribute("href",job.blobUrl); els.wav.setAttribute("download",name); els.wav.classList.remove("hidden"); }catch(e){}
+    try{ if(job.blobUrl) URL.revokeObjectURL(job.blobUrl); job.blobUrl=URL.createObjectURL(r.blob);
+      if(canExport(d)){ els.wav.setAttribute("href",job.blobUrl); els.wav.setAttribute("download",name); els.wav.classList.remove("hidden"); }
+      else { els.wav.classList.add("hidden"); els.wav.setAttribute("href","#"); els.wav.removeAttribute("download"); showUpgrade(d); }
+    }catch(e){}
     var ac=ensureAc();
-    if(!ac) throw new Error("this browser has no AudioContext for playback; use Download WAV");
+    if(!ac) throw new Error(canExport(d)?"this browser has no AudioContext for playback; use Download WAV":"this browser has no AudioContext for playback");
     return ac.decodeAudioData(r.bytes.slice().buffer).then(function(buf){
       bufStop(); els.audio.pause(); pl.mode="buf"; pl.buf=buf; pl.off=0; setPlaying(false);
       els.noRender.classList.add("hidden"); els.renderBtn.textContent="Re-render"; syncUi();
@@ -509,14 +528,19 @@ function startRender(){
     });
   }).then(function(fin){
     setProg(1,null);
-    if(fin&&fin.localOnly){ els.rstatus.textContent="Done: "+fmt(res.durationSeconds)+" rendered in your browser. Press Play. (Not saved: this player only has read access; Download WAV saves it to your device.)"; return; }
+    if(fin&&fin.localOnly){ els.rstatus.textContent="Done: "+fmt(res.durationSeconds)+" rendered in your browser. Press Play."+(canExport(d)?" (Not saved: this player only has read access; Download WAV saves it to your device.)":" (Not saved: this player only has read access.)"); return; }
     var w=fin&&fin.latest&&fin.latest.wav;
     if(fin&&fin.status==="completed"){
-      if(w&&w.downloadUrl){ els.wav.setAttribute("href",w.downloadUrl); els.wav.removeAttribute("download"); els.wav.setAttribute("target","_blank"); }
-      var m=fin.latest&&fin.latest.midi; if(m&&m.downloadUrl){ els.midi.setAttribute("href",m.downloadUrl); els.midi.classList.remove("hidden"); }
-      d.artifacts={wav:w?{downloadUrl:w.downloadUrl,durationSeconds:res.durationSeconds}:undefined,midi:m};
-      els.rstatus.textContent="Done: "+fmt(res.durationSeconds)+" rendered in your browser and saved. Press Play.";
-    } else els.rstatus.textContent="Rendered and playable here, but saving to your library failed"+(fin&&fin.error?" ("+fin.error.message+")":"")+". Download WAV still works.";
+      if(typeof fin.canExport==="boolean") d.canExport=fin.canExport;
+      if(fin.export) d.export=fin.export;
+      if(canExport(d)&&w&&w.downloadUrl){ els.wav.setAttribute("href",w.downloadUrl); els.wav.removeAttribute("download"); els.wav.setAttribute("target","_blank"); els.wav.classList.remove("hidden"); }
+      else { els.wav.classList.add("hidden"); els.wav.setAttribute("href","#"); els.wav.removeAttribute("download"); }
+      var m=fin.latest&&fin.latest.midi; if(canExport(d)&&m&&m.downloadUrl){ els.midi.setAttribute("href",m.downloadUrl); els.midi.classList.remove("hidden"); }
+      else { els.midi.classList.add("hidden"); els.midi.setAttribute("href","#"); }
+      d.artifacts={wav:w?{downloadUrl:w.downloadUrl,playUrl:w.playUrl||w.downloadUrl,durationSeconds:res.durationSeconds}:undefined,midi:m};
+      showUpgrade(d);
+      els.rstatus.textContent="Done: "+fmt(res.durationSeconds)+" rendered in your browser and saved. Press Play."+(canExport(d)?"":" Downloading WAV and MIDI is a Pro feature.");
+    } else els.rstatus.textContent="Rendered and playable here, but saving to your library failed"+(fin&&fin.error?" ("+fin.error.message+")":"")+"."+(canExport(d)?" Download WAV still works.":"");
   }).catch(function(e){
     var code=(e&&e.code)||""; var stopped=ctl.signal.aborted;
     var msg=stopped?(job.timedOut?"Render timed out and was stopped.":"Render stopped."):("Render failed: "+((e&&e.message)||String(e)));
@@ -547,10 +571,8 @@ function upload(r,signal){
 }
 els.renderBtn.addEventListener("click",startRender);
 els.stopBtn.addEventListener("click",function(){ if(job.ctl) job.ctl.abort(); });
-els.wav.addEventListener("click",function(ev){
-  var href=els.wav.getAttribute("href")||"";
-  if(/^https?:/.test(href)&&window.openai&&typeof window.openai.openExternal==="function"){ ev.preventDefault(); try{ window.openai.openExternal({href:href,redirectUrl:false}); }catch(e){ window.open(href,"_blank"); } }
-});
+els.wav.addEventListener("click",function(ev){ openHref(ev,els.wav.getAttribute("href")||""); });
+els.upgrade.addEventListener("click",function(ev){ openHref(ev,els.upgrade.getAttribute("href")||""); });
 
 /* ---------- actions ---------- */
 var zoomBtns=document.querySelectorAll("[data-zoom]");
@@ -565,7 +587,16 @@ els.refresh.addEventListener("click",function(){
   var d=state.data; if(!d) return;
   els.status.textContent="Refreshing…";
   callTool("gbk_get_artifacts",{compositionId:d.compositionId}).then(function(a){
-    if(a&&a.artifacts) d.artifacts=a.artifacts;
+    if(a){
+      if(a.latest){
+        var prev=d.artifacts||{};
+        var wav=a.latest.wav?Object.assign({},a.latest.wav):undefined;
+        if(wav&&!wav.playUrl&&prev.wav&&(prev.wav.playUrl||prev.wav.downloadUrl)&&prev.wav.sha256===wav.sha256) wav.playUrl=prev.wav.playUrl||prev.wav.downloadUrl;
+        d.artifacts={wav:wav,midi:a.latest.midi};
+      } else if(a.artifacts&&!Array.isArray(a.artifacts)) d.artifacts=a.artifacts;
+      if(typeof a.canExport==="boolean") d.canExport=a.canExport;
+      if(a.export) d.export=a.export;
+    }
     return callTool("gbk_get_composition",{compositionId:d.compositionId});
   }).then(function(fresh){
     if(fresh&&fresh.compositionId){ if(!fresh.artifacts&&d.artifacts) fresh.artifacts=d.artifacts; render(fresh); }

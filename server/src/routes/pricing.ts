@@ -139,9 +139,9 @@ function jsonLd(cfg: Config) {
 
 function plansBody(cfg: Config): string {
   const sr = cfg.serverRender;
-  return `<h1>GBK Composer plans</h1><p class="lead">GBK Composer is free. An optional Pro plan raises usage limits.</p>
-<ul><li><strong>Free</strong>: compose, edit, play, browser render, MIDI and WAV downloads. Server renders: ${sr.guestPerHour}/hour without an account, ${sr.accountPerHour}/hour signed in.</li>
-<li><strong>Pro</strong>: 120 server renders/hour up to 600 s each and a larger daily AI budget in GBK Studio. Pro also keeps 100 revision snapshots per composition (Free: 10), keeps rendered files for a year (Free: 30 days) and allows compositions up to 256 bars (Free: 64). Pro is bought on the GBK website, not in ChatGPT, and applies when you sign in with the same email.</li></ul>
+  return `<h1>GBK Composer plans</h1><p class="lead">GBK Composer is free to compose, play and listen. Downloading and exporting songs is Pro.</p>
+<ul><li><strong>Free</strong>: compose, edit, play, and listen in ChatGPT or the in-chat player (including browser render for playback). Server renders: ${sr.guestPerHour}/hour without an account, ${sr.accountPerHour}/hour signed in.</li>
+<li><strong>Pro</strong>: MIDI, WAV and video downloads and exports, 120 server renders/hour up to 600 s each and a larger daily AI budget in GBK Studio. Pro also keeps 100 revision snapshots per composition (Free: 10), keeps rendered files for a year (Free: 30 days) and allows compositions up to 256 bars (Free: 64). Pro is bought on the GBK website, not in ChatGPT, and applies when you sign in with the same email.</li></ul>
 <p>This page is informational only.</p>`;
 }
 
