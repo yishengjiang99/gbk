@@ -42,7 +42,7 @@ export function parseMidi(b: Buffer) {
 }
 
 const get = async (base: string, url: string) => { const u = new URL(url); const r = await fetch(base + u.pathname + u.search); assert.equal(r.status, 200); return Buffer.from(await r.arrayBuffer()); };
-const readArt = (s: { mcp: { store: { getArtifactAny: (id: string) => { size_bytes: number } | null; artifactAbsPath: (row: { size_bytes: number }) => string } } }, a: Art) => {
+const readArt = <R>(s: { mcp: { store: { getArtifactAny: (id: string) => R | null; artifactAbsPath: (row: R) => string } } }, a: Art) => {
   const row = s.mcp.store.getArtifactAny(a.artifactId); assert.ok(row, a.artifactId);
   return readFileSync(s.mcp.store.artifactAbsPath(row));
 };
@@ -63,8 +63,8 @@ test("guest with no browser: render returns server-rendered WAV (44.1k stereo PC
 
     const wavArt = r.artifacts.find((a) => a.kind === "wav")!;
     assert.equal(wavArt.downloadUrl, undefined, "guests do not get a download URL");
-    assert.equal((r as { canExport: boolean }).canExport, false);
-    assert.equal((r as { export: { code: string } }).export.code, "PRO_REQUIRED");
+    assert.equal((r as unknown as { canExport: boolean }).canExport, false);
+    assert.equal((r as unknown as { export: { code: string } }).export.code, "PRO_REQUIRED");
     const wav = readArt(s, wavArt);
     assert.equal(wav.length, wavArt.sizeBytes); assert.equal(createHash("sha256").update(wav).digest("hex"), wavArt.sha256);
     const w = parseWav(wav);

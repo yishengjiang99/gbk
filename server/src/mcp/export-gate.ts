@@ -23,7 +23,9 @@ export function exportUpgradeMessage(origin: string, signedIn: boolean): string 
   return `${p.message} ${p.paywall.pricing_url}`;
 }
 
-export function presentArtifact(cfg: Config, a: ArtifactRow, opts: { pro: boolean; play?: boolean }) {
+export type PresentedArtifact = { artifactId: string; kind: ArtifactRow["kind"]; filename: string; mimeType: string; sizeBytes: number; sha256: string; revision: number; meta: Record<string, unknown>; downloadUrl?: string; downloadUrlExpiresAt?: string | number; playUrl?: string };
+
+export function presentArtifact(cfg: Config, a: ArtifactRow, opts: { pro: boolean; play?: boolean }): PresentedArtifact {
   const meta = JSON.parse(a.meta_json) as Record<string, unknown>;
   const base = { artifactId: a.id, kind: a.kind, filename: a.filename, mimeType: a.mime_type, sizeBytes: a.size_bytes, sha256: a.sha256,
     revision: a.revision, meta };
