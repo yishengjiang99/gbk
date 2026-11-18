@@ -12,6 +12,12 @@ AudioWorklet, MIDI file playback and live input, and offline WAV rendering.
 The explorer UI for SF2 data and MIDI files is the manual side of the same
 workstation.
 
+## Demo
+
+<video src="https://raw.githubusercontent.com/yishengjiang99/gbk/main/docs/ads/gbk-chat-compose-v04-hero.mp4" width="100%" controls autoplay muted loop playsinline></video>
+
+Chat to compose: type what you want to hear, GBK composes it, and plays it back — here, "The Clockwork Skeleton Waltz."
+
 ## GBK Composer for ChatGPT
 
 GBK Composer is also a ChatGPT plugin and a remote MCP server (`https://compose.grepawk.com/mcp`, no auth required).
