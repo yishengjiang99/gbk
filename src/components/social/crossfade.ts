@@ -59,8 +59,8 @@ export class Crossfader {
     for (const v of this.pool.values()) if (v !== this.current && v.el.paused) { this.set(v, 0); const p = v.el.play(); v.el.pause(); void p?.catch(() => undefined); }
   }
 
-  /** Crossfade to src (null = fade everything out). */
-  async play(src: string | null): Promise<boolean> {
+  /** Crossfade to src (null = fade everything out). startMs seeks a legacy media element to the hook. */
+  async play(src: string | null, startMs = 0): Promise<boolean> {
     this.seq++;
     if (this.fading) { const f = this.fading; this.fading = null; if (f !== this.current) this.hard(f); }
     const prev = this.current;
@@ -68,7 +68,10 @@ export class Crossfader {
     this.fadeOut(prev);
     this.current = null;
     if (!src) { this.emit(); return true; }
-    const v = this.voice(src); this.current = v; this.set(v, 1);
+    const v = this.voice(src); this.current = v;
+    const start = startMs > 0 && Number.isFinite(startMs) ? startMs / 1000 : 0;
+    if (start > 0) { try { const d = v.el.duration; v.el.currentTime = Number.isFinite(d) && start >= d ? 0 : start; } catch { /* ignore seek errors */ } }
+    if (start > 0) { this.set(v, 0); this.ramp(v, "in"); } else this.set(v, 1);
     try { await v.el.play(); } catch { if (this.current === v) this.current = null; this.emit(); return false; }
     if (this.current !== v) return false;
     this.unlocked = true; this.emit(); return true;
@@ -77,8 +80,8 @@ export class Crossfader {
     if (!prev) return;
     this.fading = prev; this.ramp(prev, "out", () => { if (this.fading === prev) { if (prev.live) prev.live.stop(); else prev.el.pause(); this.fading = null; this.emit(); } });
   }
-  /** Crossfade to a live SF2 voice for the prepared song (same 58 ms fade, same shared analyser). */
-  async playLive(key: string, p: Prepared): Promise<boolean> {
+  /** Crossfade to a live SF2 voice for the prepared song (same 58 ms fade, same shared analyser). startMs is the hook. */
+  async playLive(key: string, p: Prepared, startMs = 0): Promise<boolean> {
     if (!this.ctx) return false;
     const my = ++this.seq;
     if (this.fading) { const f = this.fading; this.fading = null; if (f !== this.current) this.hard(f); }
@@ -87,9 +90,11 @@ export class Crossfader {
     this.fadeOut(prev); this.current = null;
     if (this.ctx.state !== "running") await Promise.race([this.ctx.resume().catch(() => undefined), new Promise((r) => setTimeout(r, 300))]);
     if (this.ctx.state !== "running") { this.emit(); return false; } // no gesture yet (iOS): "Tap to play" stays
+    const hook = startMs > 0 && p.seconds > 0 && startMs / 1000 < p.seconds ? startMs : 0;
     let lv: LiveVoice;
-    try { lv = await startLive(this.ctx, this.analyser ?? this.ctx.destination, p); } catch { this.emit(); return false; }
+    try { lv = await startLive(this.ctx, this.analyser ?? this.ctx.destination, p, hook); } catch { this.emit(); return false; }
     if (my !== this.seq) { lv.stop(); return false; } // superseded while the engine started
+    if (hook > 0) { lv.gain.gain.value = 0; lv.gain.gain.setValueCurveAtTime(curve("in"), this.ctx.currentTime, 0.04); }
     const clock = lv.clock as unknown as HTMLAudioElement;
     this.current = { src: key, el: clock, gain: lv.gain, live: lv }; this.unlocked = true; this.emit(); return true;
   }

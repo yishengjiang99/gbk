@@ -116,6 +116,7 @@ export async function buildApp(cfg: Config, deps: AppDeps = {}): Promise<{ app: 
     try { const g = resolveGuestCapability(cfg, mcpStore, token); return g.compositionId === projectId && g.user === owner; } catch { return false; }
   }, (id) => {
     social.markPublished(id);
+    social.fillHook(id);
     const r = shares.byId(id); const parent = r?.parent_id ? shares.byId(r.parent_id) : null;
     if (r && parent && parent.owner !== r.owner && !isGuest(r.owner)) notify(parent.owner, { kind: "fork", title: `${social.ensureProfile(r.owner, accounts.get(r.owner)?.name ?? r.owner).display_name} remixed ${parent.title}`, body: r.title, link: `${cfg.publicOrigin}/s/${r.slug}` });
   });
