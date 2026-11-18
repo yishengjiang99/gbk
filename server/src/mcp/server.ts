@@ -19,7 +19,7 @@ import { RenderService, DEFAULT_RENDER_CONFIG, type RenderConfig } from "./brows
 import { resolveRenderFont } from "./soundfonts.ts";
 import { requireScope, type Principal, type Scope } from "./auth.ts";
 import { McpError, toMcpError } from "./errors.ts";
-import { signArtifactUrl } from "./urls.ts";
+import { presentArtifact, withExportGate, exportUpgradeMessage, ownerSignedIn } from "./export-gate.ts";
 import { composerUiHtml, COMPOSER_UI_URI } from "./ui.ts";
 import { MCP_SERVER_VERSION } from "./service-meta.ts";
 import { TOOL_HINTS, OUTPUT_SCHEMAS } from "./tool-meta.ts";
@@ -57,11 +57,8 @@ const COMPOSITION_ID = z.string().min(1).max(128).describe("Durable composition 
 const ACCESS_TOKEN = z.string().min(1).max(256).optional().describe("Private project capability returned by gbk_create_composition when used without sign-in. Required on every follow-up call for that project (accessToken = edit; readAccessToken = read-only). The composition id alone grants nothing. Never show the edit token publicly or put it in a URL.");
 const IDEMPOTENCY = z.string().min(8).max(128).optional().describe("Retry key: replays with the same key and same arguments return the original result instead of applying twice");
 
-export function artifactView(cfg: Config, a: ArtifactRow) {
-  const meta = JSON.parse(a.meta_json) as Record<string, unknown>;
-  const signed = signArtifactUrl(cfg, a.id);
-  return { artifactId: a.id, kind: a.kind, filename: a.filename, mimeType: a.mime_type, sizeBytes: a.size_bytes, sha256: a.sha256,
-    revision: a.revision, downloadUrl: signed.url, downloadUrlExpiresAt: signed.expiresAt, meta };
+export function artifactView(cfg: Config, a: ArtifactRow, opts: { pro: boolean; play?: boolean } = { pro: false }) {
+  return presentArtifact(cfg, a, opts);
 }
 
 export function createGbkMcpServer(ctx: McpContext): McpServer {
@@ -227,7 +224,7 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
 
   // ---- rendering --------------------------------------------------------------------------------------
   server.registerTool("gbk_render_composition", {
-    title: "Render a composition", description: "Use this when the user wants audio or a MIDI file. Renders a saved composition revision to a validated WAV (44.1 kHz stereo PCM16, loudness-normalized by default) plus a Standard MIDI File, returned as signed download URLs with metadata (never audio bytes). Works without a browser: when no GBK Studio tab is connected (Codex, guests with an accessToken, any headless client) or headless is true, GBK renders it on the GBK server with the same SF2 engine and waits up to waitSeconds (default 50) for the result; if it is still running, poll gbk_get_render_status. Signed-in users with a connected Studio tab render there. Server renders are limited in length (guests 180 s, accounts 300 s), rate and concurrency; QUOTA_EXCEEDED explains which. In ChatGPT the in-chat player (gbk_show_composition_ui, Render button) is an alternative that renders in the user's browser. soundFont optionally selects a SoundFont catalog id from gbk_list_soundfonts (default: GeneralUser GS) and every render path — server or Studio tab — uses that font; an unknown id fails with INVALID_ARGUMENT and a catalog font that is not installed on this server fails with NOT_FOUND.",
+    title: "Render a composition", description: "Use this when the user wants to hear a composition or (if they are Pro) download a MIDI or WAV file. Renders a saved composition revision to a validated WAV (44.1 kHz stereo PCM16, loudness-normalized by default) plus a Standard MIDI File. Pro callers get signed download URLs; free callers get metadata and a message (with the Pro pricing URL) instead of a download link, never audio bytes. Playing and listening stay free. Works without a browser: when no GBK Studio tab is connected (Codex, guests with an accessToken, any headless client) or headless is true, GBK renders it on the GBK server with the same SF2 engine and waits up to waitSeconds (default 50) for the result; if it is still running, poll gbk_get_render_status. Signed-in users with a connected Studio tab render there. Server renders are limited in length (guests 180 s, accounts 300 s), rate and concurrency; QUOTA_EXCEEDED explains which. In ChatGPT the in-chat player (gbk_show_composition_ui, Render button) is an alternative that renders in the user's browser. soundFont optionally selects a SoundFont catalog id from gbk_list_soundfonts (default: GeneralUser GS) and every render path — server or Studio tab — uses that font; an unknown id fails with INVALID_ARGUMENT and a catalog font that is not installed on this server fails with NOT_FOUND.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN, revision: z.number().int().min(0).optional().describe("Render this exact stored revision instead of the latest"),
       soundFont: z.string().min(1).max(64).optional().describe("SoundFont catalog id from gbk_list_soundfonts, e.g. \"timgm6mb\" or \"fluidr3-gm\" (omit for the default, GeneralUser GS)"),
       sampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(), channels: z.union([z.literal(1), z.literal(2)]).optional(),
@@ -258,17 +255,23 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
       if (!guest) await renders.refreshPro(user);
       const job = renders.submitServer(user, { ...row, revision: rowRev }, snapshot, config, { guest, client: ctx.auth.client, family: p!.family, ...(guest ? { perDay: cfg.mcp.guestRendersPerDay } : {}) });
       const final = await renders.waitFor(user, job.id, (a.waitSeconds ?? SERVER_RENDER_DEFAULT_WAIT_S) * 1000);
+      const pro = service.proOf(user);
       return { ...renders.jobView(user, final), renderedOn: "server",
-        ...(final.status === "completed" ? { message: "Rendered on the GBK server. Give the user the wav and midi artifact downloadUrl values exactly as returned; never paste audio bytes." }
+        ...(final.status === "completed" ? { message: pro
+          ? "Rendered on the GBK server. Give the user the wav and midi artifact downloadUrl values exactly as returned; never paste audio bytes."
+          : `Rendered on the GBK server and ready to play in the in-chat player (gbk_show_composition_ui). Downloading MIDI or WAV is a GBK Pro feature. ${exportUpgradeMessage(cfg.publicOrigin, ownerSignedIn(user))}` }
           : final.status === "failed" || final.status === "cancelled" ? {} : { next: "Poll gbk_get_render_status with this jobId (waitSeconds up to 120) until status is completed/failed/cancelled." }) };
     };
     if (p!.via === "guest") {
       if (renders.serverRenderEnabled) return serverJob(true);
       // Server rendering turned off (SERVER_RENDER=0): export MIDI now; audio renders in the user's browser.
       const job = renders.midiOnlyJob(user, { ...row, revision: rowRev }, snapshot, config, service.exportMidi(snapshot), cfg.mcp.guestRendersPerDay);
+      const pro = service.proOf(user);
       return { ...renders.jobView(user, job), status: "browser_render", audio: "not rendered on the server",
         browserRender: browserRenderFor(user, row.id, rowRev),
-        message: "MIDI is ready (signed download URL in artifacts). Server rendering is off on this deployment, so audio renders only in a browser: call gbk_show_composition_ui to play/render it in the in-chat player, or give the user browserRender.studioUrl (read-only private link) to open GBK Studio and play or export WAV there. Never claim a WAV exists until one is listed." };
+        message: pro
+          ? "MIDI is ready (signed download URL in artifacts). Server rendering is off on this deployment, so audio renders only in a browser: call gbk_show_composition_ui to play/render it in the in-chat player, or give the user browserRender.studioUrl (read-only private link) to open GBK Studio and play or export WAV there. Never claim a WAV exists until one is listed."
+          : `MIDI was rendered. Playing stays free in the in-chat player (gbk_show_composition_ui). Downloading MIDI or WAV is a GBK Pro feature. ${exportUpgradeMessage(cfg.publicOrigin, ownerSignedIn(user))} Server rendering is off on this deployment, so audio plays in the user's browser. Never claim a WAV exists until one is listed.` };
     }
     const sub = a.headless && renders.serverRenderEnabled ? null : renders.submit(user, { ...row, revision: rowRev }, snapshot, config, p!.family);
     if (!sub || "studioRequired" in sub) {
@@ -300,16 +303,18 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
   }, async (a) => run("gbk_cancel_render", "gbk:renders.create", a as Record<string, unknown>, async (p) => renders.jobView(p!.user, renders.cancel(p!.user, a.jobId))));
 
   server.registerTool("gbk_get_artifacts", {
-    title: "Get artifacts", description: "Use this when the user wants to download a composition's files. Authorized download references (short-lived signed URLs, re-checked at access) and metadata for a composition's WAV and MIDI artifacts.",
+    title: "Get artifacts", description: "Use this when the user wants a composition's files or to refresh a download link. Pro callers get authorized download references (short-lived signed URLs, re-checked at access) and metadata. Free callers get metadata and a message (with the Pro pricing URL) instead of a download link. Playing and listening stay free.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN },
     ...toolMeta("gbk_get_artifacts", "gbk:artifacts.read"),
   }, async (a) => run("gbk_get_artifacts", "gbk:artifacts.read", a as Record<string, unknown>, async (p) => {
     service.getRow(p!.user, a.compositionId);
     const all = store.listArtifacts(a.compositionId, p!.user);
     const latest = store.latestArtifacts(a.compositionId, p!.user);
-    return { compositionId: a.compositionId,
-      latest: { ...(latest.wav ? { wav: artifactView(cfg, latest.wav) } : {}), ...(latest.midi ? { midi: artifactView(cfg, latest.midi) } : {}) },
-      artifacts: all.map((x) => artifactView(cfg, x)) };
+    const pro = service.proOf(p!.user);
+    return withExportGate(cfg.publicOrigin, p!.user, pro, { compositionId: a.compositionId,
+      latest: { ...(latest.wav ? { wav: presentArtifact(cfg, latest.wav, { pro }) } : {}), ...(latest.midi ? { midi: presentArtifact(cfg, latest.midi, { pro }) } : {}) },
+      artifacts: all.map((x) => presentArtifact(cfg, x, { pro })),
+      ...(!pro ? { message: exportUpgradeMessage(cfg.publicOrigin, ownerSignedIn(p!.user)) } : {}) });
   }));
 
   // ---- studio / publishing -------------------------------------------------------------------------------
@@ -351,10 +356,10 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     // and WAV upload (CORS, capability token). The widget renders audio in the user's browser, never on the server.
     _meta: { ui: { prefersBorder: true, domain: publicOrigin, csp: { resourceDomains: [publicOrigin], connectDomains: [publicOrigin] } },
       "openai/widgetCSP": { resource_domains: [publicOrigin], connect_domains: [publicOrigin] }, "openai/widgetPrefersBorder": true, "openai/widgetDomain": publicOrigin,
-      "openai/widgetDescription": "GBK player: piano roll, tracks, and a Render button that synthesizes the WAV in the user's browser, plays it and offers downloads." } }] }));
+      "openai/widgetDescription": "GBK player: piano roll, tracks, and a Render button that synthesizes the WAV in the user's browser and plays it. Downloads are Pro." } }] }));
 
   server.registerTool("gbk_show_composition_ui", {
-    title: "Show the composition player", description: "Use this when the user wants to listen to, see, or download a composition, especially when no GBK Studio tab is connected. Shows the interactive in-chat GBK player (piano roll, track list, CC lanes, Studio link) with a Render button that synthesizes the WAV in the user's own browser (SoundFont engine; no Studio tab or sign-in), then plays it and offers WAV/MIDI downloads; the WAV is also saved as an artifact. Also saves the current revision as the Studio share snapshot behind the player's Studio link (overwriting a published share's content). Tell the user to press Render in the player if no WAV exists yet. Tools remain fully usable without this UI.",
+    title: "Show the composition player", description: "Use this when the user wants to listen to or see a composition, especially when no GBK Studio tab is connected. Shows the interactive in-chat GBK player (piano roll, track list, CC lanes, Studio link) with a Render button that synthesizes the WAV in the user's own browser (SoundFont engine; no Studio tab or sign-in) and plays it. Playing and listening are free. WAV/MIDI downloads are Pro: the player shows a Pro plan link for free users. The WAV is also saved as an artifact. Also saves the current revision as the Studio share snapshot behind the player's Studio link (overwriting a published share's content). Tell the user to press Render in the player if no WAV exists yet. Tools remain fully usable without this UI.",
     inputSchema: { compositionId: COMPOSITION_ID, accessToken: ACCESS_TOKEN },
     ...toolMeta("gbk_show_composition_ui", "gbk:compositions.read", { ui: { resourceUri: COMPOSER_UI_URI }, "openai/outputTemplate": COMPOSER_UI_URI, "openai/widgetAccessible": true }),
   }, async (a) => run("gbk_show_composition_ui", "gbk:compositions.read", a as Record<string, unknown>, async (p) => {
@@ -367,20 +372,26 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     for (const e of project.ccs) if (e.controller === 11) { const arr = cc11.get(e.trackId) ?? []; if (arr.length < 200) arr.push({ tick: e.tick, value: e.value }); cc11.set(e.trackId, arr); }
     const latest = store.latestArtifacts(a.compositionId, user);
     const opened = service.openWorkstation(user, a.compositionId);
-    return {
+    const pro = service.proOf(user);
+    const wavMeta = latest.wav ? JSON.parse(latest.wav.meta_json) as { sampleRate?: number; channels?: number; durationSeconds?: number } : null;
+    const wav = latest.wav ? presentArtifact(cfg, latest.wav, { pro, play: true }) : null;
+    const midi = latest.midi ? presentArtifact(cfg, latest.midi, { pro }) : null;
+    return withExportGate(cfg.publicOrigin, user, pro, {
       compositionId: row.id, revision: row.revision, title: s.title, key: s.key, style: s.style,
       tempoBpm: s.tempoBpm ?? 120, timeSignature: (s.timeSignature as [number, number]) ?? [4, 4], ppq: project.ppq,
       durationSec: s.durationSec, bars: s.bars, sections: s.sections,
       tracks: s.tracks.map((t) => ({ id: t.id, name: t.name, channel: t.channel, program: t.program ?? 0, noteCount: t.notes, mix: t.mix })),
       notes, notesTruncated: project.notes.length > MAX_NOTES,
       controllers: [...cc11.entries()].map(([trackId, points]) => ({ trackId, controller: 11, points })),
-      artifacts: { ...(latest.wav ? { wav: { downloadUrl: artifactView(cfg, latest.wav).downloadUrl, sizeBytes: latest.wav.size_bytes, sha256: latest.wav.sha256,
-          sampleRate: (JSON.parse(latest.wav.meta_json) as { sampleRate?: number }).sampleRate ?? 44100, channels: (JSON.parse(latest.wav.meta_json) as { channels?: number }).channels ?? 2,
-          durationSeconds: (JSON.parse(latest.wav.meta_json) as { durationSeconds?: number }).durationSeconds ?? s.durationSec } } : {}),
-        ...(latest.midi ? { midi: { downloadUrl: artifactView(cfg, latest.midi).downloadUrl, sizeBytes: latest.midi.size_bytes, sha256: latest.midi.sha256 } } : {}) },
+      artifacts: { ...(wav ? { wav: { sizeBytes: latest.wav!.size_bytes, sha256: latest.wav!.sha256,
+          sampleRate: wavMeta?.sampleRate ?? 44100, channels: wavMeta?.channels ?? 2,
+          durationSeconds: wavMeta?.durationSeconds ?? s.durationSec,
+          ...(wav.downloadUrl ? { downloadUrl: wav.downloadUrl } : {}), ...(wav.playUrl ? { playUrl: wav.playUrl } : {}) } } : {}),
+        ...(midi ? { midi: { sizeBytes: latest.midi!.size_bytes, sha256: latest.midi!.sha256,
+          ...(midi.downloadUrl ? { downloadUrl: midi.downloadUrl } : {}) } } : {}) },
       projectUrl: opened.url,
       ...(p!.via === "guest" || user.startsWith("guest:") ? { browserRender: browserRenderFor(user, row.id, row.revision) } : {}),
-    };
+    });
   }));
 
   // ---- in-chat player rendering (called by the widget, not the model) -----------------------------------------
@@ -415,7 +426,12 @@ export function createGbkMcpServer(ctx: McpContext): McpServer {
     const job = renders.finishWidget(p!.user, a.jobId, a.token, a.ok ? { ok: true, meta: a.meta ?? {} } : { ok: false, code: a.errorCode ?? "RENDER_FAILED", message: a.errorMessage ?? "the in-chat player reported a failure" });
     const view = renders.jobView(p!.user, job);
     const wav = view.artifacts.find((x) => x.kind === "wav"); const midi = view.artifacts.find((x) => x.kind === "midi");
-    return { ...view, ...(wav || midi ? { latest: { ...(wav ? { wav: { downloadUrl: wav.downloadUrl, sizeBytes: wav.sizeBytes, sha256: wav.sha256 } } : {}), ...(midi ? { midi: { downloadUrl: midi.downloadUrl, sizeBytes: midi.sizeBytes, sha256: midi.sha256 } } : {}) } } : {}) };
+    const ref = (id: string, play: boolean) => {
+      const row = store.getArtifactAny(id); if (!row) return { sizeBytes: 0, sha256: "" };
+      const v = presentArtifact(cfg, row, { pro: view.canExport, play });
+      return { sizeBytes: row.size_bytes, sha256: row.sha256, ...(v.downloadUrl ? { downloadUrl: v.downloadUrl } : {}), ...(v.playUrl ? { playUrl: v.playUrl } : {}) };
+    };
+    return { ...view, ...(wav || midi ? { latest: { ...(wav ? { wav: ref(wav.artifactId, true) } : {}), ...(midi ? { midi: ref(midi.artifactId, false) } : {}) } } : {}) };
   }));
 
   return server;

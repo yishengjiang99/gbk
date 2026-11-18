@@ -1,5 +1,5 @@
 // Headless server rendering: an MCP client with no browser (guest or signed-in, no Studio tab) gets a validated
-// WAV and a Standard MIDI File as signed download URLs, rendered by the app's own SF2 engine in a worker thread.
+// WAV and a Standard MIDI File, rendered by the app's own SF2 engine in a worker thread. Download URLs are Pro only.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -7,10 +7,11 @@ import { ScriptModel, reply } from "./helpers.ts";
 import { startServer } from "./ws-helpers.ts";
 import { McpClient } from "./mcp-helpers.ts";
 import { entitlementFetch } from "./stripe-helpers.ts";
+import { readFileSync } from "node:fs";
 
 const model = () => new ScriptModel([() => reply("unused")]);
 const errorCode = (code: string) => (e: unknown) => JSON.stringify(e).includes(code) || String((e as Error)?.message ?? "").includes(code);
-interface Art { kind: string; downloadUrl: string; sha256: string; sizeBytes: number; mimeType: string; meta: Record<string, unknown> }
+interface Art { kind: string; artifactId: string; downloadUrl?: string; sha256: string; sizeBytes: number; mimeType: string; meta: Record<string, unknown> }
 interface Job { status: string; jobId: string; renderedOn?: string; artifacts: Art[]; config: { executor: string }; error: unknown }
 
 export function parseWav(b: Buffer) {
@@ -41,6 +42,10 @@ export function parseMidi(b: Buffer) {
 }
 
 const get = async (base: string, url: string) => { const u = new URL(url); const r = await fetch(base + u.pathname + u.search); assert.equal(r.status, 200); return Buffer.from(await r.arrayBuffer()); };
+const readArt = (s: { mcp: { store: { getArtifactAny: (id: string) => { size_bytes: number } | null; artifactAbsPath: (row: { size_bytes: number }) => string } } }, a: Art) => {
+  const row = s.mcp.store.getArtifactAny(a.artifactId); assert.ok(row, a.artifactId);
+  return readFileSync(s.mcp.store.artifactAbsPath(row));
+};
 
 test("guest with no browser: render returns server-rendered WAV (44.1k stereo PCM16) + valid MIDI as URLs", { timeout: 120_000 }, async () => {
   const s = await startServer(model());
@@ -57,7 +62,10 @@ test("guest with no browser: render returns server-rendered WAV (44.1k stereo PC
     assert.ok(JSON.stringify(r).length < 20_000, "tool result stays small (URLs + metadata only)");
 
     const wavArt = r.artifacts.find((a) => a.kind === "wav")!;
-    const wav = await get(s.base, wavArt.downloadUrl);
+    assert.equal(wavArt.downloadUrl, undefined, "guests do not get a download URL");
+    assert.equal((r as { canExport: boolean }).canExport, false);
+    assert.equal((r as { export: { code: string } }).export.code, "PRO_REQUIRED");
+    const wav = readArt(s, wavArt);
     assert.equal(wav.length, wavArt.sizeBytes); assert.equal(createHash("sha256").update(wav).digest("hex"), wavArt.sha256);
     const w = parseWav(wav);
     assert.deepEqual([w.format, w.channels, w.sampleRate, w.bits], [1, 2, 44100, 16]);
@@ -67,7 +75,7 @@ test("guest with no browser: render returns server-rendered WAV (44.1k stereo PC
     assert.ok(peak > 1000, "audible");
 
     const midArt = r.artifacts.find((a) => a.kind === "midi")!;
-    const mid = await get(s.base, midArt.downloadUrl);
+    const mid = readArt(s, midArt);
     assert.equal(createHash("sha256").update(mid).digest("hex"), midArt.sha256);
     const m = parseMidi(mid);
     assert.equal(m.format, 1); assert.equal(m.chunks, m.ntrks, "MTrk count matches header");
@@ -145,13 +153,15 @@ test("MCP limit messages are informational only: plan + /plans link, never prici
     const dur = await c.callRaw("gbk_render_composition", { compositionId: long.compositionId }); raw.push(JSON.stringify(dur.rpc));
     assert.match(JSON.stringify(dur.rpc), /This is over the free plan's limit \(20 s per server render\)\. Plans: http:\/\/composer\.test\/plans/);
     const g = await c.call<{ compositionId: string }>("gbk_create_composition", { title: "Short", style: "pop", bars: 2, tempo: 120, seed: 2 });
-    const ok = await c.callRaw("gbk_render_composition", { compositionId: g.compositionId, waitSeconds: 110 }); raw.push(JSON.stringify(ok.rpc));
+    // Successful free renders carry the export 402 (pricing_url) instead of a download link; that is the approved
+    // paywall, not a quota message, so it is not in `raw`.
+    await c.callRaw("gbk_render_composition", { compositionId: g.compositionId, waitSeconds: 110 });
     const hour = await c.callRaw("gbk_render_composition", { compositionId: g.compositionId }); raw.push(JSON.stringify(hour.rpc));
     assert.match(JSON.stringify(hour.rpc), /This is over the free plan's limit \(1 per hour\)\. Plans: http:\/\/composer\.test\/plans/);
     // guest path too
     const gc = new McpClient(s.base); await gc.initialize();
     const gg = await gc.call<{ compositionId: string; accessToken: string }>("gbk_create_composition", { title: "G", style: "pop", bars: 2, tempo: 120, seed: 4 });
-    raw.push(JSON.stringify((await gc.callRaw("gbk_render_composition", { compositionId: gg.compositionId, accessToken: gg.accessToken, waitSeconds: 110 })).rpc));
+    await gc.callRaw("gbk_render_composition", { compositionId: gg.compositionId, accessToken: gg.accessToken, waitSeconds: 110 });
     const gh = await gc.callRaw("gbk_render_composition", { compositionId: gg.compositionId, accessToken: gg.accessToken }); raw.push(JSON.stringify(gh.rpc));
     assert.match(JSON.stringify(gh.rpc), /over the free plan's limit \(1 per hour\)\. Plans: http:\/\/composer\.test\/plans/);
     raw.forEach((t, i) => assertNotSelling(t, `MCP output #${i}`));

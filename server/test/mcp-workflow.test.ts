@@ -22,7 +22,8 @@ const asUser = (s: { base: string }, user: string) => new McpClient(s.base, { "x
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
 interface Created { compositionId: string; revision: number; noteCount: number; tracks: { id: string; name: string; notes: number }[]; tempoBpm: number; bars: number; projectUrl: string }
-interface Rendered { status: string; jobId: string; artifacts: { kind: string; sha256: string; sizeBytes: number; downloadUrl?: string; meta: { validated?: boolean; durationSeconds?: number; sampleRate?: number; channels?: number } }[] }
+interface Rendered { status: string; jobId: string; artifacts: { kind: string; artifactId: string; sha256: string; sizeBytes: number; downloadUrl?: string; meta: { validated?: boolean; durationSeconds?: number; sampleRate?: number; channels?: number } }[]; canExport?: boolean; export?: { code: string; paywall: { pricing_url: string } } }
+const artifactGet = (base: string, id: string, user: string, q = "") => fetch(`${base}/api/mcp/artifacts/${id}${q}`, { headers: { "x-gbk-test-user": user } });
 
 async function fugue(mcp: McpClient): Promise<Created> {
   return mcp.call<Created>("gbk_create_composition", {
@@ -61,31 +62,34 @@ test("A: composition with no tab; render asks to open the studio, then renders i
     assert.equal((r as unknown as { config: { executor: string } }).config.executor, "browser");
     const wav = r.artifacts.find((a) => a.kind === "wav")!, mid = r.artifacts.find((a) => a.kind === "midi")!;
     assert.ok(wav && mid, "both WAV and MIDI artifacts exist");
-    // The render result itself carries signed download URLs — no second call needed
-    // (gbk_get_artifacts below remains the refresh path after they expire).
-    assert.match(wav.downloadUrl ?? "", /\/api\/mcp\/artifacts\//, "render result includes the WAV download URL directly");
-    const directUrl = new URL(wav.downloadUrl!);
-    const directRes = await fetch(`${s.base}${directUrl.pathname}${directUrl.search}`);
-    assert.equal(directRes.status, 200, "the URL from the render result downloads without another tool call");
+    assert.equal(wav.downloadUrl, undefined, "a free caller does not get a download URL");
+    assert.equal(r.canExport, false);
+    assert.equal(r.export?.code, "PRO_REQUIRED");
+    assert.match(r.export?.paywall.pricing_url ?? "", /\/pricing\?plan=pro_yearly&reason=export/);
+    const directRes = await artifactGet(s.base, wav.artifactId, "alice");
+    assert.equal(directRes.status, 200, "inline playback of the rendered WAV stays free");
     assert.equal(wav.meta.validated, true);
     assert.equal(wav.meta.sampleRate, 44100); assert.equal(wav.meta.channels, 2);
     // 8 bars of 4/4 at 108 BPM ≈ 17.8 s of music + 1 s tail.
     assert.ok(Math.abs((wav.meta.durationSeconds ?? 0) - 18.8) < 2.5, `duration ${wav.meta.durationSeconds}`);
 
-    const arts = await alice.call<{ latest: { wav: { downloadUrl: string }; midi: { downloadUrl: string } } }>("gbk_get_artifacts", { compositionId: c.compositionId });
-    const wavUrl = new URL(arts.latest.wav.downloadUrl), midUrl = new URL(arts.latest.midi.downloadUrl);
-    const wavRes = await fetch(`${s.base}${wavUrl.pathname}${wavUrl.search}`);
+    const arts = await alice.call<{ latest: { wav: { artifactId: string; downloadUrl?: string }; midi: { artifactId: string; downloadUrl?: string } }; canExport: boolean; export: { code: string }; message: string }>("gbk_get_artifacts", { compositionId: c.compositionId });
+    assert.equal(arts.canExport, false);
+    assert.equal(arts.latest.wav.downloadUrl, undefined);
+    assert.equal(arts.export.code, "PRO_REQUIRED");
+    assert.match(arts.message, /pricing\?plan=pro_yearly&reason=export/);
+    const wavRes = await artifactGet(s.base, arts.latest.wav.artifactId, "alice");
     assert.equal(wavRes.status, 200);
     assert.match(wavRes.headers.get("content-type") ?? "", /audio\/wav/);
     const wavBytes = new Uint8Array(await wavRes.arrayBuffer());
     assert.equal(String.fromCharCode(...wavBytes.subarray(0, 4)), "RIFF");
-    assert.equal(sha(wavBytes), wav.sha256, "downloaded WAV matches the recorded SHA-256");
+    assert.equal(sha(wavBytes), wav.sha256, "inline WAV matches the recorded SHA-256");
     assert.equal(wavBytes.length, wav.sizeBytes);
     // Range request (streamed playback support).
-    const ranged = await fetch(`${s.base}${wavUrl.pathname}${wavUrl.search}`, { headers: { range: "bytes=0-99" } });
+    const ranged = await fetch(`${s.base}/api/mcp/artifacts/${arts.latest.wav.artifactId}`, { headers: { "x-gbk-test-user": "alice", range: "bytes=0-99" } });
     assert.equal(ranged.status, 206);
     assert.equal((await ranged.arrayBuffer()).byteLength, 100);
-    const midRes = await fetch(`${s.base}${midUrl.pathname}${midUrl.search}`);
+    const midRes = await artifactGet(s.base, arts.latest.midi.artifactId, "alice");
     const midBytes = new Uint8Array(await midRes.arrayBuffer());
     assert.equal(String.fromCharCode(...midBytes.subarray(0, 4)), "MThd", "valid Standard MIDI File");
     assert.equal(sha(midBytes), mid.sha256);
@@ -242,15 +246,21 @@ test("W: in-chat player render - no Studio tab: widget tools hand out a token, b
       const up = await fetch(`${local(st.uploadUrl)}?offset=${off}`, { method: "PUT", headers: { ...sandbox, "x-gbk-render-token": st.token, "content-type": "application/octet-stream" }, body: r.bytes.subarray(off, off + st.chunkBytes) as BodyInit });
       assert.equal(up.status, 200, await up.text());
     }
-    const fin = await alice.call<Rendered & { latest: { wav: { downloadUrl: string; sha256: string } } }>("gbk_widget_render_finish", { jobId: st.jobId, token: st.token, ok: true,
+    const fin = await alice.call<Rendered & { latest: { wav: { playUrl?: string; downloadUrl?: string; sha256: string } } }>("gbk_widget_render_finish", { jobId: st.jobId, token: st.token, ok: true,
       meta: { sha256: r.sha256, byteLength: r.byteLength, validated: r.validated, durationSeconds: r.durationSeconds, soundFont: r.soundFont, renderMs: r.renderMs } });
     assert.equal(fin.status, "completed", JSON.stringify(fin));
     assert.equal(fin.latest.wav.sha256, r.sha256);
+    assert.equal(fin.canExport, false);
+    assert.equal(fin.latest.wav.downloadUrl, undefined, "free widget finish does not return a download URL");
+    assert.match(fin.latest.wav.playUrl ?? "", /\/api\/mcp\/artifacts\//, "playback URL is returned so the in-chat player can listen");
     const wav = fin.artifacts.find((a) => a.kind === "wav")!;
     assert.equal((wav.meta as { executor?: string }).executor, "widget");
     assert.ok(fin.artifacts.some((a) => a.kind === "midi"), "server-side MIDI export published too");
-    const dl = new Uint8Array(await (await fetch(local(fin.latest.wav.downloadUrl))).arrayBuffer());
+    const dl = new Uint8Array(await (await artifactGet(s.base, wav.artifactId, "alice")).arrayBuffer());
     assert.equal(sha(dl), r.sha256);
+    const play = await fetch(local(fin.latest.wav.playUrl!));
+    assert.equal(play.status, 200);
+    assert.match(play.headers.get("content-disposition") ?? "", /^inline/);
     // A replayed/forged finish cannot touch the job again; a failed report fails the job without artifacts.
     await assert.rejects(alice.call("gbk_widget_render_finish", { jobId: st.jobId, token: st.token, ok: true, meta: {} }));
     const st2 = await alice.call<Start>("gbk_widget_render_start", { compositionId: c.compositionId });

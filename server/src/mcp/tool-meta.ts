@@ -17,7 +17,7 @@ export const TOOL_HINTS: Record<string, { hints: ToolHints; why: string }> = {
   gbk_render_composition: { hints: h(false, false, false, false), why: "Starts a new render job and stores new private WAV/MIDI artifacts; never overwrites or publishes. Each call starts another job (and counts against render quota) unless an idempotencyKey is replayed." },
   gbk_get_render_status: { hints: h(true, false, true, false), why: "Reads (optionally waits on) an existing render job; never starts, cancels or changes it." },
   gbk_cancel_render: { hints: h(false, true, true, false), why: "Stops a queued/running render and discards its partial output; repeating it on a terminal job changes nothing." },
-  gbk_get_artifacts: { hints: h(true, false, true, false), why: "Returns metadata and short-lived signed download URLs for existing artifacts; creates no files." },
+  gbk_get_artifacts: { hints: h(true, false, true, false), why: "Returns metadata and, for Pro, short-lived signed download URLs for existing artifacts; free callers get a Pro pricing message instead of a link. Creates no files." },
   gbk_open_workstation: { hints: h(false, true, true, true), why: "Creates or overwrites the composition's Studio share snapshot; if that share was already published, its public page content is replaced. Repeating with the same revision rewrites identical content and returns the same link." },
   gbk_publish_composition: { hints: h(false, true, true, true), why: "Overwrites the share snapshot and makes it publicly accessible (no unpublish tool). Repeating it leaves the same public page." },
   gbk_delete_composition: { hints: h(false, true, true, true), why: "Permanently deletes a guest composition, revisions, jobs, files and every share page for it, including a published public one. A repeat returns NOT_FOUND and deletes nothing more." },
@@ -29,12 +29,15 @@ export const TOOL_HINTS: Record<string, { hints: ToolHints; why: string }> = {
 
 const nul = <T extends z.ZodTypeAny>(t: T) => t.nullable();
 const any = z.record(z.string(), z.unknown());
+const exportGate = z.object({ code: z.literal("PRO_REQUIRED"), reason: z.literal("export"), message: z.string(), signed_in: z.boolean(),
+  paywall: z.object({ reason: z.literal("export"), hard: z.literal(true), default_plan: z.string(), trial_days: z.number(), pricing_url: z.string() }) });
 const artifact = z.object({ artifactId: z.string(), kind: z.string(), filename: z.string(), mimeType: z.string(), sizeBytes: z.number(), sha256: z.string(),
-  revision: z.number().optional(), downloadUrl: z.string(), downloadUrlExpiresAt: z.string(), meta: any });
-const fileRef = z.object({ downloadUrl: z.string(), sizeBytes: z.number(), sha256: z.string() });
+  revision: z.number().optional(), downloadUrl: z.string().optional(), downloadUrlExpiresAt: z.string().optional(), playUrl: z.string().optional(), meta: any });
+const fileRef = z.object({ downloadUrl: z.string().optional(), playUrl: z.string().optional(), sizeBytes: z.number(), sha256: z.string() });
 const job = {
   jobId: z.string(), compositionId: z.string(), revision: z.number(), status: z.string().describe("queued | running | completed | failed | cancelled"),
   progress: z.number(), config: any, error: nul(z.object({ code: z.string(), message: z.string() })), createdAt: z.string(), finishedAt: nul(z.string()), artifacts: z.array(artifact),
+  canExport: z.boolean(), export: exportGate.optional(),
 };
 const lean = {
   compositionId: z.string(), projectId: z.string(), title: z.string(), revision: z.number(), createdAt: z.string(), updatedAt: z.string(),
@@ -70,7 +73,8 @@ export const OUTPUT_SCHEMAS = {
   }).shape,
   gbk_get_render_status: job,
   gbk_cancel_render: job,
-  gbk_get_artifacts: { compositionId: z.string(), latest: z.object({ wav: artifact.optional(), midi: artifact.optional() }), artifacts: z.array(artifact) },
+  gbk_get_artifacts: { compositionId: z.string(), latest: z.object({ wav: artifact.optional(), midi: artifact.optional() }), artifacts: z.array(artifact),
+    canExport: z.boolean(), export: exportGate.optional(), message: z.string().optional() },
   gbk_open_workstation: { ...link, note: z.string() },
   gbk_publish_composition: link,
   gbk_delete_composition: { deleted: z.literal(true), compositionId: z.string() },
@@ -82,7 +86,7 @@ export const OUTPUT_SCHEMAS = {
     notes: z.array(z.object({ trackId: z.string(), tick: z.number(), duration: z.number(), pitch: z.number(), velocity: z.number() })), notesTruncated: z.boolean(),
     controllers: z.array(z.object({ trackId: z.string(), controller: z.number(), points: z.array(z.object({ tick: z.number(), value: z.number() })) })),
     artifacts: z.object({ wav: fileRef.extend({ sampleRate: z.number(), channels: z.number(), durationSeconds: z.number() }).optional(), midi: fileRef.optional() }),
-    projectUrl: z.string(), browserRender: browserRender.optional(),
+    projectUrl: z.string(), browserRender: browserRender.optional(), canExport: z.boolean(), export: exportGate.optional(),
   },
   gbk_widget_render_start: { jobId: z.string(), compositionId: z.string(), revision: z.number(), token: z.string(), snapshotUrl: z.string(), uploadUrl: z.string(), chunkBytes: z.number(), options: any },
   gbk_widget_render_finish: { ...job, latest: z.object({ wav: fileRef.optional(), midi: fileRef.optional() }).optional() },

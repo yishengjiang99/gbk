@@ -66,16 +66,18 @@ test("guest lifecycle: create without login, edit with capability in a new sessi
       assert.ok(edited.revision > c.revision);
 
       // Render: MIDI from the server, audio handed to the browser. No WAV, no Studio tab needed.
-      const r = await b.call<{ status: string; jobId: string; artifacts: { kind: string; downloadUrl: string; sha256: string }[]; browserRender: Record<string, string> }>("gbk_render_composition", { ...args, waitSeconds: 5 });
+      const r = await b.call<{ status: string; jobId: string; artifacts: { kind: string; artifactId: string; downloadUrl?: string; sha256: string }[]; browserRender: Record<string, string>; canExport: boolean; export: { code: string; paywall: { pricing_url: string } }; message: string }>("gbk_render_composition", { ...args, waitSeconds: 5 });
       assert.equal(r.status, "browser_render");
       assert.deepEqual(r.artifacts.map((x) => x.kind), ["midi"], "the server publishes MIDI only");
       assert.equal(r.browserRender.widgetTool, "gbk_show_composition_ui");
       assert.equal(r.browserRender.readAccessToken, c.readAccessToken);
       assert.ok(!JSON.stringify(r).includes(c.accessToken), "render result never echoes the edit capability");
       assert.equal(s.hub.registry.size, 0, "no browser bridge involved");
-      const mid = new URL(r.artifacts[0].downloadUrl);
-      const res = await fetch(s.base + mid.pathname + mid.search); assert.equal(res.status, 200);
-      const bytes = Buffer.from(await res.arrayBuffer());
+      assert.equal(r.artifacts[0].downloadUrl, undefined, "guests do not get a download URL");
+      assert.equal(r.canExport, false); assert.equal(r.export.code, "PRO_REQUIRED");
+      assert.match(r.message, /pricing\?plan=pro_yearly&reason=export/);
+      const row = s.mcp.store.getArtifactAny(r.artifacts[0].artifactId)!;
+      const bytes = readFileSync(s.mcp.store.artifactAbsPath(row));
       assert.equal(bytes.subarray(0, 4).toString(), "MThd");
       assert.equal(createHash("sha256").update(bytes).digest("hex"), r.artifacts[0].sha256);
 
@@ -209,13 +211,12 @@ test("guest delete needs the edit capability and removes everything; claim moves
     const anon = new McpClient(s.base); await anon.initialize();
     const g = await anon.call<Guest>("gbk_create_composition", { ...brief, idempotencyKey: undefined });
     const args = { compositionId: g.compositionId, accessToken: g.accessToken };
-    const r = await anon.call<{ artifacts: { downloadUrl: string }[] }>("gbk_render_composition", args);
+    const r = await anon.call<{ artifacts: { artifactId: string; downloadUrl?: string }[] }>("gbk_render_composition", args);
     await assert.rejects(anon.call("gbk_delete_composition", { compositionId: g.compositionId }), errorCode("NOT_FOUND"));
     await assert.rejects(anon.call("gbk_delete_composition", { ...args, accessToken: g.readAccessToken }), errorCode("INSUFFICIENT_SCOPE"));
     assert.deepEqual(await anon.call("gbk_delete_composition", args), { deleted: true, compositionId: g.compositionId });
     await assert.rejects(anon.call("gbk_get_composition", args), errorCode("NOT_FOUND"));
-    const u = new URL(r.artifacts[0].downloadUrl);
-    assert.equal((await fetch(s.base + u.pathname + u.search)).status, 404, "artifact rows + bytes gone");
+    assert.equal((await fetch(`${s.base}/api/mcp/artifacts/${r.artifacts[0].artifactId}`)).status, 404, "artifact rows + bytes gone");
     assert.equal(s.mcp.store.guestCompositionCount(), 0);
 
     // Claim: anonymous session cannot claim; a signed-in session with the edit token can.

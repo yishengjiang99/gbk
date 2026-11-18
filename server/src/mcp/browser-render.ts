@@ -20,7 +20,7 @@ import { parseWavHeader } from "../../../src/audio/audio-validation.ts";
 import { McpStore, type RenderJobRow, type CompositionRow } from "./store.ts";
 import { McpError } from "./errors.ts";
 import { RENDERER_VERSION } from "./service-meta.ts";
-import { signArtifactUrl } from "./urls.ts";
+import { presentArtifact, withExportGate } from "./export-gate.ts";
 import { serverRenderTimeoutMs, type ServerRenderPool } from "./server-render.ts";
 import { resolveRenderFont, resolveFontFile, defaultFontId } from "./soundfonts.ts";
 import { tickToSec } from "../../../src/workstation/timing.ts";
@@ -296,13 +296,14 @@ export class RenderService {
   }
   jobView(owner: string, job: RenderJobRow) {
     const artifacts = job.status === "completed" ? this.store.listArtifacts(job.composition_id, owner).filter((a) => a.job_id === job.id) : [];
-    return {
+    const pro = this.isPro(owner);
+    return withExportGate(this.cfg.publicOrigin, owner, pro, {
       jobId: job.id, compositionId: job.composition_id, revision: job.revision, status: job.status,
       progress: job.progress, config: JSON.parse(job.config_json) as RenderConfig & { executor: string; rendererVersion: string },
       error: job.error ? JSON.parse(job.error) as { code: string; message: string } : null,
       createdAt: new Date(job.created_at).toISOString(), finishedAt: job.finished_at ? new Date(job.finished_at).toISOString() : null,
-      artifacts: artifacts.map((a) => { const s = signArtifactUrl(this.cfg, a.id); return { artifactId: a.id, kind: a.kind, filename: a.filename, mimeType: a.mime_type, sizeBytes: a.size_bytes, sha256: a.sha256, downloadUrl: s.url, downloadUrlExpiresAt: s.expiresAt, meta: JSON.parse(a.meta_json) }; }),
-    };
+      artifacts: artifacts.map((a) => presentArtifact(this.cfg, a, { pro })),
+    });
   }
 
   private completeJob(a: Active, meta: Record<string, unknown>) {
