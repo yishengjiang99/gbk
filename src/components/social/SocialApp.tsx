@@ -84,8 +84,9 @@ function useAudio() {
     const x = xf.current!; if (gesture) x.unlock();
     // Real-time first: the song's project through the SF2 engine; prerendered audio only for songs without a project.
     const ctx = x.audioContext; const key = `live:${s.slug}`; slugBySrc.current.set(key, s.slug);
-    const legacy = () => { const src = srcOf(s); if (!src) return x.play(null).then(() => false); slugBySrc.current.set(src, s.slug); return x.play(src); };
-    const go = ctx ? prepare(s.slug, ctx.sampleRate).then((p) => p ? x.playLive(key, p) : legacy()) : legacy();
+    const hook = s.hook_start_ms ?? 0;
+    const legacy = () => { const src = srcOf(s); if (!src) return x.play(null).then(() => false); slugBySrc.current.set(src, s.slug); return x.play(src, hook); };
+    const go = ctx ? prepare(s.slug, ctx.sampleRate).then((p) => p ? x.playLive(key, p, hook) : legacy()) : legacy();
     void go.then((ok) => { if (!ok) { if (!gesture && !x.playingCount) setUnlocked(false); return; } setUnlocked(true); if (!counted.current.has(s.slug)) { counted.current.add(s.slug); void social.play(s.slug); } });
   }, []);
   const cur = st.current ? slugBySrc.current.get(st.current) ?? null : null;

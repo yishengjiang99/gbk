@@ -9,6 +9,23 @@ import { loadSoundFont } from "../../audio/soundfont-loader.ts";
 import { getShare } from "../../agent/share-client.ts";
 import type { Project } from "../../workstation/model.ts";
 import { reportError } from "../../telemetry/error-reporter.ts";
+import type { SynthEvent } from "../../sf2-renderer.ts";
+
+/** Shift a prepared sequence so playback begins at startFrame; pre-hook CC/program state is applied at 0. */
+export function eventsFrom(events: SynthEvent[], startFrame: number): SynthEvent[] {
+  if (startFrame <= 0) return events;
+  const held = new Map<string, SynthEvent>();
+  const out: SynthEvent[] = [];
+  for (const e of events) {
+    const f = e.frame ?? 0;
+    if (f < startFrame) {
+      if (e.type !== "noteOn" && e.type !== "noteOff") held.set(`${e.type}:${e.trackIndex ?? ""}:${e.channel ?? ""}:${e.controller ?? e.note ?? ""}`, { ...e, frame: 0 });
+      continue;
+    }
+    out.push({ ...e, frame: f - startFrame });
+  }
+  return [...held.values(), ...out].sort((a, b) => (a.frame ?? 0) - (b.frame ?? 0) || (a.seq ?? 0) - (b.seq ?? 0));
+}
 
 export const LIVE_HEADROOM = 0.8;
 export interface Prepared { slug: string; plan: RenderPlan; voices: PlanVoice[]; seconds: number }
@@ -55,13 +72,16 @@ export function loadWorklet(ctx: BaseAudioContext): Promise<void> {
   return w;
 }
 
-/** Start the prepared song now on ctx -> out, looping at the end (with a short tail). */
-export async function startLive(ctx: AudioContext, out: AudioNode, p: Prepared): Promise<LiveVoice> {
+/** Start the prepared song now on ctx -> out, looping at the end (with a short tail). startMs is the hook; at/past the end clamps to 0. */
+export async function startLive(ctx: AudioContext, out: AudioNode, p: Prepared, startMs = 0): Promise<LiveVoice> {
   await loadWorklet(ctx);
   const gain = ctx.createGain(); gain.gain.value = 1;
   const bus = ctx.createGain(); bus.gain.value = LIVE_HEADROOM; bus.connect(gain); gain.connect(out);
   const merger = ctx.createChannelMerger(2); merger.connect(bus);
   const nodes: AudioWorkletNode[] = [];
+  const startSec = startMs > 0 && p.seconds > 0 && startMs / 1000 < p.seconds ? startMs / 1000 : 0;
+  const startFrame = startSec > 0 && p.seconds > 0 ? Math.round(startSec * (p.plan.musicFrames / p.seconds)) : 0;
+  const seqs = p.voices.map((v) => eventsFrom(v.events, startFrame));
   for (const v of p.voices) {
     const node = new AudioWorkletNode(ctx, "sf2-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     node.port.postMessage({ type: "setOfflineTracks", tracks: [v.t], maxVoices: 64 });
@@ -69,9 +89,9 @@ export async function startLive(ctx: AudioContext, out: AudioNode, p: Prepared):
     for (const [from, to, g] of v.gains) { const gn = ctx.createGain(); gn.gain.value = g; split.connect(gn, from); gn.connect(merger, 0, to); }
     nodes.push(node);
   }
-  const loopSec = Math.max(1, p.seconds + 1.5);
+  const loopSec = Math.max(1, Math.max(0.25, p.seconds - startSec) + 1.5);
   let t0 = ctx.currentTime; let stopped = false; let timer: ReturnType<typeof setTimeout> | undefined;
-  const kick = () => { if (stopped) return; t0 = ctx.currentTime; p.voices.forEach((v, i) => nodes[i].port.postMessage({ type: "setSequence", events: v.events })); timer = setTimeout(kick, loopSec * 1000); };
+  const kick = () => { if (stopped) return; t0 = ctx.currentTime; seqs.forEach((events, i) => nodes[i].port.postMessage({ type: "setSequence", events })); timer = setTimeout(kick, loopSec * 1000); };
   kick();
   return {
     gain,

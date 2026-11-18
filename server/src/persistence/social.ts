@@ -1,6 +1,7 @@
 // gbk Social (P1): profiles/handles, labels/tags, ratings, comments, plays, reports, ranked feed.
 // Tables live in shares.sqlite beside `shares`, created idempotently at startup. Contract: docs/social-api.md.
 import type { DatabaseSync } from "node:sqlite";
+import { backfillShareHooks, writeShareHook } from "./hook.ts";
 
 export const LABELS = ["ambient", "lofi", "classical", "jazz", "rnb", "electronic", "cinematic", "game", "pop", "experimental", "wip"] as const;
 export const TAG_RE = /^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])$/;
@@ -30,7 +31,7 @@ export class SocialStore {
     if (pcols.length && !pcols.includes("badge")) this.db.exec("ALTER TABLE profiles ADD COLUMN badge TEXT");
     add("labels", "TEXT NOT NULL DEFAULT '[]'"); add("prompt_shared", "INTEGER NOT NULL DEFAULT 0"); add("prompt_text", "TEXT");
     add("rating_sum", "INTEGER NOT NULL DEFAULT 0"); add("rating_count", "INTEGER NOT NULL DEFAULT 0"); add("comment_count", "INTEGER NOT NULL DEFAULT 0");
-    add("play_count", "INTEGER NOT NULL DEFAULT 0"); add("score", "REAL NOT NULL DEFAULT 0"); add("published_at", "INTEGER");
+    add("play_count", "INTEGER NOT NULL DEFAULT 0"); add("score", "REAL NOT NULL DEFAULT 0"); add("published_at", "INTEGER"); add("hook_start_ms", "INTEGER");
     this.db.exec(`UPDATE shares SET published_at = created_at WHERE public = 1 AND published_at IS NULL;
       CREATE INDEX IF NOT EXISTS shares_score ON shares(public, score DESC, id);
       CREATE INDEX IF NOT EXISTS shares_pub ON shares(public, published_at DESC, id);
@@ -47,7 +48,10 @@ export class SocialStore {
       CREATE TRIGGER IF NOT EXISTS shares_social_cleanup AFTER DELETE ON shares BEGIN
         DELETE FROM ratings WHERE share_id = OLD.id; DELETE FROM comments WHERE share_id = OLD.id; DELETE FROM share_tags WHERE share_id = OLD.id; DELETE FROM plays WHERE share_id = OLD.id;
         DELETE FROM reports WHERE kind = 'song' AND (target_id = OLD.slug OR target_id = OLD.short_id); END;`);
+    backfillShareHooks(this.db);
   }
+  /** Recompute hook_start_ms from this song's score/MIDI (called at publish). */
+  fillHook(shareId: string) { writeShareHook(this.db, shareId); }
 
   // ---- profiles ----
   profile(userId: string): Profile | null { return (this.db.prepare("SELECT * FROM profiles WHERE user_id = ?").get(userId) as unknown as Profile) ?? null; }
@@ -93,8 +97,8 @@ export class SocialStore {
   markPublished(shareId: string) { this.db.prepare("UPDATE shares SET published_at = COALESCE(published_at, ?) WHERE id = ?").run(this.now(), shareId); this.rescore(shareId); }
   tagsOf(shareId: string): string[] { return (this.db.prepare("SELECT tag FROM share_tags WHERE share_id = ? ORDER BY tag").all(shareId) as { tag: string }[]).map((r) => r.tag); }
   social(shareId: string) {
-    return this.db.prepare("SELECT labels, prompt_shared, prompt_text, rating_sum, rating_count, comment_count, play_count, published_at, (SELECT COUNT(*) FROM shares c WHERE c.parent_id = s.id AND c.public = 1) AS forks FROM shares s WHERE id = ?").get(shareId) as
-      { labels: string; prompt_shared: number; prompt_text: string | null; rating_sum: number; rating_count: number; comment_count: number; play_count: number; published_at: number | null; forks: number };
+    return this.db.prepare("SELECT labels, prompt_shared, prompt_text, rating_sum, rating_count, comment_count, play_count, published_at, hook_start_ms, (SELECT COUNT(*) FROM shares c WHERE c.parent_id = s.id AND c.public = 1) AS forks FROM shares s WHERE id = ?").get(shareId) as
+      { labels: string; prompt_shared: number; prompt_text: string | null; rating_sum: number; rating_count: number; comment_count: number; play_count: number; published_at: number | null; hook_start_ms: number | null; forks: number };
   }
   rescore(shareId: string) {
     const r = this.social(shareId); if (!r) return;

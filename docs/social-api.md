@@ -40,6 +40,7 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
   "preview": { "notes": [[pitch, start, dur, track]], "duration": 32.0 }, // piano-roll preview, may be null
   "prompt_shared": false, "prompt_text": null,   // P3; text only when owner opted in
   "parent_slug": null, "is_mine": false,
+  "hook_start_ms": 18400,           // Int64 ms, nullable; iOS treats null as 0
   "share_title": "\"Minuet in G\" by @yisheng",
   "share_text": "\"Minuet in G\" by @yisheng\nhttps://compose.grepawk.com/s/minuet-in-g-a1b2c3",
   "x_intent_url": "https://x.com/intent/tweet?text=..."
@@ -48,6 +49,8 @@ phase that ships it: **P1** schema, profiles/handles, publish, ratings, comments
 // Comment
 { "id": "17", "author": User, "body": "nice", "created_at": 0, "can_delete": false }
 ```
+
+`hook_start_ms` is the start of the feed hook in milliseconds from 0: the start of the densest 8–12 s velocity-weighted note-on window, or the first return of a repeated section if one is clearly detected. It is computed at publish from the song's MIDI/score data (and backfilled for existing public songs). The field is `Int64` milliseconds and may be `null` when unknown (no notes, or not yet computed). iOS treats `null` as 0.
 
 `share_title`, `share_text`, and `x_intent_url` are the canonical share wording so GBK iOS and the web app stay in sync: `share_title` is `"<title>" by @<handle>` (title falls back to `Untitled`; the by-clause is omitted when the author is missing). `share_text` is that line plus a newline and the `/s/<slug>` URL. `x_intent_url` is the X/Twitter intent with the same text; it uses a stored X handle only when one exists, otherwise the gbk handle. iOS should use `share_title` as the ShareLink subject and `share_text` as the message (or the line without the URL if the share item is already the song URL).
 
@@ -203,7 +206,7 @@ APNs payload: `{ aps: { alert, badge, sound }, link: "https://compose.grepawk.co
 
 ## Client behavior (web + iOS)
 
-- **Feed audio switch:** `FADE_OUT_MS = 58`. The next song starts immediately at full volume (no fade-in, no waiting). The previous song fades out over 58 ms with gain `cos(t·π/2)`, `t` from 0 to 1.
+- **Feed audio switch:** `FADE_OUT_MS = 58`. Playback starts at `hook_start_ms` (0 when null) and loops back to that point. The next song starts immediately at full volume when the hook is 0 (no fade-in, no waiting). When starting mid-song, a short (~40 ms) fade-in avoids a click. The previous song fades out over 58 ms with gain `cos(t·π/2)`, `t` from 0 to 1.
 - The fade starts when the scroll settles on a snapped card (web: `scrollend`, or 120 ms without scroll events). It does not start while the user is still scrolling.
 - At most one voice fades out at a time. A new switch during a fade stops the stale fading voice at once, so audio never piles up.
 - Preload the active card's audio plus the next and previous cards.

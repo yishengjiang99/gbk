@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { deriveMidi } from "./share-media.ts";
+import { writeShareHook } from "./hook.ts";
 
 export interface ShareRow { id: string; slug: string; owner: string; title: string; project_json: string; parent_id: string | null; created_at: number; public: number; midi: Uint8Array | null; wav: Uint8Array | null; mp3: Uint8Array | null; wav_meta: string | null; project_id: string | null; updated_at: number | null; short_id?: string | null }
 export interface ShareView { slug: string; title: string; owner: string; createdAt: string; public: boolean; parent: { slug: string; title: string; owner: string } | null; hasMidi: boolean; hasWav: boolean; hasMp3: boolean; wav: unknown; forks: number; updatedAt: string; projectId: string | null }
@@ -41,6 +42,7 @@ export class ShareStore {
     if (!cols.includes("updated_at")) this.db.exec("ALTER TABLE shares ADD COLUMN updated_at INTEGER");
     this.db.exec("CREATE INDEX IF NOT EXISTS shares_owner_project ON shares(owner, project_id)");
     // Name slugs: short_id is the stable random id (the old bare slug); slug = kebab(title)-short_id.
+    if (!cols.includes("hook_start_ms")) this.db.exec("ALTER TABLE shares ADD COLUMN hook_start_ms INTEGER");
     if (!cols.includes("short_id")) this.db.exec("ALTER TABLE shares ADD COLUMN short_id TEXT");
     this.db.exec("UPDATE shares SET short_id = slug WHERE short_id IS NULL");
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS shares_short_id ON shares(short_id)");
@@ -59,6 +61,7 @@ export class ShareStore {
     const parent = o.parentSlug ? this.bySlug(o.parentSlug) : null;
     const id = `shr_${randomBytes(9).toString("hex")}`; const sid = shortId();
     this.db.prepare("INSERT INTO shares (id, slug, short_id, owner, title, project_json, parent_id, created_at, public) VALUES (?,?,?,?,?,?,?,?,?)").run(id, nameSlug(o.title, sid), sid, o.owner, o.title, o.projectJson, parent?.id ?? null, Date.now(), o.public ? 1 : 0);
+    if (o.public) writeShareHook(this.db, id);
     return this.bySlug(sid)!;
   }
   /** Auto-save: one PRIVATE row per (owner, local project id); later saves overwrite it (latest version only). */
@@ -104,7 +107,7 @@ export class ShareStore {
   }
   /** Auto-save rewrote the notes: refresh the server MIDI so it never plays a stale (or missing) version. */
   refreshMidi(slugv: string) { const r = this.bySlug(slugv); const midi = r && deriveMidi(r.project_json); if (r && midi) this.setMedia(r.slug, "midi", midi); }
-  setPublic(slugv: string, pub: boolean) { this.db.prepare("UPDATE shares SET public = ? WHERE id = ?").run(pub ? 1 : 0, this.idOf(slugv)); }
+  setPublic(slugv: string, pub: boolean) { const id = this.idOf(slugv); this.db.prepare("UPDATE shares SET public = ? WHERE id = ?").run(pub ? 1 : 0, id); if (pub) writeShareHook(this.db, id); }
   /** MCP project lifecycle: drop or re-own the private Studio snapshot(s) of one MCP composition. */
   deleteByProject(owner: string, projectId: string) { this.db.prepare("DELETE FROM shares WHERE owner = ? AND project_id = ?").run(owner, projectId); }
   reassignProject(fromOwner: string, toOwner: string, projectId: string) { this.db.prepare("UPDATE shares SET owner = ? WHERE owner = ? AND project_id = ?").run(toOwner, fromOwner, projectId); }
