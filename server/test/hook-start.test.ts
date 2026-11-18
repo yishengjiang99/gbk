@@ -54,7 +54,7 @@ test("hook detector: dense chorus after a sparse intro", () => {
 
 test("hook detector: first return of a repeated section", () => {
   // 8 s motif A, 8 s contrasting B, 8 s A again. Same density, so the hook is the return of A (~16 s).
-  const onsets = [];
+  const onsets: any[] = [];
   const motif = (t0: number, pitches: number[]) => {
     for (let t = 0; t < 8_000; t += 250) onsets.push({ tMs: t0 + t, vel: 90, pitch: pitches[(t / 250) % pitches.length] });
   };
