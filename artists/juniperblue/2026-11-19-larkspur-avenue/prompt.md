@@ -1,0 +1,1 @@
+Original medium swing in Bb, 120 BPM: trombone lead with vibraphone harmony over piano, upright bass and drums. Brushed two-feel intro and first A, then walking swing. ABAC head moving Bbmaj7 to Bbm7-Eb7 and Abmaj7, C7#11 color, trombone solo, vibes solo, head out and a Bb6 ending.
