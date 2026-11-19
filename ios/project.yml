@@ -29,7 +29,7 @@ packages:
   # Pinned to an omr-sheet-cam main commit. Fix scan bugs there and bump this revision.
   OMRScan:
     url: https://github.com/yishengjiang99/omr-sheet-cam.git
-    revision: 80ad0721e29c5ffbfef4aef54a34f9df59dbaa2f
+    revision: 715c304914e06a7bbb44007ed32f6222094c80e0
 targets:
   GBKComposer:
     type: application
