@@ -59,7 +59,7 @@ test("gbk_list_soundfonts returns the pinned catalog with honest availability; c
     assert.match(gu.description, /287 presets/);
     // No response field names a person — not the SF2 engineers or copyright
     // holders, and not the people named in catalog copy (OpenAI review, 2026-11-19).
-    for (const f of fonts) assert.doesNotMatch(`${f.description} ${f.license}`, /Christian Collins|Tim Brechbill|Frank Wen|SylvataDaSylveon/);
+    for (const f of fonts) assert.doesNotMatch(JSON.stringify(f), /Christian Collins|Tim Brechbill|Frank Wen|SylvataDaSylveon/);
     const fluid = fonts[2];
     assert.equal(fluid.delivery, "server");
     assert.equal(fluid.available, fluidInstalled);
