@@ -25,9 +25,11 @@
 // dist/static is servable at /static/<file>, and a server font present in the
 // persistent dir is servable at its serverPath.
 //
-// Listing descriptions are read from the SF2 binaries themselves (readSf2Binary:
-// the INFO chunk + preset directory) whenever a font is installed; catalog copy
-// is only the fallback for fonts this deployment does not have.
+// Listing descriptions are derived from the SF2 binaries themselves
+// (readSf2Binary: the binary name + preset directory) whenever a font is
+// installed; catalog copy is only the fallback for fonts this deployment
+// does not have. Binary credits and comments never reach a response (they
+// name individual people); catalog copy follows the same rule.
 import { existsSync, readFileSync, closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -126,17 +128,16 @@ export function readSf2Binary(path: string): { info: Sf2BinaryInfo; presets: Sf2
 
 /**
  * The listing description, read from the binary when the font is installed:
- * the INFO comment (ICMT, whitespace-collapsed, capped) when the bank carries
- * one; otherwise a composite of the binary's name, its preset directory and
- * its credits. Only a font that is not installed falls back to catalog copy.
+ * the binary's name plus a summary of its preset directory. Deliberately NOT
+ * the INFO comment and NOT the binary's credits: the comment is uncontrolled
+ * free text and the copyright/engineer fields name individual people, and
+ * plugin responses must not carry personal names (OpenAI review, 2026-11-19).
+ * Only a font that is not installed falls back to catalog copy.
  */
 function binaryDescription(bin: { info: Sf2BinaryInfo; presets: Sf2PresetLite[] }): string | undefined {
-  const comment = bin.info.comment?.replace(/\s+/g, " ").trim();
-  if (comment) return comment.length > 300 ? `${comment.slice(0, 297)}…` : comment;
   if (!bin.presets.length) return undefined;
   const shown = bin.presets.slice(0, 4).map((p) => `bank ${p.bank} program ${p.program} "${p.name}"`).join("; ");
-  const credits = [bin.info.copyright ? `Copyright: ${bin.info.copyright}.` : "", bin.info.engineer ? `By ${bin.info.engineer}.` : ""].filter(Boolean).join(" ");
-  const text = `${bin.info.name ?? "SoundFont"}: ${bin.presets.length} preset${bin.presets.length === 1 ? "" : "s"} (${shown}${bin.presets.length > 4 ? "; …" : ""}).${credits ? ` ${credits}` : ""}`;
+  const text = `${bin.info.name ?? "SoundFont"}: ${bin.presets.length} preset${bin.presets.length === 1 ? "" : "s"} (${shown}${bin.presets.length > 4 ? "; …" : ""}).`;
   return text.length > 300 ? `${text.slice(0, 297)}…` : text;
 }
 
@@ -242,8 +243,8 @@ export function listSoundFonts(cfg: Config): SoundFontView[] {
   return loadCatalog().map((f) => {
     const file = resolveFontFile(cfg, f);
     // Descriptions come from the SF2 binary itself whenever it is installed
-    // (INFO comment, else its name + preset directory + credits); the catalog
-    // copy is only the fallback for fonts this deployment does not have.
+    // (its name + preset directory; never its comment or credits, which name
+    // people); the catalog copy is only the fallback for uninstalled fonts.
     const bin = file ? readSf2Binary(file) : null;
     return {
       id: f.id, label: f.label, description: (bin ? binaryDescription(bin) : undefined) ?? f.description, bytes: f.bytes, license: f.license,

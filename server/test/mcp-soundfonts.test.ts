@@ -55,7 +55,11 @@ test("gbk_list_soundfonts returns the pinned catalog with honest availability; c
     const raw = gu as unknown as Record<string, unknown>;
     assert.equal(raw.path, undefined); assert.equal(raw.file, undefined);
     assert.equal(raw.info, undefined); assert.equal(raw.presets, undefined); assert.equal(raw.presetCount, undefined);
-    assert.match(gu.description, /License v2\.0/);
+    assert.match(gu.description, /GeneralUser GS/);
+    assert.match(gu.description, /287 presets/);
+    // No response field names a person — not the SF2 engineers or copyright
+    // holders, and not the people named in catalog copy (OpenAI review, 2026-11-19).
+    for (const f of fonts) assert.doesNotMatch(`${f.description} ${f.license}`, /Christian Collins|Tim Brechbill|Frank Wen|SylvataDaSylveon/);
     const fluid = fonts[2];
     assert.equal(fluid.delivery, "server");
     assert.equal(fluid.available, fluidInstalled);
@@ -64,7 +68,6 @@ test("gbk_list_soundfonts returns the pinned catalog with honest availability; c
     const guitar = fonts[3];
     assert.equal(guitar.available, true);
     assert.match(guitar.description, /Nostalgic Rock Guitar\.sf2: 1 preset/);
-    assert.match(guitar.description, /Libre/);
     const drums = fonts[4];
     assert.equal(drums.available, true);
     assert.match(drums.description, /bank 128 program 0 "Drums"/);
