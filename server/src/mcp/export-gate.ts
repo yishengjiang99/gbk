@@ -25,8 +25,18 @@ export function exportUpgradeMessage(origin: string, signedIn: boolean): string 
 
 export type PresentedArtifact = { artifactId: string; kind: ArtifactRow["kind"]; filename: string; mimeType: string; sizeBytes: number; sha256: string; revision: number; meta: Record<string, unknown>; downloadUrl?: string; downloadUrlExpiresAt?: string | number; playUrl?: string };
 
-export function presentArtifact(cfg: Config, a: ArtifactRow, opts: { pro: boolean; play?: boolean }): PresentedArtifact {
+/** Artifact metadata shown to plugin callers: only the file facts a caller needs (validation state,
+ *  format, audio basics, and where the render ran). The stored meta_json also carries renderer
+ *  internals (renderer version, render timings, loudness measurements, warnings) — debug data that
+ *  stays on the server (OpenAI review, 2026-11-19). */
+const PRESENTED_META_KEYS = ["validated", "format", "sampleRate", "channels", "durationSeconds", "preserves", "executor", "soundFont"] as const;
+function presentedMeta(a: ArtifactRow): Record<string, unknown> {
   const meta = JSON.parse(a.meta_json) as Record<string, unknown>;
+  return Object.fromEntries(PRESENTED_META_KEYS.filter((k) => meta[k] !== undefined).map((k) => [k, meta[k]]));
+}
+
+export function presentArtifact(cfg: Config, a: ArtifactRow, opts: { pro: boolean; play?: boolean }): PresentedArtifact {
+  const meta = presentedMeta(a);
   const base = { artifactId: a.id, kind: a.kind, filename: a.filename, mimeType: a.mime_type, sizeBytes: a.size_bytes, sha256: a.sha256,
     revision: a.revision, meta };
   if (opts.pro) {

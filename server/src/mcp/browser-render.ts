@@ -297,9 +297,14 @@ export class RenderService {
   jobView(owner: string, job: RenderJobRow) {
     const artifacts = job.status === "completed" ? this.store.listArtifacts(job.composition_id, owner).filter((a) => a.job_id === job.id) : [];
     const pro = this.isPro(owner);
+    // Present the caller's own render settings plus the executor (where the render ran: server,
+    // browser, widget — a user-facing fact the result messages refer to). rendererVersion is a
+    // server internal and stays out.
+    const storedConfig = JSON.parse(job.config_json) as RenderConfig & { executor: string; rendererVersion?: string };
+    const { rendererVersion: _rendererVersion, ...config } = storedConfig;
     return withExportGate(this.cfg.publicOrigin, owner, pro, {
       jobId: job.id, compositionId: job.composition_id, revision: job.revision, status: job.status,
-      progress: job.progress, config: JSON.parse(job.config_json) as RenderConfig & { executor: string; rendererVersion: string },
+      progress: job.progress, config,
       error: job.error ? JSON.parse(job.error) as { code: string; message: string } : null,
       createdAt: new Date(job.created_at).toISOString(), finishedAt: job.finished_at ? new Date(job.finished_at).toISOString() : null,
       artifacts: artifacts.map((a) => presentArtifact(this.cfg, a, { pro })),

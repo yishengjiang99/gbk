@@ -32,9 +32,7 @@ const timBytes = readIf(new URL("../../soundfonts/TimGM6mb.sf2", import.meta.url
 const fluidInstalled = existsSync(new URL("../../soundfonts/FluidR3_GM.sf2", import.meta.url).pathname)
   || existsSync("/var/www/gbk-composer/soundfonts/FluidR3_GM.sf2");
 
-interface FontView { id: string; label: string; delivery: string; path: string; default: boolean; active: boolean; available: boolean; bytes: number; description: string;
-  info?: { name?: string; comment?: string; copyright?: string; engineer?: string };
-  presets?: { bank: number; program: number; name: string }[]; presetCount?: number }
+interface FontView { id: string; label: string; delivery: string; default: boolean; active: boolean; available: boolean; bytes: number; description: string }
 interface RenderedJob {
   status: string; renderedOn?: string; config: { soundFont?: string; executor: string };
   artifacts: { kind: string; sha256: string; meta: { soundFont?: string; validated?: boolean } }[];
@@ -50,28 +48,25 @@ test("gbk_list_soundfonts returns the pinned catalog with honest availability; c
     const gu = fonts[0];
     assert.equal(gu.default, true); assert.equal(gu.active, true);
     assert.equal(gu.available, true, "the committed public/static GeneralUser copy is always present");
-    assert.equal(gu.delivery, "bundled"); assert.equal(gu.path, "static/GeneralUser-GS.sf2");
-    // Descriptions and metadata are read from the SF2 binary itself when installed:
-    // GeneralUser carries a long ICMT license comment, which becomes its description.
-    assert.equal(gu.info?.name, "GeneralUser GS 2.0.2");
-    assert.equal(gu.info?.copyright, "1997-2025 by S. Christian Collins");
-    assert.equal(gu.presetCount, 287);
+    assert.equal(gu.delivery, "bundled");
+    // Plugin responses carry no internal file layout and no raw SF2 INFO block (which names
+    // individual engineers/copyright holders): OpenAI review, 2026-11-19. The binary still
+    // drives the description server-side (GeneralUser's long ICMT license comment becomes it).
+    const raw = gu as unknown as Record<string, unknown>;
+    assert.equal(raw.path, undefined); assert.equal(raw.file, undefined);
+    assert.equal(raw.info, undefined); assert.equal(raw.presets, undefined); assert.equal(raw.presetCount, undefined);
     assert.match(gu.description, /License v2\.0/);
     const fluid = fonts[2];
-    assert.equal(fluid.delivery, "server"); assert.equal(fluid.path, "/soundfonts/FluidR3_GM.sf2");
+    assert.equal(fluid.delivery, "server");
     assert.equal(fluid.available, fluidInstalled);
     // The vendored specialty banks are committed in-repo, so they are always installed;
     // with no ICMT in their binaries, the listing describes them from name + presets + credits.
     const guitar = fonts[3];
     assert.equal(guitar.available, true);
-    assert.deepEqual(guitar.presets, [{ bank: 0, program: 0, name: "Nostalgic Rock" }]);
-    assert.equal(guitar.info?.copyright, "Libre");
     assert.match(guitar.description, /Nostalgic Rock Guitar\.sf2: 1 preset/);
     assert.match(guitar.description, /Libre/);
     const drums = fonts[4];
     assert.equal(drums.available, true);
-    assert.deepEqual(drums.presets, [{ bank: 128, program: 0, name: "Drums" }]);
-    assert.equal(drums.info?.engineer, "SylvataDaSylveon");
     assert.match(drums.description, /bank 128 program 0 "Drums"/);
     // The tool output matches the catalog module's own view of this deployment.
     const direct = listSoundFonts(testConfig({}));

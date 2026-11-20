@@ -39,6 +39,15 @@ export interface EditOperation {
 }
 
 const sha256Of = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex");
+/** Plugin-facing shape of a generation result: the musical summary only. The canonical tool also
+ *  computes engine internals (counterpoint metrics, analysis narration, commit bookkeeping); those
+ *  are debug data the calling app does not need, so they never leave the server (OpenAI review,
+ *  2026-11-19: responses must not carry unneeded nested/debug data). */
+const GENERATION_SUMMARY_KEYS = ["style", "key", "bars", "seed", "durationSec", "totalNotes", "totalCcs", "tracks", "sections"] as const;
+function generationSummary(data: unknown): Record<string, unknown> {
+  const d = (data ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(GENERATION_SUMMARY_KEYS.filter((k) => d[k] !== undefined).map((k) => [k, d[k]]));
+}
 const RANGE = (a: Record<string, unknown>) => ({ unit: "bars", start: a.startBar as number, end: a.endBar as number });
 
 export class CompositionService {
@@ -202,7 +211,7 @@ export class CompositionService {
     if (isGuest(owner) && this.store.guestCompositionCount() >= this.cfg.mcp.guestMaxCompositions) throw new McpError("QUOTA_EXCEEDED", "global guest composition capacity reached; retry later");
     const row = this.store.createComposition({ owner, title: project.name, projectJson: JSON.stringify(project), revision: project.revision, source: "mcp" });
     this.log({ evt: "mcp_composition_create", user: owner, compositionId: row.id, revision: row.revision });
-    return { row, data: { ...this.summary(row, project), generation: gen.data, createdProjectId: (created.data as { projectId: string }).projectId } };
+    return { row, data: { ...this.summary(row, project), generation: generationSummary(gen.data), createdProjectId: (created.data as { projectId: string }).projectId } };
   }
 
   /** Import a GBK Studio project the user explicitly saved/shared (private autosave or public share). */
@@ -325,7 +334,7 @@ export class CompositionService {
       }
       case "generate_arrangement": {
         const r = await this.call(tools, c, "gbk_generate_arrangement", { style: op.style, key: op.key, tempo: op.tempo, bars: op.bars, seed: op.seed, voices: op.voices, complexity: op.complexity, instrumentation: op.instrumentation, baseRevision: rev() }, signal);
-        return r.data as Record<string, unknown>;
+        return generationSummary(r.data);
       }
       case "generate_fugue_section": {
         // NB: this canonical tool's schema has no baseRevision (it validates its own placement internally).

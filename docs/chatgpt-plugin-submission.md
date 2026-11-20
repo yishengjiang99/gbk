@@ -10,6 +10,22 @@ public directory. Which build was uploaded (main `ea1b53c` or the PR #94
 rebuild, now `17edba2`) is unconfirmed; see
 [launch/portal-package-delta.md](launch/portal-package-delta.md).
 
+**Status update (2026-11-19): REJECTED by OpenAI review.** GBK Composer
+v1.0.0 (submission `asdk_app_6add59c7b4f881918363bb8ae360a915`) was not
+approved, for two reasons: (1) a plugin call returns personal identifiers
+that are not required for the user's request; (2) the plugin returns
+user-related data not disclosed in the privacy policy, including nested and
+debug data. Remediation (same day, from a field-by-field audit of real tool
+responses): SoundFont responses no longer return the SF2 binary's INFO block
+(a named engineer's credits) or internal file/path fields; the create/edit
+generation result is trimmed to the musical summary (engine metrics and
+analysis narration dropped); artifact metadata is trimmed to file facts
+(format, duration, sample rate, channels); render job views no longer echo
+the server executor/renderer version; and the privacy policy gained a
+"What the plugin sends back to your app" section enumerating every data
+category a plugin response contains. Resubmission waits for the owner's go,
+after the fixed server is deployed.
+
 ## Submission metadata
 
 - **Plugin name:** GBK Composer

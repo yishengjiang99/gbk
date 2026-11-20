@@ -41,20 +41,13 @@ export interface SoundFontCatalogEntry {
 
 export interface SoundFontView {
   id: string; label: string; description: string; bytes: number; license: string;
-  delivery: "bundled" | "server"; file: string;
-  /** URL path a client of this deployment fetches the font from. */
-  path: string;
+  delivery: "bundled" | "server";
   /** The catalog default (what renders use when no soundFont is requested). */
   default: boolean;
   /** True for the font a render with no soundFont parameter will use. */
   active: boolean;
   /** The font file is present in this deployment right now (the Studio tab can load it). */
   available: boolean;
-  /** Descriptive metadata read from the SF2 binary itself (INFO chunk), when installed. */
-  info?: Sf2BinaryInfo;
-  /** Preset directory read from the binary's phdr chunk, when installed. */
-  presets?: Sf2PresetLite[];
-  presetCount?: number;
 }
 
 /** SF2 INFO chunk fields (the binary's own descriptive metadata). */
@@ -254,10 +247,9 @@ export function listSoundFonts(cfg: Config): SoundFontView[] {
     const bin = file ? readSf2Binary(file) : null;
     return {
       id: f.id, label: f.label, description: (bin ? binaryDescription(bin) : undefined) ?? f.description, bytes: f.bytes, license: f.license,
-      delivery: f.delivery, file: f.file, path: fontUrlPath(f),
+      delivery: f.delivery,
       default: !!f.default, active: f.id === activeId,
       available: file !== null,
-      ...(bin ? { info: bin.info, presets: bin.presets, presetCount: bin.presets.length } : {}),
     };
   });
 }

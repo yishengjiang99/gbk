@@ -57,7 +57,7 @@ const link = { url: z.string(), slug: z.string() };
 export const OUTPUT_SCHEMAS = {
   gbk_get_capabilities: { capabilities: any },
   gbk_list_soundfonts: { fonts: z.array(z.object({ id: z.string(), label: z.string(), description: z.string(), bytes: z.number(), license: z.string(),
-    delivery: z.enum(["bundled", "server"]), file: z.string(), path: z.string(), default: z.boolean(), active: z.boolean(), available: z.boolean(), info: any.optional() })), defaultFontId: z.string() },
+    delivery: z.enum(["bundled", "server"]), default: z.boolean(), active: z.boolean(), available: z.boolean() })), defaultFontId: z.string() },
   // Generated (generation, createdProjectId) or imported (imported: true); guest calls add the private capabilities.
   gbk_create_composition: { ...summary, ...guestCreds, generation: any.optional(), createdProjectId: z.string().optional(), imported: z.literal(true).optional() },
   gbk_get_composition: { ...summary, notes: z.object({ total: z.number(), offset: z.number(), nextOffset: nul(z.number()),
