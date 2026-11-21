@@ -1,0 +1,1 @@
+Original Ellington-style mid-tempo swing in Db, 112 BPM: trumpet lead voiced with clarinet and trombone over piano, upright bass and drums. Solo piano intro, AABA head with Db6-Db7-Gbmaj7-Gbm6 color, Bb7alt, and a clarinet-led bridge stepping down by whole steps (E, D, C) back to Ebm7-Ab7. Trumpet solo with horn backgrounds, clarinet solo, head out and a Db tag.
