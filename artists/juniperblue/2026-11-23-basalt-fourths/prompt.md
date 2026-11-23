@@ -1,0 +1,1 @@
+Original modal post-bop in F dorian, 144 BPM: tenor sax over quartal piano, upright bass and ride kit. Bass-pedal intro with the piano teasing a rising-fourths motif, AABA head (A: Fm9 vamp, Dbmaj7#11, Ebm9, C7alt; bridge planes through Abm9, Emaj7#11, Am9, Bbm9), tenor solo, piano solo, head out and a fading Fm9 coda.
