@@ -108,3 +108,11 @@
 .so-main-feed .so-meta .so-prompt{flex-direction:column;align-items:stretch}
 .so-main-feed .so-side{right:calc(16px + 360px + 16px + 20px)}
 }
+/* The feed view's scroll cue (constants in feed-scroll-cue.ts, shared with GBK iOS): "Swipe up" chevron centered at the
+   bottom of the first card, gentle pulse, fades out after the first scroll to card 2. Never takes taps. */
+.so-cue{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:0;padding:2px 12px 4px;border-radius:12px;background:var(--so-overlay);border:1px solid var(--so-border);color:var(--so-accent);font-size:12px;font-weight:600;line-height:1.1;white-space:nowrap;pointer-events:none;z-index:4;box-shadow:0 2px 8px rgba(17,35,49,.12);transition:opacity .25s ease-out;animation:so-cue-pulse 1.6s ease-in-out infinite}
+.so-app .so-card.so-cued{padding-bottom:46px} /* room for the cue: the card stays full height, its content makes space */
+.so-cue-chev{display:block;margin:2px 0 1px}
+.so-cue.out{animation:none;opacity:0}
+@keyframes so-cue-pulse{0%,100%{opacity:1;transform:translateX(-50%) translateY(0)}50%{opacity:.7;transform:translateX(-50%) translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){.so-cue{animation:none;transition:none}}

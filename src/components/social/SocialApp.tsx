@@ -5,6 +5,7 @@ import { Crossfader, type FadeState } from "./crossfade.ts";
 import { loadWorklet, prepare, preparedCount, songProject, warmSoundFont } from "./live-song.ts";
 import { startImpression, endImpression, attachAudio, markAction, markRate, noteScroll } from "./impressions.ts";
 import { sharePayload, webShare, type ShareTarget } from "./share-song.ts";
+import { FEED_CUE, bounceFeed, cueDone, markCueDone, prefersReducedMotion } from "./feed-scroll-cue.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { social, LABELS, type Me, type Song, type SComment, type SUser } from "../../agent/social-client.ts";
 import { PianoRoll } from "../explore/ExplorePage.tsx";
@@ -42,9 +43,9 @@ function Chips({ song, onFilter }: { song: Song; onFilter: (f: { label?: string;
   return <div className="so-chips">{song.labels.map((l) => <button key={l} className={`so-chip lab ${l === "wip" ? "wip" : ""}`} onClick={() => onFilter({ label: l })}>{l}</button>)}{song.tags.map((t) => <button key={t} className="so-chip" onClick={() => onFilter({ tag: t })}>#{t}</button>)}</div>;
 }
 
-function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter, onOpen }: { idx: number; song: Song; me: Me | null; playing: boolean; viz: () => VizSource; onPlay: (s: Song) => void; onUpdate: (s: Song) => void; onSheet: (s: Sheet) => void; onFilter: (f: { label?: string; tag?: string }) => void; onOpen: (slug: string, fork: boolean) => void }) {
+function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter, onOpen, cue }: { cue?: "show" | "hiding"; idx: number; song: Song; me: Me | null; playing: boolean; viz: () => VizSource; onPlay: (s: Song) => void; onUpdate: (s: Song) => void; onSheet: (s: Sheet) => void; onFilter: (f: { label?: string; tag?: string }) => void; onOpen: (slug: string, fork: boolean) => void }) {
   return (
-    <article className="so-card" tabIndex={-1} data-testid="feed-card" data-slug={song.slug} data-idx={idx} data-playing={playing ? "1" : "0"}>
+    <article className={`so-card${cue ? " so-cued" : ""}`} tabIndex={-1} data-testid="feed-card" data-slug={song.slug} data-idx={idx} data-playing={playing ? "1" : "0"}>
       <div className="so-rollwrap" onClick={() => onPlay(song)}>{song.preview ? <LiveRoll p={song.preview} playing={playing} source={viz} /> : <div className="so-noroll" />}<button type="button" className="so-playbadge" data-testid="card-play" aria-label={playing ? "Pause" : "Play"} aria-pressed={playing} onClick={(e) => { e.stopPropagation(); onPlay(song); }}><span aria-hidden="true">{playing ? "❚❚" : "▶"}</span></button></div>
       <div className="so-side">
         <button aria-label="Comments" data-testid="card-comments" onClick={() => onSheet({ kind: "comments", song })}>💬<small>{song.comment_count}</small></button>
@@ -61,6 +62,7 @@ function Card({ idx, song, me, playing, viz, onPlay, onUpdate, onSheet, onFilter
         {song.prompt_shared && song.prompt_text && <div className="so-prompt" data-testid="card-prompt"><span className="so-clamp">“{song.prompt_text}”</span><button className="so-btn" data-testid="card-remix" onClick={() => remix(song.slug, song.prompt_text!)}>Remix this prompt</button></div>}
         {!song.preview && !song.media.mp3 && !song.media.wav && <div className="so-dim">No audio preview yet. Open in Studio to play.</div>}
       </div>
+      {cue && <div className={`so-cue${cue === "hiding" ? " out" : ""}`} data-testid="feed-scroll-cue" aria-hidden="true"><svg className="so-cue-chev" width="18" height="10" viewBox="0 0 18 10" aria-hidden="true"><path d="M2 8.5 9 2l7 6.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg><span>{FEED_CUE.label}</span></div>}
     </article>
   );
 }
@@ -163,6 +165,22 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen, focusSlug }: { me: M
     root.addEventListener("scroll", on, { passive: true }); root.addEventListener("scrollend", done);
     return () => { clearTimeout(t); root.removeEventListener("scroll", on); root.removeEventListener("scrollend", done); };
   }, []);
+  // The feed view's scroll cue (shared with GBK iOS): a "Swipe up" chevron on the first card plus one bounce 2 s after
+  // the first song starts; both end for good once the user scrolls to card 2.
+  const [cue, setCue] = useState<"show" | "hiding" | "off">(() => cueDone() ? "off" : "show");
+  const userScrolled = useRef(false); const bounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined); const bounceArmed = useRef(false);
+  useEffect(() => { const root = feedEl.current; if (!root) return; const on = () => { if (root.scrollTop > 8) userScrolled.current = true; }; root.addEventListener("scroll", on, { passive: true }); return () => root.removeEventListener("scroll", on); }, []);
+  useEffect(() => {
+    if (active < 1 || cue !== "show") return;
+    markCueDone(); clearTimeout(bounceTimer.current); setCue("hiding");
+  }, [active, cue]);
+  useEffect(() => { if (cue !== "hiding") return; const t = setTimeout(() => setCue("off"), 300); return () => clearTimeout(t); }, [cue]); // after the fade
+  useEffect(() => {
+    if (!audio.cur || bounceArmed.current || cue !== "show") return; bounceArmed.current = true;
+    if (prefersReducedMotion()) return;
+    bounceTimer.current = setTimeout(() => { const f = feedEl.current; if (f && !userScrolled.current && f.scrollTop <= 8 && !cueDone()) void bounceFeed(f); }, FEED_CUE.delayMs);
+  }, [audio.cur, cue]);
+  useEffect(() => () => clearTimeout(bounceTimer.current), []);
   // Any first gesture (not just "Tap to play") unlocks audio and starts the visible card; after that, scroll switches autoplay.
   const visible = useRef<Song | undefined>(undefined); visible.current = items[active];
   useEffect(() => {
@@ -206,7 +224,7 @@ function FeedView({ me, filter, setFilter, onSheet, onOpen, focusSlug }: { me: M
       <div className="so-feed" data-testid="feed" hidden={!!notFound} ref={feedEl} data-active={active} data-unlocked={audio.unlocked ? "1" : "0"} data-fading={audio.fading ?? ""} data-candidate={candidate}>
         <div ref={audio.host} hidden data-testid="feed-audio" />
         {!audio.unlocked && items.length > 0 && <button className="so-unlock" data-testid="tap-to-play" onClick={() => { const s = items[active]; if (s) audio.start(s, true); }}>🔊 Tap to play</button>}
-        {items.map((s, i) => <Card key={s.slug} idx={i} song={s} me={me} playing={audio.cur === s.slug} viz={audio.viz} onPlay={audio.toggle} onUpdate={(n) => setItems((p) => p.map((x) => x.slug === n.slug ? n : x))} onSheet={onSheet} onFilter={(f) => setFilter({ sort: "new", ...f })} onOpen={onOpen} />)}
+        {items.map((s, i) => <Card key={s.slug} idx={i} song={s} me={me} playing={audio.cur === s.slug} viz={audio.viz} onPlay={audio.toggle} onUpdate={(n) => setItems((p) => p.map((x) => x.slug === n.slug ? n : x))} onSheet={onSheet} onFilter={(f) => setFilter({ sort: "new", ...f })} onOpen={onOpen} cue={i === 0 && items.length > 1 && cue !== "off" ? cue : undefined} />)}
         {!loading && !items.length && !err && <div className="so-empty" data-testid="feed-empty">Nothing here yet. <button className="so-btn pri" onClick={() => navigate("studio")}>Compose the first one</button></div>}
         {err && <div className="so-empty so-err">{err} <button className="so-btn" onClick={() => void load(true)}>Retry</button></div>}
         <div ref={sentinel} className="so-sentinel">{loading ? "Loading…" : done && items.length ? "You're all caught up." : ""}</div>
