@@ -11,7 +11,7 @@ const WEB = Number(process.env.GBK_E2E_WEB_PORT ?? 5181), API = Number(process.e
 const origin = `http://127.0.0.1:${WEB}`;
 const node22 = process.env.GBK_NODE22 ?? "node";
 export default defineConfig({
-  testDir: ".", testMatch: /e2e\/(composer|social|guest-publish|studio-desktop|studio-resume|batched-approval|fork-button|sms-disabled|paywall)\.spec\.ts$/, timeout: 600_000, expect: { timeout: 20_000 }, workers: 1,
+  testDir: ".", testMatch: /e2e\/(composer|social|guest-publish|studio-desktop|studio-resume|batched-approval|fork-button|sms-disabled|paywall|feed-scroll-cue)\.spec\.ts$/, timeout: 600_000, expect: { timeout: 20_000 }, workers: 1,
   // Every spec but paywall.spec starts with the one-time 3rd-song popup already seen (agent/paywall.ts THIRD_SONG_KEY),
   // so flows that start several songs are not interrupted; paywall.spec resets storage and tests the popup itself.
   use: { baseURL: `${origin}/`, trace: "retain-on-failure", storageState: { cookies: [], origins: [{ origin, localStorage: [{ name: "gbk.paywall.thirdSong.v1", value: "1" }] }] } },
@@ -24,7 +24,7 @@ export default defineConfig({
   projects: [
     { name: "chrome-no-webmcp", use: { ...devices["Desktop Chrome"], channel: process.env.PW_CHROME_CHANNEL ?? "chrome", viewport: { width: 1500, height: 950 } } },
     { name: "mobile", use: { ...devices["Pixel 7"] }, grep: /mobile|social/ },
-    { name: "mobile-webkit", use: { ...devices["iPhone 13"] }, grep: /mobile composer view|social|guest publish|iphone resume|iphone batch|primary Fork|no phone option|iphone paywall/ },
+    { name: "mobile-webkit", use: { ...devices["iPhone 13"] }, grep: /mobile composer view|social|guest publish|iphone resume|iphone batch|primary Fork|no phone option|iphone paywall|iphone feed view/ },
     { name: "firefox", use: { ...devices["Desktop Firefox"] }, grep: /smoke/ },
     { name: "webkit", use: { ...devices["Desktop Safari"] }, grep: /smoke/ },
   ],
