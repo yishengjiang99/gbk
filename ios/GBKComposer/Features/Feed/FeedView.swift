@@ -85,6 +85,7 @@ struct FeedView: View {
     @EnvironmentObject private var auth: AuthStore
     @Environment(\.requestSignIn) private var requestSignIn
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var model = FeedViewModel()
     @StateObject private var player = FeedPlayer()
     @State private var visibleSlug: String?
@@ -93,6 +94,9 @@ struct FeedView: View {
     @State private var deleteFor: Song?
     @State private var deleteError: String?
     @State private var tagText = ""
+    @State private var scrollCue = FeedViewScrollCue()
+    @State private var bounceOffset: CGFloat = 0
+    @State private var bounceTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -123,12 +127,22 @@ struct FeedView: View {
                         }
                     }
                     .scrollTargetLayout()
+                    // Visual only: does not change scroll position, paging, or the visible card.
+                    .offset(y: -bounceOffset)
                 }
                 .scrollTargetBehavior(.paging)
                 .scrollPosition(id: $visibleSlug)
                 .scrollIndicators(.hidden)
                 .modifier(ScrollSpeedLogger())
+                .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in cancelBounceForUserScroll() })
+                .overlay(alignment: .bottom) {
+                    if scrollCue.showsHint {
+                        FeedViewScrollCueHint(pulse: !reduceMotion)
+                            .padding(.bottom, 24)
+                    }
+                }
             }
+            .clipped()
         }
         .background(Theme.background.ignoresSafeArea())
         .overlay {
@@ -161,13 +175,25 @@ struct FeedView: View {
             if let link = router.pending { await open(link) }
             if model.items.count <= 1 { await model.reload() }
         }
-        .onChange(of: visibleSlug) { _, slug in playVisible(slug) }
+        .onChange(of: visibleSlug) { old, slug in
+            playVisible(slug)
+            if let slug, let idx = model.items.firstIndex(where: { $0.slug == slug }), old != nil {
+                if idx > 0 { dismissScrollCue() }
+                else if slug != old { cancelBounceForUserScroll() }
+            }
+        }
         // Section change (sort chip, label, #tag): the old section's song must not keep playing while the new one loads,
         // and the new section starts fresh from its first card.
-        .onChange(of: model.query) { _, _ in player.stop(); ImpressionLogger.shared.end(); visibleSlug = nil }
+        .onChange(of: model.query) { _, _ in
+            player.stop(); ImpressionLogger.shared.end(); visibleSlug = nil
+            bounceTask?.cancel(); bounceTask = nil; bounceOffset = 0
+            scrollCue.resetScheduleIfBounceStillPending()
+        }
         .onChange(of: model.items.map(\.slug)) { _, slugs in
             if let first = slugs.first, visibleSlug == nil || !slugs.contains(visibleSlug!) {
                 visibleSlug = first; playVisible(first)
+            } else if let slug = visibleSlug, let idx = model.items.firstIndex(where: { $0.slug == slug }) {
+                considerScrollCue(index: idx)
             }
         }
         .onChange(of: router.pending) { _, link in
@@ -260,6 +286,46 @@ struct FeedView: View {
                                       time: { p.currentSeconds(for: slug) }, duration: { p.durationSeconds(for: slug) })
         let next = idx + 1 < model.items.count ? model.items[idx + 1] : nil
         player.play(slug: slug, url: url, hookStartMs: hook, next: next.flatMap { n in n.midiURL.map { (slug: n.slug, url: $0) } })
+        considerScrollCue(index: idx)
+    }
+
+    private func considerScrollCue(index: Int) {
+        guard index == 0 else { return }
+        if scrollCue.firstSongStartedPlaying(hasNextCard: model.items.count > 1) {
+            scheduleFeedViewBounce()
+        }
+    }
+
+    /// Nudge the feed view content up 70 pt, then spring back. Offset is visual only.
+    private func scheduleFeedViewBounce() {
+        bounceTask?.cancel()
+        bounceTask = Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(FeedViewScrollCue.playDelay)) } catch { return }
+            guard !Task.isCancelled else { return }
+            guard scrollCue.bounceDeadlineReached(reduceMotion: reduceMotion) else { return }
+            withAnimation(.easeOut(duration: FeedViewScrollCue.nudgeDuration)) {
+                bounceOffset = FeedViewScrollCue.nudgePoints
+            }
+            do { try await Task.sleep(for: .seconds(FeedViewScrollCue.nudgeDuration)) } catch { bounceOffset = 0; return }
+            guard !Task.isCancelled else { bounceOffset = 0; return }
+            withAnimation(.spring(duration: FeedViewScrollCue.springBackDuration, bounce: 0.22)) {
+                bounceOffset = 0
+            }
+        }
+    }
+
+    private func cancelBounceForUserScroll() {
+        scrollCue.userScrolled()
+        bounceTask?.cancel()
+        bounceTask = nil
+        bounceOffset = 0
+    }
+
+    private func dismissScrollCue() {
+        bounceTask?.cancel()
+        bounceTask = nil
+        bounceOffset = 0
+        scrollCue.swipedToNextCard()
     }
 }
 
