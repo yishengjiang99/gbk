@@ -11,7 +11,19 @@ tar xzf "$TGZ" -C "$REL"
 (cd "$REL" && npm install --omit=dev --no-audit --no-fund --ignore-scripts fastify@5 ws@8 @modelcontextprotocol/sdk@1 zod@4 @resvg/resvg-js@2 >/dev/null)
 PREV=$(readlink -f $ROOT/current 2>/dev/null || true)
 if [ ! -f /etc/gbk-composer.env ]; then install -m 0640 -o root -g www-data "$REL/deploy/compose.env.example" /etc/gbk-composer.env; echo "WARNING: created /etc/gbk-composer.env from the example; edit it"; fi
-healthy() { for i in $(seq 1 30); do sleep 1; curl -fsS "http://127.0.0.1:$1/api/health" >/dev/null 2>&1 && return 0; done; return 1; }
+# Poll /api/health with backoff (1s, 2s, ... capped at 5s) for up to ~90s; log each attempt.
+healthy() {
+  local port=$1 n=0 delay=1 start=$SECONDS
+  while [ $((SECONDS - start)) -lt 90 ]; do
+    sleep "$delay"; n=$((n + 1))
+    if curl -fsS -m 5 "http://127.0.0.1:$port/api/health" >/dev/null 2>&1; then
+      echo "health :$port ok (attempt $n, $((SECONDS - start))s)"; return 0
+    fi
+    echo "health :$port not ready (attempt $n, $((SECONDS - start))s)" >&2
+    [ "$delay" -lt 5 ] && delay=$((delay + 1))
+  done
+  return 1
+}
 ln -sfn "$REL" $ROOT/current.new && mv -Tf $ROOT/current.new $ROOT/current
 install -m 0644 "$REL/deploy/gbk-composer.service" /etc/systemd/system/gbk-composer.service
 install -m 0644 "$REL/deploy/gbk-composer-standby.service" /etc/systemd/system/gbk-composer-standby.service
