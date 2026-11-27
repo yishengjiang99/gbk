@@ -17,9 +17,11 @@ package acknowledges:
 - Polyphonic-TrOMR — https://github.com/bernardosda/Polyphonic-TrOMR (the
   transformer architecture homr's encoder/decoder derive from)
 
-The pre-trained ONNX weights are downloaded from homr's public release
+The pre-trained ONNX weights come from homr's public release
 (https://github.com/liebharc/homr/releases/tag/onnx_checkpoints) and are used
-under the terms published there by the homr authors.
+under the terms published there by the homr authors. They are downloaded from
+an unmodified mirror at
+https://github.com/yishengjiang99/gbk/releases/tag/omr-models-465.
 
 The gbk audio engine that consumes this package's MIDI output is a separate
 work and is not covered by this license.

@@ -18,7 +18,8 @@ import { get } from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const RELEASE = "https://github.com/liebharc/homr/releases/download/onnx_checkpoints";
+// Byte-identical mirror of homr's onnx_checkpoints assets (465 was deleted upstream).
+const RELEASE = "https://github.com/yishengjiang99/gbk/releases/download/omr-models-465";
 const MODELS = [
   {
     file: "segnet_model_fp16.onnx",
