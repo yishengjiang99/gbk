@@ -315,10 +315,17 @@ struct FeedView: View {
     }
 
     private func cancelBounceForUserScroll() {
-        scrollCue.userScrolled()
+        // The simultaneous DragGesture fires this for every drag event of every swipe.
+        // Mutating @State on each event invalidates the view mid-gesture and the paging
+        // ScrollView drops the swipe, so only touch state when something actually
+        // changes: the first scroll marks the cue, and a pending or running bounce
+        // is cancelled exactly once. Every later event is a read-only no-op.
+        let hadBounceWork = bounceTask != nil || bounceOffset != 0
+        guard hadBounceWork || !scrollCue.hasScrolled else { return }
+        if !scrollCue.hasScrolled { scrollCue.userScrolled() }
         bounceTask?.cancel()
         bounceTask = nil
-        bounceOffset = 0
+        if bounceOffset != 0 { bounceOffset = 0 }
     }
 
     private func dismissScrollCue() {

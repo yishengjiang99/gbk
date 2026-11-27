@@ -15,6 +15,8 @@ struct FeedViewScrollCue {
     private(set) var showsHint = false
     private var done: Bool
     private var scrolled = false
+    /// Read-only peek at `scrolled`: safe to poll on every drag event without mutating state.
+    var hasScrolled: Bool { scrolled }
     private var bounceFired = false
     private var scheduled = false
 
