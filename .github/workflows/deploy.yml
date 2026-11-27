@@ -37,7 +37,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: omr-homr-web/models
-          key: omr-models-homr-308-465-v1
+          key: omr-models-gbk-mirror-308-465-v2
       - name: Cache SoundFonts
         uses: actions/cache@v4
         with:

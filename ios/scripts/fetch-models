@@ -10,8 +10,8 @@
 # models.lock (repo root) has one entry per line:
 #   <sha256>  <filename>  <url>
 # <sha256> is the SHA-256 of <filename> as written to models/ (the .onnx / .sf2 file).
-# <url> is the upstream release asset from
-#   https://github.com/liebharc/homr/releases/tag/onnx_checkpoints
+# <url> is the byte-identical gbk mirror of homr's onnx_checkpoints assets
+#   https://github.com/yishengjiang99/gbk/releases/tag/omr-models-465
 # or, for GeneralUser-GS.sf2, the commit-pinned raw file in yishengjiang99/gbk.
 # If the asset is a .zip, <filename> is extracted from it; otherwise the
 # download itself is <filename>. Blank lines and lines starting with # are skipped.
