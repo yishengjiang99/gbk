@@ -134,7 +134,7 @@ struct FeedView: View {
                 .scrollPosition(id: $visibleSlug)
                 .scrollIndicators(.hidden)
                 .modifier(ScrollSpeedLogger())
-                .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in cancelBounceForUserScroll() })
+                .modifier(ScrollInteractionWatcher { cancelBounceForUserScroll() })
                 .overlay(alignment: .bottom) {
                     if scrollCue.showsHint {
                         FeedViewScrollCueHint(pulse: !reduceMotion)
@@ -362,6 +362,19 @@ private struct ScrollSpeedLogger: ViewModifier {
         if #available(iOS 18.0, *) {
             content.onScrollGeometryChange(for: Double.self, of: { Double($0.contentOffset.y) }) { _, y in
                 ImpressionLogger.shared.noteScroll(offset: y)
+            }
+        } else { content }
+    }
+}
+
+/// Calls `onInteract` when the user starts dragging the feed (iOS 18+). Never attach a DragGesture to the
+/// ScrollView for this: it steals the pan and breaks swiping. On iOS 17 a swipe to another card still ends the cue.
+private struct ScrollInteractionWatcher: ViewModifier {
+    let onInteract: () -> Void
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollPhaseChange { _, phase in
+                if phase == .interacting { onInteract() }
             }
         } else { content }
     }
